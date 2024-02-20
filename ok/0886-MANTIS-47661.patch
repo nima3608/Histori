@@ -1,0 +1,1526 @@
+From 72bfe8571641948bd8eff7a5f0fad1b480be310d Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 22 Sep 2017 11:53:02 +0000
+Subject: [PATCH 0886/1077] MANTIS 47661 Mantis 47661: Extend C++ config
+ wrapper - Textlist type extension
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1269 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/cfgclnt/nConfigBasicTextList.hpp      | 112 ++++--
+ .../Interfaces/inc/cfgclnt/nConfigText.hpp    |   4 +-
+ .../inc/cfgclnt/nConfigTextList.hpp           | 123 +++---
+ .../Massai/cpp/CfgClnt/src/NCTxtLstGCL.cpp    |  18 +-
+ .../cpp/CfgClnt/src/nConfigBasicTextList.cpp  | 375 ++++++++++--------
+ .../cpp/CfgClnt/src/nConfigTextList.cpp       | 139 +++++--
+ 6 files changed, 472 insertions(+), 299 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicTextList.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicTextList.hpp
+index 508bd020..5ceae9b6 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicTextList.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicTextList.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2011 MATERNA Information & Communications
++ * Copyright (c) 2005-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -37,7 +37,7 @@ namespace nConfig
+     * -create new configuration items.
+     * Unlike the nConfig::gcTextList class an object of this class can be
+     * used for different configuration items. For every call to a class
+-    * method the configuration item is newly addressed by the "Item"
++    * method the configuration item is newly addressed by the "item"
+     * parameter.
+     *
+    **/
+@@ -56,7 +56,7 @@ namespace nConfig
+        * Implementation reference - for internal use.
+        *
+       **/
+-      impl * M_Impl;
++      impl * m_impl;
+ 
+    public:
+ 
+@@ -64,27 +64,27 @@ namespace nConfig
+        *
+        * Constructor.
+        *
+-       * @param System: Refers the configuration system to use.
++       * @param cfg_system:     Refers the configuration system to use.
+        *
+        */
+       explicit basicTextList
+          (
+-            cfgSystem *    System
++            cfgSystem *                         cfg_system
+          );
+ 
+       /**
+        *
+        * Constructor.
+        *
+-       * @param Auth:   The name of the application.
++       * @param auth:           The name of the application.
+        *
+-       * @param Trcout: A trace stream.
++       * @param trcout:         A trace stream.
+        *
+        */
+       explicit basicTextList
+          (
+-            char const *                        Auth,
+-            std::ostream *                      Trcout = 0
++            char const *                        auth,
++            std::ostream *                      trcout = 0
+          );
+ 
+       /**
+@@ -96,27 +96,54 @@ namespace nConfig
+ 
+       /**
+        *
+-       * Create a new textlist configuration item.
++       * Create a new text configuration item.
+        *
+-       * @param Item:           The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Rights:         The rights assigned to this item for
++       * @param rights:         The rights assigned to this item for
+        *                        further access.
+        *
+-       * @param Explanation:    An explanation for this item.
++       * @param explanation:    An explanation for this item.
+        *
+-       * @param Default:        The initial list of strings.
++       * @param value:          The initial value string.
+        *
+-       * @param MaxLength:      The maximum length of the value string.
++       * @param max_length:     The maximum length of the value string.
++       *                        allowed.
+        *
+-       */
++       * @param min_length:     The minimum length of the value string
++       *                        allowed.
++       *
++       * @param reg_ex:         A regular expression, which the value
++       *                        shall match.
++       *
++       * @param semantic:       Semantics for the item.
++       *
++      **/
++      void create
++         (
++            char const *                        item,
++            char const *                        rights,
++            char const *                        explanation,
++            std::list<std::string> const &      value,
++            long                                max_length,
++            long                                min_length,
++            char const *                        reg_ex,
++            semanticType                        semantic
++         )
++         throw( exception );
++
++      /**
++       *
++       * Please do not use this method in NEW applications.
++       *
++      **/
+       void create
+          (
+-            char const *                        Item,
+-            char const *                        Rights,
+-            char const *                        Explanation,
+-            std::list<std::string> const &      Default,
+-            long                                MaxLength
++            char const *                        item,
++            char const *                        rights,
++            char const *                        explanation,
++            std::list<std::string> const &      value,
++            long                                max_length
+          )
+          throw( exception );
+ 
+@@ -124,14 +151,15 @@ namespace nConfig
+        *
+        * Retrieve the configuration value.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @return The current value of the configuration item.
++       * @return:               The current value of the configuration
++       *                        item.
+        *
+        */
+       std::list<std::string> get
+          (
+-            char const *                        Item
++            char const *                        item
+          )
+          const throw( exception );
+ 
+@@ -139,15 +167,15 @@ namespace nConfig
+        *
+        * Set the configuration value.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Val:    The new value of the configuration item.
++       * @param value:          The new value of the configuration item.
+        *
+        */
+       void set
+          (
+-            char const *                        Item,
+-            std::list<std::string> const &      Val
++            char const *                        item,
++            std::list<std::string> const &      value
+          )
+          throw( exception );
+ 
+@@ -155,40 +183,40 @@ namespace nConfig
+        *
+        * Set the initial configuration value.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Val:    The value of the configuration item.
++       * @param value:          The value of the configuration item.
+        *
+        */
+       void setInitial
+          (
+-            char const *                        Item,
+-            std::list<std::string> const &      Val
++            char const *                        item,
++            std::list<std::string> const &      value
+          )
+          throw( exception );
+-         
++
+        /**
+        *
+        * Update text configuration item's meta data.
+        *
+-       * @param Item:           The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Rights:         The rights assigned to this item for
++       * @param rights:         The rights assigned to this item for
+        *                        further access.
+        *
+-       * @param Explanation:    An explanation for this item.
++       * @param explanation:    An explanation for this item.
+        *
+-       * @param MaxLength:      The maximum length of the value string.
++       * @param max_length:     The maximum length of the value string.
+        *
+        */
+       void setMeta
+          (
+-            char const *   Item,
+-            char const *   Rights,
+-            char const *   Explanation,
+-            long           MaxLength
++            char const *                        item,
++            char const *                        rights,
++            char const *                        explanation,
++            long                                max_length
+          )
+-         throw( exception ); 
++         throw( exception );
+ 
+    private:
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigText.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigText.hpp
+index 51fbbcf5..7ad897e6 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigText.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigText.hpp
+@@ -151,8 +151,8 @@ namespace nConfig
+       virtual void create
+          (
+             char const * &              rights,
+-            char const * &              Explanation,
+-            char const * &              Default
++            char const * &              explanation,
++            char const * &              default_value
+          );
+ 
+       /**
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigTextList.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigTextList.hpp
+index 1d791b0e..9b5c0c21 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigTextList.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigTextList.hpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2011 MATERNA Information & Communications
++ * Copyright (c) 2001-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -31,7 +31,6 @@ namespace nConfig
+ {
+ 
+ 
+-
+    /**
+     *
+     * TextList configuration class which allows to
+@@ -56,7 +55,7 @@ namespace nConfig
+        * Implementation reference - for internal use.
+        *
+       **/
+-      impl * M_Impl;
++      impl * m_impl;
+ 
+    public:
+ 
+@@ -64,33 +63,33 @@ namespace nConfig
+        *
+        * Constructor.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param System: Refers the configuration system to use.
++       * @param cfg_system:     Refers the configuration system to use.
+        *
+       **/
+       gcTextList
+          (
+-            char const *                Item,
+-            cfgSystem *                 System
++            char const *                item,
++            cfgSystem *                 cfg_system
+          );
+ 
+       /**
+        *
+        * Constructor.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Auth:   The name of the application.
++       * @param auth:           The name of the application.
+        *
+-       * @param Trcout: A trace stream.
++       * @param trcout:         A trace stream.
+        *
+        */
+       gcTextList
+          (
+-            char const *                Item,
+-            char const *                Auth = 0,
+-            std::ostream *              Trcout = 0
++            char const *                item,
++            char const *                auth = 0,
++            std::ostream *              trcout = 0
+          );
+ 
+       /**
+@@ -105,22 +104,47 @@ namespace nConfig
+        * This virtual function should be overloaded by the application in
+        * order to provide creation parameters.
+        *
+-       * @param Rights: The string determining access rights.
++       * @param rights:         The string determining access rights.
++       *
++       * @param explanation:    The string with an explanation for the
++       *                        configuration editor.
++       *
++       * @param default_value:  The default value.
++       *
++       * @param max_length:     The maximum length of the value string
++       *                        allowed.
+        *
+-       * @param Expl:   The string with an explanation for the
+-       *                configuration editor.
++       * @param min_length:     The minimum length of the value string
++       *                        allowed.
+        *
+-       * @param Def:    The default list of strings.
++       * @param reg_ex:         A regular expression, which the value
++       *                        shall match.
++       *
++       * @param semantic:       Semantics for the item.
++       *
++      **/
++      virtual void create
++         (
++            char const * &              rights,
++            char const * &              explanation,
++            std::list<std::string> &    default_value,
++            long &                      max_length,
++            long &                      min_length,
++            char const * &              reg_ex,
++            semanticType &              semantic
++         );
++
++      /**
+        *
+-       * @param Max:    The maximum string length allowed.
++       * Please do not use this method in NEW applications.
+        *
+       **/
+       virtual void create
+          (
+-            char const * &              Rights,
+-            char const * &              Expl,
+-            std::list<std::string> &    Def,
+-            long &                      Max
++            char const * &              rights,
++            char const * &              explanation,
++            std::list<std::string> &    default_value,
++            long &                      max_length
+          );
+ 
+       /**
+@@ -130,16 +154,16 @@ namespace nConfig
+       **/
+       virtual void create
+          (
+-            char const * &              Rights,
+-            char const * &              Explanation,
+-            std::list<std::string> &    Default
++            char const * &              rights,
++            char const * &              explanation,
++            std::list<std::string> &    default_value
+          );
+ 
+       /**
+        *
+        * Retrieve the configuration value.
+        *
+-       * @return the text list.
++       * @return:               The text list.
+        *
+        */
+       std::list<std::string> get() const throw( exception );
+@@ -148,38 +172,38 @@ namespace nConfig
+        *
+        * Set the configuration value.
+        *
+-       * @param Val:    The text list.
++       * @param value:          The text list.
+        *
+        */
+-      void set( std::list<std::string> const & Val ) throw( exception );
++      void set( std::list<std::string> const & value ) throw( exception );
+ 
+       /**
+        *
+        * Set the initial configuration value.
+        *
+-       * @param Val:    The text list.
++       * @param value:          The text list.
+        *
+        */
+-      void setInitial( std::list<std::string> const & Val )
++      void setInitial( std::list<std::string> const & value )
+          throw( exception );
+-         
++
+       /**
+       *
+       * Update text configuration meta data.
+       *
+-      * @param Rights:         The rights assigned to this item for
+-      *                        further access.
++      * @param rights:          The rights assigned to this item for
++      *                         further access.
+       *
+-      * @param Explanation:    An explanation for this item.
++      * @param explanation:     An explanation for this item.
+       *
+-      * @param MaxLength:      The maximum length of the value string.
++      * @param max_length:      The maximum length of the value string.
+       *
+       */
+       void setMeta
+        (
+-          char const *   Rights,
+-          char const *   Explanation,
+-          long           MaxLength
++          char const *   rights,
++          char const *   explanation,
++          long           max_length
+        )
+           throw( exception );
+ 
+@@ -209,33 +233,33 @@ namespace nConfig
+        *
+        * Constructor.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param System: Refers the configuration system to use.
++       * @param cfg_system:     Refers the configuration system to use.
+        *
+       **/
+       gclTextList
+          (
+-            char const *                Item,
+-            cfgSystem *                 System
++            char const *                item,
++            cfgSystem *                 cfg_system
+          );
+ 
+       /**
+        *
+        * Constructor.
+        *
+-       * @param Item:   The name of the configuration item.
++       * @param item:           The name of the configuration item.
+        *
+-       * @param Auth:   The name of the application.
++       * @param auth:           The name of the application.
+        *
+-       * @param Trcout: A trace stream.
++       * @param trcout:         A trace stream.
+        *
+        */
+       gclTextList
+          (
+-            char const *                Item,
+-            char const *                Auth = 0,
+-            std::ostream *              Trcout = 0
++            char const *                item,
++            char const *                auth = 0,
++            std::ostream *              trcout = 0
+          );
+ 
+       /**
+@@ -256,8 +280,7 @@ namespace nConfig
+       //! Assignment - intentionally not implemented.
+       gclTextList & operator=( gclTextList const & );
+ 
+-   };
+-
++   }; // class gclTextList
+ 
+ 
+ } // namespace nConfig
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtLstGCL.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtLstGCL.cpp
+index 9422f72c..f74d131c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtLstGCL.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtLstGCL.cpp
+@@ -84,19 +84,27 @@ class cfgTextListGCL :
+    /**
+     *
+     * This method is called, when the configuration subsystem needs to
+-    * create a new configuration item.
++    * create a new confuguration item.
+     *
+    **/
+    void create
+         (
+-           char const * &            Rights,
+-           char const * &            Explanation,
+-           std::list<std::string>  & Default
++           char const * &               Rights,
++           char const * &               Explanation,
++           std::list<std::string> &     Default,
++           long &                       Max,
++           long &                       Min,
++           char const * &               RegEx,
++           nConfig::semanticType &      Semantic
+         )
+    {
+       Rights = 0;         // Use the default
+-      Explanation = "Text list entry.";
++      Explanation = "Text list test item.";
+       Default = M_Default;
++      Max = 123;
++      Min = 0;
++      RegEx = "*";
++      Semantic = nConfig::SEMANTIC_NONE;
+    }
+ 
+ public:
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
+index 2c5690f8..7078f234 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2013 MATERNA Information & Communications
++ * Copyright (c) 2007-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -36,36 +36,36 @@
+ 
+ #define THROW_( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+-      if( M_pOS ) \
+-         *M_pOS << S << " Item=" << I << std::endl; \
++      if( m_os ) \
++         *m_os << S << " Item=" << I << std::endl; \
+       throw nConfig::exception( I, S ); \
+       MULTILINE_MACRO_END()
+ 
+ #define THROW_A( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+-      if( M_pOS ) \
+-         *M_pOS << S << " Item=" << I << std::endl; \
++      if( m_os ) \
++         *m_os << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_AccessNotAuthorized( I, S ); \
+       MULTILINE_MACRO_END()
+ 
+ #define THROW_E( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+-      if( M_pOS ) \
+-         *M_pOS << S << " Item=" << I << std::endl; \
++      if( m_os ) \
++         *m_os << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemAlreadyExists( I, S ); \
+       MULTILINE_MACRO_END()
+ 
+ #define THROW_I( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+-      if( M_pOS ) \
+-         *M_pOS << S << " Item=" << I << std::endl; \
++      if( m_os ) \
++         *m_os << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemNotFound( I, S ); \
+       MULTILINE_MACRO_END()
+ 
+ #define THROW_S( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+-      if( M_pOS ) \
+-         *M_pOS << S << " Item=" << I << std::endl; \
++      if( m_os ) \
++         *m_os << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ServantNotFound( I, S ); \
+       MULTILINE_MACRO_END()
+ 
+@@ -92,20 +92,20 @@ namespace
+    **/
+    static void copy
+    (
+-      Config::Textlist::strings &       Dst,
+-      cfgTxtLst const &                 Src
++      Config::Textlist::strings &       dst,
++      cfgTxtLst const &                 src
+    )
+    {
+-      cfgTxtLst::const_iterator SrcI = Src.begin();
+-      int const Size = Src.size();
+-      Dst.length( Size );
++      cfgTxtLst::const_iterator SrcI = src.begin();
++      int const Size = src.size();
++      dst.length( Size );
+       int Index = 0;
+-      while( SrcI != Src.end() )
++      while( SrcI != src.end() )
+       {
+          // Introduce an explicit temporary "Tmp"
+          // to avoid Lint warning
+-         //TAO_SeqElem_String_Manager Tmp = Dst[Index];
+-         Dst[Index] = CORBA::string_dup( (*SrcI).c_str() );
++         //TAO_SeqElem_String_Manager Tmp = dst[Index];
++         dst[Index] = CORBA::string_dup( (*SrcI).c_str() );
+          ++SrcI;
+          ++Index;
+       }
+@@ -120,16 +120,16 @@ namespace
+    **/
+    static void copy
+    (
+-     cfgTxtLst &                        Dst,
+-     Config::Textlist::strings const &  Src
++     cfgTxtLst &                        dst,
++     Config::Textlist::strings const &  src
+    )
+    {
+-      int const Length = Src.length();
+-      Dst.clear();
++      int const Length = src.length();
++      dst.clear();
+       for( int Idx = 0; Idx < Length; ++Idx )
+       {
+-         char const * const S = Src[Idx];
+-         Dst.push_back( S );
++         char const * const S = src[Idx];
++         dst.push_back( S );
+       }
+    }
+ 
+@@ -147,18 +147,18 @@ namespace nConfig
+    {
+ 
+       //! Trace stream.
+-      std::ostream *                    M_pOS;
++      std::ostream *                    m_os;
+ 
+       //! Refer the last get() result.
+-      cfgTxtLst                         M_Got;
++      cfgTxtLst                         m_got;
+ 
+-      //! Protect M_Got.
+-      Materna::MSSD::mutexSemaphore     M_GotMutex;
++      //! Protect m_got.
++      Materna::MSSD::mutexSemaphore     m_got_mutex;
+ 
+-      std::string                       M_Auth;
++      std::string                       m_auth;
+ 
+       //! Configuration proxy.
+-      corbaClient<Config::Textlist>     M_TextListClnt;
++      corbaClient<Config::Textlist2>    M_TextListClnt;
+ 
+       /**
+        *
+@@ -167,9 +167,9 @@ namespace nConfig
+        * @return The proxy.
+        *
+       **/
+-      Config::Textlist * validProxy()
++      Config::Textlist2 * validProxy()
+       {
+-         Config::Textlist * const Ret = M_TextListClnt.proxy();
++         Config::Textlist2 * const Ret = M_TextListClnt.proxy();
+          if( !Ret )
+             THROW_( "?", " - no Proxy" );
+          return Ret;
+@@ -183,15 +183,15 @@ namespace nConfig
+        *
+       **/
+       explicit impl( cfgSystem * System ) :
+-         M_pOS( System->traceout() ),
+-         M_Got( 0 ),
+-         M_GotMutex(),
+-         M_Auth( System->auth() ),
++         m_os( System->traceout() ),
++         m_got( 0 ),
++         m_got_mutex(),
++         m_auth( System->auth() ),
+          M_TextListClnt
+             (
+                System->host(),
+                CFGMGR_PORT,
+-               CFGMGR_SRVNAME_TEXTLIST
++               CFGMGR_SRVNAME_TEXTLIST2
+             )
+       {
+       }
+@@ -206,15 +206,15 @@ namespace nConfig
+             char const *                Auth,
+             std::ostream * Traceout
+          ) :
+-         M_pOS( Traceout ),
+-         M_Got(),
+-         M_GotMutex(),
+-         M_Auth( Auth ),
++         m_os( Traceout ),
++         m_got(),
++         m_got_mutex(),
++         m_auth( Auth ),
+          M_TextListClnt
+             (
+                CFGMGR_HOST,
+                CFGMGR_PORT,
+-               CFGMGR_SRVNAME_TEXTLIST
++               CFGMGR_SRVNAME_TEXTLIST2
+             )
+       {
+       }
+@@ -226,53 +226,81 @@ namespace nConfig
+       **/
+       void create
+       (
+-         char const *                   Item,
+-         char const *                   Rights,
+-         char const *                   Explanation,
+-         cfgTxtLst const &              Value,
+-         long                           MaxLength
++         char const *                   item,
++         char const *                   rights,
++         char const *                   explanation,
++         cfgTxtLst const &              value,
++         long                           max_length
+       )
+          throw( exception )
+       {
+-         if( M_pOS ) *M_pOS << CBTLCR " ..." << std::endl;
++         create
++            (
++               item, rights, explanation, value, max_length,
++               0, "", SEMANTIC_UNKNOWN
++            );
++      }
++
++      /**
++       *
++       * Implementation class method.
++       *
++      **/
++      void create
++      (
++         char const *                   item,
++         char const *                   rights,
++         char const *                   explanation,
++         cfgTxtLst const &              value,
++         long                           max_length,
++         long                           min_length,
++         char const *                   reg_ex,
++         semanticType                   semantic
++      )
++         throw( exception )
++      {
++         if( m_os ) *m_os << CBTLCR " ..." << std::endl;
+          try
+          {
+             Config::access Access;
+-            Access.Item = CORBA::string_dup( Item );
+-            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
+-            Config::description Description;
+-            Description.Rights = CORBA::string_dup( Rights );
+-            Description.Explanation = CORBA::string_dup( Explanation );
+-            Config::Textlist::strings DefStrings;
+-            copy( DefStrings, Value );
+-            validProxy()->create
++            Access.Item = CORBA::string_dup( item );
++            Access.Authorization = CORBA::string_dup( m_auth.c_str() );
++            Config::Textlist2::metaData md;
++            md.Desc.Rights = CORBA::string_dup( rights );
++            md.Desc.Explanation = CORBA::string_dup( explanation );
++            md.MaxLength = max_length;
++            md.MinLength = min_length;
++            md.RegEx = CORBA::string_dup( reg_ex );
++            md.Semantic = static_cast<Config::semanticType>( semantic );
++            Config::Textlist::strings proxy_value;
++            copy( proxy_value, value );
++            validProxy()->create2
+                (
+                   Access,
+-                  Description,
+-                  DefStrings,
+-                  MaxLength
++                  md,
++                  proxy_value
+                );
+-            if( M_pOS ) *M_pOS << CBTLCR "." << std::endl;
++            if( m_os ) *m_os << CBTLCR "." << std::endl;
+          }
+          catch( Config::Node::alreadyExists & )
+          {
+-            THROW_E( Item, CBTLCR " - alreadyExists exception" );
++            THROW_E( item, CBTLCR " - alreadyExists exception" );
+          }
+          catch( Config::Node::noConfiguration & )
+          {
+-            THROW_S( Item, CBTLCR " - noConfiguration exception" );
++            THROW_S( item, CBTLCR " - noConfiguration exception" );
+          }
+          catch( Config::Node::notCreated & )
+          {
+-            THROW_( Item, CBTLCR " - notCreated exception" );
++            THROW_( item, CBTLCR " - notCreated exception" );
+          }
+          catch( CORBA::Exception & )
+          {
+-            THROW_S( Item, CBTLCR " - CORBA::Exception" );
++            THROW_S( item, CBTLCR " - CORBA::Exception" );
+          }
+          catch( ... )
+          {
+-            THROW_( Item, CBTLCR " - Unknown exception" );
++            THROW_( item, CBTLCR " - Unknown exception" );
+          }
+       }
+ 
+@@ -281,49 +309,46 @@ namespace nConfig
+        * Implementation class method.
+        *
+       **/
+-      cfgTxtLst get
+-         (
+-            char const *                Item
+-         )
++      cfgTxtLst get( char const * item )
+          throw( exception )
+       {
+-         if( M_pOS ) *M_pOS << CBTLGT " ..." << std::endl;
+-         Materna::MSSD::autoMutex Block( M_GotMutex );
++         if( m_os ) *m_os << CBTLGT " ..." << std::endl;
++         Materna::MSSD::autoMutex Block( m_got_mutex );
+          try
+          {
+             Config::access Access;
+-            Access.Item = CORBA::string_dup( Item );
+-            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
++            Access.Item = CORBA::string_dup( item );
++            Access.Authorization = CORBA::string_dup( m_auth.c_str() );
+             Config::Textlist::/*strings_var */strings const Strings
+                = *validProxy()->get( Access );
+-            copy( (cfgTxtLst&)M_Got, Strings );
+-            if( M_pOS ) *M_pOS << CBTLGT "." << std::endl;
++            copy( (cfgTxtLst&)m_got, Strings );
++            if( m_os ) *m_os << CBTLGT "." << std::endl;
+          }
+          catch( Config::Node::noConfiguration & )
+          {
+-            THROW_S( Item, CBTLGT " - noConfiguration exception" );
++            THROW_S( item, CBTLGT " - noConfiguration exception" );
+          }
+          catch( Config::Node::notAuthorized & )
+          {
+-            THROW_A( Item, CBTLGT " - notAuthorized exception" );
++            THROW_A( item, CBTLGT " - notAuthorized exception" );
+          }
+          catch( Config::Node::notFound & )
+          {
+-            THROW_I( Item, CBTLGT " - notFound exception" );
++            THROW_I( item, CBTLGT " - notFound exception" );
+          }
+          catch( Config::Node::wrongParam & )
+          {
+-            THROW_( Item, CBTLGT " - wrongParam exception" );
++            THROW_( item, CBTLGT " - wrongParam exception" );
+          }
+          catch( CORBA::Exception & )
+          {
+-            THROW_S( Item, CBTLGT " - CORBA::Exception" );
++            THROW_S( item, CBTLGT " - CORBA::Exception" );
+          }
+          catch( ... )
+          {
+-            THROW_( Item, CBTLGT " - Unknown exception" );
++            THROW_( item, CBTLGT " - Unknown exception" );
+          }
+-         return M_Got;
++         return m_got;
+       }
+ 
+       /**
+@@ -333,45 +358,45 @@ namespace nConfig
+       **/
+       void set
+          (
+-            char const *                Item,
+-            cfgTxtLst const &           Val
++            char const *                item,
++            cfgTxtLst const &           value
+          )
+          throw( exception )
+       {
+-         if( M_pOS ) *M_pOS << CBTLST " ..." << std::endl;
++         if( m_os ) *m_os << CBTLST " ..." << std::endl;
+          try
+          {
+             Config::access Access;
+-            Access.Item = CORBA::string_dup( Item );
+-            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
+-            Config::Textlist::strings ValStrings;
+-            copy( ValStrings, Val );
+-            validProxy()->set( Access, ValStrings );
+-            if( M_pOS ) *M_pOS << CBTLST "." << std::endl;
++            Access.Item = CORBA::string_dup( item );
++            Access.Authorization = CORBA::string_dup( m_auth.c_str() );
++            Config::Textlist::strings proxy_value;
++            copy( proxy_value, value );
++            validProxy()->set( Access, proxy_value );
++            if( m_os ) *m_os << CBTLST "." << std::endl;
+          }
+          catch( Config::Node::noConfiguration & )
+          {
+-            THROW_S( Item, CBTLST " - noConfiguration exception" );
++            THROW_S( item, CBTLST " - noConfiguration exception" );
+          }
+          catch( Config::Node::notAuthorized & )
+          {
+-            THROW_A( Item, CBTLST " - notAuthorized exception" );
++            THROW_A( item, CBTLST " - notAuthorized exception" );
+          }
+          catch( Config::Node::notFound & )
+          {
+-            THROW_I( Item, CBTLST " - notFound exception" );
++            THROW_I( item, CBTLST " - notFound exception" );
+          }
+          catch( Config::Node::wrongParam & )
+          {
+-            THROW_( Item, CBTLST " - wrongParam exception" );
++            THROW_( item, CBTLST " - wrongParam exception" );
+          }
+          catch( CORBA::Exception & )
+          {
+-            THROW_S( Item, CBTLST " - CORBA::Exception" );
++            THROW_S( item, CBTLST " - CORBA::Exception" );
+          }
+          catch( ... )
+          {
+-            THROW_( Item, CBTLST " - Unknown exception" );
++            THROW_( item, CBTLST " - Unknown exception" );
+          }
+       }
+ 
+@@ -382,44 +407,44 @@ namespace nConfig
+       **/
+       void setInitial
+          (
+-            char const *                Item,
+-            cfgTxtLst const &           Val
++            char const *                item,
++            cfgTxtLst const &           value
+          )
+          throw( exception )
+       {
+-         if( M_pOS ) *M_pOS << CBTLSI " ..." << std::endl;
++         if( m_os ) *m_os << CBTLSI " ..." << std::endl;
+          try
+          {
+             Config::access Access;
+-            Access.Item = CORBA::string_dup( Item );
+-            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
+-            Config::Textlist::strings ValStrings;
+-            copy( ValStrings, Val );
+-            validProxy()->setInitial( Access, ValStrings );
+-            if( M_pOS ) *M_pOS << CBTLSI "." << std::endl;
++            Access.Item = CORBA::string_dup( item );
++            Access.Authorization = CORBA::string_dup( m_auth.c_str() );
++            Config::Textlist::strings proxy_value;
++            copy( proxy_value, value );
++            validProxy()->setInitial( Access, proxy_value );
++            if( m_os ) *m_os << CBTLSI "." << std::endl;
+          }
+          catch( Config::Node::alreadyExists & )
+          {
+-            THROW_E( Item, CBTLSI " - alreadyExists exception" );
++            THROW_E( item, CBTLSI " - alreadyExists exception" );
+          }
+          catch( Config::Node::noConfiguration & )
+          {
+-            THROW_S( Item, CBTLSI " - noConfiguration exception" );
++            THROW_S( item, CBTLSI " - noConfiguration exception" );
+          }
+          catch( Config::Node::wrongParam & )
+          {
+-            THROW_( Item, CBTLSI " - wrongParam exception" );
++            THROW_( item, CBTLSI " - wrongParam exception" );
+          }
+          catch( CORBA::Exception & )
+          {
+-            THROW_S( Item, CBTLSI " - CORBA::Exception" );
++            THROW_S( item, CBTLSI " - CORBA::Exception" );
+          }
+          catch( ... )
+          {
+-            THROW_( Item, CBTLSI " - Unknown exception" );
++            THROW_( item, CBTLSI " - Unknown exception" );
+          }
+       }
+-      
++
+       /**
+        *
+        * Implementation class method.
+@@ -427,48 +452,48 @@ namespace nConfig
+       **/
+       void setMeta
+       (
+-         char const *   Item,
+-         char const *   Rights,
+-         char const *   Explanation,
+-         long           MaxLength
++         char const *   item,
++         char const *   rights,
++         char const *   explanation,
++         long           max_length
+       )
+          throw( exception )
+       {
+-        if (M_pOS) *M_pOS << CBTSM " ..." << std::endl;
++        if( m_os ) *m_os << CBTSM " ..." << std::endl;
+         try
+         {
+           Config::access Access;
+-          Access.Item = CORBA::string_dup(Item);
+-          Access.Authorization = CORBA::string_dup(M_Auth.c_str());
++          Access.Item = CORBA::string_dup( item );
++          Access.Authorization = CORBA::string_dup( m_auth.c_str() );
+           Config::description Description;
+-          Description.Rights = CORBA::string_dup(Rights);
+-          Description.Explanation = CORBA::string_dup(Explanation);
+-          validProxy()->setMeta(Access, Description, MaxLength);
+-          if (M_pOS) *M_pOS << CBTSM "." << std::endl;
++          Description.Rights = CORBA::string_dup( rights );
++          Description.Explanation = CORBA::string_dup( explanation );
++          validProxy()->setMeta( Access, Description, max_length );
++          if (m_os) *m_os << CBTSM "." << std::endl;
+         }
+-        catch (Config::Node::noConfiguration &)
++        catch( Config::Node::noConfiguration & )
+         {
+-          THROW_S(Item, CBTSM " - noConfiguration exception");
++          THROW_S( item, CBTSM " - noConfiguration exception" );
+         }
+-        catch (Config::Node::notAuthorized &)
++        catch( Config::Node::notAuthorized & )
+         {
+-          THROW_(Item, CBTSM " - notAuthorized exception");
++          THROW_( item, CBTSM " - notAuthorized exception" );
+         }
+-        catch (Config::Node::notFound &)
++        catch( Config::Node::notFound & )
+         {
+-          THROW_(Item, CBTSM " - notFound exception");
++          THROW_( item, CBTSM " - notFound exception" );
+         }
+-        catch (Config::Node::wrongParam &)
++        catch( Config::Node::wrongParam & )
+         {
+-          THROW_(Item, CBTSM " - wrongParam exception");
++          THROW_( item, CBTSM " - wrongParam exception" );
+         }
+-        catch (CORBA::Exception &)
++        catch( CORBA::Exception & )
+         {
+-          THROW_S(Item, CBTSM " - CORBA::Exception");
++          THROW_S( item, CBTSM " - CORBA::Exception" );
+         }
+-        catch (...)
++        catch( ... )
+         {
+-          THROW_(Item, CBTSM " - Unknown exception");
++          THROW_( item, CBTSM " - Unknown exception" );
+         }
+       }
+ 
+@@ -490,7 +515,7 @@ namespace nConfig
+       (
+          cfgSystem * System
+       ) :
+-      M_Impl( new impl( System ) )
++      m_impl( new impl( System ) )
+    {
+    }
+ 
+@@ -506,7 +531,7 @@ namespace nConfig
+          char const *                   Auth,
+          std::ostream *                 Traceout
+       ) :
+-      M_Impl( new impl( Auth, Traceout ) )
++      m_impl( new impl( Auth, Traceout ) )
+    {
+    }
+ 
+@@ -521,7 +546,7 @@ namespace nConfig
+    {
+       try
+       {
+-         delete M_Impl;
++         delete m_impl;
+       }
+       catch( ... )
+       {
+@@ -537,15 +562,42 @@ namespace nConfig
+     */
+    void basicTextList::create
+    (
+-      char const *                      Item,
+-      char const *                      Rights,
+-      char const *                      Explanation,
+-      cfgTxtLst const &                 Value,
+-      long                              MaxLength
++      char const *                      item,
++      char const *                      rights,
++      char const *                      explanation,
++      cfgTxtLst const &                 value,
++      long                              max_length,
++      long                              min_length,
++      char const *                      reg_ex,
++      semanticType                      semantic
++   )
++      throw( exception )
++   {
++      m_impl->create
++         (
++            item, rights, explanation, value,
++            max_length, min_length, reg_ex, semantic
++         );
++   }
++
++
++
++   /*
++    *
++    * Public method - see nConfigBasicTextList.hpp
++    *
++    */
++   void basicTextList::create
++   (
++      char const *                      item,
++      char const *                      rights,
++      char const *                      explanation,
++      cfgTxtLst const &                 value,
++      long                              max_length
+    )
+       throw( exception )
+    {
+-      M_Impl->create( Item, Rights, Explanation, Value, MaxLength );
++      m_impl->create( item, rights, explanation, value, max_length );
+    }
+ 
+ 
+@@ -557,11 +609,11 @@ namespace nConfig
+     */
+    cfgTxtLst basicTextList::get
+       (
+-         char const *                   Item
++         char const *                   item
+       )
+       const throw( exception )
+    {
+-      return M_Impl->get( Item );
++      return m_impl->get( item );
+    }
+ 
+ 
+@@ -573,12 +625,12 @@ namespace nConfig
+     */
+    void basicTextList::set
+       (
+-         char const *                   Item,
+-         cfgTxtLst const &              Val
++         char const *                   item,
++         cfgTxtLst const &              value
+       )
+       throw( exception )
+    {
+-      M_Impl->set( Item, Val );
++      m_impl->set( item, value );
+    }
+ 
+ 
+@@ -590,12 +642,12 @@ namespace nConfig
+     */
+    void basicTextList::setInitial
+       (
+-         char const *                   Item,
+-         cfgTxtLst const &              Val
++         char const *                   item,
++         cfgTxtLst const &              value
+       )
+       throw( exception )
+    {
+-      M_Impl->setInitial( Item, Val );
++      m_impl->setInitial( item, value );
+    }
+ 
+ 
+@@ -606,19 +658,18 @@ namespace nConfig
+     */
+    void basicTextList::setMeta
+    (
+-      char const *   Item,
+-      char const *   Rights,
+-      char const *   Explanation,
+-      long           MaxLength
++      char const *   item,
++      char const *   rights,
++      char const *   explanation,
++      long           max_length
+    )
+       throw( exception )
+    {
+-      M_Impl->setMeta( Item, Rights, Explanation, MaxLength );
++      m_impl->setMeta( item, rights, explanation, max_length );
+    }
+-   
+-   
+-   
+-}
++
++
++} // namespace nConfig
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigTextList.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigTextList.cpp
+index 6948b803..9581c262 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigTextList.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigTextList.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2013 MATERNA Information & Communications
++ * Copyright (c) 2001-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -64,10 +64,40 @@ namespace nConfig
+       **/
+       void create
+          (
+-            char const * & R,
+-            char const * & E,
+-            std::list<std::string> & D,
+-            long & Max
++            char const * &              Rights,
++            char const * &              Expl,
++            std::list<std::string> &    Def,
++            long &                      Max,
++            long &                      Min,
++            char const * &              RegEx,
++            semanticType &              Semantic
++         )
++      {
++         M_User->create
++            (
++               Rights,
++               Expl,
++               Def,
++               Max,
++               Min,
++               RegEx,
++               Semantic
++            );
++         if( !Rights )
++            Rights = CFGRIGHTS_DEFAULT;
++      }
++
++      /**
++       *
++       * This function overloads the base-class function.
++       *
++      **/
++      void create
++         (
++            char const * &              R,
++            char const * &              E,
++            std::list<std::string> &    D,
++            long &                      Max
+          )
+       {
+          M_User->create( R, E, D, Max );
+@@ -82,9 +112,9 @@ namespace nConfig
+       **/
+       void create
+          (
+-            char const * & R,
+-            char const * & E,
+-            std::list<std::string> & D
++            char const * &              R,
++            char const * &              E,
++            std::list<std::string> &    D
+          )
+       {
+          M_User->create( R, E, D );
+@@ -181,25 +211,33 @@ namespace nConfig
+                *M_Traceout << CTLG " - notFound exception" << std::endl;
+             const char * R = 0;
+             const char * E = 0;
+-            long         Max = 1024;
++            long         Max = 0;
++            long         Min = 0;
++            char const * RegEx = "";
++            semanticType Semantic = SEMANTIC_UNKNOWN;
+             //
+             // Ask heir about create parameters
+             //
+-            create( R, E, Value, Max );
+-            if( !E )
+-            {
+-               Max = 1023;  // Trap users of old style in config file
+-               create( R, E, Value );
+-            }
+-            if( !E )
++            create( R, E, Value, Max, Min, RegEx, Semantic );
++            if( !E  )
+             {
+-               if( M_Traceout )
+-                  *M_Traceout << CTLG " - create failed" << std::endl;
+-               throw nConfig::exception
+-                        (
+-                           M_Item.c_str(),
+-                           "get() -  create() failed"
+-                        );
++               // Trap users of old style in config file
++               create( R, E, Value, Max );
++               if( !E )
++               {
++                  Max = 1023;  // Trap users of old style in config file
++                  create( R, E, Value );
++               }
++               if( !E )
++               {
++                  if( M_Traceout )
++                     *M_Traceout << CTLG " - create failed" << std::endl;
++                  throw nConfig::exception
++                           (
++                              M_Item.c_str(),
++                              "get() -  create() failed"
++                           );
++               }
+             }
+             //
+             // Explanation and defaults given
+@@ -214,7 +252,8 @@ namespace nConfig
+                   M_Item.c_str(),
+                   R,
+                   E,
+-                  Value, Max
++                  Value, Max,
++                  Min, RegEx, Semantic
+                );
+             if( M_Traceout )
+                *M_Traceout << CTLG " created." << std::endl;
+@@ -270,7 +309,7 @@ namespace nConfig
+       {
+          M_Basic.setInitial( M_Item.c_str(), Value );
+       }
+-      
++
+       /**
+       *
+       * Update text configuration meta data.
+@@ -312,7 +351,7 @@ namespace nConfig
+          char const *   Item,
+          cfgSystem *    System
+       ) :
+-      M_Impl( new impl( this, Item, System ) )
++      m_impl( new impl( this, Item, System ) )
+    {
+    }
+ 
+@@ -329,7 +368,7 @@ namespace nConfig
+          char const * Auth,
+          std::ostream * Traceout
+       ) :
+-      M_Impl( new impl( this, Item, Auth, Traceout ) )
++      m_impl( new impl( this, Item, Auth, Traceout ) )
+    {
+    }
+ 
+@@ -344,7 +383,7 @@ namespace nConfig
+    {
+       try
+       {
+-         delete M_Impl;
++         delete m_impl;
+       }
+       catch( ... )
+       {
+@@ -353,6 +392,30 @@ namespace nConfig
+ 
+ 
+ 
++   /*
++    *
++    * Exported method - see nConfigText.hpp
++    *
++    */
++   void gcTextList::create
++      (
++         char const * &              Rights,
++         char const * &              Expl,
++         std::list<std::string> &,
++         long &                      Max,
++         long &                      Min,
++         char const * &              RegEx,
++         semanticType &              Semantic
++      )
++   {
++      Rights = Expl = 0;
++      Max = Min = 0;
++      RegEx = 0;
++      Semantic = SEMANTIC_UNKNOWN;
++   }
++
++
++
+    /*
+     *
+     * Exported method - see nConfigTextList.hpp
+@@ -396,7 +459,7 @@ namespace nConfig
+     */
+    std::list<std::string> gcTextList::get() const throw( exception )
+    {
+-      return M_Impl->get();
++      return m_impl->get();
+    }
+ 
+ 
+@@ -409,7 +472,7 @@ namespace nConfig
+    void gcTextList::set( std::list<std::string> const & Value )
+       throw( exception )
+    {
+-      M_Impl->set( Value );
++      m_impl->set( Value );
+    }
+ 
+ 
+@@ -422,11 +485,11 @@ namespace nConfig
+    void gcTextList::setInitial( std::list<std::string> const & Value )
+       throw( exception )
+    {
+-      M_Impl->setInitial( Value );
++      m_impl->setInitial( Value );
+    }
+ 
+-   
+-   
++
++
+    /*
+     *
+     * Public method - see nConfigBasicText.hpp
+@@ -440,9 +503,9 @@ namespace nConfig
+    )
+       throw( exception )
+    {
+-      M_Impl->setMeta( Rights, Explanation, MaxLength );
++      m_impl->setMeta( Rights, Explanation, MaxLength );
+    }
+-   
++
+ 
+ 
+    /*
+@@ -458,7 +521,7 @@ namespace nConfig
+       gcTextList( Item, System ),
+       gclBase()
+    {
+-      M_Impl->addChangeListener( this );
++      m_impl->addChangeListener( this );
+    }
+ 
+ 
+@@ -477,7 +540,7 @@ namespace nConfig
+       gcTextList( Item, Auth, Traceout ),
+       gclBase()
+    {
+-      M_Impl->addChangeListener( this );
++      m_impl->addChangeListener( this );
+    }
+ 
+ 
+@@ -491,7 +554,7 @@ namespace nConfig
+    {
+       try
+       {
+-         M_Impl->removeChangeListener();
++         m_impl->removeChangeListener();
+       }
+       catch( ... )
+       {
+-- 
+2.41.0.windows.1
+

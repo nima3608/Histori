@@ -1,0 +1,129 @@
+From 1ca341e77e38e883ec69ffa9519cf7f0071e8b61 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 22 Apr 2016 12:51:45 +0000
+Subject: [PATCH 0743/1076] MANTIS 0041017 bugfix: GPPDev: F+D Phoenix use
+ wrong USB-Port
+
+massai_systools.lib
+V1.0.0.34
+
+- fixed use of Setup API, use devicedata relative to found deviceinfo
+- may influence GPPDev FDPhoenix and MR SankyoICM330
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1008 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/inc/mSysUSBDeviceW32.h       |  1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 +++++++--
+ .../cpp/Systools/src/mSysUSBDeviceW32.cpp     | 22 +++++++++++++++++++
+ .../Massai/cpp/Systools/src/mSysUSBHIDW32.cpp |  2 +-
+ .../cpp/Systools/src/mSysUSBPrinterW32.cpp    |  2 +-
+ 5 files changed, 33 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
+index 84cffd82..5d96fe8d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
+@@ -79,6 +79,7 @@ namespace mSysUSBDeviceW32
+      public:
+       // throw mSysError::SystemError; see mSysErrorW32.h
+       DeviceData(Devices& devices, unsigned int index, const GUID& guid, MASSAI::trace::TraceInterface& trc);
++      DeviceData(Devices& devices, DeviceInfo& deviceInfo, unsigned int index, const GUID& guid, MASSAI::trace::TraceInterface& trc);
+       ~DeviceData();
+ 
+       std::string getDeviceName();
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index a61bbad6..d630b5bb 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 33);
++VERSION_ID_DT(systools, 1, 0, 0, 34);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 33);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.33
++@version 1.0.0.34
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.34
++\li 22.04.2016
++\li bugfix SteT Mantis 0041017: GPPDev: F+D Phoenix use wrong USB-Port
++- fixed use of Setup API, use devicedata relative to found deviceinfo
++- may influence GPPDev FDPhoenix and MR SankyoICM330
++
+ \version 1.0.0.33
+ \li 29.01.2016
+ \li bugfix SteT Mantis 0040024: Process-Control: Kiosk boots at platform shutdown
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+index e20f3c3e..7fb6bb8a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+@@ -225,6 +225,28 @@ namespace mSysUSBDeviceW32
+     }
+   }
+ 
++  DeviceData::DeviceData(Devices& devices, DeviceInfo& deviceInfo, unsigned int index, const GUID& guid, MASSAI::trace::TraceInterface& trc):
++    m_devData(),
++    m_devices(devices),
++    m_trc(trc)
++  {
++    m_devData.cbSize = sizeof(m_devData);
++    if(!SetupDiEnumDeviceInterfaces(m_devices.getDeviceInfoHandle(), &deviceInfo.getDeviceInfoData(), &guid, index, &m_devData))
++    {
++      DWORD errorCode = GetLastError();
++      if(errorCode == ERROR_NO_MORE_ITEMS)
++      {
++        mSysError::traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", errorCode);
++      }
++      else
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", errorCode);
++      }
++      throw SystemError("SetupDiEnumDeviceInterfaces", errorCode);
++    }
++  }
++
++
+   DeviceData::~DeviceData()
+   {}
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
+index a318d5ec..797a1582 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
+@@ -63,7 +63,7 @@ namespace
+         DeviceInfo deviceInfo(devices, i, m_trc);
+         if(match(deviceInfo.getDeviceId()))
+         {
+-          DeviceData deviceData(devices, i, HID_GUID, m_trc);
++          DeviceData deviceData(devices, deviceInfo, 0, HID_GUID, m_trc);
+           result = deviceData.getDeviceName();
+           m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
+           break;
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+index ed81e059..b30e5ce0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+@@ -131,7 +131,7 @@ namespace
+         DeviceInfo deviceInfo(devices, i, m_trc);
+         if(match(deviceInfo.getDeviceId()))
+         {
+-          DeviceData deviceData(devices, i, PRINTER_GUID, m_trc);
++          DeviceData deviceData(devices, deviceInfo, 0, PRINTER_GUID, m_trc);
+           result = deviceData.getDeviceName();
+           m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
+           break;
+-- 
+2.41.0.windows.1
+

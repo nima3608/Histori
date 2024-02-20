@@ -1,0 +1,1670 @@
+From 1d0b9de171823f058006541bb0a3ddd549fb84aa Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 13 Oct 2014 12:47:06 +0000
+Subject: [PATCH 0506/1000] MANTIS 0032431 included functionality of the old
+ mControl
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@733 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h | 225 +++++++++-
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  12 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  10 +
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |   4 +-
+ .../Massai/cpp/mControl/makefile.mak          |   8 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 215 ++++++----
+ .../cpp/mControl/src/mControl_dialog.cpp      |  31 +-
+ .../Massai/cpp/mControl/src/mControl_impl.cpp |   2 +-
+ .../cpp/mControl/src/mControl_kioskReboot.cpp |   1 +
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 404 +++++++++++++++++-
+ .../cpp/mControl/src/mControl_scheduler.cpp   |   1 +
+ .../cpp/mControl/src/mControl_tools.cpp       | 284 +++++++++++-
+ 12 files changed, 1061 insertions(+), 136 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 51cc2f15..b0f477fc 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -15,11 +15,21 @@
+ 
+ #include "..\inc\mControl_def.h"
+ 
++//MATERNA includes
++#include "text/cEnvSubst.hpp"
++#include "cfgclnt/nConfigText.hpp"
++#include "cfgclnt/nConfigNumber.hpp"
++#include "cfgclnt/nConfigTextList.hpp"
++
++
+ //Windows includes
+ #include <windows.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <tchar.h>
++#include <list>
++
++
+ 
+ namespace mControl
+ {
+@@ -32,10 +42,18 @@ namespace mControl
+         bool        m_portableMCC;
+         bool        m_isRunningAsUserShell;
+ 
++        HINSTANCE   m_hInstance;
++
++        HWND        m_hwnd;
++        CEnvSubst   m_EnvS;
++
+     public:
++        MControlConfig(HINSTANCE hInst);
+         MControlConfig();
+         ~MControlConfig();
+ 
++
++
+         /**
+         * Attribut getter Methods
+         */
+@@ -44,6 +62,11 @@ namespace mControl
+         bool noSNMPActive(){ return m_noSNMP; }
+         bool noPortableMCCActive(){ return m_portableMCC; }
+         bool isRunningAsUserShell(){ return m_isRunningAsUserShell; }
++        HINSTANCE& getInstance(){ return m_hInstance; }
++        HWND& getHwnd(){ return m_hwnd; }
++        CEnvSubst& getEnvS(){ return m_EnvS; }
++
++
+     
+         /**
+         * Attribut setter Methods
+@@ -53,7 +76,7 @@ namespace mControl
+         void setNoSNMP(bool flag){ m_noSNMP = flag; }
+         void setPortableMCC(bool flag){ m_portableMCC = flag; }
+         void setRunningAsUserShell(bool flag){ m_isRunningAsUserShell = flag; }
+-        
++        void setInstance(HINSTANCE hInst){ m_hInstance = hInst; }        
+     };
+ 
+ 	class MControlWindowConfig
+@@ -131,6 +154,8 @@ namespace mControl
+         HWND getHwndInfo2(){ return m_hWndInfo_2; }
+         HINSTANCE getInstance(){ return m_Wcex.hInstance; }
+         LPCTSTR getClassName() const;
++        MControlConfig& getConfig(){ return m_config; }
++        WNDCLASSEX& getWndClassex(){ return m_Wcex; }
+ 
+         /**
+         * Attribut setter Methods
+@@ -156,6 +181,204 @@ namespace mControl
+         //void setBackground(HBRUSH hbrBackground);
+         //void setMenu(LPCTSTR lpMenuName)
+     };
++
++
++/**********************************************************************************************************************
++* old Config classes
++*/
++
++
++
++    //---------------------------------------------------------------------------
++    //
++    //  function:   class cfgNum : public nConfig::gcNumber
++    //
++    //  purpose:    Configuration number definition
++    //
++    //  date:       29.08.2002, 09:16
++    //
++    //  author:     Materna Information & Communications (AGe)
++    //
++    //---------------------------------------------------------------------------
++
++    class cfgNum : public nConfig::gcNumber
++    {
++
++        char szExplanation[1024];
++        long lDefault;
++        long lMinValue;
++        long lMaxValue;
++
++        /** This method is called, when the configuration subsystem needs to
++         *  create a new confuguration item.
++         */
++
++       void create(char const * & Rights, char const * & Explanation, long & Def, long & Min, long & Max)
++       {
++           Rights = "rwl";    // "[r][w][+]"
++
++           Explanation = szExplanation;
++
++           Def = lDefault;
++           Min = lMinValue;
++           Max = lMaxValue;
++       }
++
++       cfgNum();
++
++    public:
++
++        /** Constructor */
++
++        explicit cfgNum(char const *pszItem,
++               char const *pszExplanation = "",
++               long Default  = 10,
++               long MinValue = 0,
++               long MaxValue = 10) :
++            nConfig::gcNumber(pszItem,"massaiControl"),
++            lDefault( Default ),
++            lMinValue( MinValue ),
++            lMaxValue( MaxValue )
++        {
++            strcpy(szExplanation,pszExplanation);
++        }
++    };
++
++    //---------------------------------------------------------------------------
++    //
++    //  function:   class cfgStr : public nConfig::gcText
++    //
++    //  purpose:    Configuration string definition
++    //
++    //  date:       28.08.2002, 12:52
++    //
++    //  author:     Materna Information & Communications (AGe)
++    //
++    //---------------------------------------------------------------------------
++
++    class cfgStr : public nConfig::gcText
++    {
++
++        char szExplanation[1024];
++        char szDefault    [256];
++
++        /** This method is called, when the configuration subsystem needs to
++         *  create a new confuguration item.
++         */
++
++        void create(char const * & Rights, char const * & Explanation, char const * & Default)
++        {
++           Rights = "rwl";    // "[r][w][+]"
++
++           Explanation = szExplanation;
++
++           Default = szDefault;
++        }
++
++        cfgStr();
++
++    public:
++
++        /** Constructor */
++
++        explicit cfgStr(char const * pszItem,
++               char const * pszExplanation = "",
++               char const * pszDefault = "") : nConfig::gcText(pszItem,"massaiControl")
++        {
++            strcpy(szExplanation,pszExplanation);
++            strcpy(szDefault,pszDefault);
++        }
++    };
++
++    //---------------------------------------------------------------------------
++    //
++    //  function:   class cfgListSysCommands : public nConfig::gcTextList
++    //
++    //  purpose:    List of system commands to be executed before platform start/shutdown
++    //
++    //  date:       02.04.2003, 13:46
++    //
++    //  author:     Materna Information & Communications (AGe)
++    //
++    //---------------------------------------------------------------------------
++
++    class cfgListSysCommands : public nConfig::gcTextList
++    {
++        /** Default list */
++
++        std::list<std::string> defStringList;
++
++        /** This method is called, when the configuration subsystem needs to
++         *  create a new configuration item.
++         */
++
++        void create(char const * & Rights,char const * & Explanation, std::list<std::string> & Default)
++        {
++           Rights = "rwl";    // "[r][w][+]"
++
++           Explanation = "List of system commands to be executed.";
++
++           Default = *(&defStringList);
++        }
++
++        cfgListSysCommands();
++
++    public:
++
++        explicit cfgListSysCommands(char const *pszItem) :
++           nConfig::gcTextList(pszItem,"massaiControl"),
++           defStringList()
++        {
++           //defStringList.push_back( "Eins" );
++           //defStringList.push_back( "Zwei" );
++        }
++    };
++
++    //---------------------------------------------------------------------------
++    //
++    //  function:   class cfgListScheduledCommands : public nConfig::gcTextList
++    //
++    //  purpose:    list of commands to be passed to the windows AT command
++    //
++    //  date:       03.04.2003, 10:29
++    //
++    //  author:     Materna Information & Communications (AGe)
++    //
++    //---------------------------------------------------------------------------
++
++    class cfgListScheduledCommands : public nConfig::gcTextList
++    {
++        /** Default list */
++
++        std::list<std::string> defStringList;
++
++        /** This method is called, when the configuration subsystem needs to
++         *  create a new configuration item.
++         */
++
++        void create(char const * & Rights,char const * & Explanation, std::list<std::string> & Default)
++        {
++           Rights = "rwl";    // "[r][w][+]"
++
++           Explanation = "List of scheduled system commands to be executed.\n"
++                         "If no day is specified the command is executed daily.\n\n"
++                         "FORMAT: [dd;] | [last;] | [mon;|tue;|wed;|thu;|fri;|sat;|sun;]<hh:mm>;<command string>";
++
++           Default = *(&defStringList);
++        }
++
++        cfgListScheduledCommands();
++
++    public:
++
++        explicit cfgListScheduledCommands(char const *pszItem) :
++           nConfig::gcTextList(pszItem,"massaiControl"),
++           defStringList()
++        {
++           //defStringList.push_back( "Eins" );
++           //defStringList.push_back( "Zwei" );
++        }
++    };
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index e0c3028e..b91c6e66 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -49,14 +49,7 @@ namespace mControl
+         /**
+         * Calls the ShowWindow() Methods of the Window-API with the given Parameter
+         */
+-        int start(int nCmdShow);
+-
+-
+-
+-        /**
+-        * Windows MessageQueue Handler
+-        */
+-        static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
++        int startShowWindow(int nCmdShow);
+ 
+ 
+ 
+@@ -71,7 +64,8 @@ namespace mControl
+         /**
+         * getter Methods
+         */
+-        NotificationQueue& getNotificationQueue();
++        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        MControlWindowConfig& getMControlWindowConfig(){ return m_MControlWindowConfig; }
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 345e3c0e..f9c419ed 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -40,6 +40,16 @@ namespace mControl
+         static char* getWorkingDir();
+ 
+         static long setWorkingDir();
++
++        static char* timeStamp();
++
++        static long waitForService( char const * serviceName, long lTimeout);
++
++        static char const * boolToChar( bool in );
++
++        static void printInfoAboutFiles( char const * file );
++
++        static void printVersionInfo( char * fileName );
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 2694f6e4..b6b98341 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -24,8 +24,8 @@
+ #define REBOOTER_ID 1
+ #define SCHEDULER_ID 0
+ 
+-#define APP_NAME "mControl"
+-#define CLASS_NAME "win32app"
++#define szAppName   "MassaiController"
++#define szClassName "win32app"
+ 
+ // The main window class name.
+ //static TCHAR szWindowClass[] = _T("win32app");
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+index 4445a4ab..03d059ce 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+@@ -6,7 +6,6 @@
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
+-
+ MY_CFLAGS = \
+     $(MY_CFLAGS_2) \
+     $(INC_ACETAO) \
+@@ -22,12 +21,7 @@ STDUSERLIBS = \
+     $(LIB_MCFGCLNT) \
+     $(LIB_PSAPI) \
+     $(LIB_ALERTS) \
+-    $(LIB_BOOST) \
+-	$(DIR_POCO)\lib\CppUnitmt.lib \
+-	$(DIR_POCO)\lib\PocoJSONmt.lib \
+-	$(DIR_POCO)\lib\PocoNetmt.lib \
+-	$(DIR_POCO)\lib\PocoUtilmt.lib \
+-	$(DIR_POCO)\lib\PocoXMLmt.lib 
++    $(LIB_BOOST)
+ 
+ STDLINKLIBS = \
+     $(SYS_ACETAO) \
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index a3c2a6e0..74d508c3 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -16,24 +16,38 @@
+ #include "..\inc\mControl_tools.h"
+ 
+ #include <Commctrl.h>
+-
+-
+-
+ #include <iostream>
+ 
+ #include "trc/trace.h"
+ 
++
++
+ namespace mControl
+ {
+-    /*******************************************************************************************************
+-    * MConrolConfig implementation
+-    */
++/*******************************************************************************************************
++* MConrolConfig implementation
++*/
++    MControlConfig::MControlConfig(HINSTANCE hInst) : 
++        m_serverMode(false),
++        m_noLog(false),
++        m_noSNMP(false),
++        m_portableMCC(false),
++        m_isRunningAsUserShell(false),
++        m_hInstance(hInst),
++        m_hwnd(0),
++        m_EnvS()
++    {
++    }
++
+     MControlConfig::MControlConfig() : 
+         m_serverMode(false),
+         m_noLog(false),
+         m_noSNMP(false),
+         m_portableMCC(false),
+-        m_isRunningAsUserShell(false)
++        m_isRunningAsUserShell(false),
++        m_hInstance(0),
++        m_hwnd(0),
++        m_EnvS()
+     {
+     }
+ 
+@@ -42,13 +56,13 @@ namespace mControl
+     }
+ 
+ 
+-    /*******************************************************************************************************
+-    * MConrolWindowConfig implementation
+-    */
++/*******************************************************************************************************
++* MConrolWindowConfig implementation
++*/
+     MControlWindowConfig::MControlWindowConfig(HINSTANCE hInst, MControlConfig& config) :
+         m_config(config),
+         m_Wcex(),
+-        m_title(TEXT(APP_NAME)),
++        m_title(szAppName),
+         m_hWnd(), 
+         m_hbmMain(),
+         m_exStyle(0), 
+@@ -60,19 +74,21 @@ namespace mControl
+         m_Wcex.hInstance = hInst;
+     }
+ 
++
++
+     int MControlWindowConfig::registerWindow()
+     {
+-        m_Wcex.cbSize = sizeof(WNDCLASSEX);
+-        m_Wcex.style          = CS_HREDRAW | CS_VREDRAW;
+-        m_Wcex.lpfnWndProc    = startUPWndProc;
+-        m_Wcex.cbClsExtra     = 0;
+-        m_Wcex.cbWndExtra     = 0;
+-        m_Wcex.hIcon          = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+-        m_Wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
+-        m_Wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
+-        m_Wcex.lpszMenuName   = NULL;
+-        m_Wcex.lpszClassName  = TEXT(CLASS_NAME);
+-        m_Wcex.hIconSm        = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++        m_Wcex.cbSize           = sizeof(WNDCLASSEX);
++        m_Wcex.style            = CS_HREDRAW | CS_VREDRAW;
++        m_Wcex.lpfnWndProc      = startUPWndProc;
++        m_Wcex.cbClsExtra       = 0;
++        m_Wcex.cbWndExtra       = 0;
++        m_Wcex.hIcon            = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++        m_Wcex.hCursor          = LoadCursor(NULL, IDC_ARROW);
++        m_Wcex.hbrBackground    = (HBRUSH) GetStockObject (WHITE_BRUSH) ;
++        m_Wcex.lpszMenuName     = NULL;
++        m_Wcex.lpszClassName    = TEXT(szClassName);
++        m_Wcex.hIconSm          = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+ 
+         if (!RegisterClassEx(&m_Wcex))
+         {
+@@ -81,33 +97,81 @@ namespace mControl
+                 _T("mControl"),
+                 NULL);
+ 
+-            return 1;
++            return 0;
+         }
++
++        return 1;
+     }
+ 
+     int MControlWindowConfig::createWindow()
+     {
++        
++        int xSize, ySize;
++        int xPosition, yPosition;
++
++        DWORD myStyle = WS_POPUP;
++
++        if(! (this->getConfig().serverMode()) )
++        {
++            myStyle |= WS_EX_TOPMOST;
++
++            xSize = ySize = 0;
++
++            xPosition = GetSystemMetrics(SM_CXSCREEN);
++            yPosition = GetSystemMetrics(SM_CYSCREEN);
++        }
++        else
++        {
++            xPosition = 384;
++            yPosition = 288;
++
++            xSize = GetSystemMetrics(SM_CXSCREEN)/2 - xPosition/2;
++            ySize = GetSystemMetrics(SM_CYSCREEN)/2 - yPosition/2;
++
++            char szHostName[512];
++
++            *szHostName = '\0';
++
++            gethostname(szHostName,sizeof(szHostName));
++
++            // create config entry for KioskProxy initial request
++
++            if(*szHostName)
++            {
++                cfgStr ablsAddress("PLATFORM.ENVIRONMENT.ABLS-IP-Address",
++                                    "Used by kiosk proxy when balanced, using a load balancer."
++                                    "(Generated value. - Change only if IP-Address of this machine is changed!)",
++                                    szHostName);
++
++                TRACE(HERE,"ABLS-IP-Address = [%s]",ablsAddress.get());
++            }
++            else
++                TRACE(HERE,"failed to get ABLS-IP-Address");
++        }      
++        
++
+         // The parameters to CreateWindow explained:
+         // m_className: the name of the application
+         // m_title: the text that appears in the title bar
+         // WS_OVERLAPPEDWINDOW: the type of window to create
+-        // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
++        // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, ySize)
+         // m_width, m_height: initial size (width, length)
+         // NULL: the parent of this window
+         // NULL: this application dows not have a menu bar
+         // m_hInstance: the first parameter from WinMain
+-        // NULL: not used in this application
+-        m_hWnd = ::CreateWindow(
+-            m_Wcex.lpszClassName,
+-            m_title,
+-            m_Wcex.style,
+-            CW_USEDEFAULT, CW_USEDEFAULT,
+-            m_width, m_height,
+-            NULL,
+-            NULL,
+-            m_Wcex.hInstance,
+-            (void *)this
+-        );
++        // NULL: not used in this application       
++        m_hWnd = CreateWindow(  szClassName,            // window class name
++                                szAppName,            // window caption
++                                myStyle,              // window style
++                                xPosition,            // initial x position
++                                yPosition,            // initial y position
++                                xSize,                // initial x size
++                                ySize,                // initial y size
++                                NULL,                 // parent window handle
++                                NULL,                 // window menu handle
++                                m_Wcex.hInstance,     // program instance handle
++                                (void *)this) ;       // creation parameters
++        
+ 
+         if (!m_hWnd)
+         {
+@@ -125,7 +189,7 @@ namespace mControl
+         // The parameters to ShowWindow explained:
+         // hWnd: the value returned from CreateWindow
+         // nCmdShow: the fourth parameter from WinMain
+-        ::ShowWindow(m_hWnd, cmd); 
++        ShowWindow(m_hWnd, cmd); 
+         UpdateWindow(m_hWnd);
+     }
+ 
+@@ -162,8 +226,8 @@ namespace mControl
+             LPARAM lParam
+         )
+     {  
+-        static int                  x,cx,
+-                                    y,cy,
++        static int                  xSize,xPosition,
++                                    ySize,yPosition,
+                                     cxLoad,
+                                     cyLoad;
+ 
+@@ -183,9 +247,12 @@ namespace mControl
+         TCHAR           greeting[] = _T("Hello, World!");        
+ 
+ 
++        //TODO: case WM_MCONTROL_PROGRESS:
+         switch (message)
+         {
+-            case WM_CREATE:
++            //original as in the old mControl
++            //TODO: check the comments 
++            case WM_CREATE:                                         
+                 TRACE(HERE,"WM_CREATE");
+ 
+                 iccex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+@@ -193,13 +260,13 @@ namespace mControl
+ 
+                 if (!InitCommonControlsEx(&iccex))
+                 {
+-                TRACE(HERE,"Error initializing CommonControls ");
++                    TRACE(HERE,"Error initializing CommonControls ");
+                 }
+ 
+-                x =  0;
+-                y =  0;
+-                cx = GetSystemMetrics(SM_CXSCREEN);
+-                cy = GetSystemMetrics(SM_CYSCREEN);
++                xSize =  0;
++                ySize =  0;
++                xPosition = GetSystemMetrics(SM_CXSCREEN);
++                yPosition = GetSystemMetrics(SM_CYSCREEN);
+ 
+                 hdc = GetDC(hWnd);
+ 
+@@ -209,11 +276,11 @@ namespace mControl
+                     this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small.bmp") );
+                 else
+                 {
+-                    if(cx<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
++                    if(xPosition<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
+                     {
+                         this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
+                     }
+-                    else if(cx>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
++                    else if(xPosition>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
+                     {
+                         this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
+                     }
+@@ -242,33 +309,33 @@ namespace mControl
+ 
+                     cyLoad = 20;
+ 
+-                    //TRACE(HERE,"x = %d, y = %d, cx = %d, cy = %d",x,y,cx,cy);
++                    //TRACE(HERE,"xSize = %d, ySize = %d, xPosition = %d, yPosition = %d",xSize,ySize,xPosition,yPosition);
+ 
+-                    SetWindowPos(hWnd,HWND_TOPMOST,x,y,cx,cy,0);
++                    SetWindowPos(hWnd,HWND_TOPMOST,xSize,ySize,xPosition,yPosition,0);
+                 }
+                 else
+                 {
+-                    x = 0;
+-                    y = 0;
++                    xSize = 0;
++                    ySize = 0;
+ 
+-                    cx = 384;
+-                    cy = 288;
++                    xPosition = 384;
++                    yPosition = 288;
+ 
+                     cyLoad = 10;
+                 }
+ 
+                 //GetClientRect(hWnd,&rect);
+ 
+-                //TRACE(HERE,"x = %d, y = %d, cx = %d, cy = %d",rect.left,rect.top,rect.right,rect.bottom);
++                //TRACE(HERE,"xSize = %d, ySize = %d, xPosition = %d, yPosition = %d",rect.left,rect.top,rect.right,rect.bottom);
+ 
+-                cxLoad = cx; // - cx/4;
++                cxLoad = xPosition; // - xPosition/4;
+ 
+                 this->setHWndLoad( CreateWindow(
+                                         PROGRESS_CLASS,
+                                         NULL,
+                                         WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
+                                         0,
+-                                        cy   - cyLoad,
++                                        yPosition   - cyLoad,
+                                         cxLoad,
+                                         cyLoad,
+                                         hWnd,
+@@ -312,8 +379,8 @@ namespace mControl
+                 
+                 
+                 int iLpos,iTpos;
+-                ((cx-tmpBmp.bmWidth)!=0)?iLpos=(cx-tmpBmp.bmWidth)/2:iLpos=0;
+-                ((cy-tmpBmp.bmHeight)!=0)?iTpos=(cy-tmpBmp.bmHeight)/2:iTpos=0;
++                ((xPosition-tmpBmp.bmWidth)!=0)?iLpos=(xPosition-tmpBmp.bmWidth)/2:iLpos=0;
++                ((yPosition-tmpBmp.bmHeight)!=0)?iTpos=(yPosition-tmpBmp.bmHeight)/2:iTpos=0;
+                 
+                 MoveWindow(this->getHwndInfo1(),iLpos,iTpos,tmpBmp.bmWidth,tmpBmp.bmHeight,false);
+                 SendMessage(this->getHwndInfo1(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->m_hBitmap_info_1);
+@@ -347,8 +414,8 @@ namespace mControl
+                 BITMAP tmpBmp1;
+                 GetObjectA(this->getHBitMapInfo2(), sizeof(BITMAP), (LPSTR)&tmpBmp1);
+                 
+-                ((cx-tmpBmp1.bmWidth)!=0)?iLpos=(cx-tmpBmp1.bmWidth)/2:iLpos=0;
+-                ((cy-tmpBmp1.bmHeight)!=0)?iTpos=(cy-tmpBmp1.bmHeight)/2:iTpos=0;
++                ((xPosition-tmpBmp1.bmWidth)!=0)?iLpos=(xPosition-tmpBmp1.bmWidth)/2:iLpos=0;
++                ((yPosition-tmpBmp1.bmHeight)!=0)?iTpos=(yPosition-tmpBmp1.bmHeight)/2:iTpos=0;
+                 
+                 MoveWindow(this->getHwndInfo2(),iLpos,iTpos,tmpBmp1.bmWidth,tmpBmp1.bmHeight,false);
+                 SendMessage(this->getHwndInfo2(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->getHBitMapInfo2());
+@@ -360,7 +427,9 @@ namespace mControl
+                 
+                 break;
+ 
+-            case WM_PAINT:
++            //original as in the old mControl
++            //TODO: check the comments 
++            case WM_PAINT:                                          
+                 TRACE(HERE,"WM_PAINT");
+ 
+                 hdc = BeginPaint(hWnd, &ps);
+@@ -375,11 +444,11 @@ namespace mControl
+ 
+                     GetClientRect(hWnd,&rect);
+ 
+-                    //x = rect.right / 2  - bitmap.bmWidth / 2;
+-                    //y = rect.bottom / 2 - bitmap.bmHeight / 2;
++                    //xSize = rect.right / 2  - bitmap.bmWidth / 2;
++                    //ySize = rect.bottom / 2 - bitmap.bmHeight / 2;
+ 
+                     if(m_config.serverMode())
+-                      BitBlt(hdc,0,0,cx,cy,hdcMem,0,0,SRCCOPY);
++                      BitBlt(hdc,0,0,xPosition,yPosition,hdcMem,0,0,SRCCOPY);
+                     else
+                       StretchBlt(hdc,
+                                  0,0, rect.right, rect.bottom,
+@@ -395,17 +464,18 @@ namespace mControl
+                 
+                 break;
+ 
++            //original as in the old mControl
+             case WM_DESTROY:
+                 TRACE(HERE,"WM_DESTROY");
+ 
+                 DestroyWindow(this->m_hWndLoad);
+                 DestroyWindow(this->m_hWndInfo_1);
+                 DestroyWindow(this->m_hWndInfo_2);
+-
+-                PostQuitMessage(0);
+                 break;
+ 
+-            case WM_CLOSE:
++            //original as in the old mControl
++            //TODO: implement the fuctions in the comments
++            case WM_CLOSE:                                          
+                 TRACE(HERE,"WM_CLOSE");
+ 
+                 TRACE(HERE,"shutting down controller...");
+@@ -421,7 +491,8 @@ namespace mControl
+ 
+                 break;
+ 
+-            //case WM_MCONTROL_PROGRESS:
++            //original as in the old mControl
++            //TODO: implement case VK_F12
+             case WM_KEYUP:
+                 TRACE(SecondaryRuntime_HERE,"WM_KEYUP");
+ 
+@@ -505,13 +576,13 @@ namespace mControl
+                  ShowWindow(hWnd,SW_MINIMIZE);
+ 
+                break;
+-                case VK_F12: //Beenden
+-                    break;
+-                }
++
++        case VK_F12: 
+                 break;
++            }
++            break;
+             
+             default:
+-                //TRACE(HERE,"default [%d]", message);
+                 return DefWindowProc(hWnd, message, wParam, lParam);
+                 break;
+         }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index c76ad7b0..d188a3e1 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -25,6 +25,7 @@
+ using Poco::AutoPtr;
+ using namespace std;
+ 
++
+ namespace mControl
+ {
+     Dialog::Dialog(NotificationQueue& queue, HINSTANCE hInst, MControlConfig& config) :
+@@ -38,12 +39,8 @@ namespace mControl
+     Dialog::~Dialog()
+     {
+     }
+-
+-    NotificationQueue& Dialog::getNotificationQueue()
+-    {
+-        return m_notificationQueue;
+-    }
+   
++    //TODO: handle the incomming Messages 
+     void Dialog::run()
+     {
+         TRACE(HERE,"Dialog-Thread run() started...");
+@@ -68,29 +65,9 @@ namespace mControl
+             }
+         }
+     }
+-	    
+-    
+-
+-    
+-
+-    int Dialog::init()
+-    {
+-        if( !m_MControlWindowConfig.registerWindow() )
+-        {
+-            TRACE(HERE,"registerWindow() failed");
+-            return 0;
+-        }
+-
+-        if( !m_MControlWindowConfig.createWindow() )
+-        {
+-            TRACE(HERE,"registerWindow() failed");
+-            return 0;
+-        }
+-        
+-        return 1;
+-    }
++	   
+ 
+-    int Dialog::start(int nCmdShow)
++    int Dialog::startShowWindow(int nCmdShow)
+     {
+         m_MControlWindowConfig.showWindow(nCmdShow);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+index 5decb3df..a185b8a4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+@@ -15,7 +15,7 @@
+ namespace mControl
+ {
+   mControl_Impl::mControl_Impl(HINSTANCE hInst) :
+-    m_config(),
++    m_config(hInst),
+     m_notificationQueue(),
+     m_scheduledTasks(m_notificationQueue, m_config),
+     m_kioskRebooter(100, m_notificationQueue, m_config),
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+index 12f41445..f04c11bf 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+@@ -48,6 +48,7 @@ namespace mControl
+       return 0;
+   }
+ 
++  //TODO: implement correct functionality
+   void KioskReboot::run()
+   {
+     TRACE(HERE,"KioskReboot-Thread run() started...");
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index d8815005..c57ed652 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -10,28 +10,36 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#include <iostream>
+-
+-//#include "test_pocoNotificationQueue.h"
++//Project includes
+ #include "..\inc\mControl_impl.h"
+ #include "..\inc\mControl_notification.h"
+ #include "..\inc\mControl_dialog.h"
+ #include "..\inc\mControl_def.h"
++#include "..\inc\mControl_config.h"
++#include "..\inc\mControl_tools.h"
++
+ 
+-//Poco inlcudes
+-#include "Poco/ThreadPool.h"
+-#include "Poco/AutoPtr.h"
+ 
+-//Materna includes
++#include "massaidll/massai.hpp"
++#include "text/mArgScan.hpp"
++#include "text/mMainCommandLine.hpp"
+ #include "trc/trace.h"
+ 
+-#include "..\inc\mControl_config.h"
++#include "Windows.h"
++#include "shlobj.h"
++#include "Shlwapi.h"
++
++#include "systools/matDaemon.h"
++
++#include "text/cEnvSubst.hpp"
+ 
+-//Windows includes
+-#include <windows.h>
++#include <signal.h>
++#include <stdio.h>
+ #include <stdlib.h>
+-#include <string.h>
+-#include <tchar.h>
++#include <time.h>
++
++
++
+ 
+ using namespace mControl;
+ using namespace std;
+@@ -40,6 +48,48 @@ using Poco::ThreadPool;
+ using Poco::AutoPtr;
+ 
+ 
++//Global vars 
++HINSTANCE globalHInstance;
++MControlConfig globalConfig;
++
++
++
++
++
++//---------------------------------------------------------------------------
++//
++//  function:   void exitHandler(int iSignal)
++//
++//  purpose:    signal handler
++//
++//  date:       21.08.2001, 15:43
++//
++//  author:     Materna Information & Communications (AGe)
++//
++//---------------------------------------------------------------------------
++void exitHandler(int iSignal)
++{
++    char szTmp[30];
++
++    TRACE(HERE,">> exitHandler");
++    switch(iSignal)
++    {
++    case SIGABRT:   strcpy(szTmp,"SIGABRT");  break;
++    case SIGBREAK:  strcpy(szTmp,"SIGBREAK"); break;
++    case SIGTERM:   strcpy(szTmp,"SIGTERM");  break;
++    case SIGINT:    strcpy(szTmp,"SIGINT");   break;
++
++    case SIGFPE:    strcpy(szTmp,"SIGFPE");   break;
++    case SIGSEGV:   strcpy(szTmp,"SIGSEGV");  break;
++    case SIGILL:    strcpy(szTmp,"SIGILL");   break;
++    }
++    printf("\nSIGNAL: %s\n\n",szTmp);
++    TRACE(HERE,"SIGNAL: %s",szTmp);
++
++    TRACE(HERE,"<< exitHandler");
++}
++
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPreInst, char *szCmdLine, int iCmdShow)
+@@ -51,12 +101,334 @@ using Poco::AutoPtr;
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
+-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
++int WINAPI WinMain ( HINSTANCE hInst, HINSTANCE, char * cmdline, int )
++{
++    globalHInstance = hInst;
++    globalConfig = MControlConfig( globalHInstance );
++    
++    /*
++    mControl_Impl impl(globalHInstance);
++    impl.getDialog().getMControlWindowConfig().registerWindow();
++    impl.getDialog().getMControlWindowConfig().createWindow();
++
++    impl.getDialog().startShowWindow(SW_SHOW);
++    */
++    
++    mMainCommandLine cmdline_parser( "mControl", cmdline );
++    
++    // Ask the deamon control for an "interactive" service session.
++    return mDaemon_execute_interactive
++            (
++                cmdline_parser.argc(),
++                const_cast<char **>( cmdline_parser.argv() )
++            );
++}
++
++
++
++int mDaemon_main( int argc, char const * const * argv )
+ {
+     openTrace("mControl");
+ 
+-    mControl_Impl impl(hInstance);
+-    impl.getDialog().init();
+-    impl.getDialog().start(nCmdShow);
++    
++    argScan args( argc, argv );
++   
++    long         rc = 0;
++    long         lWait = 60000;
++    long         lDelay = -1;
++
++    bool useGlobalNamespace = false;
++
++    HANDLE isRunning;
++
++    OSVERSIONINFO version;
++
++    std::string userDir;
++
++    DWORD myStyle = WS_POPUP;
++
++    /*
++    
++    //******************************************************************************************
++    //*  Signals for ctrl (// needed! otherwise a ctrl-break leeds to exit(0)!!!)
++    //******************************************************************************************
++    signal(SIGABRT, exitHandler);
++    signal(SIGBREAK,exitHandler);
++    signal(SIGTERM, exitHandler);
++    signal(SIGINT,  exitHandler);
++    signal(SIGSEGV, exitHandler);
++    signal(SIGILL,  exitHandler);
++    signal(SIGFPE,  exitHandler);
++
++
++
++
++    //******************************************************************************************
++    //*  init-delay
++    //******************************************************************************************
++    //TODO: Linker Fehler beheben
++    mDaemon_indInitializing(60000);
++
++
++
++
++    //******************************************************************************************
++    //  try create within the global name space, so that this program also
++    //  on terminal server services runs only once 08.01.2004 (AGe)
++    //******************************************************************************************
++    version.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
++    if(GetVersionEx (&version))
++    {
++      useGlobalNamespace = 5 <= version.dwMajorVersion;
++    }
+ 
++    isRunning = CreateEventA(NULL,FALSE,TRUE,useGlobalNamespace?"Global\\massaiController":"massaiController");
++
++    if((GetLastError() == ERROR_ALREADY_EXISTS) || (isRunning == 0))
++    {
++      char szMsg[512];
++
++      sprintf(szMsg,"MASSAI is already active.\n\n"
++                    "You can't have more than one instance on one machine. (%d)", GetLastError());
++
++      MessageBox(NULL,TEXT(szMsg),TEXT(szClassName),MB_ICONERROR) ;
++
++      exit(-1);
++    }
++
++
++
++
++    //******************************************************************************************
++    //  trace the args parameter
++    //******************************************************************************************
++    lDelay = args.optionInteger( "DELAYBEFORESTART", -1 );
++    if( ( lDelay != -1 ) )
++    {
++        TRACE(HERE,"%s found option [delaybeforestart:], delay = %d\n",Tools::timeStamp(),lDelay);
++    }
++
++    if( args.option( "ENABLEPORTABLEMCC" ) )
++    {
++        globalConfig.setPortableMCC(true);
++        TRACE(HERE,"%s found option [enableportablemcc], removable device check for mcc enabled\n",Tools::timeStamp());
++    }
++
++    lWait = args.optionInteger( "WAIT", -1 );
++    if( lWait != -1 )
++    {
++        TRACE(HERE,"%s found option [wait:], to = %d\n",Tools::timeStamp(),lWait);
++    }
++    else
++    {
++        TRACE(HERE,"%s found option [wait], to = <infinite>\n",Tools::timeStamp());
++    }
++
++    char const * const szService = args.option( "SERVICE" );
++    if( szService)
++    {
++      TRACE(HERE,"%s found option [service:], name = %s\n", Tools::timeStamp(),szService);
++
++      rc = Tools::waitForService(szService,lWait);
++    }
++
++    if( args.help() )
++    {
++      MessageBox
++        (
++          NULL,
++          TEXT
++            (
++               "USAGE:\tmControl "
++               "{ -help |\n\t\t-normal <params> |\n"
++               "\t\t-install [-param:\"<params>\"] |\n"
++               "\t\t-deinstall }\n\n"
++               "<params>: [-delaybeforestart:seconds]"
++               " [-wait[:timeout]]\n\t[-service:<servicename>]"
++               " [-server][-usershell]\n\t[-nolog] [-nosnmp]\n\n"
++               "-delaybeforestart\n\tSet delay in seconds to wait"
++               " before startup\n"
++               "-wait\tSet timeout in ms for initial waiting for"
++               " dependencies,\n\t- default is 60000\n"
++               "\t- wait forever, if no timeout is given\n"
++               "-service\tSet dependency\n"
++               "-server\tRun in server mode, default is kiosk mode\n"
++               "-usershell\tRun as windows user shell, default is not run as user shell\n"
++               "-enableportablemcc\n\tEnables the detection of"
++               " a mcc on removable devices\n"
++               "-nolog\tEvent logging disabled\n"
++               "-nosnmp\tFor event logging use logservice instead of"
++               " massaisnmp,\n\tdo not send start platform event"
++            ),
++            szClassName,
++            MB_ICONEXCLAMATION
++        );
++      exit( 0 );
++    }
++
++
++
++    if(rc != 0)
++    {
++      MessageBox
++        (
++          NULL,
++          TEXT
++            (
++              "ERROR: Service <massaiConfig> not running.\n\nPlease"
++              " start massai configuration- and trace services first."
++            ),
++          szClassName,
++          MB_ICONERROR
++        );
++      exit( -2 );
++    }
++
++    globalConfig.getEnvS().SetBaseEnvVars();
++
++    try
++    {
++        if( args.option( "SERVER" ) || mDaemon_isService() )
++            globalConfig.setServerMode(true);
++        
++
++        if( args.option( "NOLOG" ) )
++            globalConfig.setNoLog(true);
++        
++
++        if( args.option( "NOSNMP" ) )
++            globalConfig.setNoSNMP(true);
++          
++
++        if(args.option("USERSHELL"))
++        {
++            globalConfig.setRunningAsUserShell(true);
++       
++        }
++
++        if(globalConfig.noLogActive())
++        {
++            // A noSNMP parameter is ignored.
++            TRACE
++            (
++                HERE,
++                "%s started (server mode = %s, as service = %s, noLOG = %s) ...",
++                szClassName,
++                Tools::boolToChar( globalConfig.serverMode() ),
++                Tools::boolToChar( mDaemon_isService() != 0 ),
++                Tools::boolToChar( globalConfig.noLogActive() )
++            );
++        }
++        else
++        {
++            TRACE
++            (
++                HERE,
++                "%s started (server mode = %s, as service = %s, noLOG = %s noNSMP = %s userShell = %s) ...",
++                szClassName,
++                Tools::boolToChar( globalConfig.serverMode() ),
++                Tools::boolToChar( mDaemon_isService() != 0 ),
++                Tools::boolToChar( globalConfig.noLogActive() ),
++                Tools::boolToChar( globalConfig.noSNMPActive() ),
++                Tools::boolToChar( globalConfig.isRunningAsUserShell() )
++            );
++        }
++
++        TRACE(HERE,"FileVersion of '.DLL' Files") ;
++        Tools::printInfoAboutFiles ("..\\dll\\*.dll") ;
++        TRACE(HERE,"   of '.EXE' Files") ;
++        Tools::printInfoAboutFiles ("..\\bin\\*.exe") ;
++
++        if((rc = Tools::setWorkingDir()) != 0)
++        TRACE(HERE,"Failed to set working directory, rc = %d",rc);
++        */
++
++
++        //******************************************************************************************
++        //  initialize the main components 
++        //******************************************************************************************
++        mControl_Impl impl(globalHInstance);
++        impl.getDialog().getMControlWindowConfig().registerWindow();
++        impl.getDialog().getMControlWindowConfig().createWindow();
++
++        impl.getDialog().startShowWindow(SW_SHOW);
++    try
++    {
++    }
++    catch( std::exception & X )
++    {
++        char const * se = X.what();
++        TRACE( HERE, "%s", se );
++        SendMessage(globalConfig.getHwnd(),WM_CLOSE,0,0);
++    }
++    catch( char * se )
++    {
++        TRACE( HERE, "%s", se );
++        SendMessage(globalConfig.getHwnd(),WM_CLOSE,0,0);
++    }
++    catch(...)
++    {
++        char const * se = "unknown exception";
++        TRACE( HERE, "%s", se );
++        SendMessage(globalConfig.getHwnd(),WM_CLOSE,0,0);
++    }
++
++    TRACE(HERE,"%s terminated.", szClassName);
++    CloseHandle(isRunning);
++
++    return 0;
++}
++
++
++/*******************************************************************************************************
++* Implementation of Methods needed to use mDaemon.h 
++*/
++
++/**
++ *
++ * This function is called to obtain the (list of) services, which
++ * are a pre-condition for thios one.
++ *
++**/
++char const * mDaemon_dependencies()
++{
++   // return "massaiConfig\0\0";
++    return 0;
++}
++
++
++
++/**
++ *
++ * This function is called to obtain parameters help.
++ *
++**/
++char const * mDaemon_help()
++{
++    return "";
++}
++
++
++
++/**
++ *
++ * This function is called to obtain the service name.
++ *
++**/
++char const * mDaemon_name()
++{
++    return "massaiControl";
++}
++
++
++
++/**
++ *
++ * This function is called, when the service is stopped.
++ * Do some housekeeping here.
++ *
++**/
++void mDaemon_stop()
++{
++    //TODO: implement
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index 120030f6..9882c191 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -50,6 +50,7 @@ namespace mControl
+ 
+   }
+ 
++  //TODO: implement correct functionality
+   void Scheduler::run()
+   {
+     TRACE(HERE,"Scheduler-Thread run() started...");
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index bd6024d1..a99abf92 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -13,12 +13,16 @@
+ #include "..\inc\mControl_tools.h"
+ 
+ #include <string>
++#include <list>
++#include <time.h>
++#include <sys/timeb.h>
++
+ 
+ using namespace std;
+ 
++
+ namespace mControl
+ {
+-    
+     HBITMAP Tools::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
+     {
+         BITMAPFILEHEADER * pbmfh;
+@@ -83,11 +87,17 @@ namespace mControl
+          return(hBitmap);
+     }
+ 
++
++
++
+     bool Tools::fileExists (const string& name) {
+         struct stat buffer;   
+         return (stat (name.c_str(), &buffer) == 0); 
+     }
+ 
++
++
++
+     long Tools::startExplorer()
+     {
+         STARTUPINFO         si;
+@@ -123,6 +133,9 @@ namespace mControl
+               return(0);
+     }
+ 
++
++
++
+     char* Tools::getWorkingDir()
+     {
+         static char szPath[1024];
+@@ -139,6 +152,9 @@ namespace mControl
+           return(szPath);
+     }
+ 
++
++
++
+     long Tools::setWorkingDir()
+     {
+         char szPath[1024];
+@@ -162,4 +178,270 @@ namespace mControl
+           else
+             return(GetLastError());
+     }
++
++
++
++    //------------------------------------------------------------------------
++    /**
++     *  @fn        char *timeStamp()
++     *
++     *  @brief     creates a time stamp
++     *
++     *  @date      05.04.2004
++     *
++     *  @author    Materna Information & Communications (AGe)
++     */
++    //------------------------------------------------------------------------
++    char* Tools::timeStamp()
++    {
++    static char szTmp[256];
++
++    time_t          ltime;
++    struct  tm     *today;
++    struct _timeb   tstruct;
++
++        time(&ltime);
++        _ftime(&tstruct);
++
++        today = localtime(&ltime);
++
++        sprintf(szTmp,
++                "%02d%02d %02d%02d:%02d.%02d :",
++                today->tm_mday,
++                today->tm_mon +1,
++                today->tm_hour,
++                today->tm_min,
++                today->tm_sec,
++                tstruct.millitm /10);
++
++        return(szTmp);
++    }
++
++
++
++    long Tools::waitForService( char const * serviceName, long lTimeout)
++    {
++    long lTo  = 1000;
++    long lCnt = 0;
++    long rc   = 0;
++
++        if(!serviceName || !*serviceName)
++          return(-1);
++
++        if(lTimeout >= 0)
++          lTimeout /= lTo;
++        else
++          lCnt = MINLONG;
++
++        SC_HANDLE hSC = OpenSCManager(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE );
++
++        if(hSC == 0)
++        {
++
++            TRACE(HERE,"%s OpenSCManager() failed, rc = %d\n", Tools::timeStamp(), GetLastError());
++            return(-2);
++        }
++
++        bool fServiceRunning = false;
++
++        if(lTimeout >= 0)
++        {
++            TRACE(HERE, "%s waiting for service [%s], to = %d\n", Tools::timeStamp(), serviceName, lTimeout * lTo);
++        } 
++        else
++        {
++            TRACE(HERE, "%s waiting endless for service [%s]\n", Tools::timeStamp(), serviceName);
++        }
++
++        while( !fServiceRunning && ( lCnt <= lTimeout ) )
++        {
++          SC_HANDLE hService = OpenService(hSC, serviceName, SERVICE_QUERY_STATUS);
++
++          if(hService)
++          {
++            while( !fServiceRunning && ( lCnt <= lTimeout) )
++            {
++              SERVICE_STATUS status;
++
++              if(QueryServiceStatus(hService, &status))
++              {
++                if(status.dwCurrentState == SERVICE_RUNNING)
++                  fServiceRunning = true;
++                else
++                {
++                  Sleep(lTo);
++                  if(lTimeout >= 0) lCnt++;
++                }
++              }
++              else
++              {
++                Sleep(lTo);
++                if(lTimeout >= 0) lCnt++;
++              }
++            }
++
++            // MaM try { CloseHandle(hService); } catch(...) {};
++            try { CloseServiceHandle(hService); } catch(...) {};
++          }
++
++          if( !fServiceRunning )
++          {
++            Sleep(lTo);
++            if(lTimeout >= 0) lCnt++;
++          }
++
++          // MaM try { CloseHandle(hSC); } catch(...) {};
++          try { CloseServiceHandle(hSC); } catch(...) {};
++        }
++
++        if(!fServiceRunning || lCnt > lTimeout)
++          rc = -3;
++
++          TRACE(HERE, "%s waiting for service [%s], rc = %d\n", Tools::timeStamp(), serviceName, rc);
++
++        return(rc);
++    }
++
++
++
++    char const * Tools::boolToChar( bool in )
++    {
++        if( in )
++            return "true";
++        else
++            return "false";
++    }
++
++
++
++    //------------------------------------------------------------------------
++    /**
++     *  @fn        void printInfoAboutFiles( char const * file )
++     *
++     *  @brief     print product version Info of file "file"
++     *             (wildcards are allowed)
++     *
++     *  @date      10.12.2003
++     *
++     *  @author    Materna Information & Communications (AGe)
++     */
++    //------------------------------------------------------------------------
++
++    void Tools::printInfoAboutFiles( char const * file )
++    {
++       WIN32_FIND_DATA wfd ;
++       HANDLE          hnd ;
++       char            directoryBuf [_MAX_PATH] ;
++       char            tmpBuf [_MAX_PATH] ;
++       char          * s ;
++
++       strcpy (directoryBuf, file) ;
++
++       s = strrchr (directoryBuf, '\\') ;
++       if (s)
++       {
++          * (s+1) = 0 ;
++       } else directoryBuf [0] = 0 ;
++
++       hnd = FindFirstFile (file, &wfd) ;
++       if (hnd != INVALID_HANDLE_VALUE)
++       {
++          strcpy (tmpBuf, directoryBuf) ;
++          strcat (tmpBuf, wfd.cFileName) ;
++
++          printVersionInfo( tmpBuf ) ;
++          while (FindNextFile (hnd, &wfd))
++          {
++              strcpy (tmpBuf, directoryBuf) ;
++              strcat (tmpBuf, wfd.cFileName) ;
++              printVersionInfo( tmpBuf );
++          }
++
++          // MaM try { CloseHandle(hnd); } catch(...) {};
++          try { FindClose(hnd); } catch(...) {};
++       }
++    }
++
++
++    //------------------------------------------------------------------------
++    /**
++     *  @fn        void printVersionInfo(char * fileName)
++     *
++     *  @brief     print file version Info of file "fileName"
++     *
++     *  @date      10.12.2003
++     *
++     *  @author    Materna Information & Communications (PtM)
++     */
++    //------------------------------------------------------------------------
++
++    void Tools::printVersionInfo( char * fileName )
++    {
++        DWORD dwVerHnd ;
++        DWORD dwVerInfoSize ;
++        char  szGetName [256];
++
++        dwVerInfoSize = GetFileVersionInfoSize (fileName, &dwVerHnd) ;
++        if (dwVerInfoSize)
++        {
++            LPVOID lpvMem ;
++            LPVOID lszVer = NULL;
++            UINT   cchVer = 0;
++
++            lpvMem = malloc (dwVerInfoSize) ;
++
++            if (lpvMem)
++            {
++                if (GetFileVersionInfo (fileName, dwVerHnd, dwVerInfoSize, lpvMem))
++                {
++
++                    struct LANGANDCODEPAGE
++                    {
++                        WORD wLanguage;
++                        WORD wCodePage;
++                    } *lpTranslate;
++
++                    UINT    cbTranslate;
++                    char    VersionInfo[512] = "";
++
++                    VerQueryValue(lpvMem,
++                                TEXT("\\VarFileInfo\\Translation"),
++                                (LPVOID*)&lpTranslate,
++                                &cbTranslate);
++
++                    unsigned const end = cbTranslate;
++
++                    for( unsigned i=0; i < (end / sizeof(LANGANDCODEPAGE)); ++i )
++                    {
++                        wsprintf( szGetName,
++                            TEXT("\\StringFileInfo\\%04x%04x\\ProductVersion"),
++                            lpTranslate[i].wLanguage,
++                            lpTranslate[i].wCodePage);
++
++                        // Retrieve file description for language and code page "i".
++                        VerQueryValue(lpvMem,
++                                      szGetName,
++                                      &lszVer,
++                                      &cchVer);
++                        sprintf(VersionInfo, "Modul '%-35s': Productversion '%-10s' ",
++                                           fileName, lszVer == 0 ? "not available" : lszVer);
++                        wsprintf( szGetName,
++                            TEXT("\\StringFileInfo\\%04x%04x\\FileVersion"),
++                            lpTranslate[i].wLanguage,
++                            lpTranslate[i].wCodePage);
++
++                        // Retrieve file description for language and code page "i".
++                        VerQueryValue(lpvMem,
++                                      szGetName,
++                                      &lszVer,
++                                      &cchVer);
++                        TRACE(HERE,"%s Fileversion '%-10s'", VersionInfo,
++                                lszVer == 0 ? "not available" : lszVer) ;
++                    }
++                }
++
++                free (lpvMem) ;
++            }
++        }
++    }
+ }
+-- 
+2.41.0.windows.1
+

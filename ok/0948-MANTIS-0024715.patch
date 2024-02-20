@@ -1,0 +1,239 @@
+From 4c0fca711df4059300420abec05dd7de66cbc34e Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 6 Feb 2019 17:29:13 +0000
+Subject: [PATCH 0948/1077] MANTIS 0024715 Build: VC10; fix compiler warnings
+
+warning C4237: 'export' keyword is not yet supported, but reserved for future use
+warning C4244: 'return' : conversion from 'CryptoPP::lword' to 'unsigned long', possible loss of data
+warning LNK4221: This object file does not define any previously undefined public symbols, so it will not be used by any link operation that consumes this library
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1436 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/mcrypt/mcrypt.h            |  2 +-
+ .../Massai/cpp/Mcrypt/inc/cryptlib.h          | 38 +++++++++----------
+ .../Massai/cpp/Mcrypt/makefile.mak            |  5 ---
+ .../Massai/cpp/Mcrypt/src/mcrypt.cpp          |  2 +-
+ .../cpp/SecureLogging/src/clientmain.cpp      |  4 +-
+ 5 files changed, 23 insertions(+), 28 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/mcrypt/mcrypt.h b/SelfServiceCommon/Interfaces/inc/mcrypt/mcrypt.h
+index 28c30c9d..f6935e88 100644
+--- a/SelfServiceCommon/Interfaces/inc/mcrypt/mcrypt.h
++++ b/SelfServiceCommon/Interfaces/inc/mcrypt/mcrypt.h
+@@ -18,7 +18,7 @@ private:
+ public:
+     mcrypt();
+     void setPwd(std::string pass) {passPhrase = pass;}
+-    void export(std::string source, std::string destination);
++    void export_(std::string source, std::string destination);
+ 
+     bool decrypt(std::string& decrypted, BYTE *pBuffer, int size);
+     bool encrypt(std::string& encrypted, std::string Data);
+diff --git a/SelfServiceCommon/Massai/cpp/Mcrypt/inc/cryptlib.h b/SelfServiceCommon/Massai/cpp/Mcrypt/inc/cryptlib.h
+index 0ad18de8..61bd6843 100644
+--- a/SelfServiceCommon/Massai/cpp/Mcrypt/inc/cryptlib.h
++++ b/SelfServiceCommon/Massai/cpp/Mcrypt/inc/cryptlib.h
+@@ -216,7 +216,7 @@ struct CRYPTOPP_DLL DecodingResult
+ 	and to read values from keys and crypto parameters.
+ 	\note To obtain an object that implements NameValuePairs for the purpose of parameter
+ 	passing, use the MakeParameters() function.
+-	\note To get a value from NameValuePairs, you need to know the name and the type of the value. 
++	\note To get a value from NameValuePairs, you need to know the name and the type of the value.
+ 	Call GetValueNames() on a NameValuePairs object to obtain a list of value names that it supports.
+ 	Then look at the Name namespace documentation to see what the type of each value is, or
+ 	alternatively, call GetIntValue() with the value name, and if the type is not int, a
+@@ -402,7 +402,7 @@ public:
+ 	virtual void Resynchronize(const byte *iv, int ivLength=-1) {throw NotImplemented(GetAlgorithm().AlgorithmName() + ": this object doesn't support resynchronization");}
+ 	//! get a secure IV for the next message
+ 	/*! This method should be called after you finish encrypting one message and are ready to start the next one.
+-		After calling it, you must call SetKey() or Resynchronize() before using this object again. 
++		After calling it, you must call SetKey() or Resynchronize() before using this object again.
+ 		This method is not implemented on decryption objects. */
+ 	virtual void GetNextIV(RandomNumberGenerator &rng, byte *IV);
+ 
+@@ -912,7 +912,7 @@ public:
+ 			{lword i = position; CopyRangeTo2(target, i, i+copyMax, channel); return i-position;}
+ 
+ #ifdef CRYPTOPP_MAINTAIN_BACKWARDS_COMPATIBILITY
+-		unsigned long MaxRetrieveable() const {return MaxRetrievable();}
++		unsigned long MaxRetrieveable() const {return static_cast<long>(MaxRetrievable());}
+ #endif
+ 	//@}
+ 
+@@ -926,7 +926,7 @@ public:
+ 		virtual bool AnyMessages() const;
+ 		//! start retrieving the next message
+ 		/*!
+-			Returns false if no more messages exist or this message 
++			Returns false if no more messages exist or this message
+ 			is not completely retrieved.
+ 		*/
+ 		virtual bool GetNextMessage();
+@@ -1235,15 +1235,15 @@ public:
+ 	/*! \pre CiphertextLength(plaintextLength) != 0 (i.e., plaintext isn't too long)
+ 		\pre size of ciphertext == CiphertextLength(plaintextLength)
+ 	*/
+-	virtual void Encrypt(RandomNumberGenerator &rng, 
+-		const byte *plaintext, size_t plaintextLength, 
++	virtual void Encrypt(RandomNumberGenerator &rng,
++		const byte *plaintext, size_t plaintextLength,
+ 		byte *ciphertext, const NameValuePairs &parameters = g_nullNameValuePairs) const =0;
+ 
+ 	//! create a new encryption filter
+ 	/*! \note The caller is responsible for deleting the returned pointer.
+ 		\note Encoding parameters should be passed in the "EP" channel.
+ 	*/
+-	virtual BufferedTransformation * CreateEncryptionFilter(RandomNumberGenerator &rng, 
++	virtual BufferedTransformation * CreateEncryptionFilter(RandomNumberGenerator &rng,
+ 		BufferedTransformation *attachment=NULL, const NameValuePairs &parameters = g_nullNameValuePairs) const;
+ };
+ 
+@@ -1256,14 +1256,14 @@ public:
+ 	/*! \pre size of plaintext == MaxPlaintextLength(ciphertextLength) bytes.
+ 		\return the actual length of the plaintext, indication that decryption failed.
+ 	*/
+-	virtual DecodingResult Decrypt(RandomNumberGenerator &rng, 
+-		const byte *ciphertext, size_t ciphertextLength, 
++	virtual DecodingResult Decrypt(RandomNumberGenerator &rng,
++		const byte *ciphertext, size_t ciphertextLength,
+ 		byte *plaintext, const NameValuePairs &parameters = g_nullNameValuePairs) const =0;
+ 
+ 	//! create a new decryption filter
+ 	/*! \note caller is responsible for deleting the returned pointer
+ 	*/
+-	virtual BufferedTransformation * CreateDecryptionFilter(RandomNumberGenerator &rng, 
++	virtual BufferedTransformation * CreateDecryptionFilter(RandomNumberGenerator &rng,
+ 		BufferedTransformation *attachment=NULL, const NameValuePairs &parameters = g_nullNameValuePairs) const;
+ 
+ 	//! decrypt a fixed size ciphertext
+@@ -1338,7 +1338,7 @@ public:
+ 	unsigned int DigestSize() const
+ 		{throw NotImplemented("PK_MessageAccumulator: DigestSize() should not be called");}
+ 	//! should not be called on PK_MessageAccumulator
+-	void TruncatedFinal(byte *digest, size_t digestSize) 
++	void TruncatedFinal(byte *digest, size_t digestSize)
+ 		{throw NotImplemented("PK_MessageAccumulator: TruncatedFinal() should not be called");}
+ };
+ 
+@@ -1374,7 +1374,7 @@ public:
+ 	/*! \pre size of signature == MaxSignatureLength(recoverableMessageLength)
+ 		\return actual signature length
+ 	*/
+-	virtual size_t SignMessageWithRecovery(RandomNumberGenerator &rng, const byte *recoverableMessage, size_t recoverableMessageLength, 
++	virtual size_t SignMessageWithRecovery(RandomNumberGenerator &rng, const byte *recoverableMessage, size_t recoverableMessageLength,
+ 		const byte *nonrecoverableMessage, size_t nonrecoverableMessageLength, byte *signature) const;
+ };
+ 
+@@ -1401,7 +1401,7 @@ public:
+ 	virtual bool VerifyAndRestart(PK_MessageAccumulator &messageAccumulator) const =0;
+ 
+ 	//! check whether input signature is a valid signature for input message
+-	virtual bool VerifyMessage(const byte *message, size_t messageLen, 
++	virtual bool VerifyMessage(const byte *message, size_t messageLen,
+ 		const byte *signature, size_t signatureLength) const;
+ 
+ 	//! recover a message from its signature
+@@ -1417,8 +1417,8 @@ public:
+ 	//! recover a message from its signature
+ 	/*! \pre size of recoveredMessage == MaxRecoverableLengthFromSignatureLength(signatureLength)
+ 	*/
+-	virtual DecodingResult RecoverMessage(byte *recoveredMessage, 
+-		const byte *nonrecoverableMessage, size_t nonrecoverableMessageLength, 
++	virtual DecodingResult RecoverMessage(byte *recoveredMessage,
++		const byte *nonrecoverableMessage, size_t nonrecoverableMessageLength,
+ 		const byte *signature, size_t signatureLength) const;
+ };
+ 
+@@ -1599,9 +1599,9 @@ public:
+ class PasswordAuthenticatedKeyAgreementSession : public KeyAgreementSession
+ {
+ public:
+-	void InitializePasswordAuthenticatedKeyAgreementSession(RandomNumberGenerator &rng, 
+-		const byte *myId, unsigned int myIdLength, 
+-		const byte *counterPartyId, unsigned int counterPartyIdLength, 
++	void InitializePasswordAuthenticatedKeyAgreementSession(RandomNumberGenerator &rng,
++		const byte *myId, unsigned int myIdLength,
++		const byte *counterPartyId, unsigned int counterPartyIdLength,
+ 		const byte *passwordOrVerifier, unsigned int passwordOrVerifierLength);
+ };
+ 
+@@ -1625,7 +1625,7 @@ public:
+ //! BER Decode Exception Class, may be thrown during an ASN1 BER decode operation
+ class CRYPTOPP_DLL BERDecodeErr : public InvalidArgument
+ {
+-public: 
++public:
+ 	BERDecodeErr() : InvalidArgument("BER decode error") {}
+ 	BERDecodeErr(const std::string &s) : InvalidArgument(s) {}
+ };
+diff --git a/SelfServiceCommon/Massai/cpp/Mcrypt/makefile.mak b/SelfServiceCommon/Massai/cpp/Mcrypt/makefile.mak
+index d21ef957..468069f4 100644
+--- a/SelfServiceCommon/Massai/cpp/Mcrypt/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Mcrypt/makefile.mak
+@@ -14,7 +14,6 @@ MY_CFLAGS = \
+ MY_LIB1 = $(LIB_DST_MCRYPT)
+ 
+ MY_LIB1_OBJS = \
+-      $(_OBJ)\algebra.obj \
+       $(_OBJ)\algparam.obj \
+       $(_OBJ)\asn.obj \
+       $(_OBJ)\basecode.obj \
+@@ -29,9 +28,7 @@ MY_LIB1_OBJS = \
+       $(_OBJ)\dll.obj \
+       $(_OBJ)\dsa.obj \
+       $(_OBJ)\ec2n.obj \
+-      $(_OBJ)\eccrypto.obj \
+       $(_OBJ)\ecp.obj \
+-      $(_OBJ)\eprecomp.obj \
+       $(_OBJ)\files.obj \
+       $(_OBJ)\filters.obj \
+       $(_OBJ)\fips140.obj \
+@@ -59,9 +56,7 @@ MY_LIB1_OBJS = \
+       $(_OBJ)\rng.obj \
+       $(_OBJ)\rsa.obj \
+       $(_OBJ)\sha.obj \
+-      $(_OBJ)\simple.obj \
+       $(_OBJ)\skipjack.obj \
+-      $(_OBJ)\strciphr.obj \
+       $(_OBJ)\trdlocal.obj \
+       $(_OBJ)\mcrypt.obj
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Mcrypt/src/mcrypt.cpp b/SelfServiceCommon/Massai/cpp/Mcrypt/src/mcrypt.cpp
+index fa8c6d39..22501a7d 100644
+--- a/SelfServiceCommon/Massai/cpp/Mcrypt/src/mcrypt.cpp
++++ b/SelfServiceCommon/Massai/cpp/Mcrypt/src/mcrypt.cpp
+@@ -61,7 +61,7 @@ bool mcrypt::read(string& decrypted, string source)
+ 
+ 
+ 
+-void mcrypt::export(string source, string destination)
++void mcrypt::export_(string source, string destination)
+ {
+     int byteswritten = 0;
+     string expData;
+diff --git a/SelfServiceCommon/Massai/cpp/SecureLogging/src/clientmain.cpp b/SelfServiceCommon/Massai/cpp/SecureLogging/src/clientmain.cpp
+index ddb8ddb4..3372772b 100644
+--- a/SelfServiceCommon/Massai/cpp/SecureLogging/src/clientmain.cpp
++++ b/SelfServiceCommon/Massai/cpp/SecureLogging/src/clientmain.cpp
+@@ -92,7 +92,7 @@ void sendDummies(SecureLoggingSession *pclnt)
+     for(int i = 0; i < 10; i++)
+     {
+         pclnt->open();
+-        
++
+         for(int k = 0; k < 10; k++)
+         {
+             //Sleep(500);
+@@ -208,7 +208,7 @@ char szInput[1024];
+     			    cin.getline(destination, 256);
+                     mcrypt mycrypt;
+                     mycrypt.setPwd(passPhrase);
+-   				    mycrypt.export(source, destination);
++           mycrypt.export_(source, destination);
+     		    }
+             break;
+           case 'a':
+-- 
+2.41.0.windows.1
+

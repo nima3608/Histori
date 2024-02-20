@@ -1,0 +1,156 @@
+From 30ffa8f2eb7dbb596334067625e46a9dca52e64d Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 10 Jun 2020 18:50:50 +0000
+Subject: [PATCH 376/462] Mantis 0058149: Migrate to final biometrics CUSS
+ schema 1.5.1
+
+cleanup xmlBean-Task
+
+AntProperties.xml
+add missing definitions: JarBilling, JarTempus
+
+AntTargets.xml
+cleanup xmlbean-task; needs project.xmlBeanJar, project.xmlBeanDir, project.xmlBeanFiles
+
+build.xml
+add new Java-Project CLA_GUI
+
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@691 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ SelfServiceBuild/Build/java/AntProperties.xml |  2 +
+ SelfServiceBuild/Build/java/AntTargets.xml    | 42 ++++---------------
+ SelfServiceBuild/Build/java/build.xml         |  9 ++--
+ 3 files changed, 15 insertions(+), 38 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/java/AntProperties.xml b/SelfServiceBuild/Build/java/AntProperties.xml
+index 6dff377..dd7ea83 100644
+--- a/SelfServiceBuild/Build/java/AntProperties.xml
++++ b/SelfServiceBuild/Build/java/AntProperties.xml
+@@ -231,6 +231,8 @@
+ <!-- MASSAI-JARs ================================================= -->
+ 
+ <property name="JarOPI13"                     value="${JarDir}/OPI_1_3.jar"/>
++<property name="JarBilling"                   value="${JarDir}/Billing.jar"/>
++<property name="JarTempus"                    value="${JarDir}/tempus.jar"/>
+ <property name="JarCCV"                       value="${JarDir}/OPI_CCV20120201.jar"/>
+ <property name="JarCUSS"                      value="${JarDir}/cuss.jar"/>
+ <property name="JarCLAGUI"                    value="${JarDir}/CLA_GUI.jar"/>
+diff --git a/SelfServiceBuild/Build/java/AntTargets.xml b/SelfServiceBuild/Build/java/AntTargets.xml
+index 4dec75e..adeece2 100644
+--- a/SelfServiceBuild/Build/java/AntTargets.xml
++++ b/SelfServiceBuild/Build/java/AntTargets.xml
+@@ -80,46 +80,20 @@
+ 
+ </target>
+ 
+-<!-- create-xml-bean-file ============================================ -->
+ 
+-<target name="create-xml-bean-file">
+-    <basename property="GenFile" file="${SchemaFile}" suffix=".xsd"/>    
+-    <mkdir dir="${GenXMLSrcDir}/${GenFile}"/>
+-    <!-- Die angegebene Schema-Datei wird compiliert. -->
+-    <echo message="Compiling XML-Beans Schema: ${SchemaFile}"/>
+-    <xmlbean classgendir="${GenXMLClassDir}" srcgendir="${GenXMLSrcDir}/${GenFile}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}">
+-      <fileset file="${SchemaFile}" />
+-    </xmlbean>
+-    <jar destfile="${JarDir}/${GenFile}.jar" manifest="${ManifestDir}/${ManifestName}" update="true"/>
+-</target>
++<!-- create-xml-bean ================================================= -->
+ 
+-<target name="create-xml-bean-dir">
+-    <basename property="GenFile" file="${SchemaDir}" suffix=".xsd"/>    
+-    <mkdir dir="${GenXMLSrcDir}/${GenFile}"/>
++<target name="create-xml-bean" if="project.xmlBeanJar" depends="create-manifest">
++    <property name="GenFile" value="${project.xmlBeanJar}"/>
++    <!-- mkdir dir="${GenXMLSrcDir}/${GenFile}"/ srcgendir="${GenXMLSrcDir}/${GenFile}" -->
+     <!-- Die angegebene Schema-Datei wird compiliert. -->
+-    <echo message="Compiling XML-Beans Schema: ${SchemaDir}"/>
+-    <xmlbean  classgendir="${GenXMLClassDir}" srcgendir="${GenXMLSrcDir}/${GenFile}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}">
+-      <fileset dir="${SchemaDir}" />
++    <echo message="Compiling XML-Beans Schema: ${GenFile}"/>
++    <xmlbean classgendir="${GenXMLClassDir}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}">
++      <fileset dir="${project.xmlBeanDir}" includes="${project.xmlBeanFiles}" />
+     </xmlbean>
+     <jar destfile="${JarDir}/${GenFile}.jar" manifest="${ManifestDir}/${ManifestName}" update="true"/>
+ </target>
+ 
+-<!-- create-xml-bean ================================================= -->
+-
+-<target name="create-xml-bean" if="project.xmlBean" depends="create-manifest">
+-    <mkdir dir="${GenSrcDir}"/>
+-
+-    <!-- Alle Schema-Dateien werden compiliert. -->
+-    <foreach list="${project.xmlBean}" delimiter=" " param="SchemaFile" target="create-xml-bean-file" inheritall="true"/>
+-</target>
+-
+-<target name="create-xml-bean-directories" if="project.xmlBeanDir" depends="create-manifest">
+-    <mkdir dir="${GenSrcDir}"/>
+-
+-    <!-- Alle Schema-Dateien werden compiliert. -->
+-    <foreach list="${project.xmlBeanDir}" delimiter=" " param="SchemaDir" target="create-xml-bean-dir" inheritall="true"/>
+-</target>
+-
+ <!-- create-from-wsdl ================================================= -->
+ 
+ <target name="create-from-wsdl" if="project.wsdlFile">
+@@ -204,7 +178,6 @@
+ <target name="compile-all"
+         depends="create-flex,
+                  create-xml-bean,
+-                 create-xml-bean-directories,
+                  create-from-wsdl,
+                  create-idl,
+                  prepare-compile,
+@@ -309,6 +282,7 @@
+     <delete dir="${GenSrcDir}"/>
+     <delete dir="${GenXMLSrcDir}"/>    
+     <delete dir="${ClassDir}"/>
++    <delete dir="${GenXMLClassDir}"/>    
+     <delete dir="${TestClassDir}"/>    
+     <delete dir="${ManifestDir}"/>
+     <delete dir="${JavaDocDir}/${ant.project.name}"/>
+diff --git a/SelfServiceBuild/Build/java/build.xml b/SelfServiceBuild/Build/java/build.xml
+index 7c169b3..3dd27e9 100644
+--- a/SelfServiceBuild/Build/java/build.xml
++++ b/SelfServiceBuild/Build/java/build.xml
+@@ -25,16 +25,16 @@
+     <!-- Definition der Verzeichnisse mit den Java-Modulen ======= -->
+     <property name="CommonDirList"   value="${CommonJavaDir}/OpenORB-1.3.1/OpenORB"/>
+     <property name="PlatformDirList" value="
+-      ${PlatformJavaDir}/ExtractBilling,
+       ${PlatformJavaDir}/CUSS,
+-      ${PlatformJavaDir}/CUSS.1.5.BIOMETRICS,
+-      ${PlatformJavaDir}/CUSS.BIOMETRIC,
+       ${PlatformJavaDir}/CUSS.ILLUMINATION,
+       ${PlatformJavaDir}/CUSS.PAYMENT,
+       ${PlatformJavaDir}/CUSS.SBD,
+       ${PlatformJavaDir}/CUSS.SYNTHESIS,
++      ${PlatformJavaDir}/CUSS.1.5.BIOMETRICS,
+       ${PlatformJavaDir}/CUSS.1.5.BIOMETRICS.GP,
++      ${PlatformJavaDir}/CUSS.BIOMETRIC,
+       ${PlatformJavaDir}/CUSS.IDDOCUMENT,
++      ${PlatformJavaDir}/CLA_GUI,
+       ${PlatformJavaDir}/Ingenico-Tempus,
+       ${PlatformJavaDir}/OPI.1.3,
+       ${PlatformJavaDir}/OPI_CCV20120201,
+@@ -42,6 +42,7 @@
+       ${PlatformJavaDir}/MATAC-Client,
+       ${PlatformJavaDir}/Config,
+       ${PlatformJavaDir}/PlatformManager,
++      ${PlatformJavaDir}/Statechart,
+       ${PlatformJavaDir}/PaymentIngenicoC3,
+       ${PlatformJavaDir}/Soap-Tools,
+       ${PlatformJavaDir}/LoggingClient,
+@@ -54,7 +55,7 @@
+       ${PlatformJavaDir}/SOAP-Settings,
+       ${PlatformJavaDir}/CLAApplet,
+       ${PlatformJavaDir}/DSGEventReporting,
+-      ${PlatformJavaDir}/Statechart,
++      ${PlatformJavaDir}/ExtractBilling,
+       ${PlatformJavaDir}/BhsServer"
+     />
+     <property name="AblsDirList"     value="${AblsJavaDir}/KioskProxy,${AblsJavaDir}/TunnelServer"/>
+-- 
+2.41.0.windows.1
+

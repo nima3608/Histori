@@ -1,0 +1,134 @@
+From 4179e9ad6a3b98f877f0f8b047d75a2753e94c45 Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 10 Jul 2020 08:48:05 +0000
+Subject: [PATCH 379/462] Build: optional html output with MANTIS link in
+ showPlfLastCommits.pl
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@697 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/showPlfLastCommits.pl       | 56 +++++++++++++++++--
+ 1 file changed, 50 insertions(+), 6 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+index b586738..be72757 100644
+--- a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
++++ b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+@@ -5,7 +5,7 @@ use Getopt::Long;
+ use DateTime;
+ 
+ # ----------------------------------------------------------
+-#  showPlfLastCommit.pl                 kkluge 30.06.2020
++#  showPlfLastCommit.pl                 kkluge 10.07.2020
+ #
+ #  Show the last commit of the configured list of PLF
+ #  branches, if it was within 7 days.
+@@ -13,6 +13,9 @@ use DateTime;
+ #  With the option "--all" the last commit of all branches
+ #  are shown, no matter when it was done.
+ #
++#  With the option "--html" a temporary HTML file is created
++#  and opened in a browser.
++#
+ #  Old branches which really aren't used any more should not
+ #  be included, or commented out, to reduce runtime. You can
+ #  use the "--all" option to find those.
+@@ -26,6 +29,8 @@ my $svnBaseURL      = "http://subversion.materna.de:7770/svn-repos";
+ my $ipsPlfBaseURL    = "$svnBaseURL/SelfServicePlatform";  # trunk
+ my $ipsPlfBranchURL  = "$svnBaseURL/SelfServicePlatform/branches";
+ 
++my $mantisURL        = "http://mantis.materna.de/mantis/view.php?id=";
++
+ my @allURLs =
+ (
+   "$ipsPlfBaseURL/trunk",
+@@ -50,10 +55,17 @@ my @allURLs =
+   "$ipsPlfBranchURL/RC_4.30.00",
+ );
+ 
++my $tmpHtml = "C:\\Temp\\showPlfLastCommit.html";
++my $html = "";
++
+ my ($dtToday) = DateTime->now(time_zone => "local");
++my ($today) = $dtToday->ymd('-');
++
+ my $optAll = 0;
++my $optHtml = 0;
+ 
+ GetOptions ("all!"       => \$optAll,
++            "html!"      => \$optHtml,
+             "help!"      => \$help
+             )  or die "Invalid commmand line options. Try --help\n";
+ 
+@@ -128,27 +140,51 @@ sub showRevs
+ {
+   my ($branch,$url,$revs) = @_;
+ 
+-  my (@revs2) = ($revs =~ /(r[0-9]*)/g);
++  my (@revs2) = ($revs =~ /r([0-9]*)/g);
+   foreach my $rev (@revs2) {
+     my $result = `svn log $url -r $rev | perl -l40pe 's/^-+/\\n/'`;
+     my ($user) = getUser($result);
+     my (@mantis) = getMantis($result);
+     my $mantis = "@mantis";
+-    $mantis = ($mantis eq "none") ? "" : " ($mantis)";
+     
+     my ($date) = getDateTime($result);
+     my ($dtDate) = newDateTime($date);
+     my ($dur) = $dtToday - $dtDate;
+     if (($dur->delta_days < 8) || $optAll) {
+-      printf("%-20s $date $rev %-8s$mantis\n", $branch, $user);
++      if ($optHtml) {
++        $html .= "<tr>\n";
++        $html .= "<td>$branch</td>\n";
++        $date = "<b>$date</b>" if $date =~ /^$today/;
++        $html .= "<td>$date</td>\n";
++        # requires authentication
++        # $rev = "<a href=\"$url/!svn/bc/$rev\" target=\"_blank\">$rev</a>";        
++        $html .= "<td>$rev</td>\n";
++        $html .= "<td>$user</td>\n";
++        $mantis = "<a href=\"$mantisURL$mantis\" target=\"_blank\">$mantis</a>" unless ($mantis eq "none");
++        $html .= "<td>$mantis</td>\n";
++        $html .= "</tr>\n";
++      } else {
++        printf("%-20s $date r$rev %-8s ($mantis)\n", $branch, $user);
++      }
+     }
+   }
+ }
+ 
+ # ----------------------------------------------------------
+ 
+-my ($today) = $dtToday->ymd('-');
+-print "-- PLF BRANCHES ---- $today ----- LAST COMMIT     (MANTIS) ---\n";
++if ($optHtml) {
++  $html = "<html>\n$body\n<h1>Last PLF Commits</h1>\n";
++  $html .= "<table border>\n";
++  $html .= "<tr>\n";
++  $html .= "<th align=\"left\">BRANCH</th>\n";
++  $html .= "<th align=\"left\">COMMIT TIME</th>\n";
++  $html .= "<th>REV</th>\n";
++  $html .= "<th>BY</th>\n";
++  $html .= "<th>MANTIS</th>\n";
++  $html .= "</tr>\n";
++} else {
++  print "-- PLF BRANCHES ---- $today ----- LAST COMMIT     (MANTIS) ---\n";
++}
+ foreach my $url (@allURLs) {
+   my ($repo) = ($url =~ /svn-repos\/([^\/]*)/);
+   my ($branch) = ($url =~ /([^\/]*)$/);
+@@ -157,4 +193,12 @@ foreach my $url (@allURLs) {
+   showRevs($branch,$url,@revs);
+ }
+ 
++if ($optHtml) {
++  $html .= "</table></body>\n</html>\n";
++  open(FH, '>', $tmpHtml) or die $!;
++  print FH $html;
++  close(FH);
++  `$tmpHtml`;
++}
++
+ # ----------------------------------------------------------
+-- 
+2.41.0.windows.1
+

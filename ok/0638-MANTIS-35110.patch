@@ -1,0 +1,828 @@
+From 187c9a894f6c617c36c2c40e63c31455a8cc84a0 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Jan 2015 10:59:03 +0000
+Subject: [PATCH 0638/1077] MANTIS 35110 MANTIS 35110: MassaiCfgxB: generates
+ huge trace files - Config service 1.4.3 - Use new common lib
+ tracesToFileParts to generate limited files.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@810 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/traceLocal.hpp    |  11 +-
+ .../Massai/cpp/CfgXMgrB/inc/tracesAdapter.hpp |  39 ++
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |   1 +
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      |  21 +-
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |  17 +-
+ .../Massai/cpp/CfgXMgrB/src/traceLocal.cpp    | 138 ++-----
+ .../Massai/cpp/CfgXMgrB/src/tracesAdapter.cpp | 344 ++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |   1 +
+ 10 files changed, 457 insertions(+), 141 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/tracesAdapter.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/tracesAdapter.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 1944c9ca..6eaf7073 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -401,8 +401,17 @@
+ //! @par     Change:
+ //! - MANTIS 34687: Non ASCII characters in selection item description
+ //!   Process selecton item description by xml-character-conversion too
+-#define FILE_VER_BIN 1,4,2,0
+-#define FILE_VER_DTS "1.4.2.0"
++// #define FILE_VER_BIN 1,4,2,0
++// #define FILE_VER_DTS "1.4.2.0"
++//
++//! @version 1.4.3
++//! @date    14.01.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 35110: MassaiCfgxB: generates huge trace files
++//! - Use new common lib tracesToFileParts to generate limited files.
++#define FILE_VER_BIN 1,4,3,0
++#define FILE_VER_DTS "1.4.3.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 6826e1ee..d886d40d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -392,8 +392,17 @@
+ //! @par     Change:
+ //! - MANTIS 34687: Non ASCII characters in selection item description
+ //!   Process selecton item description by xml-character-conversion too
+-#define FILE_VER_BIN 1,4,2,0
+-#define FILE_VER_DTS "1.4.2.0"
++// #define FILE_VER_BIN 1,4,2,0
++// #define FILE_VER_DTS "1.4.2.0"
++//
++//! @version 1.4.3
++//! @date    14.01.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 35110: MassaiCfgxB: generates huge trace files
++//! - Use new common lib tracesToFileParts to generate limited files.
++#define FILE_VER_BIN 1,4,3,0
++#define FILE_VER_DTS "1.4.3.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
+index 54cdc375..be231f6b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,6 +17,8 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
++#if 0
++
+ #include "trc/TraceClt.h"
+ #include <iostream>
+ 
+@@ -33,6 +35,13 @@
+ **/
+ void traceLocal_Setup( std::ostream * Stream, long Level );
+ 
++#else
++
++void traceLocal_SetConsole();
++
++void traceLocal_SetPath( char const * path );
++
++#endif
+ 
+ #endif // #ifndef TRACELOCAL_HPP
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/tracesAdapter.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/tracesAdapter.hpp
+new file mode 100644
+index 00000000..f0b71f4a
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/tracesAdapter.hpp
+@@ -0,0 +1,39 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesAdapter.hpp
++ *
++ * Control interface for the traces adapter.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACESADAPTER_HPP
++#define TRACESADAPTER_HPP
++
++#include "tools/traces.hpp"
++
++
++/**
++ *
++ * Link legacy trace mechanism to a traces::writer instance.
++ *
++ * @param Writer:       The traces::writer instance, which will handle
++ *                      calls to mTraceEx::write() now. Using 0 will
++ *                      unlink the writer.
++ *
++**/
++void tracesAdapter_set( traces::writer * Writer );
++
++
++#endif // #ifndef TRACESADAPTER_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 9587c319..738f51dd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -50,6 +50,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgValueText.obj \
+     $(_OBJ)\cfgValueTextlist.obj \
+     $(_OBJ)\traceLocal.obj \
++    $(_OBJ)\tracesAdapter.obj \
+     $(_OBJ)\xmlForbidden.obj
+ 
+ STDUSERLIBS = \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index 98ebf24c..936e515f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -29,8 +29,9 @@
+ #include "traceLocal.hpp"
+ 
+ // Common header
+-#include "text/mArgScan.hpp"
+ #include "systools/mSysSignal.hpp"
++#include "text/mArgScan.hpp"
++#include "trc/TraceClt.h"
+ 
+ // Compiler library header
+ #include <fstream>
+@@ -79,27 +80,13 @@ int main( int argc, char ** argv )
+    {
+       std::cout << "Usage: CfgXMgrB [ -xmldb:<file> ]"
+                                   " [-ipinterface:<interface>]"
+-                                  " [-tracefile:<file>]"
+                 << std::endl;
+       return 0;
+    }
+    //
+    // Traces
+    //
+-   char const * const TraceFile = Arg.option( "TRACEFILE" );
+-   std::ostream * pTrace = 0;
+-   if( TraceFile )
+-   {
+-      pTrace = new std::ofstream( TraceFile );
+-   }
+-   if( pTrace )
+-   {
+-      traceLocal_Setup( pTrace, 9 );
+-   }
+-   else
+-   {
+-      traceLocal_Setup( &std::cout, 9 );
+-   }
++   traceLocal_SetConsole();
+    writeTrace
+    (
+       5, "", 0, "",
+@@ -178,8 +165,6 @@ int main( int argc, char ** argv )
+       5, "", 0, "",
+       "CfgXMgrB - terminated with signal %s.", SysSignal.event()
+    );
+-   if( pTrace )
+-      delete pTrace;
+    return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index 93b700f0..23dbdeac 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2014 MATERNA Information & Communications
++ * Copyright (c) 2003-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -30,9 +30,10 @@
+ #include "traceLocal.hpp"
+ 
+ // Common header
+-#include "text/mArgScan.hpp"
+ #include "systools/matDaemon.h"
+ #include "systools/mEventSem.hpp"
++#include "trc/TraceClt.h"
++#include "text/mArgScan.hpp"
+ 
+ // Windows (for SYSTEMTIME)
+ #include <windows.h>
+@@ -91,7 +92,7 @@ char const * mDaemon_help()
+    return "\""
+           "[ -xmldb:<file> ]"
+           " [ -ipinterface:<interface> ]"
+-          " [ -tracedir:<directory> | -tracefile:<file> ]"
++          " [ -tracedir:<directory> ]"
+           "\"";
+ }
+ 
+@@ -137,6 +138,7 @@ int mDaemon_main( int argc, char const * const * argv )
+    //
+    // Traces
+    //
++#if 0
+    std::ofstream * pTrace = 0;
+    char const * const TraceDir = Arg.option( "TRACEDIR" );
+    if( TraceDir )
+@@ -174,6 +176,13 @@ int mDaemon_main( int argc, char const * const * argv )
+    {
+       traceLocal_Setup( &std::cout, 0 );
+    }
++#else
++   char const * const TraceDir = Arg.option( "TRACEDIR" );
++   if( TraceDir )
++   {
++      traceLocal_SetPath( TraceDir );
++   }
++#endif
+    writeTrace
+    (
+       5, "", 0, "",
+@@ -282,8 +291,6 @@ int mDaemon_main( int argc, char const * const * argv )
+       5, "", 0, "",
+       "massaiCfgXB - terminated."
+    );
+-   if( pTrace )
+-      delete pTrace;
+    return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+index f267bb7a..6d5101f2 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,22 +17,15 @@
+ #pragma warning (disable:4786)
+ #endif /* _MSC_VER */
+ 
++// Exported
+ #include "traceLocal.hpp"
+ 
+-//#define USE_HRTIME
+-#ifdef USE_HRTIME
+-#include "cfgclnt/mHRTimer.h"
+-#else
+-#include <windows.h>
+-#endif
++// Local header
++#include "tracesAdapter.hpp"
+ 
+-#include "systools/mMutexSem.hpp"
+-#include "systools/mSysThread.hpp"
+-#include "trc/TraceClt.h"
+-
+-#include <map>
+-#include <stdarg.h>
+-#include <stdio.h>
++// Common header
++#include "tools/tracesToFileParts.hpp"
++#include "tools/tracesToFile.hpp"
+ 
+ 
+ 
+@@ -40,120 +33,39 @@ namespace
+ {
+ 
+ 
+-#ifdef USE_HRTIME
+-   mHRTimer                     S_Timer;
+-   std::ostream & timestamp( std::ostream & OS )
+-   {
+-      char Buffer[20];
+-      S_Timer.timestampString( Buffer );
+-      OS << Buffer;
+-      return OS;
+-   }
+-#else
+-   std::ostream & timestamp( std::ostream & OS )
+-   {
+-      SYSTEMTIME T;
+-      GetLocalTime( &T );
+-      char Buffer[20];
+-      sprintf
+-         (
+-            Buffer, "%02d:%02d:%02d.%1d",
+-            T.wHour, T.wMinute, T.wSecond, T.wMilliseconds / 100
+-         );
+-      OS << Buffer;
+-      return OS;
+-   }
+-#endif
++   traces::writer * l_writer = 0;
+ 
+-   long                         S_Level = 0;
+-   std::ostream *               S_Stream = 0;
+ 
+-   typedef std::map<int,int>    idMap;
+-   idMap                        S_IdMap;
+-   int                          S_IdNext = 0;
++} // namespace
+ 
+ 
+-}
+-
+ 
+-
+-void _stdcall writeTrace
+-(
+-   long Level,
+-   char const *, short, char const *,
+-   char const * Format, ...
+-)
++void traceLocal_SetConsole()
+ {
+-   if( S_Stream && ( Level <= S_Level ) )
++   if( l_writer )
+    {
+-      static Materna::MSSD::mutexSemaphore X;
+-      X.request();
+-      va_list Arg;
+-      char String[4096];
+-      va_start( Arg, Format );
+-      vsprintf( String, Format, Arg );
+-      va_end( Arg );
+-      mSysThread::threadId const TId = mSysThread::id();
+-      idMap::const_iterator IId = S_IdMap.find( TId );
+-      if( IId == S_IdMap.end() )
+-      {
+-         S_IdMap[TId] = S_IdNext++;
+-         IId = S_IdMap.find( TId );
+-         *S_Stream
+-            << "T" << IId->second
+-            << " -------------: Trace thread mapped id:" << TId
+-            << std::endl;
+-      }
+-      *S_Stream
+-         << "T" << IId->second
+-         << " L" << Level << " " << timestamp << ": " << String
+-         << std::endl;
+-      X.release();
++      // stop previous writer
++      tracesAdapter_set( 0 );
++      // and delete it
++      delete l_writer;
+    }
++   l_writer = new tracesToFile::writer( "con" );
++   tracesAdapter_set( l_writer );
+ }
+ 
+ 
+ 
+-
+-
+-void _stdcall writeTraceText
+-(
+-   long Level,
+-   char const *, short, char const *,
+-   char const * String
+-)
++void traceLocal_SetPath( char const * path )
+ {
+-   if( S_Stream && ( Level <= S_Level ) )
++   if( l_writer )
+    {
+-      static Materna::MSSD::mutexSemaphore X;
+-      X.request();
+-      mSysThread::threadId const TId = mSysThread::id();
+-      idMap::const_iterator IId = S_IdMap.find( TId );
+-      if( IId == S_IdMap.end() )
+-      {
+-         S_IdMap[TId] = S_IdNext++;
+-         IId = S_IdMap.find( TId );
+-         *S_Stream
+-            << "T" << IId->second
+-            << " -------------: Trace thread mapped id:" << TId
+-            << std::endl;
+-      }
+-      *S_Stream
+-         << "T" << IId->second
+-         << " L" << Level << " " << timestamp << ": " << String
+-         << std::endl;
+-      X.release();
++      // stop previous writer
++      tracesAdapter_set( 0 );
++      // and delete it
++      delete l_writer;
+    }
+-}
+-
+-
+-
+-
+-
+-void traceLocal_Setup( std::ostream * Stream, long Level )
+-{
+-   S_Level = Level;
+-   S_Stream = Stream;
++   l_writer = new tracesToFileParts::writer( path, "CfgXMgrB" );
++   tracesAdapter_set( l_writer );
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/tracesAdapter.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/tracesAdapter.cpp
+new file mode 100644
+index 00000000..23567038
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/tracesAdapter.cpp
+@@ -0,0 +1,344 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesAdapter.cpp
++ *
++ * Map mTraceEx::write to traces::writer.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2010-2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "tracesAdapter.hpp"
++
++#include "text/mHexString.hpp"
++#include "systools/mMutexSem.hpp"
++#include "massaidll/mTrace.hpp"
++#include "trc/TraceClt.h"
++
++#include <stdio.h>
++#include <sstream>
++#include <string>
++
++
++
++namespace
++{
++
++
++   traces::writer * L_Writer = 0;
++
++
++   Materna::MSSD::mutexSemaphore L_Mutex;
++
++
++   /**
++    *
++    * Create a trace header from FILE and LINE data.
++    *
++    * @param F:         Filename from __FILE__ macro.
++    *
++    * @param L:         Source line from __LINE__ macro.
++    *
++    * @return:          A pretty trace line header.
++    *
++   **/
++   std::string makeFL( char const * F, int L )
++   {
++      std::string File( F );
++      // Strip path info
++      std::string::size_type const Slash = File.find_last_of( "\\" );
++      if( Slash != std::string::npos )
++         File = File.substr( Slash + 1 );
++      // Strip extension
++      std::string::size_type const Dot = File.find_last_of( "." );
++      if( Slash != std::string::npos )
++         File = File.substr( 0, Dot );
++      //
++      std::ostringstream R;
++      R << File << "(" << L << "):";
++      // To align trace data fill with spaces to get a min size of 30.
++      int Ind = 30 - static_cast<int>( R.str().size() );
++      while( --Ind >= 0 ) R << " ";
++      return R.str();
++   }
++
++
++   /**
++    *
++    * Create a trace header from FILE and LINE data.
++    *
++    * @param F:         Filename from __FILE__ macro.
++    *
++    * @param L:         Source line from __LINE__ macro.
++    *
++    * @return:          A pretty trace line header.
++    *
++   **/
++   std::string makeFL( char const * F, int L, char const * Fun )
++   {
++      std::string File( F );
++      // Strip path info
++      std::string::size_type const Slash = File.find_last_of( "\\" );
++      if( Slash != std::string::npos )
++         File = File.substr( Slash + 1 );
++      // Strip extension
++      std::string::size_type const Dot = File.find_last_of( "." );
++      if( Slash != std::string::npos )
++         File = File.substr( 0, Dot );
++      //
++      std::ostringstream R;
++      if( Fun && *Fun )
++         R << File << "(" << L << "," << Fun << "):";
++      else
++         R << File << "(" << L << "):";
++      // To align trace data fill with spaces to get a min size of 30.
++      int Ind = 30 - static_cast<int>( R.str().size() );
++      while( --Ind >= 0 ) R << " ";
++      return R.str();
++   }
++
++
++   /**
++    *
++    * traces::meta class for this adapter.
++    *
++   **/
++   class adapterMeta : public traces::meta
++   {
++
++      std::string const         M_Formatted;
++
++   public:
++
++      adapterMeta( long Lvl, char const * Fil, long Lin ) :
++         M_Formatted( makeFL( Fil, Lin ) )
++      {
++      }
++
++      adapterMeta
++         (
++            long Lvl, char const * Fil, long Lin,
++            char const * Fun
++         ) :
++         M_Formatted( makeFL( Fil, Lin, Fun ) )
++      {
++      }
++
++      char const * getFormatted() const
++      {
++         return M_Formatted.c_str();
++      }
++
++      traces::level getLevel() const
++      {
++         return traces::Lvl_SecondaryFrequent;
++      }
++
++   };
++
++
++}
++
++
++
++// "mTrace.hpp" method implementation.
++mTraceEx::mTraceEx( long, char * )
++{
++}
++
++
++
++// "mTrace.hpp" method implementation.
++mTraceEx::~mTraceEx()
++{
++}
++
++
++
++// "mTrace.hpp" method implementation.
++void mTraceEx::dump
++   (
++      long,             // Level
++      char *,           // File
++      long,             // Line
++      void *,           // Buffer
++      long              // Length
++   )
++{
++   // Not yet implemented
++}
++
++
++
++// "mTrace.hpp" method implementation.
++void mTraceEx::move( char * /*pszLocation*/, char * /*pszId*/ )
++{
++   // Calls to move are intentionally ignored.
++}
++
++
++
++// "mTrace.hpp" method implementation.
++void mTraceEx::write
++   (
++      long      TraceLevel,
++      char *    SrcFile,
++      long      SrcLine,
++      char *    TraceFormat,
++      ...
++   )
++{
++   if( !TraceFormat )
++   {
++      return;
++   }
++   traces::writer * const Writer = L_Writer;
++   L_Mutex.request();
++   if (
++         Writer &&
++         (
++            ( TraceLevel == 255 ) ||
++            ( TraceLevel < Writer->currentLevel() )
++         )
++      )
++   {
++      adapterMeta Meta( TraceLevel, SrcFile, SrcLine );
++      char Buffer[0x1000];
++      Buffer[ sizeof(Buffer) - 1 ] = 0;
++      va_list VArgs;
++      va_start( VArgs, TraceFormat );
++      (void)_vsnprintf( Buffer, sizeof(Buffer) - 1, TraceFormat, VArgs );
++      Writer->write( Meta, Buffer );
++   }
++   L_Mutex.release();
++}
++
++
++
++// "TraceClt.h" function implementation.
++void _stdcall dumpTrace
++                (
++                   long         TraceLevel,
++                   char const * SrcFile,
++                   short        SrcLine,
++                   char const * SrcFunction,
++                   long         DumpSize,
++                   char const * DumpPtr
++                )
++{
++   traces::writer * const Writer = L_Writer;
++   L_Mutex.request();
++   if (
++         Writer &&
++         (
++            ( TraceLevel == 255 ) ||
++            ( TraceLevel < Writer->currentLevel() )
++         )
++      )
++   {
++      adapterMeta Meta( TraceLevel, SrcFile, SrcLine, SrcFunction );
++      mHex::stringConvert Converter;
++      Converter.blend( " " );
++      std::string Dump( DumpPtr, DumpSize );
++      Writer->write( Meta, Converter.toHex( Dump ).c_str() );
++   }
++   L_Mutex.release();
++}
++
++
++
++// "TraceClt.h" function implementation.
++void _cdecl writeTrace
++               (
++                  long          TraceLevel,
++                  char const *  SrcFile,
++                  short         SrcLine,
++                  char const *  SrcFunction,
++                  char const *  TraceFormat,
++                  ...
++               )
++{
++   if( !TraceFormat )
++   {
++      return;
++   }
++   traces::writer * const Writer = L_Writer;
++   L_Mutex.request();
++   if (
++         Writer &&
++         (
++            ( TraceLevel == 255 ) ||
++            ( TraceLevel < Writer->currentLevel() )
++         )
++      )
++   {
++      adapterMeta Meta( TraceLevel, SrcFile, SrcLine, SrcFunction );
++      char Buffer[0x1000];
++      Buffer[ sizeof(Buffer) - 1 ] = 0;
++      va_list VArgs;
++      va_start( VArgs, TraceFormat );
++      (void)_vsnprintf( Buffer, sizeof(Buffer) - 1, TraceFormat, VArgs );
++      Writer->write( Meta, Buffer );
++   }
++   L_Mutex.release();
++}
++
++
++
++// "TraceClt.h" function implementation.
++void _stdcall writeTraceText
++                (
++                   long         TraceLevel,
++                   char const * SrcFile,
++                   short        SrcLine,
++                   char const * SrcFunction,
++                   char const * TraceText
++                )
++{
++   if( !TraceText )
++   {
++      return;
++   }
++   traces::writer * const Writer = L_Writer;
++   L_Mutex.request();
++   if (
++         Writer &&
++         (
++            ( TraceLevel == 255 ) ||
++            ( TraceLevel < Writer->currentLevel() )
++         )
++      )
++   {
++      adapterMeta Meta( TraceLevel, SrcFile, SrcLine, SrcFunction );
++      Writer->write( Meta, TraceText );
++   }
++   L_Mutex.release();
++}
++
++
++
++/*
++ *
++ * Interface function, see "tracesAdapter.hpp".
++ *
++ */
++void tracesAdapter_set( traces::writer * Writer )
++{
++   L_Mutex.request();
++   L_Writer = Writer;
++   L_Mutex.release();
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index fd3b87a6..3375093e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -56,6 +56,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgValueText.obj \
+     $(_OBJ)\cfgValueTextlist.obj \
+     $(_OBJ)\traceLocal.obj \
++    $(_OBJ)\tracesAdapter.obj \
+     $(_OBJ)\xmlForbidden.obj
+ 
+ 
+-- 
+2.41.0.windows.1
+

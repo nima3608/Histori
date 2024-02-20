@@ -1,0 +1,240 @@
+From c3f71ad383adbde9415cf5a9d2a4b4cf270b660d Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 22 Jan 2014 18:15:22 +0000
+Subject: [PATCH 0516/1076] MANTIS 0029957 ConveyorComp: CUSS1.3 Conveyor
+ (without ConveyorAEA) extended ConveyorDev idl for new CUSS component
+ ConveyorSBD
+
+ConveyorDev.idl
+V1.1
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@641 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/ConveyorDev.idl         | 189 ++++++++++++------
+ 1 file changed, 131 insertions(+), 58 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/ConveyorDev.idl b/SelfServiceCommon/Massai/idl/Massai/ConveyorDev.idl
+index daae3293..a9214c17 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/ConveyorDev.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/ConveyorDev.idl
+@@ -39,6 +39,60 @@
+ **/
+ module conveyordev
+ {
++   const string interface_version = "1.1";
++
++   enum ModulePosition
++   {
++     INSERTION_BELT,      // module handles data of baggage on insertion belt
++     VERIFICATION_BELT,   // module handles data of baggage on verification belt
++     PARKING_BELT,        // module handles data of baggage on parking belt
++     FRONT_BELTS,         // module handles data of baggage on insertion belt and verification belt
++     BACK_BELTS,          // module handles data of baggage on verification belt and parking belt
++     ALL_BELTS            // module handles data of baggage on insertion belt, verification belt and parking belt
++   };
++
++   enum ModuleType
++   {
++     SCALE,               // get weight of baggage
++     BCR,                 // get barcodes of tags on baggage
++     RFID_READER,         // get data from rfid-tags on baggage
++     RFID_WRITER          // set data to rfid-tags on baggage   
++   };
++
++   struct ModuleCharacteristic
++   {
++     ModuleType type;
++     ModulePosition position;
++   };
++
++   typedef sequence<ModuleCharacteristic> ModuleList;
++
++   struct BeltCharacteristic
++   {
++     long maxBags;     // maximum number of bags a conveyor can handle
++     long maxWeight;   // maximal weight of baggage in gramm
++     long maxLength;   // maximal length of baggage in mm
++   };
++
++   struct ExtendedCharacteristic
++   {
++     BeltCharacteristic insertionBeltCharacteristic;    
++     BeltCharacteristic verificationBeltCharacteristic;
++     BeltCharacteristic parkingBeltCharacteristic;
++     ModuleList modules;
++     boolean barrierCapable;              /* Indicates if the conveyor has a physical barrier control
++                                             controlling access to the insertion point. */
++     boolean userInterferenceCapable;     /* conveyor system can detect and report user
++                                             interference events which are _not_ considered critical to health,
++                                             safety and security */
++     boolean safetyIntrusionCapable;      /*  conveyor system can detect and report safety intrusions
++                                              which are considered critical to health, safety and security */          
++     boolean baggageSortingSystemPresent; 
++                                          
++     long maxWidth;    // maximal width of baggage in mm
++     long maxHeight;   // maximal height of baggage in mm
++   };
++
+ 
+    /**
+     *
+@@ -89,7 +143,12 @@ module conveyordev
+       ERR_TIMEOUT,                  /**< Transaction took too long. */
+       ERR_TRANSPORT_FAILED,         /**< piece transport failed. */
+       ERR_PIECE_TOO_HEAVY,          /**< Piece is too heavy. */
+-      ERR_TRANSPORT_ABORTED         /**< Piece transport not started. */
++      ERR_TRANSPORT_ABORTED,        /**< Piece transport not started. */
++      ERR_EMERGENCY_STOP,           /**< conveyor emergency stop button pressed */
++      ERR_USER_INTERFERENCE,        /**< user interference which are _not_ considered 
++                                         critical to health, safety and security */
++      ERR_SAFETY_INTRUSION          /**< safety intrusions which are considered 
++                                         critical to health, safety and security */
+    };
+ 
+    /**
+@@ -193,31 +252,38 @@ module conveyordev
+    **/
+    enum commandType
+    {
+-      CMD_CHARACTERISTICS_QUERY,    /**< Query device characteristics. */
+-      CMD_STATUS_QUERY,             /**< Query device status. */
+-      CMD_CANCEL,                   /**< Cancel the last command. */
+-      CMD_PIECE_ACCEPT,             /**< Accept a piece of baggage from the
+-                                         customer. */
+-      CMD_PIECE_FORWARD,            /**< Forward a piece with all
+-                                         attributes good. */
+-      CMD_PIECE_RETURN,             /**< Return a piece of baggage to the
+-                                         customer. */
+-      CMD_PARKED_FORWARD,           /**< Forward the parked piece(s) to
+-                                         the baggage transport. */
+-      CMD_PARKED_RETURN,            /**< Return the parked piece(s)
+-                                         of baggage to the customer. */
+-      CMD_PIECE_REMOVE,             /**< Let the customer remove the
+-                                         baggage. */
+-      CMD_PIECE_JAM_CLEARED,        /**< Assume the baggage piece trouble
+-                                         has been cleared. */
+-      CMD_PIECE_RFID_WRITE,         /**< Program RFID transponder. */
+-      CMD_DELIVERY_NOTE_SET,        /**< Setup the info to be delivered
+-                                         with the baggage. */
+-      CMD_PIECE_MONITOR_START,      /**< Start sending weight changes. */
+-      CMD_PIECE_MONITOR_STOP,       /**< Stop sending weight changes. */
+-      CMD_RETURN,                   /**< Return all unconditionally, even
+-                                         if in fail state. */
+-      CMD_MAINTENANCE               /**< Generic maintenance command. */
++      CMD_CHARACTERISTICS_QUERY,             /**< Query device characteristics. */
++      CMD_STATUS_QUERY,                      /**< Query device status. */
++      CMD_CANCEL,                            /**< Cancel the last command. */
++      CMD_PIECE_ACCEPT,                      /**< Accept a piece of baggage from the
++                                                  customer. */
++      CMD_PIECE_FORWARD,                     /**< Forward a piece with all
++                                                  attributes good. */
++      CMD_PIECE_RETURN,                      /**< Return a piece of baggage to the
++                                                  customer. */
++      CMD_PARKED_FORWARD,                    /**< Forward the parked piece(s) to
++                                                  the baggage transport. */
++      CMD_PARKED_RETURN,                     /**< Return the parked piece(s)
++                                                  of baggage to the customer. */
++      CMD_PIECE_REMOVE,                      /**< Let the customer remove the
++                                                  baggage. */
++      CMD_PIECE_JAM_CLEARED,                 /**< Assume the baggage piece trouble
++                                                  has been cleared. */
++      CMD_PIECE_RFID_WRITE,                  /**< Program RFID transponder. */
++      CMD_DELIVERY_NOTE_SET,                 /**< Setup the info to be delivered
++                                                  with the baggage. */
++      CMD_PIECE_MONITOR_START,               /**< Start sending weight changes. */
++      CMD_PIECE_MONITOR_STOP,                /**< Stop sending weight changes. */
++      CMD_RETURN,                            /**< Return all unconditionally, even
++                                                  if in fail state. */
++      CMD_MAINTENANCE,                       /**< Generic maintenance command. */
++      CMD_EXTENDED_CHARACTERISTICS_QUERY,    /**< Query extended device characteristics. */
++      CMD_INSERTION_PROCESS,                 /**< read properties of the baggage on insertion belt  */
++      CMD_VERIFICATION_PROCESS,              /**< read properties of the baggage on verification belt  */
++      CMD_VERIFICATION_RETURN,               /**< transport a piece from insertion belt to insertion belt  */
++      CMD_PARKING_FORWARD,                   /**< transport a piece from parking belt to main belt  */
++      CMD_PARKING_PROCESS,                   /**< read properties of the baggage on parking belt  */
++      CMD_PARKING_RETURN                     /**< transport a piece from parking belt to verification belt  */
+    };
+ 
+    /**
+@@ -227,38 +293,45 @@ module conveyordev
+    **/
+    enum indicationType
+    {
+-      IND_CHARACTERISTICS_INFO,     /**< Device characteristics. */
+-      IND_STATUS_INFO,              /**< Current device status. */
+-      IND_PIECE_ACCEPT_DONE,        /**< Finished CMD_PIECE_ACCEPT. */
+-      IND_PIECE_WEIGHT,             /**< Weight of piece. */
+-      IND_PIECE_BARCODE,            /**< Barcode(s) of the piece. */
+-      IND_PIECE_FORWARD_DONE,       /**< Finished the CMD_PIECE_FORWARD
+-                                         command. */
+-      IND_PIECE_RETURN_DONE,        /**< Finished the CMD_PIECE_RETURN
+-                                         command. */
+-      IND_PARKED_FORWARD_DONE,      /**< Finished the CMD_PARKED_FORWARD
+-                                         command. */
+-      IND_PARKED_RETURN_DONE,       /**< Finished the CMD_PARKED_RETURN
+-                                         command. */
+-      IND_PIECE_DELIVER,            /**< Piece(s) is/are about to be
+-                                         delivered. */
+-      IND_PIECE_REMOVE_DONE,        /**< Finished the CMD_PIECE_REMOVE. */
+-      IND_PIECE_JAM_CLEARED_DONE,   /**< Finished the CMD_PIECE_JAM_CLEARED
+-                                         command . */
+-      IND_PIECE_ACCEPT_WAIT,        /**< Waiting for customer to place a
+-                                         piece of baggage. */
+-      IND_PIECE_PARKED,             /**< Piece is in park position. */
+-      IND_PIECE_ACCEPT_WORKING,     /**< Prepare weighing the piece. */
+-      IND_PIECE_RFID,               /**< RFID(s) of the piece. */
+-      IND_PIECE_RFID_WRITE_DONE,    /**< Finished the CMD_PIECE_RFID_WRITE
+-                                         command. */
+-      IND_DELIVERY_NOTE_SET_DONE,   /**< The delivery note is set. */
+-      IND_PIECE_CONVEYED,           /**< The piece is on the way. */
+-      IND_PIECE_MONITOR_START_DONE, /**< Started sending weight changes. */
+-      IND_PIECE_MONITOR_STOP_DONE,  /**< Stopped sending weight changes. */
+-      IND_PARKED_FORWARD_WORKING,   /**< Delivery failed retrying. */
+-      IND_RETURN_DONE,              /**< Finished unconditional return. */
+-      IND_MAINTENANCE_DONE          /**< Manitenance operation completed. */
++      IND_CHARACTERISTICS_INFO,              /**< Device characteristics. */
++      IND_STATUS_INFO,                       /**< Current device status. */
++      IND_PIECE_ACCEPT_DONE,                 /**< Finished CMD_PIECE_ACCEPT. */
++      IND_PIECE_WEIGHT,                      /**< Weight of piece. */
++      IND_PIECE_BARCODE,                     /**< Barcode(s) of the piece. */
++      IND_PIECE_FORWARD_DONE,                /**< Finished the CMD_PIECE_FORWARD
++                                                  command. */
++      IND_PIECE_RETURN_DONE,                 /**< Finished the CMD_PIECE_RETURN
++                                                  command. */
++      IND_PARKED_FORWARD_DONE,               /**< Finished the CMD_PARKED_FORWARD
++                                                  command. */
++      IND_PARKED_RETURN_DONE,                /**< Finished the CMD_PARKED_RETURN
++                                                  command. */
++      IND_PIECE_DELIVER,                     /**< Piece(s) is/are about to be
++                                                  delivered. */
++      IND_PIECE_REMOVE_DONE,                 /**< Finished the CMD_PIECE_REMOVE. */
++      IND_PIECE_JAM_CLEARED_DONE,            /**< Finished the CMD_PIECE_JAM_CLEARED
++                                                  command . */
++      IND_PIECE_ACCEPT_WAIT,                 /**< Waiting for customer to place a
++                                                  piece of baggage. */
++      IND_PIECE_PARKED,                      /**< Piece is in park position. */
++      IND_PIECE_ACCEPT_WORKING,              /**< Prepare weighing the piece. */
++      IND_PIECE_RFID,                        /**< RFID(s) of the piece. */
++      IND_PIECE_RFID_WRITE_DONE,             /**< Finished the CMD_PIECE_RFID_WRITE
++                                                  command. */
++      IND_DELIVERY_NOTE_SET_DONE,            /**< The delivery note is set. */
++      IND_PIECE_CONVEYED,                    /**< The piece is on the way. */
++      IND_PIECE_MONITOR_START_DONE,          /**< Started sending weight changes. */
++      IND_PIECE_MONITOR_STOP_DONE,           /**< Stopped sending weight changes. */
++      IND_PARKED_FORWARD_WORKING,            /**< Delivery failed retrying. */
++      IND_RETURN_DONE,                       /**< Finished unconditional return. */
++      IND_MAINTENANCE_DONE,                  /**< Maintenance operation completed. */
++      IND_EXTENDED_CHARACTERISTICS_INFO,     /**< Finished CMD_EXTENDED_CHARACTERISTICS_QUERY */
++      IND_INSERTION_PROCESS_DONE,            /**< Finished CMD_INSERTION_PROCESS */
++      IND_VERIFICATION_PROCESS_DONE,         /**< Finished CMD_VERIFICATION_PROCESS */
++      IND_VERIFICATION_RETURN_DONE,          /**< Finished CMD_VERIFICATION_RETURN */
++      IND_PARKING_FORWARD_DONE,              /**< Finished CMD_PARKING_FORWARD */
++      IND_PARKING_PROCESS_DONE,              /**< Finished CMD_PARKING_PROCESS */
++      IND_PARKING_RETURN_DONE                /**< Finished CMD_PARKING_RETURN */
+    };
+ 
+    /**
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,122 @@
+From e7924c71a97f29f5974b0eb2fa33a07703c5ccd9 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 28 Feb 2020 15:55:14 +0000
+Subject: [PATCH 0929/1000] MANTIS 40374 massaiCfgXB.exe version 2.4.3 - MANTIS
+ 40374: MassaiCfgXB: delay of 1 minute at platform restart. - Decouple
+ mutex-protection of addListener() removeListener() from change indication.
+ This should prevent delays executing (mostly) addListener(), because the
+ indication process may run into exceptions and thus takes time.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1556 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 16 ++++++++++++++--
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 16 ++++++++++++++--
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp | 19 +++++++++++++++++++
+ 3 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index e267f78f..86a08a11 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -601,8 +601,20 @@
+ //! @par     Change:
+ //! - MANTIS 57154: Import of an item with path of exiting node kills node
+ //! - Do not allow to create a new item overwriting a directory node.
+-#define FILE_VER_BIN 2,4,1,0
+-#define FILE_VER_DTS "2.4.1.0"
++// #define FILE_VER_BIN 2,4,1,0
++// #define FILE_VER_DTS "2.4.1.0"
++//
++//! @version 2.4.3
++//! @date    28.02.2020
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 40374: MassaiCfgXB: delay of 1 minute at platform restart.
++//! - Decouple mutex-protection of addListener() removeListener() from
++//!   change indication. This should prevent delays executing (mostly)
++//!   addListener(), because the indication process may run into exception
++//!   and thus takes time.
++#define FILE_VER_BIN 2,4,3,0
++#define FILE_VER_DTS "2.4.3.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 8c26b3c7..6f3e2fb9 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -605,8 +605,20 @@
+ //! - MANTIS 57395: Config service startup issue
+ //! - Indicate a start-pending time of 30 seconds, rather than 15 seconds.
+ //! - More loggings.
+-#define FILE_VER_BIN 2,4,2,0
+-#define FILE_VER_DTS "2.4.2.0"
++// #define FILE_VER_BIN 2,4,2,0
++// #define FILE_VER_DTS "2.4.2.0"
++//
++//! @version 2.4.3
++//! @date    28.02.2020
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 40374: MassaiCfgXB: delay of 1 minute at platform restart.
++//! - Decouple mutex-protection of addListener() removeListener() from
++//!   change indication. This should prevent delays executing (mostly)
++//!   addListener(), because the indication process may run into exception
++//!   and thus takes time.
++#define FILE_VER_BIN 2,4,3,0
++#define FILE_VER_DTS "2.4.3.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index b440b3c2..8527edcb 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -73,8 +73,13 @@ bool cfgCorba_Base::valChgListener::mListenRetry
+       CORBA::SystemException const &
+    )
+ {
++#if 0
+    //! For CORBA exceptions always give it a second try.
+    return true;
++#else
++   //! No retry - simplification
++   return false;
++#endif
+ }
+ 
+ 
+@@ -233,7 +238,16 @@ void cfgCorba_Base::removeChangeListenerItem
+ **/
+ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+ {
++#ifdef DUMB_MUTEX
+    Materna::MSSD::autoMutex OnlyOne( Mutex );
++#else
++   valChgListeners change_listeners;
++   {
++      // Protect copying listeners list
++      Materna::MSSD::autoMutex OnlyOne( Mutex );
++      change_listeners = M_ValChgListeners;
++   }
++#endif
+    try
+    {
+       std::vector<std::string> ppl;
+@@ -242,8 +256,13 @@ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+       std::vector< std::string >::iterator pplIt;
+       for( pplIt = ppl.begin(); pplIt != ppl.end(); ++pplIt)
+       {
++#ifdef DUMB_MUTEX
+          It = M_ValChgListeners.find( (*pplIt).c_str() );
+          if( It != M_ValChgListeners.end() )
++#else
++         It = change_listeners.find( (*pplIt).c_str() );
++         if( It != change_listeners.end() )
++#endif
+          {
+             writeTrace
+                (
+-- 
+2.41.0.windows.1
+

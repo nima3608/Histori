@@ -1,0 +1,221 @@
+From a7e9fa224ff90104714ffd423aa41716c010997b Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 25 Jul 2014 11:06:55 +0000
+Subject: [PATCH 0561/1077] MANTIS 0032748 bugfix: SEL extension for Conrad USB
+ 4 channel relay
+
+massai_systools.lib
+V1.0.0.20
+
+- added mSysFindComPort.h/msysFindComPortW32.cpp to find COM port by id
+- renamed SEARCH_ALL to DEV_SEARCH_ALL; conflicted with define in windows.h
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@703 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysFindComPort.h |  3 +
+ .../Interfaces/inc/systools/mSysUSBDevice.h   |  4 +-
+ .../cpp/Systools/src/TestSysCOMPort.cpp       |  6 +-
+ .../Massai/cpp/Systools/src/TestSysUSBHID.cpp |  2 +-
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 ++-
+ .../cpp/Systools/src/mSysFindComPortW32.cpp   | 64 +++++++++++++++++++
+ .../cpp/Systools/src/mSysUSBDeviceW32.cpp     |  2 +-
+ 7 files changed, 82 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysFindComPort.h b/SelfServiceCommon/Interfaces/inc/systools/mSysFindComPort.h
+index 9a9cfbab..e2ab1e4f 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysFindComPort.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysFindComPort.h
+@@ -17,6 +17,9 @@ namespace mSysCOMPort
+   // instanceId: example: "006311BE"
+   std::string getCOMPort(const std::string& deviceTypePrefix, const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
+     mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++
++  // id: example: "USB/VID_10C4&PID_EA60/006311BE" or "VID_10C4&PID_EA60"
++  std::string getCOMPort(const std::string& idPart, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
+index d2ac69bc..41f22c67 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
+@@ -8,8 +8,8 @@ namespace mSysUSBDevice
+ {
+   enum Search
+   {
+-    SEARCH_ALL,
+-    SEARCH_PRESENT,
++    DEV_SEARCH_ALL,
++    DEV_SEARCH_PRESENT,
+   };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysCOMPort.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysCOMPort.cpp
+index 958f8138..b84c6c33 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysCOMPort.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysCOMPort.cpp
+@@ -11,13 +11,13 @@ int main(int argc, char **argv)
+   TraceLocal trc("TestSysCOMPort");
+   try
+   {
+-    if(argc == 4)
++    if(argc == 2)
+     {
+-      std::cout << mSysCOMPort::getCOMPort(argv[1], argv[2], argv[3], mSysUSBDevice::SEARCH_PRESENT, trc);
++      std::cout << mSysCOMPort::getCOMPort(argv[1], mSysUSBDevice::DEV_SEARCH_PRESENT, trc);
+     }
+     else
+     {
+-      std::cout << "Usage: TestSysCOMPort.exe <deviceTypePrefix> <deviceIdPrefix> <instanceIdPrefix>" << std::endl;
++      std::cout << "Usage: TestSysCOMPort.exe <idPart>" << std::endl;
+       std::cout << "  find COM port for device" << std::endl;
+     }
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
+index 3d217241..37e417c2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
+@@ -13,7 +13,7 @@ int main(int argc, char **argv)
+   {
+     if(argc == 3)
+     {
+-      std::cout << mSysUSBHID::getUSBHIDDevice(argv[1], argv[2], mSysUSBDevice::SEARCH_PRESENT, trc);
++      std::cout << mSysUSBHID::getUSBHIDDevice(argv[1], argv[2], mSysUSBDevice::DEV_SEARCH_PRESENT, trc);
+     }
+     else
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 4b04abc4..5c2f4724 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 19);
++VERSION_ID_DT(systools, 1, 0, 0, 20);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 19);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.19
++@version 1.0.0.20
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.20
++\li 25.07.2014
++\li bugfix - SteT Mantis 0032748: SEL extension for Conrad USB 4 channel relay
++- added mSysFindComPort.h/msysFindComPortW32.cpp to find COM port by id
++- renamed SEARCH_ALL to DEV_SEARCH_ALL; conflicted with define in windows.h
++
+ \version 1.0.0.19
+ \li 18.07.2014
+ \li extension - SteT Mantis 0032748: SEL extension for Conrad USB 4 channel relay
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
+index 855f2eee..0c1960bc 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
+@@ -39,6 +39,23 @@ namespace
+       Search m_search;
+       TraceInterface& m_trc;
+   };
++
++  class FindCOMPortById
++  {
++    public:
++      FindCOMPortById(const std::string& idPart, Search search, TraceInterface& trc);
++
++      ~FindCOMPortById();
++
++      std::string getPort();
++
++    private:
++      bool match(const std::string& deviceInstanceId);
++
++      std::string m_idPart;
++      Search m_search;
++      TraceInterface& m_trc;
++  };
+ }
+ 
+ namespace
+@@ -101,6 +118,47 @@ namespace
+     }
+     return result;
+   }
++
++
++  FindCOMPortById::FindCOMPortById(const std::string& idPart, Search search, TraceInterface& trc):
++    m_idPart(idPart),
++    m_search(search),
++    m_trc(trc)
++  {}
++
++  FindCOMPortById::~FindCOMPortById()
++  {}
++
++  std::string FindCOMPortById::getPort()
++  {
++    std::string result;
++    try
++    {
++      Devices devices(PORT_GUID, m_search, m_trc);
++      for(DWORD i = 0;; i++)
++      {
++        DeviceInfo deviceInfo(devices, i, m_trc);
++        if(match(deviceInfo.getDeviceId()))
++        {
++          DeviceInfoRegistry deviceInfoRegistry(deviceInfo, m_trc);
++          result = deviceInfoRegistry.getText(COM_PORT_NAME);
++          m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
++          break;
++        }
++      }
++    }
++    catch(const mSysError::SystemError& e)
++    {
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
++    }
++    return result;
++  }
++
++  bool FindCOMPortById::match(const std::string& deviceInstanceId)
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "check: (%s)", deviceInstanceId.c_str());
++    return deviceInstanceId.find(m_idPart) != std::string::npos;
++  }
+ }
+ 
+ namespace mSysCOMPort
+@@ -111,4 +169,10 @@ namespace mSysCOMPort
+     FindCOMPort find(deviceTypePrefix, deviceIdPrefix, instanceIdPrefix, search, trc);
+     return find.getPort();
+   }
++
++  std::string getCOMPort(const std::string& idPart, Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindCOMPortById find(idPart, search, trc);
++    return find.getPort();
++  }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+index 7fb4d17d..00dd973d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+@@ -278,7 +278,7 @@ namespace mSysUSBDeviceW32
+     m_trc(trc)
+   {
+     DWORD flags = DIGCF_DEVICEINTERFACE;
+-    if(search == mSysUSBDevice::SEARCH_PRESENT)
++    if(search == mSysUSBDevice::DEV_SEARCH_PRESENT)
+     {
+       flags|= DIGCF_PRESENT;
+     }
+-- 
+2.41.0.windows.1
+

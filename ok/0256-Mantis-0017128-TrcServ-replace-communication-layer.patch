@@ -1,0 +1,537 @@
+From 1720e2bbab1022b52f2d05aea2df8fd3f31a7820 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 19 Mar 2012 20:57:00 +0000
+Subject: [PATCH 0256/1077] Mantis 0017128: TrcServ: replace communication
+ layer
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@308 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/TraceSetLevel.h      |  23 ++
+ .../inc/Tools/TraceSetLevelDelegate.h         | 122 +++++++++++
+ .../cpp/Tools/inc/local_def_msystools.h       |  10 +-
+ .../Massai/cpp/Tools/makefile.mak             |   2 +
+ .../Massai/cpp/Tools/src/TraceSetLevel.cpp    |  14 ++
+ .../cpp/Tools/src/TraceSetLevelDelegate.cpp   | 206 ++++++++++++++++++
+ .../Massai/cpp/Trace/inc/TraceSession.h       |   8 +-
+ .../Massai/cpp/Trace/inc/local_def.h          |  10 +-
+ .../Massai/cpp/Trace/src/TraceSession.cpp     |   8 +-
+ 9 files changed, 389 insertions(+), 14 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevel.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevelDelegate.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevel.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevelDelegate.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevel.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevel.h
+new file mode 100644
+index 00000000..5ca71de3
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevel.h
+@@ -0,0 +1,23 @@
++// set tracelevel for TraceInterface
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef TRACESETLEVEL_H_INCLUDED
++#define TRACESETLEVEL_H_INCLUDED
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    class TraceSetLevel
++    {
++      public:
++        TraceSetLevel();
++        virtual ~TraceSetLevel();
++        virtual void setTraceLevel(long lTraceLevel) = 0;
++        virtual void setTraceTopic(const char* pszTopic, bool active) = 0;
++    };
++  }
++}
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevelDelegate.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevelDelegate.h
+new file mode 100644
+index 00000000..4a25453c
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceSetLevelDelegate.h
+@@ -0,0 +1,122 @@
++// set tracelevel for TraceDelegate
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef TRACESETLEVELDELEGATE_H_INCLUDED
++#define TRACESETLEVELDELEGATE_H_INCLUDED
++
++#include "tools/TraceSetLevel.h"
++#include "tools/TraceDelegate.h"
++#include "sysTools/mMutexCS.h"
++
++#include <string>
++#include <map>
++
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    class TraceSetLevelDelegate: public TraceSetLevel, public TraceDelegate
++    {
++      public:
++        TraceSetLevelDelegate(long lTraceLevel, bool defaultTopicState);
++        TraceSetLevelDelegate(long lTraceLevel, bool defaultTopicState, const TraceInterface* pDelegate);
++        virtual ~TraceSetLevelDelegate();
++        virtual void setTraceLevel(long lTraceLevel);
++        virtual void setTraceTopic(const char* pszTopic, bool active);
++        bool isActive(const char* pszTopic) const;
++        bool isActive(long lTraceLevel) const;
++
++        /*
++        ---------------------------------------------------------------------------
++           Trace Text
++
++        ---------------------------------------------------------------------------
++        */
++        void writeTraceText
++        (
++           long lTraceLevel,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           const char* pszText
++        ) const;
++        /*
++        ---------------------------------------------------------------------------
++           Trace Dump
++        ---------------------------------------------------------------------------
++        */
++        void dumpTrace
++        (
++           long lTraceLevel,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           long lDumpSize,
++           const char* pDump
++        ) const;
++        /*
++        ---------------------------------------------------------------------------
++          Start new files
++
++        ---------------------------------------------------------------------------
++        */
++        void startNewTraceFile(long lTraceLevel) const;
++        /*
++        ---------------------------------------------------------------------------
++           Trace Text
++
++        ---------------------------------------------------------------------------
++        */
++        void writeTraceTextForTopic
++        (
++           const char* pszTopic,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           const char* pszText
++        ) const;
++        /*
++        ---------------------------------------------------------------------------
++           Trace Dump
++        ---------------------------------------------------------------------------
++        */
++        void dumpTraceForTopic
++        (
++           const char* pszTopic,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           long lDumpSize,
++           const char* pDump
++        ) const;
++        /*
++        ---------------------------------------------------------------------------
++          Start new files
++
++        ---------------------------------------------------------------------------
++        */
++        void startNewTraceFileForTopic(const char* pszTopic) const;
++        /*
++        ---------------------------------------------------------------------------
++           move file
++        ---------------------------------------------------------------------------
++        */
++        void moveTrace
++        (
++           const char* pszPath
++        ) const;
++
++      private:
++        typedef std::map<std::string, bool> TopicState;
++
++        mutable Materna::MSSD::Mutex m_access;
++        long m_tracelevel;
++        bool m_defaultTopicState;
++        TopicState m_topicState;
++    };
++  }
++}
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 1b444ace..163791cd 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,6 +1,13 @@
++#define FILE_VER_BIN     1,0,1,9
++#define FILE_VER_STR     "FileVersion", "1.0.1.9\0"
++
+ /*! \page tools.lib tools.lib - Release Notes
+  *
+  *
++ *  \date 19.03.2012 \li V1.0.1.9
++ *                   \li SteT -  Mantis 0017128: TrcServ: replace communication layer
++ *                       added TraceSetLevel and TraceSetLevelDelegate to filter trace by tracelevel/topic
++ *
+  *  \date 21.10.2010 \li V1.0.1.8
+  *                   \li SteT -  Mantis 10547: TrcServ: trace client functions return type: void
+  *
+@@ -61,9 +68,6 @@
+  *
+  */
+ 
+-#define FILE_VER_BIN     1,0,1,8
+-#define FILE_VER_STR     "FileVersion", "1.0.1.8\0"
+-
+ #define FILEDESCRIPTION  "FileDescription"  ,"tools"
+ #define INTERNALNAME     "InternalName"     ,"tools\0"
+ #define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 0b32d84b..c8d2f072 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -38,6 +38,8 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\tracesToLocal.obj \
+                         $(_OBJ)\tracesToTrc.obj \
+                         $(_OBJ)\ResetTime.obj \
++                        $(_OBJ)\TraceSetLevel.obj \
++                        $(_OBJ)\TraceSetLevelDelegate.obj
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevel.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevel.cpp
+new file mode 100644
+index 00000000..6568e26d
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevel.cpp
+@@ -0,0 +1,14 @@
++// set tracelevel for TraceInterface
++
++#include "Tools/TraceSetLevel.h"
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    TraceSetLevel::TraceSetLevel()
++    {}
++    TraceSetLevel::~TraceSetLevel()
++    {}
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevelDelegate.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevelDelegate.cpp
+new file mode 100644
+index 00000000..a889fff4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSetLevelDelegate.cpp
+@@ -0,0 +1,206 @@
++//---------------------------------------------------------------------------
++//
++//  file:       TraceSetLevelDelegate.cpp
++//
++//  purpose:    interface for traceing
++//
++//  date:       15.12.2010
++//
++//  author:     Materna Information & Communications
++//
++//  history:
++//---------------------------------------------------------------------------
++
++#include "Tools/TraceSetLevelDelegate.h"
++#include "Tools/TraceInterface.h"
++#include "systools/mAutoMutexCS.h"
++
++
++using Materna::MSSD::AutoMutexCS;
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    TraceSetLevelDelegate::TraceSetLevelDelegate
++    (
++      long lTraceLevel,
++      bool defaultTopicState
++    ):
++      TraceSetLevel(),
++      TraceDelegate(),
++      m_access(),
++      m_tracelevel(lTraceLevel),
++      m_defaultTopicState(defaultTopicState),
++      m_topicState()
++    {}
++
++    TraceSetLevelDelegate::TraceSetLevelDelegate
++    (
++      long lTraceLevel,
++      bool defaultTopicState,
++      const TraceInterface* pDelegate
++    ):
++      TraceSetLevel(),
++      TraceDelegate(pDelegate),
++      m_access(),
++      m_tracelevel(lTraceLevel),
++      m_defaultTopicState(defaultTopicState),
++      m_topicState()
++    {}
++
++    TraceSetLevelDelegate::~TraceSetLevelDelegate()
++    {}
++
++    void TraceSetLevelDelegate::setTraceLevel(long lTraceLevel)
++    {
++      AutoMutexCS mx(m_access);
++      m_tracelevel = lTraceLevel;
++    }
++
++    void TraceSetLevelDelegate::setTraceTopic(const char* pszTopic, bool active)
++    {
++      AutoMutexCS mx(m_access);
++      if(pszTopic)
++      {
++        m_topicState[pszTopic] = active;
++      }
++    }
++
++    bool TraceSetLevelDelegate::isActive(const char* pszTopic) const
++    {
++      AutoMutexCS mx(m_access);
++      bool result = m_defaultTopicState;
++      if(pszTopic)
++      {
++        TopicState::const_iterator it = m_topicState.find(pszTopic);
++        if(it != m_topicState.end())
++        {
++          result = it->second;
++        }
++      }
++      return result;
++    }
++
++    bool TraceSetLevelDelegate::isActive(long lTraceLevel) const
++    {
++      AutoMutexCS mx(m_access);
++      return lTraceLevel <= m_tracelevel;
++    }
++
++    /*
++    ---------------------------------------------------------------------------
++       Trace Text
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::writeTraceText
++    (
++       long lTraceLevel,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       const char* pszText
++    ) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::writeTraceText(lTraceLevel, pszFile, sLine, pszFunction, pszText);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++       Trace Dump
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::dumpTrace
++    (
++       long lTraceLevel,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       long lDumpSize,
++       const char* pDump
++    ) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::dumpTrace(lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++      Start new files
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::startNewTraceFile(long lTraceLevel) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::startNewTraceFile(lTraceLevel);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++       Trace Text
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::writeTraceTextForTopic
++    (
++       const char* pszTopic,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       const char* pszText
++    ) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::writeTraceTextForTopic(pszTopic, pszFile, sLine, pszFunction, pszText);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++       Trace Dump
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::dumpTraceForTopic
++    (
++       const char* pszTopic,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       long lDumpSize,
++       const char* pDump
++    ) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::dumpTraceForTopic(pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++      Start new files
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::startNewTraceFileForTopic(const char* pszTopic) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::startNewTraceFileForTopic(pszTopic);
++      }
++    }
++    /*
++    ---------------------------------------------------------------------------
++       move file
++    ---------------------------------------------------------------------------
++    */
++    void TraceSetLevelDelegate::moveTrace
++    (
++       const char* pszPath
++    ) const
++    {
++      TraceDelegate::moveTrace(pszPath);
++    }
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+index 6bc491c7..fa39677f 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+@@ -33,11 +33,11 @@ namespace MASSAI
+   namespace trace
+   {
+     class TraceCmd;
+-    class TraceCallback: public Callback
++    class TraceLineCallback: public Callback
+     {
+       public:
+-        TraceCallback();
+-        virtual ~TraceCallback();
++        TraceLineCallback();
++        virtual ~TraceLineCallback();
+         virtual void traceLine(const std::string& head, const std::string& data) const;
+         void setOut(std::ostream* pOut);
+ 
+@@ -64,7 +64,7 @@ namespace MASSAI
+         boost::filesystem::path m_path; // path for current trace file
+         std::string m_filename;
+         OutputPtr m_pOut;
+-        TraceCallback m_callback;
++        TraceLineCallback m_callback;
+         TraceFormatCB m_format;
+         bool m_init;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+index 85471836..4fd4466b 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+@@ -1,13 +1,17 @@
+-#define FILE_VER_BIN     1,0,0,2
+-#define FILE_VER_STR     "FileVersion", "1.0.0.2\0"
++#define FILE_VER_BIN     1,0,0,3
++#define FILE_VER_STR     "FileVersion", "1.0.0.3\0"
+ 
+ 
+ /*! \page trace trace library - Release Notes
+  *
+- *  @version 1.0.0.2
++ *  @version 1.0.0.3
+  *
+  *  \section change1 Change history
+  *
++ *  \date 19.03.2012 \li V1.0.0.3
++ *                   \li SteT -  Mantis 0017128: TrcServ: replace communication layer
++ *                       conflict with massai-tools.lib renamed TraceCallback to TraceLineCallback
++ *
+  *  \date 23.02.2012 \li V1.0.0.2
+  *                   \li SteT Mantis 0022536: trace.dll: do not add \n to \r; use mode binary
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index 99af60d3..f49238bc 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -73,19 +73,19 @@ namespace MASSAI
+ {
+   namespace trace
+   {
+-    TraceCallback::TraceCallback():
++    TraceLineCallback::TraceLineCallback():
+       m_pOut(0)
+     {}
+-    TraceCallback::~TraceCallback()
++    TraceLineCallback::~TraceLineCallback()
+     {}
+-    void TraceCallback::traceLine(const std::string& head, const std::string& data) const
++    void TraceLineCallback::traceLine(const std::string& head, const std::string& data) const
+     {
+       if(m_pOut != 0)
+       {
+         (*m_pOut) << head << data << std::endl;
+       }
+     }
+-    void TraceCallback::setOut(std::ostream* pOut)
++    void TraceLineCallback::setOut(std::ostream* pOut)
+     {
+       m_pOut= pOut;
+     }
+-- 
+2.41.0.windows.1
+

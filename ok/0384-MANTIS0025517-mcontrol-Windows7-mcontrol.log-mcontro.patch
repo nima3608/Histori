@@ -1,0 +1,148 @@
+From 8063d1fdeee7dd2b2d18b4dd257693dc86bc4956 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 9 Jan 2013 19:57:07 +0000
+Subject: [PATCH 0384/1076] MANTIS0025517: mcontrol: Windows7; mcontrol.log,
+ mcontrol.reboot are written to the directory bin
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@460 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |  9 ++++--
+ .../Massai/cpp/Controller/inc/server.h        |  4 ++-
+ .../Massai/cpp/Controller/src/reboot.cpp      | 10 +++++--
+ .../Massai/cpp/Controller/src/server.cpp      | 30 ++++++++++++++++++-
+ 4 files changed, 46 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index e8e7a148..5b640c06 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,15 +9,18 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,7
+-#define FILE_VER_STR     "FileVersion", "1.0.2.7\0"
++#define FILE_VER_BIN     1,0,2,8
++#define FILE_VER_STR     "FileVersion", "1.0.2.8\0"
+ 
+ /*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+  *
+- *  @version 1.0.2.7
++ *  @version 1.0.2.8
+  *
+  *  \section change1 Change history
+  *
++ *  \date 09.01.2013 \li V1.0.2.8
++ *                   \li GIT: Mantis0025517: mcontrol: Windows7; mcontrol.reboot is written to the directory bin 
++ *
+  *  \date 25.10.2012 \li V1.0.2.7
+  *                   \li GIT: Mantis0024822: Mcontrol sets workingdir to the path of the executable. Change to use user path (Win7 compatibility) 
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/server.h b/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
+index 77a29928..3606d965 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
+@@ -21,7 +21,7 @@
+ #include "controller.h"
+ #include "controller_skel.h"
+ 
+-#define REBOOT_FILE_NAME ".\\mcontrol.reboot"
++#define REBOOT_FILE_NAME "mcontrol.reboot"
+ 
+ class controllerServant : public POA_Controller::kioskControl
+ {
+@@ -63,6 +63,8 @@ public:
+     bool isKioskBusy() { return(fKioskBusy); }
+ 
+     char *lastRebootTime();
++        
++    std::string getRebootFileName();
+ 
+     char *systemTime();
+     
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+index 2a18e80d..444177cc 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+@@ -39,7 +39,10 @@ long checkReboot::saveRebootDate()
+     mDate date = mDate::today();
+     mTime time = mTime();
+ 
+-    fp = fopen(REBOOT_FILE_NAME,"wb");
++    if(pServant)
++      fp = fopen(pServant->getRebootFileName().c_str(),"wb");
++    else
++      fp = fopen(REBOOT_FILE_NAME,"rb");
+ 
+     if(fp)
+     {
+@@ -71,7 +74,10 @@ long checkReboot::getRebootDate(mDate *pDate)
+     FILE *fp;
+     mDate date;
+ 
+-    fp = fopen(REBOOT_FILE_NAME,"rb");
++    if(pServant)
++      fp = fopen(pServant->getRebootFileName().c_str(),"rb");
++    else
++      fp = fopen(REBOOT_FILE_NAME,"rb");
+ 
+     if(fp && pDate)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+index 0c67ec3e..b13f3b4f 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+@@ -20,6 +20,9 @@
+ #include "pslist.h"
+ #include "serverwin.h"
+ 
++#include "shlobj.h"
++#include "Shlwapi.h"
++
+ #ifndef _lint
+ #include "boost/regex.hpp"
+ //using boost::cmatch;
+@@ -649,7 +652,7 @@ char szDateTime[256];
+ 
+     strcpy(szDateTime,"reboot time not available");
+ 
+-    fp = fopen(REBOOT_FILE_NAME,"rb");
++    fp = fopen(getRebootFileName().c_str(),"rb");
+ 
+     if(fp)
+     {
+@@ -665,6 +668,31 @@ char szDateTime[256];
+     return(CORBA::string_dup(szDateTime));
+ }
+ 
++std::string controllerServant::getRebootFileName()
++{
++    std::string userDir;
++    try
++    {
++      TCHAR app_path[MAX_PATH] = {0};
++      if(SHGetSpecialFolderPath(NULL, app_path, CSIDL_APPDATA, FALSE))
++      {
++        PathAddBackslash(reinterpret_cast<LPTSTR>(app_path));
++        std::string buf(app_path); buf.append("materna");
++        if(PathIsDirectory(buf.c_str()))
++        {
++          PathAppend(app_path,"materna\\");
++        }
++        userDir.assign(app_path).append(REBOOT_FILE_NAME);
++      } else
++      userDir.assign(".\\"REBOOT_FILE_NAME);
++    }
++    catch(...)
++    {
++      userDir.assign(".\\"REBOOT_FILE_NAME);
++    }
++    return userDir; 
++}
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   CORBA::Long controllerServant:forcedShutdownPlatform()
+-- 
+2.41.0.windows.1
+

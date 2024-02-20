@@ -1,0 +1,556 @@
+From 1d96ce19480c1ed6f2e057b154f2d97b318f795b Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 30 Oct 2014 13:22:01 +0000
+Subject: [PATCH 0597/1077] MANTIS 0032431 -added getter/setter in config
+ -added method traceCurrentDir
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@749 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |   4 +
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |   8 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 103 +++++++++++-------
+ .../cpp/mControl/src/mControl_dialog.cpp      |  89 ++++++++-------
+ .../Massai/cpp/mControl/src/mControl_main.cpp |  31 ++++--
+ .../cpp/mControl/src/mControl_tools.cpp       |  15 ++-
+ 6 files changed, 155 insertions(+), 95 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 6f784173..39b26f3e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -175,6 +175,10 @@ namespace mControl
+         /**
+         * Attribut getter Methods
+         */
++        int getWidth(){ return m_width; }
++        int getHeight(){ return m_height; }
++        int getX(){ return m_xCoordinate; }
++        int getY(){ return m_yCoordinate; }
+         HBITMAP getHBitMap(){ return m_hbmMain; }
+         HBITMAP getHBitMapInfo1(){ return m_hBitmap_info_1; }
+         HBITMAP getHBitMapInfo2(){ return m_hBitmap_info_2; }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index c3f109ca..c5a2a021 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -36,7 +36,7 @@
+ #include <string>
+ 
+ 
+-//TODO: check if needed
++//TODO: check if needed ----------------
+ #ifndef _lint
+ #include "boost/regex.hpp"
+ //using boost::cmatch;
+@@ -45,6 +45,9 @@ using boost::regex;
+ using boost::regbase;
+ #endif // #ifndef _lint
+ 
++#include <direct.h>
++#define GetCurrentDir _getcwd
++//---------------------------------------
+ 
+ using namespace std;
+ using namespace mSysProcess;
+@@ -170,6 +173,9 @@ namespace mControl
+         static long loadHostsFile();
+ 
+ 
++        static int traceCurrentDir();
++
++
+         /*TODO:
+          #ifndef _lint
+             static regex const option_pattern
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 8616dfe2..ba8b0fca 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -29,7 +29,7 @@
+ namespace mControl
+ {
+ /*******************************************************************************************************
+-* MConrolConfig implementation
++* GlobalConfig implementation
+ */
+ 
+     GlobalConfig::GlobalConfig() : 
+@@ -50,7 +50,7 @@ namespace mControl
+ 
+ 
+ /*******************************************************************************************************
+-* MConrolWindowConfig implementation
++* WindowConfig implementation
+ */
+     WindowConfig::WindowConfig(HINSTANCE hInst, GlobalConfig& config) :
+         m_globalConfig(config),
+@@ -98,10 +98,6 @@ namespace mControl
+ 
+     int WindowConfig::createWindow()
+     {
+-        
+-        int xSize, ySize;
+-        int xPosition, yPosition;
+-
+         DWORD myStyle = WS_POPUP;
+ 
+         TRACE(HERE,"check serverMode: %d ", this->getConfig().serverMode() );
+@@ -110,18 +106,19 @@ namespace mControl
+         {
+             myStyle |= WS_EX_TOPMOST;
+ 
+-            xSize = ySize = 0;
++            this->setX(0);
++            this->setY(0);
+ 
+-            xPosition = GetSystemMetrics(SM_CXSCREEN);
+-            yPosition = GetSystemMetrics(SM_CYSCREEN);
++            this->setWidth( GetSystemMetrics(SM_CXSCREEN) );
++            this->setHeight( GetSystemMetrics(SM_CYSCREEN) );
+         }
+         else
+         {
+-            xPosition = 384;
+-            yPosition = 288;
++            this->setWidth( 384 );
++            this->setHeight( 288 );
+ 
+-            xSize = GetSystemMetrics(SM_CXSCREEN)/2 - xPosition/2;
+-            ySize = GetSystemMetrics(SM_CYSCREEN)/2 - yPosition/2;
++            this->setX( GetSystemMetrics(SM_CXSCREEN)/2 - this->getWidth()/2 );
++            this->setY( GetSystemMetrics(SM_CYSCREEN)/2 - this->getHeight()/2 );
+ 
+             char szHostName[512];
+ 
+@@ -147,10 +144,10 @@ namespace mControl
+         m_hWnd = CreateWindow(  szClassName,            // window class name
+                                 szAppName,              // window caption
+                                 myStyle,                // window style
+-                                xPosition,              // initial x position
+-                                yPosition,              // initial y position
+-                                xSize,                  // initial x size
+-                                ySize,                  // initial y size
++                                this->getWidth(),       // initial width
++                                this->getHeight(),      // initial height
++                                this->getX(),                  // initial x size
++                                this->getY(),                  // initial y size
+                                 NULL,                   // parent window handle
+                                 NULL,                   // window menu handle
+                                 m_Wcex.hInstance,       // program instance handle
+@@ -168,6 +165,7 @@ namespace mControl
+         }
+     }
+ 
++
+     void WindowConfig::showWindow(int cmd)
+     {
+         // The parameters to ShowWindow explained:
+@@ -177,6 +175,7 @@ namespace mControl
+         UpdateWindow(m_hWnd);
+     }
+ 
++
+     LRESULT CALLBACK WindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+     { 
+         WindowConfig* pWnd;
+@@ -202,6 +201,7 @@ namespace mControl
+             return DefWindowProc(hWnd, msg, wParam, lParam);
+     }
+ 
++
+     LRESULT CALLBACK WindowConfig::wndProc
+         (
+             HWND hWnd, 
+@@ -219,9 +219,7 @@ namespace mControl
+         initialStart = INISTATUS_INITIAL;
+ 
+ 
+-        static int                  xSize,xPosition,
+-                                    ySize,yPosition,
+-                                    cxLoad,
++        static int                  cxLoad,
+                                     cyLoad;
+ 
+         PAINTSTRUCT                 ps;
+@@ -248,6 +246,11 @@ namespace mControl
+             case WM_CREATE:                                         
+                 TRACE(HERE,"WM_CREATE");
+ 
++
++                /**
++                *   Ensures that the common control DLL (Comctl32.dll) is loaded, and registers specific common control classes from the DLL. 
++                *   An application must call this function before creating a common control. 
++                */
+                 iccex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+                 iccex.dwICC  = ICC_PROGRESS_CLASS;
+ 
+@@ -256,22 +259,30 @@ namespace mControl
+                     TRACE(HERE,"Error initializing CommonControls ");
+                 }
+ 
+-                xSize =  0;
+-                ySize =  0;
+-                xPosition = GetSystemMetrics(SM_CXSCREEN);
+-                yPosition = GetSystemMetrics(SM_CYSCREEN);
+ 
++                /**
++                *   build and set BitMap
++                */
++                this->setX(0);
++                this->setY(0);
++                this->setWidth( GetSystemMetrics(SM_CXSCREEN) );
++                this->setHeight( GetSystemMetrics(SM_CYSCREEN) );
++
++                //get a handle to a device context (DC) for the client area of a specified window
+                 hdc = GetDC(hWnd);
+ 
++                //setting the Bitmap
++
++                Tools::traceCurrentDir();
+                 if(m_globalConfig.serverMode())
+                     this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small.bmp") );
+                 else
+                 {
+-                    if(xPosition<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
++                    if(this->getWidth()<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
+                     {
+                         this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
+                     }
+-                    else if(xPosition>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
++                    else if(this->getWidth()>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
+                     {
+                         this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
+                     }
+@@ -292,36 +303,42 @@ namespace mControl
+                         }
+                     }
+                 }
++                if(!this->m_hbmMain)
++                {
++                    TRACE(HERE,"ERROR initializing hbmMain");
++                }
++                
+ 
++                //freeing the hdc for use by other applications
+                 ReleaseDC(hWnd, hdc);
+ 
+                 if(!m_globalConfig.serverMode())
+                 {
+                     cyLoad = 20;
+ 
+-                    //TRACE(HERE,"xSize = %d, ySize = %d, xPosition = %d, yPosition = %d",xSize,ySize,xPosition,yPosition);
++                    //TRACE(HERE,"xSize = %d, ySize = %d, width = %d, height = %d",xSize,ySize,this->getWidth(),this->getHeight());
+ 
+-                    SetWindowPos(hWnd,HWND_TOPMOST,xSize,ySize,xPosition,yPosition,0);
++                    SetWindowPos(hWnd,HWND_TOPMOST,this->getX(),this->getY(),this->getWidth(),this->getHeight(),0);
+                 }
+                 else
+                 {
+-                    xSize = 0;
+-                    ySize = 0;
++                    this->setX(0);
++                    this->setY(0);
+ 
+-                    xPosition = 384;
+-                    yPosition = 288;
++                    this->setWidth( 384 );
++                    this->setHeight( 288 );
+ 
+                     cyLoad = 10;
+                 }
+ 
+-                cxLoad = xPosition; 
++                cxLoad = this->getWidth(); 
+ 
+                 this->setHWndLoad( CreateWindow(
+                                         PROGRESS_CLASS,
+                                         NULL,
+                                         WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
+                                         0,
+-                                        yPosition   - cyLoad,
++                                        this->getHeight()   - cyLoad,
+                                         cxLoad,
+                                         cyLoad,
+                                         hWnd,
+@@ -359,14 +376,18 @@ namespace mControl
+                 {
+                     TRACE(HERE,".\\mcontrol_small_ds.bmp not found");
+                 }
++                if(!Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_ds.bmp"))
++                {
++                    TRACE(HERE,".\\mcontrol_small_ds.bmp creation failed");
++                }
+ 
+                 BITMAP tmpBmp;
+                 GetObjectA(this->getHBitMapInfo1(), sizeof(BITMAP), &tmpBmp);
+                 
+                 
+                 int iLpos,iTpos;
+-                ((xPosition-tmpBmp.bmWidth)!=0)?iLpos=(xPosition-tmpBmp.bmWidth)/2:iLpos=0;
+-                ((yPosition-tmpBmp.bmHeight)!=0)?iTpos=(yPosition-tmpBmp.bmHeight)/2:iTpos=0;
++                ((this->getWidth()-tmpBmp.bmWidth)!=0)?iLpos=(this->getWidth()-tmpBmp.bmWidth)/2:iLpos=0;
++                ((this->getHeight()-tmpBmp.bmHeight)!=0)?iTpos=(this->getHeight()-tmpBmp.bmHeight)/2:iTpos=0;
+                 
+                 MoveWindow(this->getHwndInfo1(),iLpos,iTpos,tmpBmp.bmWidth,tmpBmp.bmHeight,false);
+                 SendMessage(this->getHwndInfo1(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->m_hBitmap_info_1);
+@@ -400,8 +421,8 @@ namespace mControl
+                 BITMAP tmpBmp1;
+                 GetObjectA(this->getHBitMapInfo2(), sizeof(BITMAP), (LPSTR)&tmpBmp1);
+                 
+-                ((xPosition-tmpBmp1.bmWidth)!=0)?iLpos=(xPosition-tmpBmp1.bmWidth)/2:iLpos=0;
+-                ((yPosition-tmpBmp1.bmHeight)!=0)?iTpos=(yPosition-tmpBmp1.bmHeight)/2:iTpos=0;
++                ((this->getWidth()-tmpBmp1.bmWidth)!=0)?iLpos=(this->getWidth()-tmpBmp1.bmWidth)/2:iLpos=0;
++                ((this->getHeight()-tmpBmp1.bmHeight)!=0)?iTpos=(this->getHeight()-tmpBmp1.bmHeight)/2:iTpos=0;
+                 
+                 MoveWindow(this->getHwndInfo2(),iLpos,iTpos,tmpBmp1.bmWidth,tmpBmp1.bmHeight,false);
+                 SendMessage(this->getHwndInfo2(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->getHBitMapInfo2());
+@@ -434,7 +455,7 @@ namespace mControl
+                     //ySize = rect.bottom / 2 - bitmap.bmHeight / 2;
+ 
+                     if(m_globalConfig.serverMode())
+-                      BitBlt(hdc,0,0,xPosition,yPosition,hdcMem,0,0,SRCCOPY);
++                        BitBlt(hdc,0,0,this->getWidth(),this->getHeight(),hdcMem,0,0,SRCCOPY);
+                     else
+                       StretchBlt(hdc,
+                                  0,0, rect.right, rect.bottom,
+@@ -528,6 +549,7 @@ namespace mControl
+         the nasty button obsolete.
+         (AkA)
+         */
++        /*
+         case WM_SYSCOMMAND:
+             TRACE(SecondaryRuntime_HERE,"WM_SYSCOMMAND(%x)", wParam);
+             if ((GET_SC_WPARAM(wParam) != SC_RESTORE && GET_SC_WPARAM(wParam) != SC_MAXIMIZE) || m_globalConfig.serverMode()) break;    // nothing to do
+@@ -554,7 +576,7 @@ namespace mControl
+                         if the indication is send again, a new connection is opened
+                            (the servant is still listening) and
+                            the indication can be send successfully
+-                      */
++                      *//*
+                       TRACE(HERE_5, "WARNING: 'Go into service' failed, retry");
+                       TRACE(HERE_5, "WARNING: Corba exception occured: <%s>", e._info());
+                       pPltfCtrl->returnToService();
+@@ -580,6 +602,7 @@ namespace mControl
+             }
+ 
+             break;
++            */
+ 
+             //original as in the old mControl
+             //TODO: implement case VK_F12
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 71d08d45..395af6a7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -340,50 +340,57 @@ namespace mControl
+                             FILE_FLAG_SEQUENTIAL_SCAN,
+                             NULL);
+ 
+-         if(hFile == INVALID_HANDLE_VALUE)
+-           return(NULL);
++        if(hFile == INVALID_HANDLE_VALUE)
++        {
++            TRACE(HERE,"hFile [INVALID_HANDLE_VALUE]");
++            return(NULL);
++        }
+ 
+         // Read in the whole file
+ 
+-         dwFileSize = GetFileSize (hFile, &dwHighSize);
+-
+-         if(dwHighSize)
+-         {
+-           CloseHandle(hFile);
+-           return(NULL);
+-         }
+-
+-         pbmfh = (struct tagBITMAPFILEHEADER *)malloc (dwFileSize);
+-
+-         if(!pbmfh)
+-         {
+-           CloseHandle (hFile);
+-           return(NULL);
+-         }
+-
+-         bSuccess = ReadFile(hFile, pbmfh, dwFileSize, &dwBytesRead, NULL);
+-         CloseHandle (hFile);
+-
+-         // Verify the file
+-
+-         if(!bSuccess || (dwBytesRead != dwFileSize)
+-                      || (pbmfh->bfType != * (WORD *) "BM")
+-                      || (pbmfh->bfSize != dwFileSize))
+-         {
+-           free (pbmfh);
+-           return(NULL);
+-         }
+-              // Create the DDB
+-
+-         hBitmap = CreateDIBitmap(hdc,
+-                                  (BITMAPINFOHEADER *) (pbmfh + 1),
+-                                  CBM_INIT,
+-                                  (BYTE *) pbmfh + pbmfh->bfOffBits,
+-                                  (BITMAPINFO *) (pbmfh + 1),
+-                                  DIB_RGB_COLORS);
+-         free (pbmfh);
+-
+-         return(hBitmap);
++        dwFileSize = GetFileSize (hFile, &dwHighSize);
++
++        if(dwHighSize)
++        {
++            TRACE(HERE,"dwHighSize not NULL");
++            CloseHandle(hFile);
++            return(NULL);
++        }
++
++        pbmfh = (struct tagBITMAPFILEHEADER *)malloc (dwFileSize);
++
++        if(!pbmfh)
++        {
++            TRACE(HERE,"pbmfh is NULL");
++            CloseHandle (hFile);
++            return(NULL);
++        }
++
++        bSuccess = ReadFile(hFile, pbmfh, dwFileSize, &dwBytesRead, NULL);
++        CloseHandle (hFile);
++
++        // Verify the file
++
++        if(!bSuccess || (dwBytesRead != dwFileSize)
++                    || (pbmfh->bfType != * (WORD *) "BM")
++                    || (pbmfh->bfSize != dwFileSize))
++        {
++            TRACE(HERE,"bSuccess ERROR");
++            free (pbmfh);
++            return(NULL);
++        }
++            // Create the DDB
++
++        TRACE(HERE,"CreateDIBitmap");
++        hBitmap = CreateDIBitmap(hdc,
++                                (BITMAPINFOHEADER *) (pbmfh + 1),
++                                CBM_INIT,
++                                (BYTE *) pbmfh + pbmfh->bfOffBits,
++                                (BITMAPINFO *) (pbmfh + 1),
++                                DIB_RGB_COLORS);
++        free (pbmfh);
++
++        return(hBitmap);
+     }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 63850c54..c8a0c65b 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -104,6 +104,16 @@ int WINAPI WinMain ( HINSTANCE hInst, HINSTANCE, char * cmdline, int )
+     openTrace("New_mControl");
+     TRACE(HERE,"entering WinMain...");
+ 
++    std::string str = string( cmdline );
++    std::size_t found = str.find("DEBUG");
++    if (found!=std::string::npos)
++    {
++        //DelayTime for Debbuging-Mode
++        int delay = 2500;
++        TRACE(HERE,"Debug Delay [%d]", delay);
++        OS_Sleep(delay);
++    }
++
+     globalHInstance = hInst;
+     
+     mMainCommandLine cmdline_parser( "mControl", cmdline );
+@@ -165,7 +175,6 @@ int mDaemon_main( int argc, char const * const * argv )
+     //******************************************************************************************
+     //*  init-delay
+     //******************************************************************************************
+-    //TODO: Linker Fehler beheben
+     TRACE(HERE,"mDaemon initializing...");
+     mDaemon_indInitializing(60000);
+ 
+@@ -367,14 +376,15 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+         if( mDaemon_isService() )
+         {
++            //TODO: Check if needed
+             //PostMessage(hwnd,WM_PAINT,0,0);
+             RedrawWindow(mainDialog.getWindowConfig().getHwnd(),NULL,NULL,RDW_INTERNALPAINT);
+         }
+ 
+         mDaemon_indReady(0);
+ 
+-        //TODO: delay the start of the platform
+-        //PostMessage(hwnd,WM_START_DELAY_TIMER, lDelay, 0);
++        //start a Delay Timer, so that the touch interface is initiated without complications
++        PostMessage(mainDialog.getWindowConfig().getHwnd(),WM_START_DELAY_TIMER, lDelay, 0);
+ 
+         
+         // process all remaining window messages
+@@ -384,16 +394,12 @@ int mDaemon_main( int argc, char const * const * argv )
+             DispatchMessage(&msg);
+ 
+         //******************************************************************************************
+-        //  initialize and starting servatn, scheduler and rebooter 
+-        //******************************************************************************************
+-        Poco::TaskManager tm;
+-        
++        //  initialize and starting servant, scheduler and rebooter 
++        //******************************************************************************************      
+         MControlServant servant     = MControlServant(mainMsgQueue);
+-
+-        KioskReboot     rebooter    = KioskReboot(100, mainMsgQueue, globalConfig, &servant);
+-
+         corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl",19998);
+ 
++        KioskReboot     rebooter    = KioskReboot(100, mainMsgQueue, globalConfig, &servant);     
+         rebooter.saveRebootDate();
+         
+         
+@@ -428,7 +434,7 @@ int mDaemon_main( int argc, char const * const * argv )
+             DispatchMessage(&msg);
+         }
+ 
+-        
++        //TODO: check if needed
+         //Shutdhown Rebooter and Scheduler
+         /*
+         if(!globalConfig.serverMode())
+@@ -466,7 +472,8 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+ 
+ /*******************************************************************************************************
+-* Implementation of Methods needed to use mDaemon.h 
++*   TODO: check for the right configuration
++*   Implementation of Methods needed to use mDaemon.h 
+ */
+ 
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index 422e1ed7..e7d78f03 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -648,5 +648,18 @@ namespace mControl
+     }
+ 
+ 
+-    
++    int Tools::traceCurrentDir()
++    {
++
++        char cCurrentPath[FILENAME_MAX];
++
++        if (!GetCurrentDir(cCurrentPath, sizeof(cCurrentPath)))
++            {
++            return errno;
++            }
++
++        cCurrentPath[sizeof(cCurrentPath) - 1] = '\0'; /* not really required */
++
++        TRACE(HERE,"The current working directory is: %s", cCurrentPath);
++    }
+ }
+-- 
+2.41.0.windows.1
+

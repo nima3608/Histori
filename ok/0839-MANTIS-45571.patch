@@ -1,0 +1,169 @@
+From d2ddd456ceabf5406a9f312111bf6e53cab319df Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 18 Apr 2017 14:03:02 +0000
+Subject: [PATCH 0839/1077] MANTIS 45571 Mantis 45571: ETX/ACK for F+D Gemini
+ New Etx-Ack keyword LH_RX_ACK - use LH protocol, wait for ACK
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1192 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/serialCon/mPEtxAck.hpp     | 31 +++++++++++++++++--
+ .../Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp  | 22 +++++++++++--
+ 2 files changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+index 1227b038..67835ff3 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2015 MATERNA Information & Communications
++ * Copyright (c) 2001-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -22,6 +22,12 @@
+ //! Do not check received checksum
+ #define CHK_RX_CHK 0
+ 
++#define MAX_TX_FRAME_RETRIES    2       // Allow 2 retries (3 tries)
++
++// Mix protocol log entries into low-level trace
++#include "matKey.h"
++#define LOGPROTOCOL( x ) m_char_in_out.set( MATKEY_TRACE, x );
++
+ 
+ 
+ /**
+@@ -130,9 +136,18 @@ private:
+    )
+       throw()
+    {
+-      int tries_left = 3;
++      int tries_left = MAX_TX_FRAME_RETRIES + 1;
+       while( tries_left-- )
+       {
++         if( tries_left == MAX_TX_FRAME_RETRIES )
++         {
++            // First (perhaps only) try.
++            LOGPROTOCOL( "--- write ..." );
++         }
++         else
++         {
++            LOGPROTOCOL( "--- write - retry ..." );
++         }
+          m_char_in_out.write( ASCII_STX );
+          char TxLRC = 0;
+          char RxAck = 0;
+@@ -180,11 +195,18 @@ private:
+          {
+             m_rx_ack_queue.read( RxAck, 500 );
+             if( RxAck == ASCII_ACK )
++            {
++               LOGPROTOCOL( "--- write." );
+                return RC_OK;
++            }
+          }
+          else
++         {
++            LOGPROTOCOL( "--- write." );
+             return RC_OK;
++         }
+       }
++      LOGPROTOCOL( "--- write - failed." );
+       return RC_ERROR;
+    }
+ 
+@@ -269,6 +291,7 @@ public:
+       case STA_INI:
+          if( RxC == ASCII_STX )
+          {
++            LOGPROTOCOL( "        --- rcvd STX" );
+             m_rx_segment.clear();
+             m_rx_state = STA_DATA;
+             m_rx_lrc = 0;
+@@ -283,11 +306,13 @@ public:
+          switch( RxC )
+          {
+          case ASCII_STX:
++            LOGPROTOCOL( "        --- rcvd unexpected STX" );
+             m_rx_segment.clear();
+             m_rx_lrc = 0;
+             break;
+          case ASCII_ETB:
+          case ASCII_ETX:
++            LOGPROTOCOL( "        --- rcvd ETX" );
+             if( m_cfg_rx_lrc )
+             {
+                // Next byte received should be LRC
+@@ -323,12 +348,14 @@ public:
+          if( RxC == m_rx_lrc  )
+          {
+ #endif
++            LOGPROTOCOL( "        --- rcvd OK" );
+             m_char_in_out.write( ASCII_ACK );
+             m_rx_msg_queue.write( m_rx_segment );
+ #if CHK_RX_CHK
+          }
+          else
+          {
++            LOGPROTOCOL( "        --- rcvd wrong LRC" );
+             m_char_in_out.write( ASCII_NAK );
+          }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+index 3d281d00..8efa2c92 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2015 MATERNA Information & Communications
++ * Copyright (c) 2001-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -183,12 +183,25 @@ public:
+       throw()
+    {
+       M_LH = true;
+-      // Do not send ACK
++      // Do not expect ACK
+       M_Proto.setNoRxAck();
+       // DLE-Escape only the protocol-relevant bytes
+       M_Proto.setEscapeMinControl();
+    }
+ 
++   /**
++    *
++    * Set modyfied LH protocol status.
++    *
++   **/
++   void setLH_RxAck()
++      throw()
++   {
++      M_LH = true;
++      // DLE-Escape only the protocol-relevant bytes
++      M_Proto.setEscapeMinControl();
++   }
++
+    /**
+     *
+     * Get LH protocol status.
+@@ -417,6 +430,11 @@ void mIEtxAck::set( char const * Key, char const * Value )
+             Handle->setLH();
+             return;
+          }
++         if( !strcmp( Value, "LH_RX_ACK" ) )
++         {
++            Handle->setLH_RxAck();
++            return;
++         }
+          if( !strcmp( Value, "CHKNONE" ) )
+          {
+             Handle->setChkNone();
+-- 
+2.41.0.windows.1
+

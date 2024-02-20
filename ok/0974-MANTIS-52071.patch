@@ -1,0 +1,241 @@
+From 3409193df4f889c28543152b2a7baebcc1096225 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 4 Nov 2019 15:46:42 +0000
+Subject: [PATCH 0974/1076] MANTIS 52071 massaiCfgXB.exe version 2.4.0 - MANTIS
+ 52071: Extend CfgValuesS read operation by item sort - Return the directory
+ contents in ascending order.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1494 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++--
+ .../cpp/CfgXMgrB/inc/cfgValueDirectory.hpp    | 34 ++++++++++++-------
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 +++++--
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     |  4 +--
+ .../cpp/CfgXMgrB/src/cfgValueDirectory.cpp    | 28 ++++++++++++---
+ 5 files changed, 69 insertions(+), 23 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 98a09562..1b2879ae 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -583,8 +583,17 @@
+ //! - Fix setMeta() to take original scalar value before destroying
+ //!   the value.
+ //! - Increase time announced to initialize from 5 to 15 seconds.
+-#define FILE_VER_BIN 2,3,2,0
+-#define FILE_VER_DTS "2.3.2.0"
++// #define FILE_VER_BIN 2,3,2,0
++// #define FILE_VER_DTS "2.3.2.0"
++//
++//! @version 2.4.0
++//! @date    04.11.2019
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 52071: Extend CfgValuesS read operation by item sort
++//! - Return the directory contents in ascending order.
++#define FILE_VER_BIN 2,4,0,0
++#define FILE_VER_DTS "2.4.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueDirectory.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueDirectory.hpp
+index 46d3facd..5b0eb792 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueDirectory.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueDirectory.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2019 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -22,7 +22,6 @@
+ #include <list>
+ 
+ 
+-
+ //! Directory entry base class.
+ class cfgValueNode;
+ 
+@@ -43,7 +42,7 @@ class cfgValueDirectory :
+     * The directory entries value.
+     *
+    **/
+-   cfgValueNodes M_Value;
++   cfgValueNodes        m_value;
+ 
+ public:
+ 
+@@ -70,38 +69,47 @@ public:
+ 
+    /**
+     *
+-    * Save the object to an ostream.
++    * Return the mutable directory entries.
+     *
+-    * @param Dst:       The stream to write the object to.
++    * @return The entries.
+     *
+    **/
+-   bool save( std::ostream & Dst ) const;
++   cfgValueNodes & get();
+ 
+    /**
+     *
+-    * Return the mutable directory entries.
++    * Return the non-mutable directory entries.
+     *
+     * @return The entries.
+     *
+    **/
+-   cfgValueNodes & get();
++   cfgValueNodes const & get() const;
+ 
+    /**
+     *
+-    * Return the non-mutable directory entries.
++    * Insert a new directory entry.
+     *
+-    * @return The entries.
++    * @param item:      The new item to be inserted.
+     *
+    **/
+-   cfgValueNodes const & get() const;
++   void insert( cfgValueNode * item );
++
++   /**
++    *
++    * Save the object to an ostream.
++    *
++    * @param dst:       The stream to write the object to.
++    *
++   **/
++   bool save( std::ostream & dst ) const;
+ 
+ private:
+ 
+    //! Copy constructor - intentionally not implemented.
+-   cfgValueDirectory( cfgValueDirectory const & Src );
++   cfgValueDirectory( cfgValueDirectory const & src );
+ 
+    //! Assignment - intentionally not implemented.
+-   cfgValueDirectory & operator=( cfgValueDirectory const & Src );
++   cfgValueDirectory & operator=( cfgValueDirectory const & src );
+ 
+ };
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 63c5122b..903e6ccd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -577,8 +577,17 @@
+ //! - Fix setMeta() to take original scalar value before destroying
+ //!   the value.
+ //! - Increase time announced to initialize from 5 to 15 seconds.
+-#define FILE_VER_BIN 2,3,2,0
+-#define FILE_VER_DTS "2.3.2.0"
++// #define FILE_VER_BIN 2,3,2,0
++// #define FILE_VER_DTS "2.3.2.0"
++//
++//! @version 2.4.0
++//! @date    04.11.2019
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 52071: Extend CfgValuesS read operation by item sort
++//! - Return the directory contents in ascending order.
++#define FILE_VER_BIN 2,4,0,0
++#define FILE_VER_DTS "2.4.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index daec917d..a5ace2f6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2018 MATERNA Information & Communications
++ * Copyright (c) 2002-2019 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -890,7 +890,7 @@ namespace
+          {
+             //-std::cout << "node_find_or_creat - create." << std::endl;
+             StepNode = new cfgValueNode( Token );
+-            NodeValueDirectory->get().push_back( StepNode );
++            NodeValueDirectory->insert( StepNode );
+          }
+          else
+          {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueDirectory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueDirectory.cpp
+index f2c4a60b..7f7f7f07 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueDirectory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueDirectory.cpp
+@@ -7,20 +7,22 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2019 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
+ #include "cfgValueDirectory.hpp"
+ 
++#include "cfgValueNode.hpp"
++
+ #include <iostream>
+ 
+ 
+ 
+ cfgValueDirectory::cfgValueDirectory() :
+    cfgValue(),
+-   M_Value()
++   m_value()
+ {
+ }
+ 
+@@ -54,14 +56,32 @@ bool cfgValueDirectory::save
+ 
+ cfgValueNodes & cfgValueDirectory::get()
+ {
+-   return M_Value;
++   return m_value;
+ }
+ 
+ 
+ 
+ cfgValueNodes const & cfgValueDirectory::get() const
+ {
+-   return M_Value;
++   return m_value;
++}
++
++
++
++void cfgValueDirectory::insert( cfgValueNode * item )
++{
++   cfgValueNodes::iterator it = m_value.begin();
++   while( it != m_value.end() )
++   {
++      if( item->name() < (*it)->name() )
++      {
++         m_value.insert( it, item );
++         return;
++      }
++      ++it;
++   }
++   // Directory had no bigger elements
++   m_value.push_back( item );
+ }
+ 
+ 
+-- 
+2.41.0.windows.1
+

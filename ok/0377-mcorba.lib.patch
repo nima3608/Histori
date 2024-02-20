@@ -1,0 +1,318 @@
+From 733c73a597b2219be0ec2c8ee903855e92d706d6 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 27 Nov 2012 20:38:48 +0000
+Subject: [PATCH 0377/1077] mcorba.lib V1.0.6.20 Mantis 0024715: Build: VC10;
+ fix compiler warnings
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@449 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/MassaiCorba/inc/massaiCORBA_def.h     | 270 +++++++++---------
+ .../Massai/cpp/MassaiCorba/src/trace.cpp      |   4 +-
+ 2 files changed, 139 insertions(+), 135 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index e931ce01..75ee719a 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -9,140 +9,144 @@
+  *
+  ************************************************************************/
+ 
+-// #define FILE_VER_BIN     1,0,6,19
+-// #define FILE_VER_STR     "FileVersion", "1.0.6.19\0"
++// #define FILE_VER_BIN     1,0,6,20
++// #define FILE_VER_STR     "FileVersion", "1.0.6.20\0"
+ 
+-/*! \page mcorba.lib, mcorbas.lib Massai CORBA library - Release Notes
+- *
+- *  @version 1.0.6.19
+- *
+- *  \section change1 Change history
+- *
+- *  \date 23.08.2012 \li V1.0.6.19
+- *                   \li SteT - bugfix, Mantis 24158 call ACE::init, ACE::fini around use of ORB_init, ORB::destroy
+- *                              bugfix, use correct POA for servant deactivation
+- *                              bugfix, fixed reading port after hostname in configuration from CORBA.SERVANTS.*
+- *                              bugfix, with ORBClientConnectionHandler RW, ACE TAO ignores CloseConnection-Messages
+- *                                      use MT_NOUPCALL instead
+- *
+- *  \date 13.03.2012 \li V1.0.6.18
+- *                   \li SteT - enhancement, Mantis 0018942: mCorba: creation order of servant orb and client orb and synchronisation problems
+- *
+- *                   \li environment settings:
+- *                      CORBA_AUTOPOLL_ENABLE     enable auto polling, client only
+- *                      CORBA_AUTOPOLL_DISABLE    disable auto polling, client only
+- *                      CORBA_AUTOPOLL_TIMEOUT    poll timeout in ms, default 60000 ms, client only
+- *                      CORBA_INVOCATION_TIMEOUT  default invocation timeout in ms, default 60000ms
+- *                      ORBENDPOINT_PORT          default orb endpoint port
+- *                      CORBA_NUMERIC_ORB         use ip instead of hostname in ior
+- *                      CORBA_ENABLE_LOGGING      enable ORB logging
+- *                      CORBA_USE_NESTED_CALLS    allow nested calls: use the threads in client calls for processing servant calls
+- *
+- *                   \li logging
+- *                      TAO ORB logging is written to stderr
+- *                      massaiCORBA logging is written with OutputDebugString
+- *
+- *                   \li localhost
+- *                      cfg: empty host in configuration (CORBA.SERVANTS.*) is mapped to localhost
+- *                      servant creation: localhost is mapped to 0.0.0.0
+- *                      client connecting servant: localhost is mapped to local hostname
+- *                      to bind and connect to 127.0.0.1 use 127.0.0.1 for hostname
+- *
+- *                   \li multiple network interfaces
+- *                      the hostname in the ior is set to the local hostname, if the servant is listening on all interfaces (interface = localhost or no interface)
+- *                      to use multiple hostnames in the ior use the interface = 0.0.0.0
+- *
+- *                   \li multiple orbs
+- *                      every module creates his own orbs (avoid interaction between orb creation in dlls and executable)
+- *                      for every ORBEndpoint a new orb is created
+- *                      clients use the first servant orb or an own client orb, if no servant orb is created
+- *                      for implicit activation the first servant orb is used
+- *                         warning: this is not module independent, all modules use the same orb for implicit activation
+- *                                  the first servant orb of the module that creates its first servant orb at last is used
+- *                                  => avoid creating servants in dlls
+- *
+- *  \date 09.06.2011 \li V1.0.6.17
+- *                   \li GiT, rollback of previous change
+- *
+- *  \date 09.06.2011 \li V1.0.6.16
+- *                   \li GiT, modification: changed orb connection handler behaviour to RW
+- *                            TAO description : RW selects a strategy that simply blocks in recv() when waiting for a response from the server
+- *                                              instead of waiting in the Reactor using the Leader/Followers pattern.
+- *                            This change should prevent nested upcalls.
+- *                       To change the behaviour back to the old strategy set the environment variable
+- *                       STANDARD_ORB_WAIT_STRATEGY
+- *                   \li QA-Tests: All platform modules including the connection to applications are affected, a thorough integration test is needed
+- *
+- *  \date 21.04.2011 \li V1.0.6.15
+- *                   \li SteT, enhancement, added trace to corbaorb
+- *
+- *  \date 28.10.2009 \li V1.0.6.14
+- *                   \li SteT Mantis 11665: deactivate CorbaPoll (per default)
+- *
+- *     per default the corbaClient is created with the parameter AUTO_POLL_OFF
+- *     this behaviour can be changed with environment setting:
+- *        use CORBA_AUTOPOLL_ENABLE to enabling the polling for non local connections
+- *
+- *  \date 28.04.2009 \li V1.0.6.13
+- *                   \li SteT bugfix: use killClientOrb when starting new Servant to avoid LOCATION_FORWARD from servant port to client port
+- *
+- *  \date 04.12.2008 \li V1.0.6.12
+- *                   \li SteT Mantis 6871: correct CorbaPoll Tracelevel
+- *
+- *  \date 04.09.2008 \li V1.0.6.11
+- *                   \li SteT EDB 28111: Invalid Pointer Read / Free Memory Read in CorbaPoll
+- *
+- *
+- *  \date 17.07.2008 \li V1.0.6.10
+- *                   \li SteT Change: corbaClient sends KeepAlive requests
+- *
+- *   corbaClient is derived from corbaPoll and the default behaviour of corbaClient ist changed:
+- *
+- *     per default the corbaClient is created with the parameter AUTO_POLL_NON_LOCAL
+- *     if the servant is not obvious on the same machine, the client send every minute a LocateRequest message to the servant
+- *
+- *     the behaviour can be changed with the autopoll parameter in the constructor
+- *     and with environment setting:
+- *        use CORBA_AUTOPOLL_DISABLE to disable the polling
+- *        use CORBA_AUTOPOLL_TIMEOUT to set the polling timeout (in ms)
+- *
+- *   a new corbaClient constructor is added for callback-listener set by remote (the KeepAlive mechanism is not used if the listener is used without the corbaClient)
+- *
+- *
+- *  \date 12.11.2007 \li V1.0.6.9
+- *                   \li SteT Bugfix unresolved external of CfgXMgrB (ACE_NO_INLINE removed)
+- *
+- *  \date 25.07.2007 \li V1.0.6.8
+- *                   \li SteT EDB 26866: the classes corbaClient, corbaServantEx stores the ior and releases the memory used
+- *                   \li     the method ior() returns const char* (was char*)
+- *                   \li     the caller is not responsible for releasing the returned buffer any more
+- *
+- *  \date 20.06.2007 \li V1.0.6.7
+- *                   \li SteT EDB 27607: wrong constructor results in access violation
+- *
+- *  \date 20.06.2007 \li V1.0.6.6
+- *                   \li SteT EDB 27562: Pure virtual function call, after removeServant
+- *
+- *  \date 30.05.2007 \li V1.0.6.5
+- *                   \li feature - hostname_in_ior can be set from external. PtM
+- *
+- *  \date 17.01.2007 \li V1.0.6.4 MaM
+- *                   \li MaM EDB 27073: mCorba / mDisplay: kein CORBA Roundtrip TO bei Fremdplattform
+- *
+- *  \date 09.08.2006 \li V1.0.6.3 SteT
+- *                   \li SteT EDB 26406: Erweiterung der massaiCORBA Funktionalität um ClearRTTimeout
+- *
+- *
+- *  \date 09.08.2006 \li V1.0.6.2 SteT
+- *                   \li RoundTrip Timeout wird jetzt initial ORB weit gesetzt
+- *
+- *  \date 04.07.2006 \li V1.0.6.1 BrN
+- *                   \li TAO 1.4 mit Connection Timeout
+- *
+- *  \date 08.05.2006 \li V1.0.6.0 MaM
+- *                   \li TAO 1.4 mit RoundTrip Timeout
+- *
+- */
++/*!
++\page mcorba.lib, mcorbas.lib Massai CORBA library - Release Notes
++
++@version 1.0.6.20
++
++\section change1 Change history
++
++\date 27.11.2012 \li V1.0.6.20
++                 \li SteT - enhancement, Mantis 0024715: Build: VC10; fix compiler warnings
++
++\date 23.08.2012 \li V1.0.6.19
++                 \li SteT - bugfix, Mantis 24158 call ACE::init, ACE::fini around use of ORB_init, ORB::destroy
++                            bugfix, use correct POA for servant deactivation
++                            bugfix, fixed reading port after hostname in configuration from CORBA.SERVANTS.*
++                            bugfix, with ORBClientConnectionHandler RW, ACE TAO ignores CloseConnection-Messages
++                                    use MT_NOUPCALL instead
++
++\date 13.03.2012 \li V1.0.6.18
++                 \li SteT - enhancement, Mantis 0018942: mCorba: creation order of servant orb and client orb and synchronisation problems
++
++                 \li environment settings:
++                    CORBA_AUTOPOLL_ENABLE     enable auto polling, client only
++                    CORBA_AUTOPOLL_DISABLE    disable auto polling, client only
++                    CORBA_AUTOPOLL_TIMEOUT    poll timeout in ms, default 60000 ms, client only
++                    CORBA_INVOCATION_TIMEOUT  default invocation timeout in ms, default 60000ms
++                    ORBENDPOINT_PORT          default orb endpoint port
++                    CORBA_NUMERIC_ORB         use ip instead of hostname in ior
++                    CORBA_ENABLE_LOGGING      enable ORB logging
++                    CORBA_USE_NESTED_CALLS    allow nested calls: use the threads in client calls for processing servant calls
++
++                 \li logging
++                    TAO ORB logging is written to stderr
++                    massaiCORBA logging is written with OutputDebugString
++
++                 \li localhost
++                    cfg: empty host in configuration (CORBA.SERVANTS.*) is mapped to localhost
++                    servant creation: localhost is mapped to 0.0.0.0
++                    client connecting servant: localhost is mapped to local hostname
++                    to bind and connect to 127.0.0.1 use 127.0.0.1 for hostname
++
++                 \li multiple network interfaces
++                    the hostname in the ior is set to the local hostname, if the servant is listening on all interfaces (interface = localhost or no interface)
++                    to use multiple hostnames in the ior use the interface = 0.0.0.0
++
++                 \li multiple orbs
++                    every module creates his own orbs (avoid interaction between orb creation in dlls and executable)
++                    for every ORBEndpoint a new orb is created
++                    clients use the first servant orb or an own client orb, if no servant orb is created
++                    for implicit activation the first servant orb is used
++                       warning: this is not module independent, all modules use the same orb for implicit activation
++                                the first servant orb of the module that creates its first servant orb at last is used
++                                => avoid creating servants in dlls
++
++\date 09.06.2011 \li V1.0.6.17
++                 \li GiT, rollback of previous change
++
++\date 09.06.2011 \li V1.0.6.16
++                 \li GiT, modification: changed orb connection handler behaviour to RW
++                          TAO description : RW selects a strategy that simply blocks in recv() when waiting for a response from the server
++                                            instead of waiting in the Reactor using the Leader/Followers pattern.
++                          This change should prevent nested upcalls.
++                     To change the behaviour back to the old strategy set the environment variable
++                     STANDARD_ORB_WAIT_STRATEGY
++                 \li QA-Tests: All platform modules including the connection to applications are affected, a thorough integration test is needed
++
++\date 21.04.2011 \li V1.0.6.15
++                 \li SteT, enhancement, added trace to corbaorb
++
++\date 28.10.2009 \li V1.0.6.14
++                 \li SteT Mantis 11665: deactivate CorbaPoll (per default)
++
++   per default the corbaClient is created with the parameter AUTO_POLL_OFF
++   this behaviour can be changed with environment setting:
++      use CORBA_AUTOPOLL_ENABLE to enabling the polling for non local connections
++
++\date 28.04.2009 \li V1.0.6.13
++                 \li SteT bugfix: use killClientOrb when starting new Servant to avoid LOCATION_FORWARD from servant port to client port
++
++\date 04.12.2008 \li V1.0.6.12
++                 \li SteT Mantis 6871: correct CorbaPoll Tracelevel
++
++\date 04.09.2008 \li V1.0.6.11
++                 \li SteT EDB 28111: Invalid Pointer Read / Free Memory Read in CorbaPoll
++
++
++\date 17.07.2008 \li V1.0.6.10
++                 \li SteT Change: corbaClient sends KeepAlive requests
++
++ corbaClient is derived from corbaPoll and the default behaviour of corbaClient ist changed:
++
++   per default the corbaClient is created with the parameter AUTO_POLL_NON_LOCAL
++   if the servant is not obvious on the same machine, the client send every minute a LocateRequest message to the servant
++
++   the behaviour can be changed with the autopoll parameter in the constructor
++   and with environment setting:
++      use CORBA_AUTOPOLL_DISABLE to disable the polling
++      use CORBA_AUTOPOLL_TIMEOUT to set the polling timeout (in ms)
++
++ a new corbaClient constructor is added for callback-listener set by remote (the KeepAlive mechanism is not used if the listener is used without the corbaClient)
++
++
++\date 12.11.2007 \li V1.0.6.9
++                 \li SteT Bugfix unresolved external of CfgXMgrB (ACE_NO_INLINE removed)
++
++\date 25.07.2007 \li V1.0.6.8
++                 \li SteT EDB 26866: the classes corbaClient, corbaServantEx stores the ior and releases the memory used
++                 \li     the method ior() returns const char* (was char*)
++                 \li     the caller is not responsible for releasing the returned buffer any more
++
++\date 20.06.2007 \li V1.0.6.7
++                 \li SteT EDB 27607: wrong constructor results in access violation
++
++\date 20.06.2007 \li V1.0.6.6
++                 \li SteT EDB 27562: Pure virtual function call, after removeServant
++
++\date 30.05.2007 \li V1.0.6.5
++                 \li feature - hostname_in_ior can be set from external. PtM
++
++\date 17.01.2007 \li V1.0.6.4 MaM
++                 \li MaM EDB 27073: mCorba / mDisplay: kein CORBA Roundtrip TO bei Fremdplattform
++
++\date 09.08.2006 \li V1.0.6.3 SteT
++                 \li SteT EDB 26406: Erweiterung der massaiCORBA Funktionalität um ClearRTTimeout
++
++
++\date 09.08.2006 \li V1.0.6.2 SteT
++                 \li RoundTrip Timeout wird jetzt initial ORB weit gesetzt
++
++\date 04.07.2006 \li V1.0.6.1 BrN
++                 \li TAO 1.4 mit Connection Timeout
++
++\date 08.05.2006 \li V1.0.6.0 MaM
++                 \li TAO 1.4 mit RoundTrip Timeout
++
++*/
+ 
+ // #define FILEDESCRIPTION  "FileDescription"  ,"Massai CORBA library\0"
+ // #define INTERNALNAME     "InternalName"     ,MassaiCORBA"\0"
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+index 03fadc0b..20b34be5 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+@@ -81,7 +81,7 @@ namespace massaiCorba
+     char buffer[BUFFERSIZE];
+     _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+     buffer[sizeof(buffer)-1]= 0;
+-    getTrace().writeTraceText(lLevel, pszFile, sLine, pszFunction, buffer);
++    getTrace().writeTraceText(lLevel, pszFile, static_cast<short>(sLine), pszFunction, buffer);
+     va_end(arg_ptr);
+   }
+ 
+@@ -98,6 +98,6 @@ namespace massaiCorba
+   //---------------------------------------------------------------------------
+   void dump(long lLevel, const char* pszFile, long sLine, const char* pszFunction, const char* pData, long usLen)
+   {
+-    getTrace().dumpTrace(lLevel, pszFile, sLine, pszFunction, usLen, pData);
++    getTrace().dumpTrace(lLevel, pszFile, static_cast<short>(sLine), pszFunction, usLen, pData);
+   }
+ }
+-- 
+2.41.0.windows.1
+

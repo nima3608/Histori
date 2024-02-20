@@ -1,0 +1,94 @@
+From e6f95be5fd6db705b76b55758229ef036137b72b Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 7 Jun 2016 14:50:38 +0000
+Subject: [PATCH 0682/1000] MANTIS 0041253 [SetKioskData]:  - Add multi DNS
+ functionality  - BUGFIX: If you have () in your interface name (e.g. Intel(R)
+ PRO/1000 MT Network Connection), the script threw an error.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1031 90b65887-3827-0410-9a23-83215b262276
+---
+ .../setup/SetKioskData/configNetwork.cmd      | 42 ++++++++++++++-----
+ 1 file changed, 32 insertions(+), 10 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
+index b93dab11..5c3c5f0d 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
+@@ -9,31 +9,36 @@ set INTERFACE=%~2
+ set ADDRESS=%~3
+ set SUBNET=%~4
+ set GATEWAY=%~5
+-set DNS1=%~6
++set DNS=%~6
+ set NETSH=%SystemRoot%\system32\netsh.exe
+ 
++set LOG_IFACE=%INTERFACE:(=%
++set LOG_IFACE=%LOG_IFACE:)=%
++set LOG_IFACE=%LOG_IFACE:/=%
++
+ if "%LOG%" == "" (
+     set LOG=nul
+ ) else (
+-    set LOG=%LOG%.configNetwork.log
++    set LOG=%LOG%.configNetwork.%LOG_IFACE%.log
+ )
+ 
+ rem set ui-language for wmic format
+ FOR /F tokens^=2^ delims^=^" %%a IN ('wmic os get MUILanguages /Value') DO set LANG=%%a
+ 
++echo Trying to find network interface for "%INTERFACE%" >> "%LOG%"
+ call :get_iface_name IFACE "%INTERFACE%"
+-if "%IFACE%" == "" (
+-    echo Fail to get interface from given interface name: %INTERFACE%. Abort! >> "%LOG%"
++if "" == "" (
++    echo Fail to get interface from given interface name: "!INTERFACE!". Abort. >> "%LOG%"
+     exit /B 1
+ )
+ 
+-if "%DNS1%" == "" set DNS1=none
++if "%DNS%" == "" set DNS=none
+ 
+ echo Configure Network interface %IFACE% with >> "%LOG%"
+ echo IPv4 ADDRESS = %ADDRESS% >> "%LOG%"
+ echo Subnet       = %SUBNET% >> "%LOG%"
+ echo Gateway      = %GATEWAY% >> "%LOG%"
+-echo DNS          = %DNS1% >> "%LOG%"
++echo DNS          = %DNS% >> "%LOG%"
+ 
+ %NETSH% interface ip set address name="%IFACE%" source=static address=%ADDRESS% mask=%SUBNET% gateway=%GATEWAY% gwmetric=0 >> "%LOG%" 2>&1
+ if not "%errorlevel%" == "0" (
+@@ -41,10 +46,27 @@ if not "%errorlevel%" == "0" (
+     exit /B 1
+ )
+ 
+-%NETSH% interface ip set dns     name="%IFACE%" source=static address=%DNS1% >> "%LOG%" 2>&1
+-if not "%errorlevel%" == "0" (
+-    echo Fail to set DNS server on interface %IFACE%! Abort. >> "%LOG%"
+-    exit /B 1
++set /A Index=1
++
++for %%A IN (%DNS%) DO (
++    rem set primary DNS server
++    if !Index! equ 1 ( 
++        %NETSH% interface ip set dns name="%IFACE%" source=static address=%%A primary >> "%LOG%" 2>&1
++        if not "%errorlevel%" == "0" (
++            echo Fail to set primary DNS server on interface %IFACE%! Abort. >> "%LOG%"
++            exit /B 1
++        )
++    )
++    
++    rem set additional dns server
++    if !Index! gtr 1 ( 
++        %NETSH% interface ip add dns name="%IFACE%" address=%%A index=!Index! >> "%LOG%" 2>&1
++        if not "%errorlevel%" == "0" (
++            echo Fail to set additional DNS server on interface %IFACE%! Abort. >> "%LOG%"
++            exit /B 1
++        )
++    )  
++    set /A Index=!Index!+1 
+ )
+ 
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,331 @@
+From 6d4b8d6b538aba8446494a57d9f16dc8276a50da Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 23 Jan 2020 18:11:46 +0000
+Subject: [PATCH 0990/1077] MANTIS 0057194 extension: GPPDev: Custom RFID
+ printer configure power, sensitivity, frequency
+
+tools.lib
+V1.0.1.24
+- add cfgSelection, cfgCachedSelection
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1524 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/configItem.h         |  84 +++++++++
+ .../cpp/Tools/inc/local_def_msystools.h       |  11 +-
+ .../Massai/cpp/Tools/src/configItem.cpp       | 170 ++++++++++++++++++
+ 3 files changed, 262 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+index 9130405a..6cf9629d 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -5,6 +5,7 @@
+ #include "cfgclnt/nConfigText.hpp"
+ #include "cfgclnt/nConfigTextList.hpp"
+ #include "cfgclnt/nConfigNumber.hpp"
++#include "cfgclnt/nConfigSelection.hpp"
+ #include "cfgclnt/nConfigCache.hpp"
+ 
+ namespace config
+@@ -313,4 +314,87 @@ namespace config
+ 
+       void create(const char*& rights, const char*& explanation, std::list<std::string>& defaultValue, long& maxLength);
+   };
++
++  class cfgCachedSelection: private nConfig::cache<long, nConfig::gclSelection>
++  {
++    public:
++      cfgCachedSelection
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        long defaultValue,
++        const nConfig::selection* begin,
++        const nConfig::selection* end,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgCachedSelection
++      (
++        const std::string& item,
++        long defaultValue,
++        const nConfig::selection* begin,
++        const nConfig::selection* end,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgCachedSelection();
++      long getValue();
++      std::string getItem();
++      void setValue(long value);
++
++    private:
++      std::string explanation;
++      long defaultValue;
++      const nConfig::selection* begin;
++      const nConfig::selection* end;
++      std::string rights;
++      std::string item;
++      MASSAI::trace::TraceInterface& trc;
++
++      virtual void create(const char*& rights, const char*& explanation, long& defaultIndex, const nConfig::selection*& begin, const nConfig::selection*& end);
++      long uncached();
++  };
++
++  class cfgSelection: private nConfig::gcSelection
++  {
++    public:
++      cfgSelection
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        long defaultValue,
++        const nConfig::selection* begin,
++        const nConfig::selection* end,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgSelection
++      (
++        const std::string& item,
++        long defaultValue,
++        const nConfig::selection* begin,
++        const nConfig::selection* end,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgSelection();
++      long getValue() const throw(nConfig::exception);
++      std::string getItem();
++      void setValue(long value);
++
++    private:
++      std::string item;
++      long defaultValue;
++      const nConfig::selection* begin;
++      const nConfig::selection* end;
++      std::string explanation;
++      std::string rights;
++      MASSAI::trace::TraceInterface& trc;
++
++      virtual void create(const char*& rights, const char*& explanation, long& defaultIndex, const nConfig::selection*& begin, const nConfig::selection*& end);
++  };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 2eb1d1c7..502a6ca1 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,23
+-#define FILE_VER_STR     "FileVersion", "1.0.1.23"
++#define FILE_VER_BIN     1,0,1,24
++#define FILE_VER_STR     "FileVersion", "1.0.1.24"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.23
++@version 1.0.1.24
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.24
++\li 23.01.2020
++\li SteT - Mantis 0057194: GPPDev: Custom RFID printer configure power, sensitivity, frequency
++- add cfgSelection, cfgCachedSelection
++
+ \version 1.0.1.23
+ \li 11.04.2019
+ \li SteT - Mantis  0054305: Receipt Drucker: Nippon Primex NP2411D
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+index 88e8f66f..8fdf45a0 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -642,4 +642,174 @@ namespace config
+     }
+     set(value);
+   }
++
++
++  cfgCachedSelection::cfgCachedSelection
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    long defaultValue,
++    const nConfig::selection* begin,
++    const nConfig::selection* end,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::cache<long, nConfig::gclSelection>((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    begin(begin),
++    end(end),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgCachedSelection::cfgCachedSelection
++  (
++    const std::string& item,
++    long defaultValue,
++    const nConfig::selection* begin,
++    const nConfig::selection* end,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::cache<long, nConfig::gclSelection>(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    begin(begin),
++    end(end),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgCachedSelection::create(const char*& rights, const char*& explanation, long& defaultValue, const nConfig::selection*& begin, const nConfig::selection*& end)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d; %.200s; %.200s",
++      this->item.c_str(),
++      this->defaultValue,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    for(const nConfig::selection* it = this->begin; it != this->end; it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "selection %d: %.200s; %.200s", it->index(), it->text(), it->explanation());
++    }
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    begin = this->begin;
++    end = this->end;
++  }
++
++  cfgCachedSelection::~cfgCachedSelection()
++  {}
++
++  long cfgCachedSelection::getValue()
++  {
++    return cached();
++  }
++
++  void cfgCachedSelection::setValue(const long value)
++  {
++    if(cached() != value)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %d", item.c_str(), value);
++      setIndex(value);
++    }
++  }
++
++  long cfgCachedSelection::uncached()
++  {
++    long result = getIndex();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d", item.c_str(), result);
++    return result;
++  }
++
++  std::string cfgCachedSelection::getItem()
++  {
++    return item;
++  }
++
++
++  cfgSelection::cfgSelection
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    long defaultValue,
++    const nConfig::selection* begin,
++    const nConfig::selection* end,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::gcSelection((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    rights(rights),
++    explanation(explanation),
++    defaultValue(defaultValue),
++    begin(begin),
++    end(end),
++    trc(root.trc)
++  {}
++
++  cfgSelection::cfgSelection
++  (
++    const std::string& item,
++    long defaultValue,
++    const nConfig::selection* begin,
++    const nConfig::selection* end,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::gcSelection(item.c_str(), client.c_str()),
++    item(item),
++    rights(rights),
++    explanation(explanation),
++    defaultValue(defaultValue),
++    begin(begin),
++    end(end),
++    trc(trc)
++  {}
++
++  cfgSelection::~cfgSelection()
++  {}
++
++  void cfgSelection::create(const char*& rights, const char*& explanation, long& defaultValue, const nConfig::selection*& begin, const nConfig::selection*& end)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d; %.200s; %.200s",
++      this->item.c_str(),
++      this->defaultValue,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    for(const nConfig::selection* it = this->begin; it != this->end; it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "selection %d: %.200s; %.200s", it->index(), it->text(), it->explanation());
++    }
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    begin = this->begin;
++    end = this->end;
++  }
++
++  long cfgSelection::getValue() const throw(nConfig::exception)
++  {
++    long result = getIndex();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d", item.c_str(), result);
++    return result;
++  }
++
++  void cfgSelection::setValue(const long value)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %d", item.c_str(), value);
++    setIndex(value);
++  }
++
++  std::string cfgSelection::getItem()
++  {
++    return item;
++  }
+ }
+-- 
+2.41.0.windows.1
+

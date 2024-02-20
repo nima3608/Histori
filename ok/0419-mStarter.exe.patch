@@ -1,0 +1,1179 @@
+From 62c757a20c1dad33316ba1b8e8e700d59dc106eb Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Jun 2013 20:01:01 +0000
+Subject: [PATCH 0419/1076] mStarter.exe V1.1.1.5 Mantis 0026902: Internet
+ Explorer Process doesn't close closing child processes, except process of
+ exlusionList read environment variables and configuration entry
+ PLATFORM.ENVIRONMENT.Variables for substitution new configuration item:  
+ PLATFORM.ENVIRONMENT.Variables   type: text list   description: substitution
+ variables; format variablename=value    default:
+ TerminationExclusion=ctfmon.exe
+
+TerminationExlusion is used for exlusionList in process termination if nstarter
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@514 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mstarter_args.h |  18 +-
+ .../cpp/Controller/inc/mstarter_config.h      |  21 +-
+ .../Massai/cpp/Controller/inc/mstarter_def.h  | 264 +++++++-------
+ .../cpp/Controller/inc/mstarter_notify.h      |  13 +-
+ .../Massai/cpp/Controller/src/mstarter.cpp    |   2 +-
+ .../cpp/Controller/src/mstarter_args.cpp      |  10 +-
+ .../cpp/Controller/src/mstarter_config.cpp    | 332 ++++++++----------
+ .../cpp/Controller/src/mstarter_notify.cpp    |  19 +-
+ 8 files changed, 315 insertions(+), 364 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_args.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_args.h
+index 33184988..b10a5736 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_args.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_args.h
+@@ -1,10 +1,5 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_args.h
+-//
+-//  purpose:    arguments for mstarter
+-//
+-//---------------------------------------------------------------------------
++// arguments for mstarter
++
+ #ifndef MSTARTER_ARGS_H_INCLUDED
+ #define MSTARTER_ARGS_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+@@ -15,9 +10,7 @@
+ 
+ namespace mStarter
+ {
+-  /*
+-    command line arguments for mstarter
+-  */
++  // command line arguments for mstarter
+   class Arguments
+   {
+     public:
+@@ -27,9 +20,8 @@ namespace mStarter
+       std::string stopSemaphore;
+       bool help;
+   };
+-  /*
+-    extract arguments from commandline
+-  */
++
++  // extract arguments from commandline
+   Arguments readArguments(int argc, const char** argv);
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_config.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_config.h
+index a51ad945..4a7cfc92 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_config.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_config.h
+@@ -1,10 +1,5 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_config.h
+-//
+-//  purpose:    configuration items for mstarter
+-//
+-//---------------------------------------------------------------------------
++// configuration items for mstarter
++
+ #ifndef MSTARTER_CONFIG_H_INCLUDED
+ #define MSTARTER_CONFIG_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+@@ -16,15 +11,17 @@
+ #include "systools/mSysProcessList.h"
+ #include "tools/TraceInterface.h"
+ #include "systools/mMutexCS.h"
++#include "text/cEnvSubst.hpp"
+ 
++#include <list>
+ #include <string>
+ #include <memory>
+ 
+ namespace mStarter
+ {
+-  /*
+-    configuration items for mstarter
+-  */
++  typedef std::list<std::string> TextList;
++
++  // configuration items for mstarter
+   class ConfigHardwareList;
+   class ConfigSoftwareList;
+   class ConfigListenOnChange;
+@@ -42,8 +39,11 @@ namespace mStarter
+       virtual mSysProcess::PropertyList getProcessList() const;
+       mSysProcess::WatchdogSettings getWatchdogSettings() const;
+       virtual void valueChanged(const std::string& item);
++      TextList getExclusionList() const;
+ 
+     private:
++      void initEnv();
++
+       typedef std::auto_ptr<ConfigHardwareList> ConfigHardwareListPtr;
+       typedef std::auto_ptr<ConfigSoftwareList> ConfigSoftwareListPtr;
+       typedef std::auto_ptr<ConfigListenOnChange> ConfigListenOnChangePtr;
+@@ -60,6 +60,7 @@ namespace mStarter
+       ConfigListenOnChangePtr m_listenOnChange;
+       ConfigExecListPtr m_execList;
+       ConfigTimeoutPtr m_timeout;
++      CEnvSubst m_substituteEnv;
+   };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+index 6d3b2459..673d3b8d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -9,131 +9,147 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,1,1,3
+-#define FILE_VER_STR     "FileVersion", "1.1.1.3\0"
++#define FILE_VER_BIN     1,1,1,5
++#define FILE_VER_STR     "FileVersion", "1.1.1.5\0"
+ 
+-/*! \page massaistarter mStarter - Release Notes
+- *
+- *  @version 1.1.1.3
+- *
+- *  \section change1 Change history
+- *
+- *  \date 14.08.2012 \li V1.1.1.3
+- *                   \li extension - JK Mantis 24145
+- *                        - Port range is now hardcoded to 20002 - 20199
+- *                          ( Configuration can be enabled
+- *                            with ALLOW_TO_CONFIGURE_PORT_RANGE ).
+- *                        - CORBA.SERVANTS.<servant> is no longer set
+- *                          ( Option can be enabled with SETUP_CORBA_SERVANTS ).
+- *                          A separate tool setCORBASERVANTS can be
+- *                          configured in PLATFORM.EXEC for legacy apps.
+- *
+- *  \date 10.08.2012 \li V1.1.1.2
+- *                   \li bugfix - SteT Mantis 0024162: Suspicious assignment
+- *
+- *  \date 10.08.2012 \li V1.1.1.1
+- *                   \li extension - JK Mantis 24145 Remove CORBA.SERVANTS configuration
+- *
+- *  \date 16.12.2011 \li V1.1.1.0
+- *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
+- *
+- *     fixed problems in mstarter:
+- *           - listenOnChange can be activated without restarting mstarter:
+- *              listen on items:
+- *                SERVICES.STARTER.listenOnConfigChange
+- *                PLATFORM.HARDWARE.Devices
+- *                PLATFORM.SOFTWARE.Services
+- *                PLATFORM.EXEC.*
+- *           - listenOnChange works for processes without configured WND
+- *               send ctrl-break to console applications (console ist started as new process group)
+- *               first close visible windows and then all windows for process without option WND
+- *           - option WNDCLASS added for PLATFORM.EXEC.* items to find process main window by class
+- *           - mstarter arguments changed:
+- *               WatchDog-Timeout must be set with ":"
+- *               semaphore name is optional, if not set mstarter waits for ctrl-c, ctrl-break
+- *               mstarter.exe [<StopSemaphoreName>][-server][-cfg][-watchDog:<ms>]
+- *                 StopSemaphoreName: name of event semaphore, posted to stop
+- *                 server: start in server mode
+- *                 cfg: create configuraton items
+- *                 watchdog: timeout for restart of processes; -1 deactivates restart
+- *           - watchdog:
+- *                process are watched all the time
+- *                more information of a process are printed at process terminated
+- *           - shutdown:
+- *                when all processes are terminated, mstarter terminated
+- *                mstarter can be stopped while starting processes
+- *           - progress bar:
+- *                progress is calculated by mstarter; depends on mcontrol V1.0.2.0
+- *
+- *
+- *  \date 17.11.2011 \li V1.1.0.8
+- *                   \li GiT: Mantis0021563: SelfServiceCommon Controller changes for VC10 compatibilty
+- *
+- *  \date 12.09.2011 \li V 1.1.0.7
+- *                   \li GiT: Mantis0014919: placeholder for system paths
+- *                   \li      The following substitutions are now supported:
+- *                   \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
+- *                   \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
+- *                   \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
+- *
+- *  \date 25.01.2010 \li V 1.1.0.6
+- *                   \li bufix - Wrong illegal pointer dereference - crash (JK)
+- *
+- *  \date 08.12.2009 \li V 1.1.0.5
+- *                   \li feature - JK MANTIS0011257: mcontrol reboot wird nicht ausgeführt, plattform wird nicht gestoppt
+- *                   \li           - More traces and try-catch blocks to handle unexpected situations.
+- *                   \li           - Increase use of systools functions.
+- *
+- *  \date 27.10.2009 \li V 1.1.0.4
+- *                   \li enhancement - SteT MANTIS 0010640: Plattform-Konfiguration PLATFORM.EXEC set length to 9000 (some Execs are longer than 255)
+- *
+- *  \date 26.05.2009 \li V 1.1.0.3
+- *                   \li enhancement - SteT MANTIS 0006873: description for configuration items under PLATFORM.EXEC improved
+- *                   \li                       allow " in parameter
+- *
+- *  \date 26.11.2008 \li V 1.1.0.2
+- *                   \li bufix - creating correct default entries for server mode (PtM)
+- *
+- *  \date 21.11.2008 \li V 1.1.0.1
+- *                   \li bufix - catch exceptions during config access (PtM)
+- *
+- *  \date 20.11.2008 \li V 1.1.0.0 (PtM)
+- *                   \li bugfix - process count bar display now the correct number of running applications
+- *                   \li bugfix - removed memory leaks (configuration)
+- *                   \li feature - with the configuration item "SERVICES.STARTER.listenOnConfigChange" the feature
+- *                                 "listen on configuration changes" can be activated.
+- *                                 This feature starts and stops processes if they have been added or removed under:
+- *                                 PLATFORM.SOFTWARE.Services or PLATFORM.HARDWARE.Devices
+- *
+- *  \date 02.06.2008 \li V 1.0.5.7
+- *                   \li SteT EDB 28044: wrong working directory used when the program parameters contain \
+- *                   \li     now the parameters are ignored when the working directory is extracted from command line if the parameter are enclosed in double quotes
+- *
+- *  \date 07.03.2008 \li V 1.0.5.6
+- *                   \li SteT closed unused handles, read configuration once at startup (memory leak)
+- *
+- *  \date 07.08.2007 \li V 1.0.5.5
+- *                   \li SteT EDB 27719: evaluate all parameter values from EXEC configuration
+- *
+- *  \date 29.03.2007 \li V 1.0.5.4
+- *                   \li bugfix display correct process bar after watchdog restarted a process(PtM)
+- *
+- *  \date 24.01.2007 \li V 1.0.5.3
+- *                   \li SteT Send CTRL_C and CTRL_BREAK
+- *
+- *  \date 07.11.2006 \li V 1.0.5.2
+- *                   \li SteT EDB 26729: Remove CTRL_BREAK
+- *
+- *
+- *  \date 27.04.2006 \li V 1.0.5.1  BschR
+- *                   \li change startup order from: devices -> services -> platform to: services -> platform -> devices
+- *
+- *  \date 21.03.2006 \li V 1.0.5.0  MaM
+- *                   \li new feature: watchDog (default: ON, PollTime 1000 ms, no selective Processlist)
+- *                   \li to switch off watchDog call: mstarter.exe <sema> [-server] -watchDog -1
+- *                   \li to to set watchDog poll intervall call: mstarter.exe <sema> [-server] -watchDog <ms>
+- *
+- */
++/*!
++
++\page massaistarter mStarter - Release Notes
++
++@version 1.1.1.5
++
++\section change1 Change history
++
++\date 14.08.2012
++\li V1.1.1.5
++\li Mantis 0026902: Internet Explorer Process doesn't close
++closing child processes, except process of exlusionList
++read environment variables and configuration entry PLATFORM.ENVIRONMENT.Variables for substitution
++new configuration item:
++  PLATFORM.ENVIRONMENT.Variables
++  type: text list
++  description: substitution variables; format variablename=value
++   default: TerminationExclusion=ctfmon.exe
++
++TerminationExlusion is used for exlusionList in process termination if nstarter
++
++
++\date 14.08.2012 \li V1.1.1.3
++                 \li extension - JK Mantis 24145
++                      - Port range is now hardcoded to 20002 - 20199
++                        ( Configuration can be enabled
++                          with ALLOW_TO_CONFIGURE_PORT_RANGE ).
++                      - CORBA.SERVANTS.<servant> is no longer set
++                        ( Option can be enabled with SETUP_CORBA_SERVANTS ).
++                        A separate tool setCORBASERVANTS can be
++                        configured in PLATFORM.EXEC for legacy apps.
++
++\date 10.08.2012 \li V1.1.1.2
++                 \li bugfix - SteT Mantis 0024162: Suspicious assignment
++
++\date 10.08.2012 \li V1.1.1.1
++                 \li extension - JK Mantis 24145 Remove CORBA.SERVANTS configuration
++
++\date 16.12.2011 \li V1.1.1.0
++                 \li SteT Mantis 0021947: mstarter: problems at shutdown
++
++   fixed problems in mstarter:
++         - listenOnChange can be activated without restarting mstarter:
++            listen on items:
++              SERVICES.STARTER.listenOnConfigChange
++              PLATFORM.HARDWARE.Devices
++              PLATFORM.SOFTWARE.Services
++              PLATFORM.EXEC.*
++         - listenOnChange works for processes without configured WND
++             send ctrl-break to console applications (console ist started as new process group)
++             first close visible windows and then all windows for process without option WND
++         - option WNDCLASS added for PLATFORM.EXEC.* items to find process main window by class
++         - mstarter arguments changed:
++             WatchDog-Timeout must be set with ":"
++             semaphore name is optional, if not set mstarter waits for ctrl-c, ctrl-break
++             mstarter.exe [<StopSemaphoreName>][-server][-cfg][-watchDog:<ms>]
++               StopSemaphoreName: name of event semaphore, posted to stop
++               server: start in server mode
++               cfg: create configuraton items
++               watchdog: timeout for restart of processes; -1 deactivates restart
++         - watchdog:
++              process are watched all the time
++              more information of a process are printed at process terminated
++         - shutdown:
++              when all processes are terminated, mstarter terminated
++              mstarter can be stopped while starting processes
++         - progress bar:
++              progress is calculated by mstarter; depends on mcontrol V1.0.2.0
++
++
++\date 17.11.2011 \li V1.1.0.8
++                 \li GiT: Mantis0021563: SelfServiceCommon Controller changes for VC10 compatibilty
++
++\date 12.09.2011 \li V 1.1.0.7
++                 \li GiT: Mantis0014919: placeholder for system paths
++                 \li      The following substitutions are now supported:
++                 \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
++                 \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
++                 \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
++
++\date 25.01.2010 \li V 1.1.0.6
++                 \li bufix - Wrong illegal pointer dereference - crash (JK)
++
++\date 08.12.2009 \li V 1.1.0.5
++                 \li feature - JK MANTIS0011257: mcontrol reboot wird nicht ausgeführt, plattform wird nicht gestoppt
++                 \li           - More traces and try-catch blocks to handle unexpected situations.
++                 \li           - Increase use of systools functions.
++
++\date 27.10.2009 \li V 1.1.0.4
++                 \li enhancement - SteT MANTIS 0010640: Plattform-Konfiguration PLATFORM.EXEC set length to 9000 (some Execs are longer than 255)
++
++\date 26.05.2009 \li V 1.1.0.3
++                 \li enhancement - SteT MANTIS 0006873: description for configuration items under PLATFORM.EXEC improved
++                 \li                       allow " in parameter
++
++\date 26.11.2008 \li V 1.1.0.2
++                 \li bufix - creating correct default entries for server mode (PtM)
++
++\date 21.11.2008 \li V 1.1.0.1
++                 \li bufix - catch exceptions during config access (PtM)
++
++\date 20.11.2008 \li V 1.1.0.0 (PtM)
++                 \li bugfix - process count bar display now the correct number of running applications
++                 \li bugfix - removed memory leaks (configuration)
++                 \li feature - with the configuration item "SERVICES.STARTER.listenOnConfigChange" the feature
++                               "listen on configuration changes" can be activated.
++                               This feature starts and stops processes if they have been added or removed under:
++                               PLATFORM.SOFTWARE.Services or PLATFORM.HARDWARE.Devices
++
++\date 02.06.2008 \li V 1.0.5.7
++                 \li SteT EDB 28044: wrong working directory used when the program parameters contain \
++                 \li     now the parameters are ignored when the working directory is extracted from command line if the parameter are enclosed in double quotes
++
++\date 07.03.2008 \li V 1.0.5.6
++                 \li SteT closed unused handles, read configuration once at startup (memory leak)
++
++\date 07.08.2007 \li V 1.0.5.5
++                 \li SteT EDB 27719: evaluate all parameter values from EXEC configuration
++
++\date 29.03.2007 \li V 1.0.5.4
++                 \li bugfix display correct process bar after watchdog restarted a process(PtM)
++
++\date 24.01.2007 \li V 1.0.5.3
++                 \li SteT Send CTRL_C and CTRL_BREAK
++
++\date 07.11.2006 \li V 1.0.5.2
++                 \li SteT EDB 26729: Remove CTRL_BREAK
++
++
++\date 27.04.2006 \li V 1.0.5.1  BschR
++                 \li change startup order from: devices -> services -> platform to: services -> platform -> devices
++
++\date 21.03.2006 \li V 1.0.5.0  MaM
++                 \li new feature: watchDog (default: ON, PollTime 1000 ms, no selective Processlist)
++                 \li to switch off watchDog call: mstarter.exe <sema> [-server] -watchDog -1
++                 \li to to set watchDog poll intervall call: mstarter.exe <sema> [-server] -watchDog <ms>
++
++*/
+ 
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_notify.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_notify.h
+index 5d9b9a17..167f97a1 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_notify.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_notify.h
+@@ -1,10 +1,5 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_notify.h
+-//
+-//  purpose:    mstarter sends windows messages to mcontrol
+-//
+-//---------------------------------------------------------------------------
++// mstarter sends windows messages to mcontrol
++
+ #ifndef MSTARTER_NOTIFY_H_INCLUDED
+ #define MSTARTER_NOTIFY_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+@@ -16,9 +11,7 @@
+ 
+ namespace mStarter
+ {
+-  /*
+-    command line arguments for mstarter
+-  */
++  // notification interface to mcontrol
+   class Notifier: public mSysProcess::ProcessListCallback
+   {
+     public:
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+index 22d32cd9..f86c632d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+@@ -44,7 +44,7 @@ int main(int argc, const char** argv)
+     Arguments args= readArguments(argc, argv);
+     Notifier notifyMControl(trc);
+     Config config(trc, args.isServer, args.watchDogTimeout);
+-    ProcessList processList(trc, config.getWatchdogSettings());
++    ProcessList processList(config.getWatchdogSettings(), config.getExclusionList(), trc);
+     config.setListener(&processList);
+     processList.setListener(&notifyMControl);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
+index 488964a5..4fbc7901 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
+@@ -1,10 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_args.cpp
+-//
+-//  purpose:    arguments for mstarter
+-//
+-//---------------------------------------------------------------------------
++// arguments for mstarter
+ 
+ #include "mstarter_args.h"
+ #include "text/mArgScan.hpp"
+@@ -23,6 +17,7 @@ namespace
+   {
+     writeTrace(BasicRuntime_HERE, "argument: %s ignored", argument);
+   }
++
+   void usage(int argc, const char** argv)
+   {
+     std::cout << "Usage: " << argv[0] << " <StopSemaphoreName> [-server][-cfg][-watchdog:<timeout>] " << std::endl;
+@@ -31,6 +26,7 @@ namespace
+     std::cout << "cfg: create configuraton items" << std::endl;
+     std::cout << "watchdog: timeout for restart of processes; -1 deactivates restart" << std::endl;
+   }
++
+   const char* boolText(bool val)
+   {
+     return val?"true":"false";
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+index b9902c9a..c9c7d5ba 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+@@ -1,10 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_config.cpp
+-//
+-//  purpose:    configuration items for mstarter
+-//
+-//---------------------------------------------------------------------------
++// configuration items for mstarter
+ 
+ #include "mstarter_config.h"
+ #include "serviceMap.hpp"
+@@ -13,17 +7,13 @@
+ #include "cfgclnt/nConfigTextList.hpp"
+ #include "cfgclnt/nConfigBasicTextList.hpp"
+ #include "boost/shared_ptr.hpp"
+-#include "boost/regex.hpp"
+-#include "text/cEnvSubst.hpp"
+ #include "systools/mAutoMutexCS.h"
+ #include "trc/trace.h"
++#include "text/readEnv.h"
++#include "text/textTools.h"
+ #include <map>
+ 
+ 
+-using boost::smatch;
+-using boost::regex_search;
+-using boost::regex;
+-using boost::regbase;
+ using nConfig::gclTextList;
+ using nConfig::gclSelection;
+ using nConfig::gcNumber;
+@@ -35,6 +25,7 @@ using namespace mStarter;
+ using mSysProcess::WatchdogSettings;
+ using Materna::MSSD::Mutex;
+ using Materna::MSSD::AutoMutexCS;
++using MASSAI::trace::TraceInterface;
+ 
+ namespace
+ {
+@@ -46,34 +37,8 @@ namespace
+   const std::string platformItem=       "Platform";
+   const std::string configUser=         "mstarter";
+   const selection boolSelection[]= {selection(0, "no", ""), selection(1, "yes", "")};
+-  const regex option_pattern
+-  (
+-    "WND *= *\"([^\"]+)\""
+-    "|WNDCLASS *= *\"([^\"]+)\""
+-    "|CWD *= *\"([^\"]+)\""
+-    "|(?:SHOW *= *(YES)|(NO)|(HIDE)|(MINIMIZED))"
+-    "|(?:WAIT *= *([0-9]+)|(terminate))"
+-    "|(SHOW)",
+-    regbase::normal | regbase::icase
+-  );
+-  enum OptionIndex
+-  {
+-    OPT_TITLE= 1,
+-    OPT_CLASS,
+-    OPT_WORKING_DIR,
+-    OPT_SHOW_YES,
+-    OPT_SHOW_NO,
+-    OPT_SHOW_HIDE,
+-    OPT_SHOW_MINIMIZED,
+-    OPT_WAIT,
+-    OPT_TERMINATE,
+-    OPT_SHOW_SHOW,
+-  };
+ 
+-  typedef std::list<std::string> TextList;
+-  /*
+-    base class for config items
+-  */
++  //  base class for config items
+   class ConfigItemBase
+   {
+     public:
+@@ -82,63 +47,85 @@ namespace
+       bool isServer() const;
+       void setConfig(Config* config);
+       Config* getConfig() const;
++
+     private:
+       Config* m_config;
+       std::string m_item;
+   };
+-  /*
+-    config item exec
+-  */
++
++  //  config item exec
+   class ConfigExec: public ConfigItemBase, public gclTextList
+   {
+     public:
+       ConfigExec(const std::string& item);
+       TextList getValue() const;
+       virtual void valueChanged();
++
+     private:
+       void create(const char *& rights, const char*& explanation, TextList& defaultValue, long& max);
+   };
++
+   typedef boost::shared_ptr<ConfigExec> ConfigExecPtr;
+   typedef std::map<std::string, ConfigExecPtr> ExecMap;
+ 
+-  /*
+-    base class for config items
+-  */
++  class cfgtype: public nConfig::gcNumber
++  {
++    public:
++      cfgtype(char const which[], unsigned def);
++      ~cfgtype() throw();
++
++    private:
++      void create(char const*& rights, char const*& expl, long& def, long& min, long& max);
++
++      std::string*       m_expl;
++      std::string const  m_which;
++      unsigned int const m_def;
++  };
++
++  unsigned int portRangeConfig(char const which[], unsigned def);
++
++
++  // base class for config items
+   ConfigItemBase::ConfigItemBase(const std::string& item):
+     m_item(item)
+   {}
++
+   void ConfigItemBase::configChanged()
+   {
+     m_config->valueChanged(m_item);
+   }
++
+   bool ConfigItemBase::isServer() const
+   {
+     return m_config->isServer();
+   }
++
+   Config* ConfigItemBase::getConfig() const
+   {
+     return m_config;
+   }
++
+   void ConfigItemBase::setConfig(Config* config)
+   {
+     m_config= config;
+   }
+ 
+-  /*
+-    config item exec
+-  */
++  // config item exec
+   ConfigExec::ConfigExec(const std::string& item):
+     ConfigItemBase(item),
+     gclTextList(item.c_str(), configUser.c_str())
+   {}
++
+   TextList ConfigExec::getValue() const
+   {
+     return get();
+   }
++
+   void ConfigExec::valueChanged()
+   {
+     configChanged();
+   }
++
+   void ConfigExec::create(const char*& rights, const char*& explanation, TextList&, long& max)
+   {
+     rights = "rwl";
+@@ -161,6 +148,7 @@ namespace
+       "The following substitution environment variables are supported:"
+       "$PROGRAMFILES, $SYSTEMROOT, $SYSTEMDRIVE";
+   }
++
+   void extractExec(const std::string& input, char delimiter, std::string& commandLine, std::string& options)
+   {
+     std::string::size_type pos= input.rfind(delimiter);
+@@ -174,6 +162,7 @@ namespace
+       commandLine= input;
+     }
+   }
++
+   ProcessProperties getProperties(const std::string& group, const std::string& input)
+   {
+     ProcessProperties result;
+@@ -187,175 +176,124 @@ namespace
+     {
+       extractExec(input, ';', result.commandLine, options);
+     }
+-    if(options.size() > 0)
+-    {
+-      smatch parsed;
+-      std::string::const_iterator position= options.begin();
+-      std::string::const_iterator end= options.end();
+-      while(regex_search(position, end, parsed, option_pattern))
+-      {
+-        if(parsed[OPT_TITLE].matched)                // WND="([^"]+)"
+-        {
+-          result.windowTitle = parsed[OPT_TITLE];
+-        }
+-        else if(parsed[OPT_CLASS].matched)           // WNDCLASS="([^"]+)"
+-        {
+-          result.windowClass= parsed[OPT_CLASS];
+-        }
+-        else if(parsed[OPT_WORKING_DIR].matched)     // CWD="([^"]+)"
+-        {
+-          result.workingDir= parsed[OPT_WORKING_DIR];
+-        }
+-        else if(parsed[OPT_SHOW_YES].matched         // SHOW=(YES)
+-          || parsed[OPT_SHOW_SHOW].matched)          // (SHOW)
+-        {
+-          result.show = mSysProcess::SHOW;
+-        }
+-        else if(parsed[OPT_SHOW_NO].matched          // SHOW=(NO)
+-         ||parsed[OPT_SHOW_HIDE].matched)            // SHOW=(HIDE)
+-        {
+-          result.show = mSysProcess::HIDE;
+-        }
+-        else if(parsed[OPT_SHOW_MINIMIZED].matched)  // SHOW=(MINIMIZED)
+-        {
+-          result.show = mSysProcess::MINIMIZED;
+-        }
+-        else if(parsed[OPT_TERMINATE].matched)       // WAIT=(terminate)
+-        {
+-          result.timeout= -1;
+-        }
+-        else if(parsed[OPT_WAIT].matched)            // WAIT=([0-9]+)
+-        {
+-          result.timeout= atol(std::string(parsed[OPT_WAIT]).c_str());
+-        }
+-        position= parsed[0].second;
+-      }
+-    }
++    result.parse(options);
+     return result;
+   }
+ 
+-#ifdef ALLOW_TO_CONFIGURE_PORT_RANGE
+-  unsigned portRangeConfig( char const which[], unsigned def )
++  cfgtype::cfgtype(char const which[], unsigned def):
++    gcNumber((execSection + "Port-Range." + which).c_str(), configUser.c_str()),
++    m_expl(0),
++    m_which(which),
++    m_def(def)
++  {}
++
++  cfgtype::~cfgtype() throw()
+   {
+-    class cfgtype: public nConfig::gcNumber
++    try
+     {
+-       std::string *            m_expl;
+-       std::string const        m_which;
+-       unsigned const           m_def;
+-    public:
+-      cfgtype( char const which[], unsigned def ) :
+-         gcNumber( ( execSection + "Port-Range." + which ).c_str(), configUser.c_str() ),
+-         m_expl( 0 ),
+-         m_which( which ),
+-         m_def( def )
+-      {
+-      }
+-      ~cfgtype() throw()
+-      {
+-         try
+-         {
+-            delete m_expl;
+-         }
+-         catch( ... )
+-         {
+-         }
+-      }
+-    private:
+-      void create( char const * & rights, char const * & expl, long & def, long & min, long & max )
+-         {
+-            rights = "rwl";
+-            m_expl = new std::string( "Specify the " );
+-            *m_expl += m_which;
+-            *m_expl += " limit of the range of CORBA service ports";
+-            expl = m_expl->c_str();
+-            def = m_def;
+-            min = 0;
+-            max = 0xFFFF;
+-         }
+-    }; // class cfgtype
+-    cfgtype cfg( which, def );
+-    return cfg.get();
++      delete m_expl;
++    }
++    catch(...)
++    {}
+   }
+-#endif // #ifdef ALLOW_TO_CONFIGURE_PORT_RANGE
+ 
+-} // namespace
++  void cfgtype::create(char const*& rights, char const*& expl, long& def, long& min, long& max)
++  {
++    rights = "rwl";
++    m_expl = new std::string("Specify the ");
++    *m_expl += m_which;
++    *m_expl += " limit of the range of CORBA service ports";
++    expl = m_expl->c_str();
++    def = m_def;
++    min = 0;
++    max = 0xFFFF;
++  }
+ 
++  unsigned int portRangeConfig(char const which[], unsigned def)
++  {
++#ifdef ALLOW_TO_CONFIGURE_PORT_RANGE
++    cfgtype cfg(which, def);
++    return cfg.get();
++#else
++    return def;
++#endif
++  }
++}
+ 
+ namespace mStarter
+ {
+-  /*
+-    config item hardware list
+-  */
++  // config item hardware list
+   class ConfigHardwareList: public ConfigItemBase, public gclTextList
+   {
+     public:
+       ConfigHardwareList();
+       void appendTo(TextList& items) const;
+       virtual void valueChanged();
++
+     private:
+       void create(const char*& rights, const char*& explanation, TextList& defaultValue, long& max);
+   };
+-  /*
+-    config item software list
+-  */
++
++  // config item software list
+   class ConfigSoftwareList: public ConfigItemBase, public gclTextList
+   {
+     public:
+       ConfigSoftwareList();
+       void appendTo(TextList& items) const;
+       virtual void valueChanged();
++
+     private:
+       void create(const char*& rights, const char*& explanation, TextList& defaultValue, long& max);
+   };
+-  /*
+-    config item listen on change
+-  */
++
++  // config item listen on change
+   class ConfigListenOnChange: public ConfigItemBase, public gclSelection
+   {
+     public:
+       ConfigListenOnChange();
+       bool getValue() const;
+       virtual void valueChanged();
++
+     private:
+       void create(const char*& rights, const char*& explanation,
+         long& defaultIndex, const selection*& begin, const selection*& end);
+   };
+-  /*
+-    config items termination timeout
+-  */
++
++  //  config items termination timeout
+   class ConfigTimeout: public ConfigItemBase, public nConfig::gcNumber
+   {
+     public:
+       ConfigTimeout();
+       int getValue() const;
++
+     private:
+       void create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max);
+   };
+-  /*
+-    config items exec
+-  */
++
++  // config items exec
+   class ConfigExecList: public ConfigItemBase
+   {
+     public:
+       ConfigExecList();
+       TextList getValue(const std::string& item);
++
+     private:
+       ExecMap       m_execMap;
+       serviceMap    m_service_map;
+-      CEnvSubst     m_substituteEnv;
+   };
+-  /*
+-    config item hardware list
+-  */
++
++  // config item hardware list
+   ConfigHardwareList::ConfigHardwareList():
+     ConfigItemBase(hardwareItem),
+     gclTextList(hardwareItem.c_str(), configUser.c_str())
+   {}
++
+   void ConfigHardwareList::appendTo(TextList& items) const
+   {
+     TextList list= get();
+     items.insert(items.end(), list.begin(), list.end());
+   }
++
+   void ConfigHardwareList::create(const char*& rights, const char*& explanation, TextList& defaultValue, long& max)
+   {
+     rights = "rwl";
+@@ -369,22 +307,24 @@ namespace mStarter
+       defaultValue.push_back("SEL");
+     }
+   }
++
+   void ConfigHardwareList::valueChanged()
+   {
+     configChanged();
+   }
+-  /*
+-    config item software list
+-  */
++
++  // config item software list
+   ConfigSoftwareList::ConfigSoftwareList():
+     ConfigItemBase(softwareItem),
+     gclTextList(softwareItem.c_str(), configUser.c_str())
+   {}
++
+   void ConfigSoftwareList::appendTo(TextList& items) const
+   {
+     TextList list= get();
+     items.insert(items.end(), list.begin(), list.end());
+   }
++
+   void ConfigSoftwareList::create(const char*& rights, const char*& explanation, TextList& defaultValue, long& max)
+   {
+     rights = "rwl";
+@@ -402,21 +342,23 @@ namespace mStarter
+       defaultValue.push_back("LOG");
+     }
+   }
++
+   void ConfigSoftwareList::valueChanged()
+   {
+     configChanged();
+   }
+-  /*
+-    config item listen on change
+-  */
++
++  // config item listen on change
+   ConfigListenOnChange::ConfigListenOnChange():
+     ConfigItemBase(listenOnChangeItem),
+     gclSelection(listenOnChangeItem.c_str(), configUser.c_str())
+   {}
++
+   bool ConfigListenOnChange::getValue() const
+   {
+     return getIndex() == 1;
+   }
++
+   void ConfigListenOnChange::create(const char *& rights, const char*& explanation,
+     long& defaultIndex, const selection*& begin, const selection*& end)
+   {
+@@ -427,51 +369,42 @@ namespace mStarter
+     begin = boolSelection;
+     end = boolSelection + sizeof(boolSelection)/sizeof(*boolSelection);
+   }
++
+   void ConfigListenOnChange::valueChanged()
+   {
+     configChanged();
+   }
+-  /*
+-    config items termination timeout
+-  */
++
++  // config items termination timeout
+   ConfigTimeout::ConfigTimeout():
+     ConfigItemBase(timeoutItem),
+     gcNumber(timeoutItem.c_str(), configUser.c_str())
+   {}
++
+   int ConfigTimeout::getValue() const
+   {
+     return get();
+   }
++
+   void ConfigTimeout::create(const char*& rights, const char*& explanation,
+     long& defaultValue, long& min, long& max)
+   {
+     rights = "rwl";
+     explanation = "Specifies how long to wait (in seconds) after platform shutdown notification.";
+-    defaultValue = 30;
++    defaultValue = 25;
+     min = 0;
+     max = 3600;
+   }
+-  /*
+-    config items exec
+-  */
++
++  // config items exec
+   ConfigExecList::ConfigExecList():
+     ConfigItemBase(execSection),
+     m_execMap(),
+-    m_service_map(),
+-    m_substituteEnv()
++    m_service_map()
+   {
+-    m_service_map.addPortRange
+-      (
+-#ifdef ALLOW_TO_CONFIGURE_PORT_RANGE
+-         portRangeConfig( "lower", 20002 ),
+-         portRangeConfig( "upper", 20199 )
+-#else
+-         20002,
+-         20199
+-#endif
+-      );
+-    m_substituteEnv.SetBaseEnvVars();
++    m_service_map.addPortRange(portRangeConfig("lower", 20002), portRangeConfig("upper", 20199));
+   }
++
+   TextList ConfigExecList::getValue(const std::string& item)
+   {
+     ExecMap::iterator it= m_execMap.find(item);
+@@ -481,14 +414,11 @@ namespace mStarter
+       ptr->setConfig(getConfig());
+       it= m_execMap.insert(ExecMap::value_type(item, ptr)).first;
+     }
+-    TextList const subst_temp =
+-        m_service_map.substPortMacros(it->second->getValue());
+-    return m_substituteEnv.substEnvList(subst_temp);
+-  }
+-  /*
+-    access configuration items for mstarter
+-  */
+-  Config::Config(MASSAI::trace::TraceInterface& trc, bool serverMode, int watchDog):
++    return m_service_map.substPortMacros(it->second->getValue());
++  }
++
++  // access configuration items for mstarter
++  Config::Config(TraceInterface& trc, bool serverMode, int watchDog):
+     m_trc(trc),
+     m_server(serverMode),
+     m_watchDog(watchDog),
+@@ -498,21 +428,35 @@ namespace mStarter
+     m_softwareList(ConfigSoftwareListPtr(new ConfigSoftwareList())),
+     m_listenOnChange(ConfigListenOnChangePtr(new ConfigListenOnChange())),
+     m_execList(ConfigExecListPtr(new ConfigExecList())),
+-    m_timeout(ConfigTimeoutPtr(new ConfigTimeout()))
++    m_timeout(ConfigTimeoutPtr(new ConfigTimeout())),
++    m_substituteEnv()
+   {
+     m_hardwareList->setConfig(this);
+     m_softwareList->setConfig(this);
+     m_listenOnChange->setConfig(this);
+     m_execList->setConfig(this);
+     m_timeout->setConfig(this);
++    initEnv();
++  }
++
++  void Config::initEnv()
++  {
++    m_substituteEnv.SetBaseEnvVars();
++    mText::ReadEnvironment* envReader = mText::getEnvironmentVariablesReader(m_trc);
++    m_substituteEnv.SetEnvVars(envReader->getEnv());
++    mText::ReadEnvironment* cfgReader = mText::getConfigReader(configUser, m_trc);
++    m_substituteEnv.SetEnvVars(cfgReader->getEnv());
+   }
++
+   void Config::setListener(mSysProcess::ProcessList* pListener)
+   {
+     AutoMutexCS mx(m_accessListener);
+     m_pListener = pListener;
+   }
++
+   Config::~Config()
+   {}
++
+   PropertyList Config::getProcessList() const
+   {
+     TextList components;
+@@ -526,7 +470,7 @@ namespace mStarter
+     for(; it != end; it++)
+     {
+       const std::string& component = *it;
+-      TextList exec= m_execList->getValue(component);
++      TextList exec= m_substituteEnv.substEnvList(m_execList->getValue(component));
+       TextList::const_iterator it2 = exec.begin();
+       TextList::const_iterator end2 = exec.end();
+       for(; it2 != end2; it2++)
+@@ -536,6 +480,7 @@ namespace mStarter
+     }
+     return result;
+   }
++
+   WatchdogSettings Config::getWatchdogSettings() const
+   {
+     WatchdogSettings result;
+@@ -556,6 +501,14 @@ namespace mStarter
+ 
+     return result;
+   }
++
++  TextList Config::getExclusionList() const
++  {
++    TextList exclusionList;
++    MASSAI::text::split(m_substituteEnv.SubstEnvVars("$TerminationExclusion"), ":", exclusionList);
++    return exclusionList;
++  }
++
+   void Config::valueChanged(const std::string& item)
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "valueChanged (%s)", item.c_str());
+@@ -565,6 +518,7 @@ namespace mStarter
+       m_pListener->checkProcessList();
+     }
+   }
++
+   bool Config::isServer() const
+   {
+     return m_server;
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_notify.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_notify.cpp
+index 65e32c43..b005d31a 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_notify.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_notify.cpp
+@@ -1,10 +1,5 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mstarter_notify.cpp
+-//
+-//  purpose:    mstarter sends windows messages to mcontrol
+-//
+-//---------------------------------------------------------------------------
++// mstarter sends windows messages to mcontrol
++
+ #include "mstarter_notify.h"
+ #include "control_common.h"
+ #include <windows.h>
+@@ -31,6 +26,7 @@ namespace
+     LocalFree(buf);
+     return result;
+   }
++
+   void notifyMControl(TraceInterface& trc, int started, int total)
+   {
+     if(!mcontrol_hwnd)
+@@ -58,16 +54,16 @@ namespace
+ 
+ namespace mStarter
+ {
+-  /*
+-    command line arguments for mstarter
+-  */
++  // command line arguments for mstarter
+   Notifier::Notifier(TraceInterface& trc):
+     m_processCount(0),
+     m_started(0),
+     m_trc(trc)
+   {}
++
+   Notifier::~Notifier()
+   {}
++
+   void Notifier::start(const PropertyList& processes)
+   {
+     if(processes.size() > 0)
+@@ -76,11 +72,13 @@ namespace mStarter
+       notify();
+     }
+   }
++
+   void Notifier::started(const ProcessProperties& process)
+   {
+     m_started++;
+     notify();
+   }
++
+   void Notifier::terminated(const ProcessProperties& process)
+   {
+     m_started--;
+@@ -90,6 +88,7 @@ namespace mStarter
+     }
+     notify();
+   }
++
+   void Notifier::notify()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "Started: (%d)/(%d)", m_started, m_processCount);
+-- 
+2.41.0.windows.1
+

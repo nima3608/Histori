@@ -1,0 +1,63 @@
+From 5fb21b0eb7ac436d2d1aa0028a7190c3b68a81df Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 16 Jan 2019 19:41:37 +0000
+Subject: [PATCH 0940/1077] MANTIS 0053039 Support AZTEC barcode printing for
+ LH
+
+massai_graphic.lib
+V1.0.0.6
+- change symbology of EAN to CODE 128 between encoding and drawing to avoid spaces
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1421 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Graphic/src/barcodeEAN13.cpp          | 12 ++++++++++--
+ .../Massai/cpp/Graphic/src/local_def.cpp             |  2 +-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/barcodeEAN13.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/barcodeEAN13.cpp
+index 5ce372de..0c6158a2 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/barcodeEAN13.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/barcodeEAN13.cpp
+@@ -27,7 +27,13 @@ namespace
+       barcode->show_hrt = 0;
+       barcode->height = 1;
+       barcode->option_1 = 2;
+-      int errorCode = ZBarcode_Encode_and_Buffer(barcode, buf.udata(), buf.size(), 0);
++      int errorCode = ZBarcode_Encode(barcode, buf.udata(), buf.size());
++      if(!errorCode)
++      {
++        // show_hrt=0 is ignored for BARCODE_EANX => use BARCODE_CODE128 for drawing
++        barcode->symbology = BARCODE_CODE128;
++        errorCode = ZBarcode_Buffer(barcode, 0);
++      }
+       if(errorCode == ZINT_ERROR_MEMORY || errorCode == ZINT_ERROR_TOO_LONG)
+       {
+         std::string error = barcode->errtxt;
+@@ -42,7 +48,9 @@ namespace
+       }
+       else
+       {
+-        ZintPixelRows result(settings.blockWidth, settings.blockHeight, barcode->bitmap_width, 1, 1, 1, barcode->bitmap);
++        int blockWidth = barcode->bitmap_width / barcode->width;
++        int blockHeight = barcode->bitmap_height / barcode->rows;
++        ZintPixelRows result(settings.blockWidth, settings.blockHeight, barcode->width, barcode->rows, blockWidth, blockHeight, barcode->bitmap);
+         ZBarcode_Delete(barcode);
+         return result;
+       }
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/local_def.cpp
+index 90433046..190b235c 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/local_def.cpp
+@@ -19,7 +19,7 @@ massai_graphic.lib
+ \li Mantis 0053039: Support AZTEC barcode printing for LH
+ - remove files of pdf417lib
+ - fixed size of barcode blocks for PDF417, Aztec, DataMatrix, QR
+-- use first row only for ean13 to avoid space on top of barcode; still space on left and right side
++- change symbology of EAN to CODE 128 between encoding and drawing to avoid spaces
+ - rows/columns in pdf417; calculate number of columns from expected number of rows
+ - fixed order of rows in zintPixelRow; was mirrored
+ 
+-- 
+2.41.0.windows.1
+

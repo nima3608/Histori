@@ -1,0 +1,133 @@
+From 71e1296bfe5d1ac8f28e399529423b8b020559a0 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 2 Mar 2020 13:40:44 +0000
+Subject: [PATCH 0930/1000] MANTIS 40374 massaiCfgXB.exe version 2.4.3 - MANTIS
+ 40374: MassaiCfgXB: delay of 1 minute at platform restart. - Decouple
+ mutex-protection of addListener() removeListener() from change indication.
+ This should prevent delays executing (mostly) addListener(), because the
+ indication process may run into exceptions and thus takes time. - Decouple
+ just addListener()
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1557 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  1 +
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  1 +
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp | 35 ++++++++++---------
+ 3 files changed, 21 insertions(+), 16 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 86a08a11..479fbc9f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -613,6 +613,7 @@
+ //!   change indication. This should prevent delays executing (mostly)
+ //!   addListener(), because the indication process may run into exception
+ //!   and thus takes time.
++//! - Decouple just addListener()
+ #define FILE_VER_BIN 2,4,3,0
+ #define FILE_VER_DTS "2.4.3.0"
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 6f3e2fb9..b84dcaa5 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -617,6 +617,7 @@
+ //!   change indication. This should prevent delays executing (mostly)
+ //!   addListener(), because the indication process may run into exception
+ //!   and thus takes time.
++//! - Decouple just addListener()
+ #define FILE_VER_BIN 2,4,3,0
+ #define FILE_VER_DTS "2.4.3.0"
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index 8527edcb..50e8da1b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -33,10 +33,20 @@ namespace
+ 
+    /**
+     *
+-    * Protect change listeners against mutual access.
++    * Protect change listeners against mutual access
++    * by addChangeListener().
+     *
+    **/
+-   Materna::MSSD::mutexSemaphore Mutex;
++   Materna::MSSD::mutexSemaphore m_mutex_add;
++
++
++   /**
++    *
++    * Protect change listeners against mutual access
++    * by removeChangeListener().
++    *
++   **/
++   Materna::MSSD::mutexSemaphore m_mutex_rem;
+ 
+ 
+    // a helper function
+@@ -171,7 +181,7 @@ void cfgCorba_Base::addChangeListener
+ )
+ {
+    std::string ItemKey( Acc.Item );
+-   Materna::MSSD::autoMutex OnlyOne( Mutex );
++   Materna::MSSD::autoMutex only_one_add( m_mutex_add );
+    valChgListeners::iterator It( M_ValChgListeners.find( ItemKey ) );
+    valChgListener * ValChgListener;
+    if( It == M_ValChgListeners.end() )
+@@ -198,7 +208,7 @@ void cfgCorba_Base::removeChangeListener
+    Config::changeListener * Listener
+ )
+ {
+-   Materna::MSSD::autoMutex OnlyOne( Mutex );
++   Materna::MSSD::autoMutex only_one_remove( m_mutex_rem );
+    valChgListeners::iterator I;
+    for( I = M_ValChgListeners.begin(); I != M_ValChgListeners.end(); ++I )
+    {
+@@ -220,7 +230,7 @@ void cfgCorba_Base::removeChangeListenerItem
+    char const *              Item
+ )
+ {
+-   Materna::MSSD::autoMutex OnlyOne( Mutex );
++   Materna::MSSD::autoMutex only_one_remove( m_mutex_rem );
+    valChgListeners::iterator It( M_ValChgListeners.find( Item ) );
+    if( It != M_ValChgListeners.end() )
+    {
+@@ -238,16 +248,14 @@ void cfgCorba_Base::removeChangeListenerItem
+ **/
+ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+ {
+-#ifdef DUMB_MUTEX
+-   Materna::MSSD::autoMutex OnlyOne( Mutex );
+-#else
++   // Globally mutex protect againt listener removal
++   Materna::MSSD::autoMutex only_one_remove( m_mutex_rem );
+    valChgListeners change_listeners;
+    {
+-      // Protect copying listeners list
+-      Materna::MSSD::autoMutex OnlyOne( Mutex );
++      // Protect copying listeners list against listener adding
++      Materna::MSSD::autoMutex only_one_add( m_mutex_add );
+       change_listeners = M_ValChgListeners;
+    }
+-#endif
+    try
+    {
+       std::vector<std::string> ppl;
+@@ -256,13 +264,8 @@ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+       std::vector< std::string >::iterator pplIt;
+       for( pplIt = ppl.begin(); pplIt != ppl.end(); ++pplIt)
+       {
+-#ifdef DUMB_MUTEX
+-         It = M_ValChgListeners.find( (*pplIt).c_str() );
+-         if( It != M_ValChgListeners.end() )
+-#else
+          It = change_listeners.find( (*pplIt).c_str() );
+          if( It != change_listeners.end() )
+-#endif
+          {
+             writeTrace
+                (
+-- 
+2.41.0.windows.1
+

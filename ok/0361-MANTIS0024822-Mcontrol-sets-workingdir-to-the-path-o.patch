@@ -1,0 +1,71 @@
+From e9b1d194f618195b5e20f6a67b8c702d0610f0bf Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 25 Oct 2012 16:36:59 +0000
+Subject: [PATCH 0361/1077] MANTIS0024822: Mcontrol sets workingdir to the path
+ of the executable. Change to use user path (Win7 compatibility)
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@429 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/makefile.mak        |  1 +
+ .../Massai/cpp/Controller/src/main.cpp        | 26 ++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index 69938edb..1816cfb2 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -64,6 +64,7 @@ MY_BIN1_LDFLAGS = \
+ 
+ MY_BIN1_LINKLIBS = \
+     $(STDLINKLIBS) \
++    Shlwapi.lib \
+     $(SYS_COMCTL32)
+ 
+ MY_BIN1_GEN_DIRS = \
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index 5eed5fdc..df0386ea 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -26,6 +26,9 @@
+ 
+ #include "resource.h"
+ 
++#include "shlobj.h"
++#include "Shlwapi.h"
++
+ #include "config.h"
+ #include "reboot.h"
+ #include "mctools.h"
+@@ -294,7 +297,28 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+     setWorkingDir();
+ 
+-    fp = fopen("mcontrol.log","w+");
++    std::string userDir;
++    try
++    {
++      TCHAR app_path[MAX_PATH] = {0};
++      if(SHGetSpecialFolderPath(NULL, app_path, CSIDL_APPDATA, FALSE))
++      {
++        PathAddBackslash(reinterpret_cast<LPTSTR>(app_path));
++        std::string buf(app_path); buf.append("materna");
++        if(PathIsDirectory(buf.c_str()))
++        {
++          PathAppend(app_path,"materna\\");
++        }
++        userDir.assign(app_path).append("mcontrol.log");
++      } else
++      userDir.assign("\\mcontrol.log");
++    }
++    catch(...)
++    {
++      userDir.assign("\\mcontrol.log");
++    }
++
++    fp = fopen(userDir.c_str(),"w+");
+ 
+     if(fp)
+     {
+-- 
+2.41.0.windows.1
+

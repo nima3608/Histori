@@ -1,0 +1,419 @@
+From f3eb381832daacb7a2d5ae4a3a4a750a346fe95d Mon Sep 17 00:00:00 2001
+From: vjudin <vjudin@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 10 Jun 2011 08:27:19 +0000
+Subject: [PATCH 0120/1076] Remote command execution implemented
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@150 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/src/server.cpp      | 391 ++++++++++++++++++
+ 1 file changed, 391 insertions(+)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+index 84dedd9a..e51a8c6d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+@@ -20,6 +20,314 @@
+ #include "pslist.h"
+ #include "serverwin.h"
+ 
++#ifndef _lint
++#include "boost/regex.hpp"
++using boost::cmatch;
++using boost::regex_search;
++using boost::regex;
++using boost::regbase;
++#endif // #ifndef _lint
++
++
++#ifndef _lint
++static regex const option_pattern
++(
++    "WND *= *\"([^\"]+)\"|CWD *= *\"([^\"]+)\"|SHOW *= *([A-Z]+)|WAIT *= *([0-9]+|terminate)|(SHOW)",
++    regbase::normal | regbase::icase
++);
++#endif // #ifndef _lint
++
++//---------------------------------------------------------------------------
++//
++//  function:   void scanArguments(char  *pszInput,
++//                                 long  *lTimeOut,
++//                                 bool  *pfShow,
++//                                 char  *pszArgs,
++//                                 char  *pszWndName)
++//
++//  purpose:    scan for program arguments and start options
++//
++//  date:       08.08.2001, 08:56
++//
++//  author:     Materna Information & Communications (AGe)
++//
++//---------------------------------------------------------------------------
++void scanArguments(char *pszInput,
++                   long *plTimeOut,
++                   int  *piShow,
++                   char *pszArgs,
++                   char *pszWndName,
++                   char *pszWorkingDir)
++{
++  char *pStr;
++  char  cDelimiter = ';';
++  std::string options;
++
++  // reset this in all cases !!!
++  *plTimeOut     = 0;
++  *pszArgs       = '\0';
++  *pszWndName    = '\0';
++  *pszWorkingDir = '\0';
++  *piShow        = PROCESS_HIDE;
++
++  if(pszInput[0] > ' ' && pszInput[1] == ' ')
++  {
++    // save specified delimter
++    cDelimiter = pszInput[0];
++    // skip delimiter specification
++    strcpy(pszInput, pszInput + 2);
++  }
++  else
++  {
++    // use ';' as the standard delimiter
++    cDelimiter = ';';
++  }
++
++  pStr = strrchr(pszInput, cDelimiter);
++  if(pStr != NULL)
++  {
++    *pStr = '\0';
++    options= pStr + 1;
++
++#ifndef _lint
++    cmatch parsed;
++    std::string::const_iterator position= options.begin();
++    std::string::const_iterator end= options.end();
++
++
++    while(regex_search(position, end, parsed, option_pattern))
++    {
++      if(parsed[1].matched)       // WND *= *"([^"]+)"
++      {
++        int length= parsed[1].second - parsed[1].first;
++        strncpy(pszWndName, parsed[1].first, length);
++        pszWndName[length]= 0;
++      }
++      else if(parsed[2].matched)  // CWD *= *"([^"]+)"
++      {
++        int length= parsed[2].second - parsed[2].first;
++        strncpy(pszWorkingDir, parsed[2].first, length);
++        pszWorkingDir[length]= 0;
++      }
++      else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
++      {
++        int length= parsed[3].second - parsed[3].first;
++        if(_strnicmp(parsed[3].first,      "YES", length) == 0)       { *piShow = PROCESS_SHOW; }
++        else if(_strnicmp(parsed[3].first, "NO", length) == 0)        { *piShow = PROCESS_HIDE; }
++        else if(_strnicmp(parsed[3].first, "HIDE", length) == 0)      { *piShow = PROCESS_HIDE; }
++        else if(_strnicmp(parsed[3].first, "MINIMIZED", length) == 0) { *piShow = PROCESS_MINIMIZED; }
++      }
++      else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
++      {
++        int length= parsed[4].second - parsed[4].first;
++        if(_strnicmp(parsed[4].first, "terminate", length) == 0)
++        {
++          *plTimeOut = -1;
++        }
++        else
++        {
++          *plTimeOut = atol(parsed[4].first);
++        }
++      }
++      else if(parsed[5].matched)  // (SHOW)
++      {
++        *piShow = PROCESS_SHOW;
++      }
++      position= parsed[0].second;
++    }
++#endif // #ifndef _lint
++
++  }
++
++  // scan for program arguments
++
++  //TRACE(HERE,"pszInput = %s",pszInput);
++
++  if((pStr = strchr(pszInput,'"')) != NULL)
++  {
++    *pStr= 0;
++    pStr++;
++    const char* pEnd= strrchr(pStr, '"');
++    if(pEnd != NULL)
++    {
++      while(pStr != pEnd)
++      {
++        *pszArgs++ = *pStr++;
++      }
++    }
++    else
++    {
++      while(*pStr && *pStr != '"')
++      {
++        *pszArgs++ = *pStr++;
++      }
++    }
++
++    *pszArgs = '\0';
++
++//      TRACE(HERE,"pszArgs = %s",pszArgs);
++  }
++  else
++  {
++    if((pStr = strrchr(pszInput,'\\')) != NULL)
++    {
++      while(*pStr && *pStr != ' ')
++        pStr++;
++
++      // cut off arguments from program name
++
++      //@@MaK 7-25-97, 4:20 PM
++
++      if(*pStr)
++      {
++        *pStr = '\0';
++
++        pStr++;
++
++        if(*pStr)
++        {
++          // save program arguments
++
++          strcpy(pszArgs,pStr);
++
++          pStr = pszArgs + strlen(pszArgs) -1;
++
++          while(*pStr <= ' ')
++          {
++            *pStr = '\0';
++            pStr--;
++          }
++        }
++      }
++    }
++  }
++}
++
++static void scanArgs(
++                    char *pszInput,
++                    long& lTimeOut,
++                    int&  iShow,
++                    std::string& strCmdLine,
++                    std::string& strArgs,
++                    std::string& strWndName,
++                    std::string& strWorkingDir )
++{
++    char *pStr = NULL;
++    char  cDelimiter = ';';
++    std::string options;
++    int length = -1;
++
++    lTimeOut     = 0;
++    iShow        = PROCESS_HIDE;
++
++    if( strlen( pszInput ) < 2 )
++        return;
++    if( pszInput[ 0 ] > ' ' && pszInput[1] == ' ')
++    {
++        // save specified delimter
++        cDelimiter = pszInput[0];
++        // skip delimiter specification
++        //strcpy(pszInput, pszInput + 2);
++        pszInput += 2;
++    }
++    else
++    {
++        // use ';' as the standard delimiter
++        cDelimiter = ';';
++    }
++
++    pStr = strrchr( pszInput, cDelimiter );
++    
++    if( pStr != NULL )
++    {
++        *pStr = '\0';
++        strCmdLine = std::string( pszInput, pStr );
++        options = pStr + 1;
++
++#ifndef _lint
++        cmatch parsed;
++        std::string::const_iterator start = options.begin();
++        std::string::const_iterator end   = options.end();
++
++
++        while( regex_search( start, end, parsed, option_pattern ))
++        {
++            if( parsed[1].matched )     // WND *= *"([^"]+)"
++            {
++                length = parsed[1].second - parsed[1].first;
++                strWndName = std::string( parsed[1].first, length );
++            }
++            else if(parsed[2].matched)  // CWD *= *"([^"]+)"
++            {
++                length = parsed[2].second - parsed[2].first;
++                strWorkingDir = std::string( parsed[2].first, length );
++            }
++            else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
++            {
++                length= parsed[3].second - parsed[3].first;
++                if( _strnicmp(parsed[3].first,      "YES", length) == 0)
++                    iShow = PROCESS_SHOW;
++                else if( _strnicmp(parsed[3].first, "NO", length) == 0 )
++                    iShow = PROCESS_HIDE;
++                else if( _strnicmp(parsed[3].first, "HIDE", length) == 0 )
++                    iShow = PROCESS_HIDE;
++                else if( _strnicmp(parsed[3].first, "MINIMIZED", length) == 0)
++                    iShow = PROCESS_MINIMIZED;
++            }
++            else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
++            {
++                length = parsed[4].second - parsed[4].first;
++                if( _strnicmp(parsed[4].first, "terminate", length) == 0 )
++                {
++                    lTimeOut = -1;
++                }
++                else if( ::sscanf( parsed[4].first, "%ld", &lTimeOut ) < 0 )
++                    lTimeOut = 0;
++            }
++            else if(parsed[5].matched )  // (SHOW)
++                iShow = PROCESS_SHOW;
++            start = parsed[0].second;
++        }
++#endif // #ifndef _lint
++    }
++    else
++        strCmdLine = std::string( pszInput );
++
++    if(( pStr = strchr(pszInput, '"' )) != NULL)
++    {
++        *( pStr++ )= '\0';
++        const char* const pEnd = ::strrchr(pStr, '"');
++        if( pEnd != NULL )
++            strArgs = std::string( pStr, pEnd - pStr );
++        else
++            strArgs = pStr;
++
++    }
++    else if(( pStr = strrchr(pszInput,'\\')) != NULL)
++    {
++        pStr = strchr( pStr, ' ' );
++        // cut off arguments from program name
++        if( pStr != NULL )
++        {
++            *( pStr++ ) = '\0';
++            if( *pStr )
++            {
++                // save program arguments
++                //strcpy(pszArgs,pStr);
++                char* szArgs = pStr;
++                pStr = szArgs + strlen( szArgs ) -1;
++                while(*pStr <= ' ')
++                {
++                    --pStr;
++                }
++				
++                strArgs = std::string( szArgs, pStr - szArgs + 1);
++            }
++        }
++    }
++}
++
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   CORBA::Long controllerServant::reloadHostsFile()
+@@ -547,3 +855,86 @@ bool     fYearChange;
+ 
+     return(rc);
+ }
++
++
++CORBA::Long controllerServant::executeCommand( const Controller::kioskControl::string_sequence & string_args )
++{
++    if( string_args.length() < 1 )
++    {
++        TRACE( HERE, "controllerServant::executeCommand: wrong length sequence" );
++        return -1;
++    }
++    
++    long lTimeOut = 0;
++    int iShow = 0;
++
++    std::string strInput = string_args[ 0 ];    
++    char *szInput = ::strdup( strInput.c_str() ); //   Don't want 2 const_cast
++    char szWorkingDir[ MAX_PATH ], 
++         szArgs      [ 1024 ], 
++         szWndName   [ 1024 ];    
++         
++    scanArguments(  szInput,
++                    &lTimeOut,
++                    &iShow,
++                    szArgs,
++                    szWndName,
++                    szWorkingDir);
++    
++    STARTUPINFO siStartupInfo;
++    memset(&siStartupInfo, 0, sizeof(siStartupInfo));
++    siStartupInfo.cb = sizeof(siStartupInfo);
++    switch( iShow )
++    {
++    case PROCESS_SHOW:
++        siStartupInfo.wShowWindow = SW_SHOW;
++        break;
++    case PROCESS_MINIMIZED:
++        siStartupInfo.wShowWindow = SW_SHOWMINIMIZED;
++        break;
++    default:
++        siStartupInfo.wShowWindow = SW_HIDE;
++        break;
++    };
++
++    PROCESS_INFORMATION pi;
++    memset(&pi, 0, sizeof(pi));
++
++    BOOL bRc = ::CreateProcess( szInput, 
++                                szArgs,
++                                NULL, NULL,             // secAttrs, threadAttrs by default
++                                FALSE,                  // don't bInheritHandles
++                                0,                      // dwCreationFlags
++                                NULL,                   // lpEnvironment
++                                szWorkingDir[ 0 ] ? szWorkingDir : NULL,
++                                &siStartupInfo,
++                                &pi );
++    if( bRc == FALSE)
++    {
++        TRACE( HERE, "controllerServant::executeCommand %s w.cmdLine \"%s\" failed error %d", \
++            szInput, szArgs, GetLastError());
++        
++    }
++    else
++    {
++        TRACE( HERE, "executeCommand %s w.cmdLine \"%s\" OK", szInput, szArgs );
++        if( lTimeOut )
++        {
++            DWORD dwExitCode = 0;
++            // We should wait until child process exits.
++            // It is however not practical
++            bRc = ::WaitForSingleObject( pi.hProcess, lTimeOut > 0 ?  lTimeOut : INFINITE  );
++            if( bRc )
++               ::GetExitCodeProcess ( pi.hProcess, &dwExitCode );
++            //TRACE( HERE, "executeCommand retCode %d", dwExitCode );
++        }
++    
++        // Close process and thread handles.
++        ::CloseHandle( pi.hProcess ); 
++        ::CloseHandle( pi.hThread ) ;
++    }
++    
++    ::free( szInput );
++    return (bRc != FALSE) ? 0 : -1;
++}
++
+-- 
+2.41.0.windows.1
+

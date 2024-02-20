@@ -1,0 +1,102 @@
+From eea6c0f95e3344c89d3680c96202cd081c4beb6b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 20 Feb 2017 10:26:32 +0000
+Subject: [PATCH 0825/1076] MANTIS 44533 Mantis 44533: Support new printer
+ Sanai SK1-21 New feature to enable CTS handshaking matAsyncSet( MATKEY_CTS,
+ MATKEY_HANDSHAKE )
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1157 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/SerialCon/src/matAsyncW32.c    | 48 ++++++++++++++++++-
+ 1 file changed, 47 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+index 118d7fa2..a89cd362 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 1998-2015 MATERNA Information & Communications.
++ * Copyright (c) 1998-2017 MATERNA Information & Communications.
+  *
+  **************************************************************************
+ **/
+@@ -116,6 +116,7 @@ struct matAsyncPrivate
+     */
+    char              szPort[12];          /* COM-port name, e.g. "COM1" */
+    char              szBitrate[8];        /* Bitrate, e.g. "9600" */
++   char              szCTS[4];            /* CTS state */
+    char              szDTR[4];            /* DTR state, e.g. "1" */
+    char              szRTS[4];            /* RTS state, e.g. "1" */
+    char              szParity[4];         /* Parity, e.g. "E" */
+@@ -476,6 +477,43 @@ static MATRC setupLnDTR( mtHdl H )
+ 
+ 
+ 
++/**
++ *
++ * Set modem line DTR.
++ *
++**/
++static MATRC setupLnCTS( mtHdl H )
++{
++   if( !H->CommH )
++      return MATRC_OK;
++   else
++   {
++      DCB D;
++      if( !GetCommState( H->CommH, &D ) )
++      {
++         fillLastError( H, "GetCommState" );
++         return MATRC_ERROR;
++      }
++      switch( H->szDTR[0] )
++      {
++      default:
++         D.fOutxCtsFlow = FALSE;
++         break;
++      case 'H':
++         D.fOutxCtsFlow = TRUE;
++         break;
++      }
++      if( !SetCommState( H->CommH, &D ) )
++      {
++         fillLastError( H, "SetCommState" );
++         return MATRC_ERROR;
++      }
++      return MATRC_OK;
++   }
++}
++
++
++
+ /**
+  *
+  * Set the modem line RTS.
+@@ -633,6 +671,7 @@ mtHdl matAsyncCreate( void )
+    {
+       H->szPort[0] = 0;
+       H->szBitrate[0] = 0;
++      H->szCTS[0] = 0;
+       H->szDTR[0] = 0;
+       H->szRTS[0] = 0;
+       H->szParity[0] = 0;
+@@ -997,6 +1036,13 @@ MATRC matAsyncSet( mtHdl H, MTCONST char * Key, MTCONST char * Val )
+       return safeStrcpy( H->szPort, sizeof(H->szPort), Val );
+    if( !strcmp( Key, MATKEY_BITRATE ) )
+       return safeStrcpy( H->szBitrate, sizeof(H->szBitrate), Val );
++   if( !strcmp( Key, MATKEY_CTS ) )
++   {
++      MATRC R = safeStrcpy( H->szCTS, sizeof(H->szCTS), Val );
++      if( R == MATRC_OK )
++         R = setupLnCTS( H );
++      return R;
++   }
+    if( !strcmp( Key, MATKEY_DTR ) )
+    {
+       MATRC R = safeStrcpy( H->szDTR, sizeof(H->szDTR), Val );
+-- 
+2.41.0.windows.1
+

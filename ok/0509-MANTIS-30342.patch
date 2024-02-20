@@ -1,0 +1,109 @@
+From 319aab8b4edaf68db009247698b32cefc21f0e11 Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 9 Jan 2014 10:14:44 +0000
+Subject: [PATCH 0509/1076] MANTIS 30342  - MIPSKIC supports multible aida
+ reporting formats/modes.  - You can set the format by using the "-m"
+ commandline switch.  - By default the TEXT report format will be used.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@631 90b65887-3827-0410-9a23-83215b262276
+---
+ SelfServiceCommon/Tools/MIPSKIC/src/bin/aida.bat    | 13 +++++++++++--
+ SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat     |  6 ++++--
+ .../Tools/MIPSKIC/src/mipskic_remote/config.txt     |  2 +-
+ 3 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/src/bin/aida.bat b/SelfServiceCommon/Tools/MIPSKIC/src/bin/aida.bat
+index 5a45ee4a..840e04c4 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/src/bin/aida.bat
++++ b/SelfServiceCommon/Tools/MIPSKIC/src/bin/aida.bat
+@@ -20,6 +20,7 @@ set _target=
+ set _output=%~dp0output\
+ set _user=Administrator
+ set _passwd=massai
++set _mode=TEXT
+ 
+ rem overwrite default from environment
+ if not "%USER%"     == "" set _user=%USER%
+@@ -36,8 +37,15 @@ if [%_target%] == [] (
+     GOTO end
+ )
+ 
++if "%_mode%" == "" (
++	echo You must set a mode/format for AIDA Reporting file.
++	exit /b 1
++)
++
+ IF NOT EXIST "%_output%" mkdir "%_output%"
+ 
++
++
+ echo Test if %_target% is available
+ ping -n 1 %_target% > NUL 2>&1
+ IF ERRORLEVEL 1 (
+@@ -68,8 +76,8 @@ IF ERRORLEVEL 1 (
+ )
+ 
+ sleep.exe 5
+-echo Start AIDA32 on %_target%.
+-psexec.exe \\%_target% -u %_user% -p %_passwd% C:\mipskic_remote.exe > NUL 2>&1
++echo Start AIDA32 (MODE: %_mode%) on %_target%.
++psexec.exe \\%_target% -u %_user% -p %_passwd% C:\mipskic_remote.exe /%_mode% > NUL 2>&1
+ IF ERRORLEVEL 1 (
+     echo Fail to start mipskic_remote.exe on %_target% with user %_user%. Abort!
+     del /S /Q \\%_target%\c$\mipskic_remote.exe
+@@ -114,6 +122,7 @@ if /i "%1"=="-H" (set _setopt=_target& goto end)
+ if /i "%1"=="-u" (set _setopt=_user& goto end)
+ if /i "%1"=="-p" (set _setopt=_passwd& goto end)
+ if /i "%1"=="-o" (set _setopt=_output& goto end)
++if /i "%1"=="-m" (set _setopt=_mode& goto end)
+ 
+ set ERRORCHECK=%1
+ if /i "%ERRORCHECK:~0,1%"=="-" (
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
+index 029231bc..6c4151a9 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
++++ b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
+@@ -20,11 +20,12 @@ setlocal
+ path %~dp0bin;%PATH%
+ 
+ 
+-set _hostsFile=%1& shift
++set _hostsFile=%1
+ set _user=
+ set _passwd=
+ set _output=%~dp0output
+ set _configuration=
++set _mode=TEXT
+ 
+ for %%a in (%*) do call :setopt %%a
+ 
+@@ -55,7 +56,7 @@ echo Parse input file...
+ FOR /F %%i in (%_hostsFile%) do (
+ 	echo.
+     echo Processing %%i...
+-    call aida.bat -H %%i -o %_output%\
++    call aida.bat -H %%i -m %_mode% -o %_output%\
+ 	
+ 	if not "%_configuration%" == "" (
+ 			FOR %%a in (%_configuration%) do (
+@@ -76,6 +77,7 @@ if /i [%1]==[-u] (set _setopt=_user& goto end)
+ if /i [%1]==[-p] (set _setopt=_passwd& goto end)
+ if /i [%1]==[-o] (set _setopt=_output& goto end)
+ if /i [%1]==[-c] (set _setopt=_configuration& goto end)
++if /i [%1]==[-m] (set _setopt=_mode& goto end)
+ 
+ set ERRORCHECK=%~1
+ if /i [%ERRORCHECK:~0,1%]==[-] (
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/config.txt b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/config.txt
+index 1ddf66d6..987df762 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/config.txt
++++ b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/config.txt
+@@ -1,3 +1,3 @@
+ ;!@Install@!UTF-8!
+-RunProgram="aida32.exe /TEXT /CUSTOM kioskreport.rpf /R c:\aida32_report.log"
++RunProgram="aida32.exe /CUSTOM kioskreport.rpf /R c:\aida32_report.log"
+ ;!@InstallEnd@!
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

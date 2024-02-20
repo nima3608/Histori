@@ -1,0 +1,100 @@
+From 14bf603ee2ffa85a1b33255e5baf292d520be622 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 18 Nov 2011 11:16:11 +0000
+Subject: [PATCH 0211/1076] replacement for trace.dll, trchdl.dll and
+ trcserv.exe: writes trace files to subdirectory
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@253 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Trace/inc/TraceSession.h       |  1 -
+ .../Massai/cpp/Trace/src/TraceSession.cpp     | 34 ++++++-------------
+ 2 files changed, 11 insertions(+), 24 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+index 45c4bc20..594ff3ed 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+@@ -41,7 +41,6 @@ namespace MASSAI
+         void init();
+         void open();
+         void close();
+-        void close(const Timestamp& ts);
+         void process(const TraceCmd& cmd);
+         const std::string& getSessionId() const;
+         void setSessionId(const std::string& sessionId);
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index 530d8c02..075275e2 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -95,7 +95,6 @@ namespace MASSAI
+       {
+         m_path= m_config.getFullPath();
+         m_filename= m_config.getNewFilename();
+-        fs::create_directories(m_path);
+         openFile();
+       }
+       catch(std::exception& ex)
+@@ -106,33 +105,22 @@ namespace MASSAI
+     }
+     void TraceSession::close()
+     {
+-      close(getTimestamp());
+-    }
+-    void TraceSession::close(const Timestamp& ts)
+-    {
+-      std::ostream* pOut= m_pOut.get();
+-      if(pOut)
++      try
+       {
+-        try
+-        {
+-          m_pOut= std::auto_ptr<std::ostream>();
+-          fs::path backup= m_config.getBackupPath(m_path, ts);
+-          fs::create_directories(backup);
+-          fs::path source= m_path / m_filename;
+-          backup/= m_filename;
+-          fs::rename(source, backup);
+-        }
+-        catch(std::exception& ex)
+-        {
+-          MASSAI::trace::tracetrace(MinorWarning_HERE, "close file: (%.1000s)", ex.what());
+-        }
++        m_pOut= std::auto_ptr<std::ostream>();
++      }
++      catch(std::exception& ex)
++      {
++        MASSAI::trace::tracetrace(MinorWarning_HERE, "close file: (%.1000s)", ex.what());
+       }
+     }
+     void TraceSession::openFile()
+     {
+       try
+       {
+-        fs::path file= m_path / m_filename;
++        fs::path backup= m_config.getBackupPath(m_path, getTimestamp());
++        fs::create_directories(backup);
++        fs::path file= backup / m_filename;
+         m_pOut= std::auto_ptr<std::ostream>(new std::ofstream(file.native_file_string().c_str(),
+           std::ios_base::out | std::ios_base::app));
+       }
+@@ -240,7 +228,7 @@ namespace MASSAI
+         // pOut->seekp(-1, std::ios::end);
+         if(pOut->tellp() > m_config.getFileSizeLimit())
+         {
+-          close(cmd.timestamp);
++          close();
+           open();
+         }
+       }
+@@ -291,7 +279,7 @@ namespace MASSAI
+       TraceFormat& fmt= getTraceFormat();
+       fmt.text(out, cmd.threadIndex, cmd.timestamp, cmd.traceLevel,
+         cmd.topic, cmd.file, cmd.line, cmd.function, "start new file");
+-      close(cmd.timestamp);
++      close();
+       open();
+     }
+     void TraceSession::move(const TraceCmd& cmd)
+-- 
+2.41.0.windows.1
+

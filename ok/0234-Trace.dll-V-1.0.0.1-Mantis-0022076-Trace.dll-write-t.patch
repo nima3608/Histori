@@ -1,0 +1,320 @@
+From b5e4daf6113720ef03b195521e183982027badc1 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 11 Jan 2012 20:14:00 +0000
+Subject: [PATCH 0234/1076] Trace.dll; V 1.0.0.1; Mantis 0022076: Trace.dll:
+ write traces before openTrace and after closeTrace to stdout
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@285 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Trace/inc/TraceProcessor.h     |  3 --
+ .../Massai/cpp/Trace/inc/TraceSession.h       |  6 ++-
+ .../Massai/cpp/Trace/inc/local_def.h          | 13 +++--
+ .../Massai/cpp/Trace/src/TestTraceHdlLib.cpp  |  2 +-
+ .../Massai/cpp/Trace/src/TestTraceLib.cpp     |  2 +
+ .../Massai/cpp/Trace/src/TraceProcessor.cpp   | 53 ++++++++-----------
+ .../Massai/cpp/Trace/src/TraceSession.cpp     | 35 ++++++++----
+ 7 files changed, 64 insertions(+), 50 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+index 4be52849..fdb192ce 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+@@ -44,8 +44,6 @@ namespace MASSAI
+         void close(int hdl);
+         void forward(const TraceCmd& cmd);
+         void forwardAll(const TraceCmd& cmd);
+-        void removeSession(const std::string& sessionId);
+-        void addSession(TraceSession* pSession);
+         TraceSession* findSession(int hdl);
+ 
+ 
+@@ -55,7 +53,6 @@ namespace MASSAI
+ 
+         TraceCommonConfig& m_config;
+         SessionSet m_sessionSet;
+-        SessionMap m_sessionMap;
+         TraceSession m_baseSession;
+         long m_threadCounter;
+         ThreadMap m_threadMap;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+index aef3a897..6bc491c7 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+@@ -50,6 +50,7 @@ namespace MASSAI
+         TraceSession(TraceCommonConfig& config);
+         ~TraceSession();
+         void init();
++        void finit();
+         void open();
+         void close();
+         void process(const TraceCmd& cmd);
+@@ -58,16 +59,19 @@ namespace MASSAI
+         void setHandle(int hdl);
+         void traceLine(const std::string& out) const;
+       private:
++        typedef std::auto_ptr<std::ostream> OutputPtr;
+         TraceConfig m_config;
+         boost::filesystem::path m_path; // path for current trace file
+         std::string m_filename;
+-        std::auto_ptr<std::ostream> m_pOut;
++        OutputPtr m_pOut;
+         TraceCallback m_callback;
+         TraceFormatCB m_format;
++        bool m_init;
+ 
+         void move();
+         void openFile();
+         std::ostream& getOut();
++        void setOut(std::ostream* pOut);
+         void text(const TraceCmd& cmd);
+         void dump(const TraceCmd& cmd);
+         void move(const TraceCmd& cmd);
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+index 05104abb..46757e7d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+@@ -1,9 +1,16 @@
++#define FILE_VER_BIN     1,0,0,1
++#define FILE_VER_STR     "FileVersion", "1.0.0.1\0"
++
++
+ /*! \page trace trace library - Release Notes
+  *
+- *  @version 1.0.0.0
++ *  @version 1.0.0.1
+  *
+  *  \section change1 Change history
+  *
++ *  \date 11.01.2012 \li V1.0.0.1
++ *                   \li SteT Mantis 0022076: Trace.dll: write traces before openTrace and after closeTrace to stdout
++ *
+  *  \date 27.10.2011 \li V1.0.0.0
+  *                   \li SteT Initial Version
+  *
+@@ -73,7 +80,3 @@
+  *     9, 'All',               'All'
+  *
+  */
+- */
+-
+-#define FILE_VER_BIN     1,0,0,0
+-#define FILE_VER_STR     "FileVersion", "1.0.0.0\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+index a0013dae..d875e98a 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+@@ -23,7 +23,7 @@ int main(int argc, char** argv)
+   try
+   {
+     int t1= openTrace("TestTrace");
+-    int t2= openTrace("TestTrace2");
++    int t2= openTrace("TestTrace");
+     char buffer[300];
+     for(int i= 0; i < sizeof(buffer); i++)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+index 64f69a4c..754a7d0b 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+@@ -22,6 +22,7 @@ int main(int argc, char** argv)
+   MASSAI::localtrace::openTrace("TestTrace");
+   try
+   {
++    writeTraceText(0, TOPIC_HERE, "Before open");
+     openTrace("TestTrace");
+     char buffer[300];
+     for(int i= 0; i < sizeof(buffer); i++)
+@@ -37,6 +38,7 @@ int main(int argc, char** argv)
+     }
+     MASSAI::localtrace::writeTraceText(MajorError_HERE, "close");
+     closeTrace();
++    writeTraceText(0, TOPIC_HERE, "After close");  // this may be lost, because the process terminates before writing this
+   }
+   catch(std::exception& ex)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+index 95d67ea4..f04b0f1f 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+@@ -23,7 +23,6 @@ namespace MASSAI
+     TraceProcessor::TraceProcessor(TraceCommonConfig& config):
+       m_config(config),
+       m_sessionSet(),
+-      m_sessionMap(),
+       m_baseSession(config),
+       m_threadCounter(0),
+       m_threadMap()
+@@ -108,26 +107,40 @@ namespace MASSAI
+     }
+     void TraceProcessor::initBaseSession(const std::string& sessionId)
+     {
+-      removeSession(sessionId);
+       m_baseSession.close();
+       m_baseSession.setSessionId(sessionId);
+-      addSession(&m_baseSession);
+       m_baseSession.init();
+     }
+     void TraceProcessor::initSession(TraceSession* pSession)
+     {
+       const std::string& sessionId= pSession->getSessionId();
+-      removeSession(sessionId);
+-      addSession(pSession);
++      m_sessionSet.insert(pSession);
+       pSession->init();
+     }
+     void TraceProcessor::close(int hdl)
+     {
+-      TraceSession* pSession= findSession(hdl);
+-      if(pSession != 0)
++      if(hdl == 0)
++      {
++        m_baseSession.close();
++        m_baseSession.finit();
++      }
++      else
+       {
+-        pSession->close();
+-        removeSession(pSession->getSessionId());
++        SessionSet::iterator it= m_sessionSet.find(reinterpret_cast<TraceSession*>(hdl));
++        if(it != m_sessionSet.end())
++        {
++          TraceSession* pSession = *it;
++          if(pSession != 0)
++          {
++            pSession->close();
++            m_sessionSet.erase(it);
++            delete pSession;
++          }
++          else
++          {
++            m_sessionSet.erase(it);
++          }
++        }
+       }
+     }
+     void TraceProcessor::forward(const TraceCmd& cmd)
+@@ -148,28 +161,6 @@ namespace MASSAI
+       }
+       m_baseSession.process(cmd);
+     }
+-    void TraceProcessor::removeSession(const std::string& sessionId)
+-    {
+-      SessionMap::iterator it= m_sessionMap.find(sessionId);
+-      if(it != m_sessionMap.end())
+-      {
+-        TraceSession* pSession= (*it).second;
+-        if(pSession != &m_baseSession)
+-        {
+-          m_sessionSet.erase(pSession);
+-          delete pSession;
+-        }
+-        m_sessionMap.erase(it);
+-      }
+-    }
+-    void TraceProcessor::addSession(TraceSession* pSession)
+-    {
+-      m_sessionMap[pSession->getSessionId()]= pSession;
+-      if(pSession != &m_baseSession)
+-      {
+-        m_sessionSet.insert(pSession);
+-      }
+-    }
+     TraceSession* TraceProcessor::findSession(int hdl)
+     {
+       TraceSession* result= 0;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index 5b642927..394087c9 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -96,15 +96,23 @@ namespace MASSAI
+       m_path(),
+       m_filename(),
+       m_callback(),
+-      m_format(m_callback)
+-    {}
++      m_format(m_callback),
++      m_init(false)
++    {
++      setOut(0);
++    }
+     TraceSession::~TraceSession()
+     {}
+     void TraceSession::init()
+     {
++      m_init = true;
+       m_config.init();
+       open();
+     }
++    void TraceSession::finit()
++    {
++      m_init = false;
++    }
+     void TraceSession::open()
+     {
+       try
+@@ -124,8 +132,7 @@ namespace MASSAI
+       try
+       {
+         m_format.text(-1, TOPIC, TOPIC_HERE, "--- Trace Close ---");
+-        m_pOut= std::auto_ptr<std::ostream>();
+-        m_callback.setOut(m_pOut.get());
++        setOut(0);
+       }
+       catch(std::exception& ex)
+       {
+@@ -139,9 +146,8 @@ namespace MASSAI
+         fs::path backup= m_config.getBackupPath(m_path, mSysTime::getTimestamp());
+         fs::create_directories(backup);
+         fs::path file= backup / m_filename;
+-        m_pOut= std::auto_ptr<std::ostream>(new std::ofstream(file.native_file_string().c_str(),
++        setOut(new std::ofstream(file.native_file_string().c_str(),
+           std::ios_base::out | std::ios_base::app));
+-        m_callback.setOut(m_pOut.get());
+       }
+       catch(std::exception& ex)
+       {
+@@ -152,8 +158,7 @@ namespace MASSAI
+     {
+       try
+       {
+-        m_pOut= std::auto_ptr<std::ostream>();
+-        m_callback.setOut(m_pOut.get());
++        setOut(0);
+         fs::path newPath= m_config.getFullPath();
+         fs::create_directories(newPath);
+         fs::path source= m_path / m_filename;
+@@ -215,11 +220,18 @@ namespace MASSAI
+           break;
+         }
+         case TRC_NEWFILE:
+-        case TRC_NEWDAY:
+         {
+           newFile(cmd);
+           break;
+         }
++        case TRC_NEWDAY:
++        {
++          if(m_init)
++          {
++            newFile(cmd);
++          }
++          break;
++        }
+         case TRC_CHANGELEVEL:
+         {
+           changeLevel(cmd);
+@@ -263,6 +275,11 @@ namespace MASSAI
+     {
+       m_config.setHandle(hdl);
+     }
++    void TraceSession::setOut(std::ostream* pOut)
++    {
++      m_pOut= OutputPtr(pOut);
++      m_callback.setOut(&getOut());
++    }
+     std::ostream& TraceSession::getOut()
+     {
+       std::ostream* pOut= m_pOut.get();
+-- 
+2.41.0.windows.1
+

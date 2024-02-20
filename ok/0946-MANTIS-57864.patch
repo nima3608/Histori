@@ -1,0 +1,719 @@
+From 5ee352a9fedca1e4b7055fc176afb847a844adf4 Mon Sep 17 00:00:00 2001
+From: dmeier <dmeier@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 7 Jul 2020 08:35:07 +0000
+Subject: [PATCH 0946/1000] MANTIS 57864 Assure ID - Detect and report document
+ type and service events via IdDocument struct
+
+Copied IdDocument.XSD AND the formerly forgotten OneIdTypes.xsd from ips-framework to platform repo.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1580 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Cuss/IdDocument.XSD            |   5 -
+ .../Massai/idl/Cuss/OneIdTypes.xsd            | 680 +++++++++++-------
+ 2 files changed, 408 insertions(+), 277 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/IdDocument.XSD b/SelfServiceCommon/Massai/idl/Cuss/IdDocument.XSD
+index 7df8a1c7..453935ec 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/IdDocument.XSD
++++ b/SelfServiceCommon/Massai/idl/Cuss/IdDocument.XSD
+@@ -29,11 +29,6 @@
+ 			<xs:documentation>Possible values for attribute 'data-item-name' of element 'data-item'</xs:documentation>
+ 		</xs:annotation>
+ 		<xs:restriction base="xs:string">
+-			<xs:enumeration value="idDocument.assureId.documentType">
+-				<xs:annotation>
+-					<xs:documentation>Document type (e.g. 'Germany (D) Identity Card') if document was properly scanned and is genuine (copy does not work!)</xs:documentation>
+-				</xs:annotation>
+-			</xs:enumeration>
+ 			<xs:enumeration value="idDocument.assureId.event">
+ 				<xs:annotation>
+ 					<xs:documentation>AssureID service event giving detailed information about the document analysis process</xs:documentation>
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/OneIdTypes.xsd b/SelfServiceCommon/Massai/idl/Cuss/OneIdTypes.xsd
+index d47a79e1..37460074 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/OneIdTypes.xsd
++++ b/SelfServiceCommon/Massai/idl/Cuss/OneIdTypes.xsd
+@@ -1,273 +1,409 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<xsd:schema xmlns:oneIdTypes="http://www.materna.com/CUSS/OneIdTypes-1.0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.materna.com/CUSS/OneIdTypes-1.0">
+-    <xsd:simpleType name="genderType">
+-        <xsd:annotation>
+-            <xsd:documentation>Gender type codes.</xsd:documentation>
+-        </xsd:annotation>
+-        <xsd:restriction base="xsd:string">
+-            <xsd:enumeration value="MALE"/>
+-            <xsd:enumeration value="FEMALE"/>
+-            <xsd:enumeration value="CHILD"/>
+-            <xsd:enumeration value="UNKNOWN"/>
+-        </xsd:restriction>
+-    </xsd:simpleType>
+-
+-    <xsd:complexType name="nameData">
+-        <xsd:annotation>
+-            <xsd:documentation>A raw or converted name. The raw name can be in elements name or fName and lName. The converted name is stored in the parts list, title, etc.</xsd:documentation>
+-        </xsd:annotation>
+-        <xsd:sequence>
+-            <xsd:annotation>
+-                <xsd:documentation>name data structure</xsd:documentation>
+-            </xsd:annotation>
+-            <xsd:element name="name" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>full name</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="fName" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>first name.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="fNameParts" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+-                <xsd:annotation>
+-                    <xsd:documentation>first name in form of split up and normalized (“ä”-> “ae”, etc.) name parts.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="lName" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>last name.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="lNameParts" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+-                <xsd:annotation>
+-                    <xsd:documentation>last name in form of split up and normalized (“ä”-> “ae”, etc.) name parts.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="gender" type="oneIdTypes:genderType" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>gender</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-        </xsd:sequence>
+-    </xsd:complexType>
+-
+-    <xsd:complexType name="idDocumentData">
+-        <xsd:annotation>
+-            <xsd:documentation>ID / passport document data structure</xsd:documentation>
+-        </xsd:annotation>
+-        <xsd:sequence>
+-            <xsd:element name="name" type="oneIdTypes:nameData" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Name data structure</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="documentNumber" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Document number</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="expiryDate" type="xsd:date" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Expiry date of this document</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="countryOfIssue" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>ISO code of document issuing country</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="cityOfIssue" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>nameof issuing city</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="dateOfBirth" type="xsd:date" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Date of birth</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="nationality" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Document owner's nationality</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="dateOfIssue" type="xsd:date" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Issue date of this document</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="mrzData" minOccurs="0" maxOccurs="3">
+-                <xsd:annotation>
+-                    <xsd:documentation>List of "machine readable zone" tracks</xsd:documentation>
+-                </xsd:annotation>
+-                <xsd:complexType>
+-                    <xsd:simpleContent>
+-                        <xsd:extension base="xsd:string">
+-                            <xsd:attribute name="mrz-track" use="required">
+-                                <xsd:simpleType>
+-                                    <xsd:restriction base="xsd:unsignedInt">
+-                                        <xsd:enumeration value="1"/>
+-                                        <xsd:enumeration value="2"/>
+-                                        <xsd:enumeration value="3"/>
+-                                    </xsd:restriction>
+-                                </xsd:simpleType>
+-                            </xsd:attribute>
+-                        </xsd:extension>
+-                    </xsd:simpleContent>
+-                </xsd:complexType>
+-            </xsd:element>
+-            <xsd:element name="documentImage" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Base64 encoded document image data</xsd:documentation>
+-                </xsd:annotation>
+-                <xsd:complexType>
+-                    <xsd:simpleContent>
+-                        <xsd:extension base="xsd:base64Binary">
+-                            <xsd:attribute name="data-format" use="optional">
+-                                <xsd:annotation>
+-                                    <xsd:documentation>Image data format.</xsd:documentation>
+-                                </xsd:annotation>
+-                                <xsd:simpleType>
+-                                    <xsd:restriction base="xsd:string">
+-                                        <xsd:enumeration value="bmp"/>
+-                                        <xsd:enumeration value="jpg"/>
+-                                        <xsd:enumeration value="png"/>
+-                                    </xsd:restriction>
+-                                </xsd:simpleType>
+-                            </xsd:attribute>
+-                        </xsd:extension>
+-                    </xsd:simpleContent>
+-                </xsd:complexType>
+-            </xsd:element>
+-            <xsd:element name="isGenuine" type="xsd:boolean" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Indicates if this document is genuine. Depends on device handler implementation if this element is supported</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-        </xsd:sequence>
+-    </xsd:complexType>
+-
+-    <xsd:complexType name="boardingPassData">
+-        <xsd:annotation>
+-            <xsd:documentation>Passport document data structure</xsd:documentation>
+-        </xsd:annotation>
+-        <xsd:sequence>
+-            <xsd:element name="name" type="oneIdTypes:nameData" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Name data structure</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <!-- flight related data -->
+-            <xsd:element name="airlineCode" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>2L-Airline code</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="flightNumber" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Flight number in trimmed format, may include flight number suffix</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="flightDate" type="xsd:date" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Full flight date</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="origin" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Origin 3L-code</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="destination" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Destination 3L-code</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <!-- pax related data -->
+-            <xsd:element name="sequenceNumber" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Boarding number or standby number for this segment, if any. The type is determined by the checkinStatus.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="pnr" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>PNR code (file key) for this segment.</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="compartmentCode" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Passenger's compartment code (e.g. 'F')</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="seat" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Passenger's seat (e.g. '015A)</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="barcodeString" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>List of "machine readable zone" tracks</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-        </xsd:sequence>
+-    </xsd:complexType>
+-
+-    <xsd:complexType name="passenger">
+-        <xsd:annotation>
+-            <xsd:documentation></xsd:documentation>
+-        </xsd:annotation>
+-        <xsd:sequence>
+-            <xsd:element name="id" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Passenger id, if applicable</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="hostNativeId" type="xsd:string" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Host specific passenger id, if applicable</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="name" type="oneIdTypes:nameData" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Name data structure</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="idDocument" type="oneIdTypes:idDocumentData" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>TBC</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="boardingPass" type="oneIdTypes:boardingPassData" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>TBC</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="facialImage" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>Base64 encoded facial image data. Required in case of identification via facial image</xsd:documentation>
+-                </xsd:annotation>
+-                <xsd:complexType>
+-                    <xsd:simpleContent>
+-                        <xsd:extension base="xsd:base64Binary">
+-                            <xsd:attribute name="data-format" use="optional">
+-                                <xsd:annotation>
+-                                    <xsd:documentation>Image data format.</xsd:documentation>
+-                                </xsd:annotation>
+-                                <xsd:simpleType>
+-                                    <xsd:restriction base="xsd:string">
+-                                        <xsd:enumeration value="bmp"/>
+-                                        <xsd:enumeration value="jpg"/>
+-                                        <xsd:enumeration value="png"/>
+-                                    </xsd:restriction>
+-                                </xsd:simpleType>
+-                            </xsd:attribute>
+-                        </xsd:extension>
+-                    </xsd:simpleContent>
+-                </xsd:complexType>
+-            </xsd:element>
+-        </xsd:sequence>
+-    </xsd:complexType>
+-
+-</xsd:schema>
++<xs:schema xmlns:oneIdTypes="http://www.materna.com/CUSS/OneIdTypes-1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.materna.com/CUSS/OneIdTypes-1.0">
++	<xs:simpleType name="resultCode">
++		<xs:annotation>
++			<xs:documentation>The high level result code of the biometrics operation (e.f. verification, identification, enrolment etc.)</xs:documentation>
++		</xs:annotation>
++		<xs:restriction base="xs:string">
++			<xs:enumeration value="success">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process was succesful</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++			<xs:enumeration value="failed">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process failed for some reason (e.g. id-check failed). See message and biomericsResult for further details</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++			<xs:enumeration value="partiallyFailed">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process failed partially for some reason (e.g. id-check failed). See message and biomericsResult for further details. This result is used as overall result code and not related to a single passenger result</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++			<xs:enumeration value="fatalError">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process was not completed and failed for an unexpected reason</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++			<xs:enumeration value="timeout">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process timed out</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++			<xs:enumeration value="userAbort">
++				<xs:annotation>
++					<xs:documentation>Biometrics sub-process was aborted by passenger or floorwalker</xs:documentation>
++				</xs:annotation>
++			</xs:enumeration>
++		</xs:restriction>
++	</xs:simpleType>
++	
++	<xs:simpleType name="biometricsResult">
++		<xs:annotation>
++			<xs:documentation>Result of biometrics sub-process</xs:documentation>
++		</xs:annotation>
++		<xs:restriction base="xs:string">
++			<xs:enumeration value="verifyMatch"/>
++			<xs:enumeration value="verifyMismatch"/>
++			<xs:enumeration value="identifySuccess"/>
++			<xs:enumeration value="identifyFailed"/>
++			<xs:enumeration value="enrolSuccess"/>
++			<xs:enumeration value="enrolFailed"/>
++			<xs:enumeration value="acceptanceDenied"/>
++			<xs:enumeration value="platformError"/>
++		</xs:restriction>
++	</xs:simpleType>
++	
++	<xs:complexType name="result">
++		<xs:annotation>
++			<xs:documentation>Result of the performed biometrics action related to a single passenger</xs:documentation>
++		</xs:annotation>
++		<xs:sequence>
++			<xs:element name="resultCode" type="oneIdTypes:resultCode">
++				<xs:annotation>
++					<xs:documentation>The high-level result of the operation. Indicates if the 'biometrics action' was successful. What action(s) were executed depend on the application configuration</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="biometricsResult" type="oneIdTypes:biometricsResult" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>The biometrics method result</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="floorwalkerInteraction" type="xs:boolean" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Indicates if a floorwalker has interacted</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="floorwalkerBarcode" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Contains the service barcode of the floorwalker who has interacted</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="message" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Optional message giving more information about the reason for the specific result</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++		</xs:sequence>
++	</xs:complexType>
++	
++	<xs:simpleType name="genderType">
++		<xs:annotation>
++			<xs:documentation>Gender type codes.</xs:documentation>
++		</xs:annotation>
++		<xs:restriction base="xs:string">
++			<xs:enumeration value="MALE"/>
++			<xs:enumeration value="FEMALE"/>
++			<xs:enumeration value="CHILD"/>
++			<xs:enumeration value="UNKNOWN"/>
++		</xs:restriction>
++	</xs:simpleType>
++	
++    <xs:simpleType name="paxType">
++        <xs:annotation>
++            <xs:documentation>Pax type codes</xs:documentation>
++        </xs:annotation>
++        <xs:restriction base="xs:string">
++            <xs:enumeration value="ADULT"/>
++            <xs:enumeration value="CHILD"/>
++            <xs:enumeration value="INFANT"/>
++            <xs:enumeration value="ADULT_WITH_INFANT"/>
++        </xs:restriction>
++    </xs:simpleType>
++	
++	<xs:complexType name="paxCount">
++		<xs:annotation>
++			<xs:documentation>Passenger counter</xs:documentation>
++		</xs:annotation>
++		<xs:attribute name="current" type="xs:int" use="optional">
++			<xs:annotation>
++				<xs:documentation>The current passenger loop counter (starting with value 1) if known by the calling application</xs:documentation>
++			</xs:annotation>
++		</xs:attribute>
++		<xs:attribute name="max" type="xs:int" use="optional">
++			<xs:annotation>
++				<xs:documentation>The maximum passenger loop counter (starting with value 1) if known by the calling application</xs:documentation>
++			</xs:annotation>
++		</xs:attribute>
++	</xs:complexType>
++	
++	<xs:complexType name="nameData">
++		<xs:annotation>
++			<xs:documentation>A raw or converted name. The raw name can be in elements name or fName and lName. The converted name is stored in the parts list, title, etc.</xs:documentation>
++		</xs:annotation>
++		<xs:sequence>
++			<xs:annotation>
++				<xs:documentation>name data structure</xs:documentation>
++			</xs:annotation>
++			<xs:element name="name" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>full name</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="fName" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>first name.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="fNameParts" type="xs:string" minOccurs="0" maxOccurs="unbounded">
++				<xs:annotation>
++					<xs:documentation>first name in form of split up and normalized (“ä”-> “ae”, etc.) name parts.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="lName" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>last name.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="lNameParts" type="xs:string" minOccurs="0" maxOccurs="unbounded">
++				<xs:annotation>
++					<xs:documentation>last name in form of split up and normalized (“ä”-> “ae”, etc.) name parts.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="gender" type="oneIdTypes:genderType" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>gender</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++		</xs:sequence>
++	</xs:complexType>
++	<xs:complexType name="idDocumentData">
++		<xs:annotation>
++			<xs:documentation>ID / passport document data structure</xs:documentation>
++		</xs:annotation>
++		<xs:sequence>
++			<xs:element name="name" type="oneIdTypes:nameData" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Name data structure</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="documentNumber" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Document number</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="expiryDate" type="xs:date" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Expiry date of this document</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="countryOfIssue" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>ISO code of document issuing country</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="cityOfIssue" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>nameof issuing city</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="dateOfBirth" type="xs:date" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Date of birth</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="nationality" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Document owner's nationality</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="dateOfIssue" type="xs:date" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Issue date of this document</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="mrzData" minOccurs="0" maxOccurs="3">
++				<xs:annotation>
++					<xs:documentation>List of "machine readable zone" tracks</xs:documentation>
++				</xs:annotation>
++				<xs:complexType>
++					<xs:simpleContent>
++						<xs:extension base="xs:string">
++							<xs:attribute name="mrz-track" use="required">
++								<xs:simpleType>
++									<xs:restriction base="xs:unsignedInt">
++										<xs:enumeration value="1"/>
++										<xs:enumeration value="2"/>
++										<xs:enumeration value="3"/>
++									</xs:restriction>
++								</xs:simpleType>
++							</xs:attribute>
++						</xs:extension>
++					</xs:simpleContent>
++				</xs:complexType>
++			</xs:element>
++			<xs:element name="documentImage" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Base64 encoded document image data</xs:documentation>
++				</xs:annotation>
++				<xs:complexType>
++					<xs:simpleContent>
++						<xs:extension base="xs:base64Binary">
++							<xs:attribute name="data-format" use="optional">
++								<xs:annotation>
++									<xs:documentation>Image data format.</xs:documentation>
++								</xs:annotation>
++								<xs:simpleType>
++									<xs:restriction base="xs:string">
++										<xs:enumeration value="bmp"/>
++										<xs:enumeration value="jpg"/>
++										<xs:enumeration value="png"/>
++									</xs:restriction>
++								</xs:simpleType>
++							</xs:attribute>
++						</xs:extension>
++					</xs:simpleContent>
++				</xs:complexType>
++			</xs:element>
++			<xs:element name="isGenuine" type="xs:boolean" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Indicates if this document is genuine. Depends on device handler implementation if this element is supported</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="documentType" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>The textual description of the id-document if available, e.g. 'Germany (D) Identity Card'. This data is for instance returned by the AssureID-SDK while parsing ID documents (IDDR) via a Desko scanner</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++		</xs:sequence>
++	</xs:complexType>
++	<xs:complexType name="boardingPassData">
++		<xs:annotation>
++			<xs:documentation>Passport document data structure</xs:documentation>
++		</xs:annotation>
++		<xs:sequence>
++			<xs:element name="name" type="oneIdTypes:nameData" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Name data structure</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<!-- flight related data -->
++			<xs:element name="airlineCode" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>2L-Airline code</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="flightNumber" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Flight number in trimmed format, may include flight number suffix</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="flightDate" type="xs:date" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Full flight date</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="origin" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Origin 3L-code</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="destination" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Destination 3L-code</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<!-- pax related data -->
++			<xs:element name="sequenceNumber" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Boarding number or standby number for this segment, if any. The type is determined by the checkinStatus.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="pnr" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>PNR code (file key) for this segment.</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="compartmentCode" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Passenger's compartment code (e.g. 'F')</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="seat" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Passenger's seat (e.g. '015A)</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="barcodeString" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Barcode data in hex-binary format (sorry for type xs:string!)</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++		</xs:sequence>
++	</xs:complexType>
++	<xs:complexType name="passenger">
++		<xs:annotation>
++			<xs:documentation>The passenger based information</xs:documentation>
++		</xs:annotation>
++		<xs:sequence>
++			<xs:element name="paxNumber" type="oneIdTypes:paxCount" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Passenger number if biometrics sub-process runs encapsulated in e.g. outer SBD flow</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="type" type="oneIdTypes:paxType" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Passenger type (ADULT / INFANT / etc.)</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="id" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Passenger id, if applicable</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="hostNativeId" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Host specific passenger id, if applicable</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="uid" type="xs:string" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>The unique passenger identifier returned by external interfaces (e.g. CBP Traveller Verification System)</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="name" type="oneIdTypes:nameData" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Name data structure</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="idDocument" type="oneIdTypes:idDocumentData" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>TBC</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="boardingPass" type="oneIdTypes:boardingPassData" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>TBC</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++			<xs:element name="facialImage" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Base64 encoded facial image data. Required in case of identification via facial image</xs:documentation>
++				</xs:annotation>
++				<xs:complexType>
++					<xs:simpleContent>
++						<xs:extension base="xs:base64Binary">
++							<xs:attribute name="data-format" use="optional">
++								<xs:annotation>
++									<xs:documentation>Image data format.</xs:documentation>
++								</xs:annotation>
++								<xs:simpleType>
++									<xs:restriction base="xs:string">
++										<xs:enumeration value="bmp"/>
++										<xs:enumeration value="jpg"/>
++										<xs:enumeration value="png"/>
++									</xs:restriction>
++								</xs:simpleType>
++							</xs:attribute>
++						</xs:extension>
++					</xs:simpleContent>
++				</xs:complexType>
++			</xs:element>
++			<xs:element name="result" type="oneIdTypes:result" minOccurs="0">
++				<xs:annotation>
++					<xs:documentation>Overall result of the performed biometrics action</xs:documentation>
++				</xs:annotation>
++			</xs:element>
++		</xs:sequence>
++	</xs:complexType>
++</xs:schema>
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,431 @@
+From 3475f77508da43dd27b1003a8ef7d8601a87b4ca Mon Sep 17 00:00:00 2001
+From: sbornema <sbornema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 6 Jul 2018 13:26:09 +0000
+Subject: [PATCH 0917/1076] Mantis 0044960: Extend CfgValuesS by list
+ operations through configuration file (and more)
+
+git-svn-id: svn://localhost/SelfServiceCommon/branches/RC_5.10.00@1359 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 299 +++++++++++-------
+ 1 file changed, 189 insertions(+), 110 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index 7e188f61..84e41a8d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -34,6 +34,8 @@
+ #define CSTR_VAL_END    "\""
+ 
+ #define CCHR_CR         '\n'
++#define CCHR_COMMENT1   '#'
++#define CCHR_COMMENT2   '-'
+ 
+ #define DSPLERR         "CfgValues - "
+ #define DSPLLIN         "CfgValues: "
+@@ -448,9 +450,35 @@ struct cfgValuesFStatus
+ 
+ /**
+  *
+- * Read a token value.
++ * Skips comment lines in stream
+  *
+ **/
++bool checkComment
++(
++   std::istream &       input_stream
++)
++{
++   std::streampos pos_rewind = input_stream.tellg();
++   char input_char = static_cast<char>( input_stream.get() );
++
++   if( input_stream.good() )
++   {
++      if( input_char == CCHR_CR || input_char == CCHR_COMMENT1  || input_char == CCHR_COMMENT2)
++      {
++		// Forward to next line
++		while(input_char != CCHR_CR) {
++			// Next character
++			input_char = static_cast<char>( input_stream.get() );
++		}
++		return true;
++	  }
++   }
++
++   input_stream.seekg( pos_rewind );
++   return false;
++}
++
++
+ void cfgValuesFRead
+ (
+    std::string &        result_value,
+@@ -671,6 +699,119 @@ void soutItems( unsigned N )
+       std::cout << "s";
+ }
+ 
++
++int erase(char const * Host, const char* DelItem)
++{
++    corbaClient<Config::Directory> DirClient
++    (
++        Host,
++        CFGMGR_PORT,
++        CFGMGR_SRVNAME_DIRECTORY
++    );
++    Config::Directory * const DirProxy = DirClient.proxy();
++    if( !DirProxy )
++    {
++        std::cout
++            << DSPLERR "Could not connect the Directory servant."
++            << std::endl;
++        return c_exit_connection_failed;
++    }
++    Config::access SAcc;
++    SAcc.Authorization = CORBA::string_dup( ACC_NAME );
++    SAcc.Item = CORBA::string_dup( DelItem );
++    try
++    {
++        DirProxy->erase( SAcc );
++    }
++    catch( Config::Node::notFound & )
++    {
++        std::cout << DSPLERR "Erase item [" << DelItem << "]"
++        " not found - ignored." << std::endl;
++    }
++    std::cout
++        << DSPLLIN "Erased [" << DelItem << "]"
++        << std::endl;
++    return c_exit_good;
++}
++
++int removeFromList(char const * Host,
++	const char* RemItem,
++	const char* RemValue
++	)
++{
++    Config::access SAcc;
++    Config::description CDescr;
++    SAcc.Authorization = CORBA::string_dup( ACC_NAME );
++    SAcc.Item = CORBA::string_dup( RemItem );
++
++    corbaClient<Config::Textlist>
++        TextlistClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXTLIST );
++    Config::Textlist * const TextlistProxy = TextlistClnt.proxy();
++    if( !TextlistProxy )
++    {
++        std::cout
++            << DSPLERR "Could not connect the "
++            << CFGMGR_SRVNAME_TEXTLIST << " servant."
++            << std::endl;
++        return c_exit_connection_failed;
++    }
++    try
++    {
++        if( TextlistProxy->get( SAcc ) )
++        {
++        Config::Textlist::strings const & Val =
++            *TextlistProxy->get( SAcc );
++        unsigned int Length = Val.length();
++        std::string strbuf;
++        Config::Textlist::strings cstrbuflist;
++        cstrbuflist.length(Length);
++        std::cout
++            << "Found " << Length << " Textlistitems" << " compare with [" << RemValue << "]"
++            << std::endl;
++
++        int IdxNew = 0;
++        for( unsigned Idx = 0; Idx < Length; ++Idx )
++        {
++            strbuf.assign(Val[Idx].in());
++
++            if( strbuf.compare(RemValue) != 0 )
++            {
++                cstrbuflist[IdxNew++]=(CORBA::string_dup(Val[Idx].in()));
++            }
++            strbuf.clear();
++        }
++        if( IdxNew != Length )
++        {
++            cstrbuflist.length(IdxNew);
++            try
++            {
++                TextlistProxy->set( SAcc, cstrbuflist );
++                std::cout << "Removed [" << RemValue << "] from Listitem [" << RemItem << "] " << std::endl;
++            }
++            catch( ... )
++            {
++                std::cout
++                    << DSPLERR "Unable to write changed list to "
++                    << RemItem << " servant."
++                    << std::endl;
++                return c_exit_connection_failed;
++            }
++        } 
++        else
++        {
++            std::cout << DSPLLIN "Listitem [" << RemValue << "]"
++                    " not found in List - ignored." << std::endl;
++        }            
++        }
++    }
++    catch( Config::Node::notFound & )
++    {
++        std::cout << DSPLERR "REMOVEFROMLIST item [" << RemItem << "]"
++        " not found - ignored." << std::endl;
++    }
++    return c_exit_good;         
++}
++
+ /**
+  *
+  * Retrieve the value
+@@ -876,6 +1017,7 @@ int main( int argc, char ** argv )
+          std::string FSelStr;
+          std::string FSelExp;
+          std::string FDefInd;
++         std::string FAction;
+ 
+          char const * const AutoInitial =
+             Arg.option( "AUTOINITIAL" );
+@@ -902,6 +1044,11 @@ int main( int argc, char ** argv )
+          cfgValuesFStatus sta_fst, sta_nxt;
+          while( input_stream.good() )
+          {
++			while(checkComment(input_stream)){};
++			if(!input_stream.good()) {
++				continue;
++			}
++
+             cfgValuesFRead( FItm, sta_fst, input_stream, CFGTOKEN_ITEM_NAME );
+             cfgValuesFRead( FTyp, sta_nxt, input_stream, CFGTOKEN_TYPE );
+             cfgValuesFRead( FVal, sta_nxt, input_stream, "val" );
+@@ -912,6 +1059,7 @@ int main( int argc, char ** argv )
+             cfgValuesFReadE( FSelInd, input_stream, "selind" );
+             cfgValuesFReadE( FSelStr, input_stream, "selstr" );
+             cfgValuesFReadE( FSelExp, input_stream, "selexpl" );
++            cfgValuesFReadE( FAction, input_stream, "action" );
+ 
+             if( FDescr.length() )
+             {
+@@ -919,6 +1067,25 @@ int main( int argc, char ** argv )
+               CDescr.Rights = CORBA::string_dup( FRights.c_str() );
+               CDescr.Explanation = CORBA::string_dup( FDescr.c_str() );
+             }
++
++			if(FAction.size() > 0 && FAction != "erase" && FAction != "delete" && FAction != "addtolist" && FAction != "addtolistunique" && FAction != "removefromlist") {
++                std::cout
++                << DSPLERR "Invalid action value '" << FAction << "' for item " << FItm
++                << std::endl;
++                return c_exit_wrong_parameter;
++			}
++
++			if(FAction == "erase" || FAction == "delete") {
++				erase(Host, FItm.c_str());
++				continue;
++			}
++
++			if(FAction == "removefromlist") {
++			  return removeFromList(Host, 
++					FItm.c_str(),
++					FVal.c_str());
++			}
++
+             if( ( FItm.size() > 0 ) && ( FTyp.size() > 0 ) )
+             {
+                ++SetRecordsTotal;
+@@ -1017,7 +1184,7 @@ int main( int argc, char ** argv )
+                   //
+                   char const * const AddToListUnique =
+                      Arg.option( "ADDTOLISTUNIQUE" );
+-                  if( AddToListUnique || Arg.option( "ADDTOLIST" ) )
++                  if( AddToListUnique || FAction == "addtolistunique" || Arg.option( "ADDTOLIST" ) || FAction == "addtolist" )
+                   {
+ 
+                      Config::Textlist::strings ValStrings;
+@@ -1032,7 +1199,7 @@ int main( int argc, char ** argv )
+                      {
+                         if( SetInitial )
+                         {
+-                           if(AddToListUnique)
++                           if(AddToListUnique || FAction == "addtolistunique")
+                               TextlistProxy->addUInitial
+                                              (
+                                                 SAcc,
+@@ -1051,7 +1218,7 @@ int main( int argc, char ** argv )
+                            {
+                               try
+                               {
+-                                 if(AddToListUnique)
++                                 if(AddToListUnique || FAction == "addtolistunique")
+                                     TextlistProxy->addU
+                                                    (
+                                                       SAcc,
+@@ -1066,7 +1233,7 @@ int main( int argc, char ** argv )
+                               }
+                               catch( ... )
+                               {
+-                                 if(AddToListUnique)
++                                 if(AddToListUnique || FAction == "addtolistunique")
+                                     TextlistProxy->addUInitial
+                                                    (
+                                                       SAcc,
+@@ -1082,7 +1249,7 @@ int main( int argc, char ** argv )
+                            }
+                            else
+                            {
+-                              if(AddToListUnique)
++                              if(AddToListUnique || FAction == "addtolistunique")
+                                  TextlistProxy->addU
+                                                 (
+                                                    SAcc,
+@@ -1160,7 +1327,7 @@ int main( int argc, char ** argv )
+                   }
+                   //
+                   //-------------------------------------------------------
+-               }
++			   }
+                else if( !FTyp.compare( CFGTOKEN_TYPE_NUMBER ) )
+                {
+                   //-------------------------------------------------------
+@@ -1408,36 +1575,7 @@ int main( int argc, char ** argv )
+       char const * const DelItem = Arg.option( "ERASE" );
+       if( DelItem )
+       {
+-        corbaClient<Config::Directory> DirClient
+-        (
+-          Host,
+-          CFGMGR_PORT,
+-          CFGMGR_SRVNAME_DIRECTORY
+-        );
+-        Config::Directory * const DirProxy = DirClient.proxy();
+-        if( !DirProxy )
+-        {
+-          std::cout
+-             << DSPLERR "Could not connect the Directory servant."
+-             << std::endl;
+-          return c_exit_connection_failed;
+-        }
+-        Config::access SAcc;
+-        SAcc.Authorization = CORBA::string_dup( ACC_NAME );
+-        SAcc.Item = CORBA::string_dup( DelItem );
+-        try
+-        {
+-          DirProxy->erase( SAcc );
+-        }
+-        catch( Config::Node::notFound & )
+-        {
+-          std::cout << DSPLERR "Erase item [" << DelItem << "]"
+-            " not found - ignored." << std::endl;
+-        }
+-        std::cout
+-           << DSPLLIN "Erased [" << DelItem << "]"
+-           << std::endl;
+-        return c_exit_good;
++		return erase(Host, DelItem);
+       }
+       //
+       // Then try, if the REMOVEFROMLIST-option is given
+@@ -1446,77 +1584,9 @@ int main( int argc, char ** argv )
+       char const * const RemValue = Arg.option( "VALUE" );
+       if( RemItem && RemValue)
+       {
+-        Config::access SAcc;
+-        Config::description CDescr;
+-        SAcc.Authorization = CORBA::string_dup( ACC_NAME );
+-        SAcc.Item = CORBA::string_dup( RemItem );
+-
+-        corbaClient<Config::Textlist>
+-          TextlistClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXTLIST );
+-        Config::Textlist * const TextlistProxy = TextlistClnt.proxy();
+-        if( !TextlistProxy )
+-        {
+-          std::cout
+-             << DSPLERR "Could not connect the "
+-             << CFGMGR_SRVNAME_TEXTLIST << " servant."
+-             << std::endl;
+-          return c_exit_connection_failed;
+-        }
+-        try
+-        {
+-          if( TextlistProxy->get( SAcc ) )
+-          {
+-            Config::Textlist::strings const & Val =
+-               *TextlistProxy->get( SAcc );
+-            unsigned int Length = Val.length();
+-            std::string strbuf;
+-            Config::Textlist::strings cstrbuflist;
+-            cstrbuflist.length(Length);
+-            std::cout
+-               << "Found " << Length << " Textlistitems" << " compare with [" << RemValue << "]"
+-               << std::endl;
+-
+-            int IdxNew = 0;
+-            for( unsigned Idx = 0; Idx < Length; ++Idx )
+-            {
+-               strbuf.assign(Val[Idx].in());
+-
+-               if( strbuf.compare(RemValue) != 0 )
+-               {
+-                 cstrbuflist[IdxNew++]=(CORBA::string_dup(Val[Idx].in()));
+-               }
+-               strbuf.clear();
+-            }
+-            if( IdxNew != Length )
+-            {
+-               cstrbuflist.length(IdxNew);
+-               try
+-               {
+-                  TextlistProxy->set( SAcc, cstrbuflist );
+-                  std::cout << "Removed [" << RemValue << "] from Listitem [" << RemItem << "] " << std::endl;
+-               }
+-               catch( ... )
+-               {
+-                  std::cout
+-                     << DSPLERR "Unable to write changed list to "
+-                     << RemItem << " servant."
+-                     << std::endl;
+-                  return c_exit_connection_failed;
+-               }
+-            } 
+-            else
+-            {
+-               std::cout << DSPLLIN "Listitem [" << RemValue << "]"
+-                     " not found in List - ignored." << std::endl;
+-            }            
+-         }
+-        }
+-        catch( Config::Node::notFound & )
+-        {
+-          std::cout << DSPLERR "REMOVEFROMLIST item [" << RemItem << "]"
+-            " not found - ignored." << std::endl;
+-        }
+-        return c_exit_good;         
++		  return removeFromList(Host, 
++					RemItem,
++					RemValue);
+       }
+       //
+       // No explicit command - invalid syntax!
+@@ -1539,8 +1609,17 @@ int main( int argc, char ** argv )
+             HINDENT2 "   -erase:<Config-item|Config-section>\n"
+             HINDENT2 "   |\n"
+             HINDENT2 "   -REMOVEFROMLIST:<Config-listitem> -value:<listentry_to_remove>\n"
+-            HINDENT2 "}"
+-         << std::endl;
++            HINDENT2 "}\n"
++			"Config file line format:\n"
++			"\n"
++			"[-|#]itm=\"<path-to-item>\" typ=\"TEXT|TEXTLIST|NUMBER|SELECTION\" val=\"<value>\" [action=\"addtolist|addtolistunique|removefromlist|delete\"]\n"
++			"\n"
++			"Example: itm=\"SERVICES.UPDATE.LoginName\" typ=\"TEXT\" val=\"gate-update\"\n"
++			"\n"
++			"Action 'addtolist', 'addtolistunique' and 'removefromlist' are only applicable for items of type TEXTLIST.\n"
++			"A leading '-' or '#' disables processing for this line (can also be used for comments).\n"
++			"Deleting an item via action=\"delete\" requires empty value (val=\"\")!\n"
++			<< std::endl;
+       if( Arg.option( "HIDDEN" ) )
+          std::cout
+             << "\n"
+-- 
+2.41.0.windows.1
+

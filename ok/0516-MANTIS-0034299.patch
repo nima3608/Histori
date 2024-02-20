@@ -1,0 +1,381 @@
+From a4f65b61560fac9428c41f04f9342fc06a9409c6 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 23 Oct 2014 13:03:16 +0000
+Subject: [PATCH 0516/1000] MANTIS 0034299 extension: AppControl: switch
+ resolution; start application with default resolution
+
+massai_systools.lib
+V1.0.0.22
+- allow to start process maximized in mSysProcess and mSysProcessList
+- added method to maximize windows in mSysWindow
+
+appControl.idl
+V1.4
+- for application start the default resolution must be set
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@743 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   | 15 +++++--
+ .../Interfaces/inc/systools/mSysProcessList.h |  3 +-
+ .../Interfaces/inc/systools/mSysWindow.h      |  1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 ++++-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 18 +++++++--
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 40 +++++++++++++++----
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  7 ++++
+ .../Massai/idl/Massai/appcontrol.idl          |  3 +-
+ 8 files changed, 79 insertions(+), 18 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index 91269359..ed359301 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -227,11 +227,11 @@ namespace mSysProcess
+ 
+       // get parent process id
+       virtual std::string getParentProcessId() const = 0;
+-      
++
+       virtual unsigned long getProcessIoUsage() const = 0;
+-      
++
+       virtual unsigned long getProcessTimeUsage() const = 0;
+-      
++
+       virtual unsigned long getProcessMemoryUsage () const = 0;
+ 
+    }; // class child
+@@ -326,6 +326,15 @@ namespace mSysProcess
+       **/
+       parent & setMinimized();
+ 
++      /**
++       *
++       * Maximize the child process window.
++       *
++       * @return                A reference to this object.
++       *
++      **/
++      parent & setMaximized();
++
+       /**
+        *
+        * Setup a destination for the stderr output of the child.
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index d79ef530..eaa110ea 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -23,7 +23,8 @@ namespace mSysProcess
+   {
+     SHOW,
+     HIDE,
+-    MINIMIZED
++    MINIMIZED,
++    MAXIMIZED,
+   };
+ 
+   enum Termination
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index 9a35463c..474b04ce 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -23,6 +23,7 @@ namespace mSysWindow
+       // Warning: this may simulate pressing shift in the current process
+       //   to get the right to activate the window
+       virtual void activate()= 0;
++      virtual void showMaximized()= 0;
+       virtual void show()= 0;
+       virtual void hide()= 0;
+       virtual void close()= 0;
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 5e02b333..61fb329e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 21);
++VERSION_ID_DT(systools, 1, 0, 0, 22);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 21);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.21
++@version 1.0.0.22
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.22
++\li 23.10.2014
++\li extension - SteT Mantis 0034299: AppControl: switch resolution; start application with default resolution
++- allow to start process maximized in mSysProcess and mSysProcessList
++- added method to maximize windows in mSysWindow
++
+ \version 1.0.0.21
+ \li 11.09.2014
+ \li bugfix - SteT Mantis 0033581: Desko-Penta: support RFID
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index a0571d97..c678bb48 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -60,7 +60,7 @@ namespace
+     "|WND *= *\"([^\"]+)\""
+     "|WNDCLASS *= *\"([^\"]+)\""
+     "|CWD *= *\"([^\"]+)\""
+-    "|(?:SHOW *= *(YES)|(NO)|(HIDE)|(MINIMIZED))"
++    "|(?:SHOW *= *(YES)|(NO)|(HIDE)|(MINIMIZED)|(MAXIMIZED))"
+     "|(?:WAIT *= *([0-9]+)|(terminate))"
+     "|(SHOW)"
+     "|(EXTRA_TERMINATION_TIME)"
+@@ -79,6 +79,7 @@ namespace
+     OPT_SHOW_NO,
+     OPT_SHOW_HIDE,
+     OPT_SHOW_MINIMIZED,
++    OPT_SHOW_MAXIMIZED,
+     OPT_WAIT,
+     OPT_TERMINATE,
+     OPT_SHOW_SHOW,
+@@ -349,6 +350,7 @@ namespace
+       case SHOW:      return "show";
+       case HIDE:      return "hide";
+       case MINIMIZED: return "minimized";
++      case MAXIMIZED: return "maximized";
+       default:        return "unknown";
+     }
+   }
+@@ -694,9 +696,9 @@ namespace
+     }
+     if(result)
+     {
+-      m_trc.writeTrace(BasicRuntime_HERE, "found window WND(%s)\tWNDCLASS(%s)\tCOMP(%s)\tCMD(%s)",
+-        window.getTitle().c_str(),
++      m_trc.writeTrace(BasicRuntime_HERE, "found window WNDCLASS(%s)\tWND(%s)\tCOMP(%s)\tCMD(%s)",
+         window.getClass().c_str(),
++        window.getTitle().c_str(),
+         m_properties.group.c_str(),
+         m_properties.commandLine.c_str()
+       );
+@@ -730,6 +732,11 @@ namespace
+         factory.setMinimized();
+         break;
+       }
++      case MAXIMIZED:
++      {
++        factory.setMaximized();
++        break;
++      }
+       // case SHOW:
+     }
+     m_reset.resetError();
+@@ -1728,7 +1735,6 @@ namespace mSysProcess
+     termination(PT_NORMAL)
+   {}
+ 
+-
+   bool ProcessProperties::operator<(const ProcessProperties& cmp) const
+   {
+     return group < cmp.group
+@@ -1796,6 +1802,10 @@ namespace mSysProcess
+         {
+           show = mSysProcess::MINIMIZED;
+         }
++        else if(parsed[OPT_SHOW_MAXIMIZED].matched)  // SHOW=(MAXIMIZED)
++        {
++          show = mSysProcess::MAXIMIZED;
++        }
+         else if(parsed[OPT_TERMINATE].matched)       // WAIT=(terminate)
+         {
+           timeout= -1;
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index b303e9a5..43412c62 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -333,6 +333,7 @@ namespace
+         bool                             Hide,
+         mSysProcess::callBack const *    Logging,
+         bool                             Minimized,
++        bool                             Maximized,
+         mSysProcess::callBack const *    StdErr,
+         bool                             StdIn,
+         mSysProcess::callBack const *    StdOut,
+@@ -368,7 +369,7 @@ namespace
+       void printTime(std::ostream& out, mSysProcess::status state) const;
+       void printCounters(std::ostream& out) const;
+       bool sendEvent(DWORD event);
+-      
++
+       unsigned long getProcessIoUsage() const;
+       unsigned long getProcessTimeUsage() const;
+       unsigned long getProcessMemoryUsage() const;
+@@ -458,6 +459,7 @@ namespace
+         bool                            Hide,
+         mSysProcess::callBack const *   Logging,
+         bool                            Minimized,
++        bool                            Maximized,
+         mSysProcess::callBack const *   StdErr,
+         bool                            StdIn,
+         mSysProcess::callBack const *   StdOut,
+@@ -509,6 +511,10 @@ namespace
+      {
+         Si.wShowWindow = SW_SHOWMINIMIZED;
+      }
++     else if( Maximized )
++     {
++        Si.wShowWindow = SW_SHOWMAXIMIZED;
++     }
+      else
+      {
+         Si.wShowWindow = SW_SHOW;
+@@ -1032,12 +1038,12 @@ namespace
+   {
+     return M_Internal;
+   }
+-  
+-  
++
++
+   unsigned long myChild::getProcessIoUsage() const
+   {
+     IO_COUNTERS ioCounters;
+-    
++
+     unsigned long sum = 0;
+     if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
+     {
+@@ -1052,16 +1058,16 @@ namespace
+     }
+     return sum;
+   }
+-      
++
+   unsigned long myChild::getProcessTimeUsage() const
+   {
+     FILETIME creation;
+     FILETIME exit;
+     FILETIME kernel;
+     FILETIME user;
+-    
++
+     unsigned long sum = 0;
+-    
++
+     if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
+     {
+       mSysTime::Duration usr = mSysTime::getDuration(user);
+@@ -1127,6 +1133,8 @@ class mSysProcess::parent::impl
+ 
+    bool                                 M_Minimized;
+ 
++   bool                                 M_Maximized;
++
+    bool                                 M_Started;
+ 
+    callBack const *                     M_StdErr;
+@@ -1163,6 +1171,7 @@ public:
+       M_Hide( false ),
+       M_Logging( 0 ),
+       M_Minimized( false ),
++      M_Maximized( false ),
+       M_Started( false ),
+       M_StdErr( 0 ),
+       M_StdIn( false ),
+@@ -1202,6 +1211,7 @@ public:
+                         M_Hide,
+                         M_Logging,
+                         M_Minimized,
++                        M_Maximized,
+                         M_StdErr,
+                         M_StdIn,
+                         M_StdOut,
+@@ -1274,6 +1284,7 @@ public:
+    **/
+    void setMinimized()
+    {
++      M_Maximized = false;
+       M_Minimized = true;
+       if( M_Logging )
+       {
+@@ -1281,6 +1292,16 @@ public:
+       }
+    }
+ 
++   void setMaximized()
++   {
++      M_Minimized = false;
++      M_Maximized = true;
++      if( M_Logging )
++      {
++         M_Logging->lineOut( "setMaximized()" );
++      }
++   }
++
+ 
+    /**
+     *
+@@ -1589,6 +1610,11 @@ mSysProcess::parent & mSysProcess::parent::setMinimized()
+    return *this;
+ }
+ 
++mSysProcess::parent & mSysProcess::parent::setMaximized()
++{
++   M_Impl->setMaximized();
++   return *this;
++}
+ 
+ 
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 61b0189c..9fa4813e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -24,6 +24,7 @@ namespace
+       WindowW32(HWND hwnd, const std::string& desktop, TraceInterface& trc);
+       virtual ~WindowW32();
+       virtual void activate();
++      virtual void showMaximized();
+       virtual void show();
+       virtual void hide();
+       virtual void close();
+@@ -206,6 +207,12 @@ namespace
+     }
+   }
+ 
++  void WindowW32::showMaximized()
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "showMaximized (%d)(%s)", m_hwnd, m_title.c_str());
++    ShowWindow(m_hwnd, SW_SHOWMAXIMIZED);
++  }
++
+   void WindowW32::show()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "show (%d)(%s)", m_hwnd, m_title.c_str());
+diff --git a/SelfServiceCommon/Massai/idl/Massai/appcontrol.idl b/SelfServiceCommon/Massai/idl/Massai/appcontrol.idl
+index 7bfb2c8a..b55456e8 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/appcontrol.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/appcontrol.idl
+@@ -22,7 +22,7 @@
+ 
+ module appControl
+ {
+-    const string interface_version = "1.3";
++    const string interface_version = "1.4";
+    
+     // list of strings
+     typedef sequence<string> strings;
+@@ -62,6 +62,7 @@ module appControl
+       string appName;     /**< The application name as internally handeled by the ApplicationManager*/
+       strings cmdLine;     /**< The commandline for the application to start within the newly created dektop */
+       long switchTimeout; /**< timeout in ms; wait time before switching back to main, when process is started */
++      resolutions defaultResolution; /**< default resolution for the application */
+     };
+ 
+     /** Commands accepted by this device */
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1786 @@
+From be6b5bfc4c6079fe118a8044b1de1c765bebb600 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 6 Dec 2010 11:57:47 +0000
+Subject: [PATCH 0067/1077] Move "DevicesCommon.cpp" from SelfServiceCommon to
+ SelfServicePlatform - part 2.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@83 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/serialCon/atbMessage.hpp   |  58 +++
+ .../Interfaces/inc/serialCon/mIEtxAck.hpp     | 151 +++++++
+ .../Interfaces/inc/serialCon/mPEtxAck.hpp     | 401 ++++++++++++++++++
+ .../Interfaces/inc/serialCon/mPTrace.hpp      | 149 +++++++
+ .../Interfaces/inc/systools/tRex.hpp          | 182 ++++++++
+ .../inc/systools/tRexLookupComport.hpp        |  60 +++
+ .../Massai/cpp/SerialCon/src/cfgUART.cpp      |   4 +-
+ .../Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp  |   8 +-
+ .../Massai/cpp/Systools/makefile.mak          |   4 +-
+ .../Massai/cpp/Systools/src/tRex.cpp          | 347 +++++++++++++++
+ .../cpp/Systools/src/tRexLookupComport.cpp    | 289 +++++++++++++
+ 11 files changed, 1646 insertions(+), 7 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/serialCon/atbMessage.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/tRex.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/tRexLookupComport.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/tRex.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/atbMessage.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/atbMessage.hpp
+new file mode 100644
+index 00000000..89096826
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/atbMessage.hpp
+@@ -0,0 +1,58 @@
++/**
++ **************************************************************************
++ *
++ * @file atbMessage.hpp
++ *
++ * Defines the type atbMessage.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2001-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef ATBMESSAGE_HPP
++#define ATBMESSAGE_HPP
++
++#include <vector>
++
++/**
++ *
++ * Used to transport data from and to the ATB device.
++ *
++**/
++typedef std::vector<char> atbMessage;
++
++/**
++ *
++ * Copy a message.
++ *
++ * @param Dst:          Copy destination.
++ *
++ * @param Src:          Copy source.
++ *
++**/
++void atbMessageCopy( atbMessage & Dst, char const * Src );
++
++/**
++ *
++ * Compare two messages.
++ *
++ * @param First:        Reference to the first message.
++ *
++ * @param Second:       Reference to the second message.
++ *
++ * @return true,        if the second message is equal to or a subset of
++ *                      the first message.
++ *
++**/
++bool atbMessageMatch( atbMessage const & First, char const * Second );
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+new file mode 100644
+index 00000000..9282bd5b
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+@@ -0,0 +1,151 @@
++/**
++ **************************************************************************
++ *
++ * @file mIEtxAck.hpp
++ *
++ * Interface to an implementation of ETX-ACK protocol handler.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2001-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MIETXACK_HPP
++#define MIETXACK_HPP
++
++
++
++#include "atbMessage.hpp"
++
++
++
++//! Handle class
++class mIEtxAck_Handle;
++
++class mIEtxAck
++{
++
++   //! Implementation-private data
++   mIEtxAck_Handle * Handle;
++
++public:
++
++   /**
++    *
++    * Returncodes for class methods.
++    *
++   **/
++   typedef enum
++   {
++      RC_OK,
++      RC_ERROR
++   } RC;
++
++   /**
++    *
++    * Default constructor.
++    *
++   **/
++   mIEtxAck();
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param MaxSegment:        Maximum size of transmit blocks
++    *
++   **/
++   mIEtxAck( unsigned MaxSegment );
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   virtual ~mIEtxAck();
++
++   /**
++    *
++    * Start operation.
++    *
++   **/
++   RC open() throw();
++
++   /**
++    *
++    * Write data.
++    *
++    * @param Src:       The message to write.
++    *
++   **/
++   RC write( atbMessage const & Src ) throw();
++
++   /**
++    *
++    * Write data as nonfinal segment.
++    *
++    * @param Src:       The message to write.
++    *
++   **/
++   RC writeNonfinal( atbMessage const & Src ) throw();
++
++   /**
++    *
++    * Read data.
++    *
++    * @param Dst:       Upon return the message received.
++    *
++   **/
++   RC read( atbMessage & Dst ) throw();
++
++   /**
++    *
++    * Retrieve an attribute.
++    *
++    * @param Key:       The attribute name.
++    *
++    * @param Buf:       There to write the attribute.
++    *
++    * @param Len:       The aize of Buf.
++    *
++   **/
++   void get( char const * Key, char * Buf, long Len ) throw();
++
++   /**
++    *
++    * Set an attribute.
++    *
++    * @param Key:       The attribute name.
++    *
++    * @param Value:     A zero terminated string with the new value.
++    *
++   **/
++   void set( char const * Key, char const * Value ) throw();
++
++private:
++
++   /**
++    *
++    * Copy constructor - intentionally not implemented.
++    *
++   **/
++   mIEtxAck( mIEtxAck const & );
++
++   /**
++    *
++    * Assignment operator - intentionally not implemented.
++    *
++   **/
++   mIEtxAck & operator=( mIEtxAck const & );
++
++};
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+new file mode 100644
+index 00000000..6cf5ff3b
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+@@ -0,0 +1,401 @@
++/**
++ **************************************************************************
++ *
++ * @file mPEtxAck.hpp
++ *
++ * Contains template class mPEtxAck.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2001-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef METXACK_HPP
++#define METXACK_HPP
++
++#include "mFMTQueue.hpp"
++#include "ASCII.h"
++
++
++
++//! Do not check received checksum
++#define CHK_RX_CHK 0
++
++
++
++/**
++ *
++ * This is an ETX-ACK protocol implementation class. Generally we consider
++ * a sequence of STX, Data1, Data2, ... , DataN, End, LRC as a protocol-
++ * conforming segment. Here STX is alway 0x02 followed by the segment data
++ * bytes to transfer, End is a end-of-segment character (Either ETX=0x03 or
++ * ETB=0x17 and LRC is the segment checksum (XOR over the data bytes).
++ *
++ * Any segment with correct checksum is to be acknowledged with ACK=0x06,
++ * if the checksum does not match it is replied with NACK=0x15.
++ *
++ * If a data byte is one of the special bytes (e.g. ETX), it is to be
++ * flagged with a preceeding DLE=0x10.
++ *
++ * A message may consist of several segments, nonfinal segments use the
++ * ETB as end marker, final (and only) segments use the ETX.
++ *
++**/
++template< class CIO, class xData >
++class mPEtxAck
++{
++
++public:
++
++   /**
++    *
++    * Method return codes.
++    *
++   **/
++   typedef enum
++   {
++      RC_OK,
++      RC_ERROR
++   } RC;
++
++   /**
++    *
++    * Exception class
++    *
++    */
++   class mPEtxAck_Fatal
++   {
++   };
++
++
++private:
++
++   //! Refers the low-level character interface to use.
++   CIO &                            M_CharInOut;
++
++   //! The maximum number of data bytes in a segment.
++   unsigned const                   M_MaxBlock;
++
++   //! Queues the ACKs received.
++   Materna::MSSD::fmtQueue<char>    M_RxAckQ;
++
++   //! Queues the messages received.
++   Materna::MSSD::fmtQueue<xData>   M_RxMessageQ;
++
++   /**
++    *
++    * Receiver state.
++    *
++    */
++   enum
++   {
++      //! Initially and between segments.
++      STA_INI = 1,
++
++      //! Receiving a segment
++      STA_DATA,
++
++      //! Receiving a segment, last was DLE
++      STA_DATA_DLE,
++
++      //! Receiving the checksum.
++      STA_CHK
++   }                 M_RxState;
++
++   //! The currently received segment.
++   xData             M_RxSegment;
++
++   //! The currently received LRC.
++   char              M_RxLRC;
++
++   //! Is the protocol configured to wait for an ACK?
++   bool              M_CfgRxAck;
++
++   //! Is the protocol configured to wait for an LRC?
++   bool              M_CfgXxLRC;
++
++   /**
++    *
++    * Write a segment to the interface with given end-of-text.
++    *
++   **/
++   RC write
++   (
++      typename xData::const_iterator const & SrcFrom,
++      typename xData::const_iterator const & SrcTo,
++      char SrcETX
++   )
++      throw()
++   {
++      int Tries = 3;
++      while( Tries-- )
++      {
++         M_CharInOut.write( ASCII_STX );
++         char TxLRC = 0;
++         char RxAck = 0;
++         xData::const_iterator Iter( SrcFrom );
++         while( Iter != SrcTo )
++         {
++            char C = *Iter;
++            TxLRC ^= C;
++            switch( C )
++            {
++            case ASCII_STX:
++            case ASCII_ETX:
++            case ASCII_ACK:
++            case ASCII_DLE:
++            case ASCII_NAK:
++            case ASCII_ETB:
++               M_CharInOut.write( ASCII_DLE );
++               break;
++            default:
++               break;
++            }
++            M_CharInOut.write( static_cast<unsigned char>( C ) );
++            ++Iter;
++         }
++         TxLRC ^= SrcETX;
++         M_CharInOut.write( static_cast<unsigned char>( SrcETX ) );
++         M_RxAckQ.clear();
++         if( M_CfgXxLRC )
++         {
++            M_CharInOut.write( static_cast<unsigned char>( TxLRC ) );
++         }
++         if( M_CfgRxAck )
++         {
++            M_RxAckQ.read( RxAck, 500 );
++            if( RxAck == ASCII_ACK )
++               return RC_OK;
++         }
++         else
++            return RC_OK;
++      }
++      return RC_ERROR;
++   }
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param CharInOut: The character interface to use.
++    *
++    * @param MaxBlock:  The maximum size allowed for a single segment.
++    *
++   **/
++   explicit mPEtxAck( CIO & CharInOut, unsigned MaxBlock = 2000 )
++      throw():
++      M_CharInOut( CharInOut ),
++      M_MaxBlock( MaxBlock ),
++      M_RxAckQ( 1 ),
++      M_RxMessageQ( 10 ),
++      M_RxState( STA_INI ),
++      M_RxSegment(),
++      M_RxLRC( 0 ),
++      M_CfgRxAck( true ),
++      M_CfgXxLRC( true )
++   {
++   }
++
++   /**
++    *
++    * Calling this method will set the protocol handler to not wait for
++    * an LRC following an ETX/ETB to be received.
++    *
++    */
++   void setChkNone()
++      throw()
++   {
++      M_CfgXxLRC = false;
++      M_CfgRxAck = false;
++   }
++
++   /**
++    *
++    * Calling this method will set the protocol handler to not wait for
++    * an ACK to be received.
++    *
++    */
++   void setNoRxAck()
++      throw()
++   {
++      M_CfgRxAck = false;
++   }
++
++   /**
++    *
++    * Call this method to indicate a received character. Protocol handler
++    * then will feed it into its state machine, eventually letting
++    * a pending read() return.
++    *
++    * @param RxC:       The received character.
++    *
++    */
++   void event( char RxC )
++      throw( mPEtxAck_Fatal )
++   {
++      switch( M_RxState )
++      {
++
++      case STA_INI:
++         if( RxC == ASCII_STX )
++         {
++            M_RxSegment.clear();
++            M_RxState = STA_DATA;
++            M_RxLRC = 0;
++         }
++         else
++         {
++            M_RxAckQ.write( RxC );
++         }
++         break;
++
++      case STA_DATA:
++         switch( RxC )
++         {
++         case ASCII_STX:
++            M_RxSegment.clear();
++            M_RxLRC = 0;
++            break;
++         case ASCII_ETB:
++         case ASCII_ETX:
++            if( M_CfgXxLRC )
++            {
++               // Next byte received should be LRC
++               M_RxState = STA_CHK;
++               M_RxLRC ^= RxC;
++            }
++            else
++            {
++               // End of frame received
++               M_RxState = STA_INI;
++               // Do not send an ACK
++               // M_CharInOut.write( ASCII_ACK );
++               M_RxMessageQ.write( M_RxSegment );
++            }
++            break;
++         case ASCII_DLE:
++            M_RxState = STA_DATA_DLE;
++            break;
++         default:
++            M_RxSegment.push_back( RxC );
++            M_RxLRC ^= RxC;
++         }
++         break;
++
++      case STA_DATA_DLE:
++         M_RxSegment.push_back( RxC );
++         M_RxLRC ^= RxC;
++         M_RxState = STA_DATA;
++         break;
++      case STA_CHK:
++         // End of frame received
++#if CHK_RX_CHK
++         if( RxC == M_RxLRC  )
++         {
++#endif
++            M_CharInOut.write( ASCII_ACK );
++            M_RxMessageQ.write( M_RxSegment );
++#if CHK_RX_CHK
++         }
++         else
++            M_CharInOut.write( ASCII_NAK );
++#endif
++         M_RxState = STA_INI;
++         break;
++
++      default:
++         throw( mPEtxAck_Fatal() );
++
++      }
++
++   }
++
++   /**
++    *
++    * Read a message from the interface.
++    *
++    * @param Dst:       Where to write the segment received.
++    *
++   **/
++   RC read( xData & Dst )
++      throw()
++   {
++      if( M_RxMessageQ.read( Dst ) == Materna::MSSD::FMTQ_OK )
++         return RC_OK;
++      else
++         return RC_ERROR;
++   }
++
++   /**
++    *
++    * Write a message to the interface.
++    *
++    * @param Src:       The segment to write.
++    *
++   **/
++   RC write( xData const & Src )
++      throw()
++   {
++      unsigned Remaining = Src.size();
++      xData::const_iterator From( Src.begin() );
++      while( Remaining > M_MaxBlock )
++      {
++         xData::const_iterator To( From + M_MaxBlock );
++         RC PartRC = write( From, To, ASCII_ETB );
++         if( PartRC != RC_OK )
++            return PartRC;
++         From = To;
++         Remaining -= M_MaxBlock;
++      }
++      return write( From, From + Remaining, ASCII_ETX );
++   }
++
++   /**
++    *
++    * Write a forced nonfinal segment to the interface.
++    *
++   **/
++   RC writeNonfinal( xData const & Src )
++      throw()
++   {
++      return write( Src.begin(), Src.end(), ASCII_ETB );
++   }
++
++
++private:
++
++   /**
++    *
++    * Default constructor - intentionally not implemented.
++    *
++   **/
++   mPEtxAck();
++
++   /**
++    *
++    * Copy constructor - intentionally not implemented.
++    *
++   **/
++   mPEtxAck( mPEtxAck const & );
++
++   /**
++    *
++    * Assignment - intentionally not implemented.
++    *
++   **/
++   mPEtxAck & operator=( mPEtxAck const & );
++
++};
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
+new file mode 100644
+index 00000000..7886b6ef
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
+@@ -0,0 +1,149 @@
++/**
++ **************************************************************************
++ *
++ * @file mPTrace.hpp
++ *
++ * Template protocol trace handler.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2001-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MPTRACE_HPP
++#define MPTRACE_HPP
++
++#include "TraceClt.h"
++
++#include <string>
++
++
++
++/**
++ *
++ * Trace handler class.
++ *
++**/
++template <class PImpl, class PRet, class PData>
++class mPTrace
++{
++
++   //! Module name used in trace entries.
++   std::string const  M_Module;
++
++   //! Read method name.
++   char const * const M_Read;
++
++   //! Write method name.
++   char const * const M_Write;
++
++   //! Refers the protocol implementation.
++   PImpl &            M_P;
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++   **/
++   mPTrace( char const * Module, PImpl & Protocol ) :
++      M_Module( Module ),
++      M_Read( "read" ),
++      M_Write( "write" ),
++      M_P( Protocol )
++   {
++   }
++
++   /**
++    *
++    * Protocol method extension. Calls the protocol::read method and then
++    * writes a trace entry.
++    *
++   **/
++   PRet read( PData & Dst )
++      throw()
++   {
++      PRet R = M_P.read( Dst );
++      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Read, "read:" );
++      dumpTrace
++      (
++         BasicProcess, M_Module.c_str(), 0, M_Read, Dst.size(),
++         &(*Dst.begin())
++      );
++      return R;
++   }
++
++   /**
++    *
++    * Protocol method extension. Writes a trace entry before actually
++    * calling the protocol::write method.
++    *
++   **/
++   PRet write( PData const & Src )
++      throw()
++   {
++      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Write, "write:" );
++      dumpTrace
++      (
++         BasicProcess, M_Module.c_str(), 0, M_Write, Src.size(),
++         &(*Src.begin())
++      );
++      return M_P.write( Src );
++   }
++
++   /**
++    *
++    * Protocol method extension. Writes a trace entry before actually
++    * calling the protocol::writeNonfinal method.
++    *
++   **/
++   PRet writeNonfinal( PData const & Src )
++      throw()
++   {
++      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Write, "write (nonfinal):" );
++      dumpTrace
++      (
++         BasicProcess, M_Module.c_str(), 0, M_Write, Src.size(),
++         &(*Src.begin())
++      );
++      return M_P.writeNonfinal( Src );
++   }
++
++private:
++
++   /**
++    *
++    * Default constructor - intentionally not implemented.
++    *
++   **/
++   mPTrace();
++
++   /**
++    *
++    * Copy constructor - intentionally not implemented.
++    *
++   **/
++   mPTrace( mPTrace const & );
++
++   /**
++    *
++    * Assignment - intentionally not implemented.
++    *
++   **/
++   mPTrace & operator=( mPTrace const & );
++
++};
++
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
++
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/tRex.hpp b/SelfServiceCommon/Interfaces/inc/systools/tRex.hpp
+new file mode 100644
+index 00000000..bf5f8b30
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/tRex.hpp
+@@ -0,0 +1,182 @@
++/**
++ **************************************************************************
++ *
++ * @file tRex.hpp
++ *
++ * Contains registry access helper interfaces.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2008-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TREX_HPP
++#define TREX_HPP
++
++
++#include "pImplPtr.h"
++#include <string>
++
++
++/**
++ *
++ * Return codes of tRex functions.
++ *
++**/
++enum TREX_RC
++{
++   TREX_RC_OK,                  //!< Function completed successfully.
++   TREX_RC_FAILED               //!< Function failked to complete.
++};
++
++
++/**
++ *
++ * Data element returned by tRex functions.
++ *
++**/
++class tRexData
++{
++   bool         M_Valid;
++   std::string  M_Data;
++public:
++   tRexData();
++   tRexData( std::string const & Data );
++   void operator=( char const * Src );
++   char const * c_str() const;
++   bool valid() const;
++};
++
++
++//! Prototype
++class tRexParam;
++
++
++/**
++ *
++ * User function.
++ *
++**/
++typedef void ( * tRexFunction )( tRexParam & Param );
++
++
++/**
++ *
++ * Main access class.
++ *
++**/
++class tRexParam
++{
++
++   //! Implementation class.
++   class tRexParamImpl;
++
++   //! Implementation object.
++   pImplPtr<tRexParamImpl> M_TRexParamImpl;
++
++public:
++
++   /**
++    *
++    * Default constructor.
++    *
++   **/
++   tRexParam();
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   virtual ~tRexParam() throw();
++
++   /**
++    *
++    * Access the registry.
++    *
++    * @param Path:      Path to the registry item.
++    *
++    * @param Function:  The function to execute with this item.
++    *
++   **/
++   TREX_RC access
++      (
++         char const * Path,
++         tRexFunction Function
++      );
++
++   /**
++    *
++    * Get the current registry key name.
++    *
++   **/
++   char const * getKey() const;
++
++   /**
++    *
++    * Get the specified subkey.
++    *
++    * @param Dst:       Where to return the subkey.
++    *
++    * @param Index:     Address the subkey (0,1,2,...)
++    *
++    * @return   Sucess.
++    *
++   **/
++   TREX_RC getSubkey( tRexData & Dst, unsigned Index ) const;
++
++   /**
++    *
++    * Get the item value, if it is a string.
++    *
++    * @param Dst:       Where to return the value.
++    *
++    * @param Index:     Address the item (0,1,2,...)
++    *
++    * @return   Sucess.
++    *
++   **/
++   TREX_RC getStringValue( tRexData & Dst, unsigned Index ) const;
++
++   /**
++    *
++    * Get the item key.
++    *
++    * @param Dst:       Where to return the key.
++    *
++    * @param Index:     Address the item (0,1,2,...)
++    *
++    * @return   Sucess.
++    *
++   **/
++   TREX_RC getValueKey( std::string & Dst, unsigned Index ) const;
++
++};
++
++
++/**
++ *
++ * Example user function.
++ *
++ * Can be used for debugging. Registry elements will be written
++ * to stdout.
++ *
++ * @param Param:                The parameter
++ *                              as required by any user function.
++ *
++**/
++void tRex_ReadGeneric
++   (
++      tRexParam & Param
++   );
++
++
++#endif // #ifndef TREX_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/tRexLookupComport.hpp b/SelfServiceCommon/Interfaces/inc/systools/tRexLookupComport.hpp
+new file mode 100644
+index 00000000..6836f06e
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/tRexLookupComport.hpp
+@@ -0,0 +1,60 @@
++/**
++ **************************************************************************
++ *
++ * @file tRexLookupComport.hpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2008-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TREXLOOKUPCOMPORT_HPP
++#define TREXLOOKUPCOMPORT_HPP
++
++#include <iostream>
++#include <list>
++#include <string>
++
++/**
++ *
++ * Comport name type.
++ *
++**/
++typedef std::string             comport;
++
++/**
++ *
++ * Comport name list type.
++ *
++**/
++typedef std::list<comport>      comports;
++
++/**
++ *
++ * Access the registry and try to get a comport name from a device key.
++ *
++ * @param DeviceKey:    A device key sub-string.
++ *
++ * @param Dst:          The result destination list of possible comports.
++ *
++**/
++void tRexLookupComport( comports & Dst, std::string const & DeviceKey );
++
++/**
++ *
++ * Access the registry and try to get comport names.
++ *
++ * @param Dst:          Destination stream.
++ *
++**/
++void tRexLookupComport( std::ostream & Dst );
++
++#endif // #ifndef TREXLOOKUPCOMPORT_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/cfgUART.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/cfgUART.cpp
+index cf15c1d8..6cdb6e92 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/cfgUART.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/cfgUART.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2006-2008 MATERNA Information & Communications
++ * Copyright (c) 2006-2010 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,7 +15,7 @@
+ 
+ #include "nConfigCache.hpp"
+ #include "nConfigText.hpp"
+-#include "tRexLookupComport.hpp"
++#include "systools/tRexLookupComport.hpp"
+ 
+ 
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+index 2cfff035..a00af15f 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2004 MATERNA Information & Communications
++ * Copyright (c) 2001-2010 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -19,12 +19,12 @@
+ 
+ 
+ 
+-#include "mIEtxAck.hpp"
++#include "serialCon/mIEtxAck.hpp"
+ 
+-#include "mPEtxack.hpp"
++#include "serialCon/mPEtxack.hpp"
+ 
+ #ifdef USE_TRACE_CLIENT
+-#include "mPTrace.hpp"
++#include "serialCon/mPTrace.hpp"
+ #endif
+ 
+ #include "matAsync.h"
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 9368c59c..0dec3643 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -25,10 +25,12 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysSignalW32.obj \
+                         $(_OBJ)\mSysThreadW32.obj \
+                         $(_OBJ)\nt_evsem.obj \
++                        $(_OBJ)\nt_file.obj \
+                         $(_OBJ)\nt_thrdc.obj \
+                         $(_OBJ)\software_error.obj \
+                         $(_OBJ)\threadException.obj \
+-                        $(_OBJ)\nt_file.obj
++                        $(_OBJ)\tRex.obj \
++                        $(_OBJ)\tRexLookupComport.obj
+ 
+ MY_LIB1_LIBS =          $(SYS_ADVAPI32)
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/tRex.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/tRex.cpp
+new file mode 100644
+index 00000000..fee62b6d
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/tRex.cpp
+@@ -0,0 +1,347 @@
++/**
++ **************************************************************************
++ *
++ * @file tRex.cpp
++ *
++ * Contains registry access helper implementation.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2008-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "systools/tRex.hpp"
++
++#include <iostream>
++using namespace std;
++
++#include <windows.h>
++
++#define MAX_KEY_LENGTH 255
++#define MAX_VALUE_NAME 16383
++
++
++
++void tRex_ReadGeneric( tRexParam & TRex )
++{
++   cout << "values: " << endl;
++   bool More = true;
++   unsigned Ndx = 0;
++   while( More )
++   {
++      tRexData TRexValue;
++      if( TRex.getStringValue( TRexValue, Ndx ) == TREX_RC_OK )
++      {
++         cout << " - " << TRexValue.c_str() << endl;
++         ++Ndx;
++      }
++      else
++      {
++         More = false;
++      }
++   }
++   cout << "subkeys: " << endl;
++   More = true;
++   Ndx = 0;
++   while( More )
++   {
++      tRexData TRexSubkey;
++      if( TRex.getSubkey( TRexSubkey, Ndx ) == TREX_RC_OK )
++      {
++         cout << " - " << TRexSubkey.c_str() << endl;
++         ++Ndx;
++      }
++      else
++      {
++         More = false;
++      }
++   }
++}
++
++
++
++/**
++ *
++ * Implementation class.
++ *
++**/
++class tRexParam::tRexParamImpl
++{
++
++
++   HKEY         M_HKey;
++
++   std::string  M_Key;
++
++   tRexParam *  M_Root;
++
++
++   tRexParamImpl();
++
++
++public:
++
++
++   tRexParamImpl( tRexParam * Root ) :
++      M_Root( Root )
++   {
++   }
++
++
++   TREX_RC access
++      (
++         char const * Key,
++         tRexFunction Function
++      )
++   {
++      M_Key = Key;
++      long const Rc = RegOpenKeyEx
++                        (
++                           HKEY_LOCAL_MACHINE,
++                           TEXT( Key ),
++                           0,
++                           KEY_READ,
++                           &M_HKey
++                        );
++      if( Rc == ERROR_SUCCESS )
++      {
++         Function( *M_Root );
++         RegCloseKey( M_HKey );
++         return TREX_RC_OK;
++      }
++      return TREX_RC_FAILED;
++   }
++
++
++   char const * getKey() const
++   {
++      return M_Key.c_str();
++   }
++
++
++   TREX_RC getSubkey
++      (
++         tRexData &        Dst,
++         unsigned          Index
++      ) const
++   {
++      TCHAR    achKey[MAX_KEY_LENGTH];   // buffer for subkey name
++      DWORD    cbName = MAX_KEY_LENGTH;  // size of name string
++      TCHAR    achClass[MAX_PATH] = TEXT("");  // buffer for class name
++      DWORD    cchClassName = MAX_PATH;  // size of class string
++      DWORD    cSubKeys=0;               // number of subkeys
++      DWORD retCode = RegEnumKeyEx
++         (
++            M_HKey,             // in
++            Index,              // in
++            achKey,             // out
++            &cbName,            // inout
++            NULL,               // reserved
++            NULL,
++            NULL,
++            NULL
++         );
++      switch( retCode )
++      {
++      case ERROR_SUCCESS:
++         Dst = achKey;
++         return TREX_RC_OK;
++      case ERROR_NO_MORE_ITEMS:
++         Dst = "";
++         return TREX_RC_FAILED;
++      default:
++         std::cout << "TREX system error: " << (int)retCode << std::endl;
++         Dst = "";
++         return TREX_RC_FAILED;
++      }
++   }
++
++
++   TREX_RC getStringValue
++      (
++         tRexData &        Dst,
++         unsigned          Index
++      ) const
++   {
++      TCHAR  achValue[MAX_VALUE_NAME];
++      DWORD cchValue = MAX_VALUE_NAME;
++      DWORD JType;
++      char JValue[88];
++      DWORD JValueSize = sizeof( JValue );
++      cchValue = MAX_VALUE_NAME;
++      achValue[0] = '\0';
++      DWORD retCode = RegEnumValue
++         (
++            M_HKey,
++            Index,
++            achValue,
++            &cchValue,
++            NULL,                    // Reserved
++            &JType,
++            (BYTE *)&JValue,
++            &JValueSize
++         );
++      switch( retCode )
++      {
++      case ERROR_SUCCESS:
++         if( JType == REG_SZ )
++         {
++            Dst = JValue;
++         }
++         else
++         {
++            Dst = "";
++         }
++         return TREX_RC_OK;
++      case ERROR_NO_MORE_ITEMS:
++         Dst = "";
++         return TREX_RC_FAILED;
++      default:
++         std::cout << "TREX system error: " << (int)retCode << std::endl;
++         Dst = "";
++         return TREX_RC_FAILED;
++      }
++   }
++
++
++   TREX_RC getValueKey( std::string & Dst, unsigned Index ) const
++   {
++      TCHAR  achValue[MAX_VALUE_NAME];
++      DWORD cchValue = MAX_VALUE_NAME;
++      cchValue = MAX_VALUE_NAME;
++      achValue[0] = '\0';
++      DWORD retCode = RegEnumValue
++         (
++            M_HKey,
++            Index,
++            achValue,
++            &cchValue,
++            NULL,                    // Reserved
++            NULL,
++            NULL,
++            NULL
++         );
++      switch( retCode )
++      {
++      case ERROR_SUCCESS:
++         Dst = achValue;
++         return TREX_RC_OK;
++      case ERROR_NO_MORE_ITEMS:
++         return TREX_RC_FAILED;
++      default:
++         std::cout << "TREX system error: " << (int)retCode << std::endl;
++         return TREX_RC_FAILED;
++      }
++   }
++
++
++};
++
++
++
++tRexParam::tRexParam() :
++   M_TRexParamImpl( new tRexParamImpl( this ) )
++{
++}
++
++
++
++tRexParam::~tRexParam() throw()
++{
++}
++
++
++
++TREX_RC tRexParam::access
++   (
++      char const * Key,
++      tRexFunction Function
++   )
++{
++   return M_TRexParamImpl->access( Key, Function );
++}
++
++
++
++char const * tRexParam::getKey() const
++{
++   return M_TRexParamImpl->getKey();
++}
++
++
++
++TREX_RC tRexParam::getSubkey
++   (
++      tRexData &        Dst,
++      unsigned          Index
++   ) const
++{
++   return M_TRexParamImpl->getSubkey( Dst, Index );
++}
++
++
++
++TREX_RC tRexParam::getStringValue
++   (
++      tRexData &        Dst,
++      unsigned          Index
++   ) const
++{
++   return M_TRexParamImpl->getStringValue( Dst, Index );
++}
++
++
++
++TREX_RC tRexParam::getValueKey( std::string & Dst, unsigned Index ) const
++{
++   return M_TRexParamImpl->getValueKey( Dst, Index );
++}
++
++
++
++tRexData::tRexData( std::string const & Data ) :
++   M_Data( Data ),
++   M_Valid( true )
++{
++}
++
++
++
++tRexData::tRexData() :
++   M_Data(),
++   M_Valid( false )
++{
++}
++
++
++
++void tRexData::operator=( char const * Src )
++{
++   M_Data.assign( Src );
++   M_Valid = true;
++}
++
++
++
++char const * tRexData::c_str() const
++{
++   return M_Data.c_str();
++}
++
++
++
++bool tRexData::valid() const
++{
++   return M_Valid;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
+new file mode 100644
+index 00000000..0c9177ea
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
+@@ -0,0 +1,289 @@
++/**
++ **************************************************************************
++ *
++ * @file tRexLookupComport.cpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2008-2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "systools/tRexLookupComport.hpp"
++
++#include "systools/tRex.hpp"
++
++#include <iostream>
++#include <string>
++
++
++
++namespace
++{
++
++
++
++   /**
++    *
++    * Parameter class define comport-lookup parameters in the tRex user
++    * functions here.
++    *
++   **/
++   class comportParam :
++      public tRexParam
++   {
++      comports *                   M_Comports;
++      std::string const * const    M_Dev;
++      std::ostream * const         M_Log;
++      bool const                   M_Verbose;
++   public:
++      comportParam
++         (
++            comports *             Dst,
++            std::string const *    Dev,
++            std::ostream *         Log,
++            bool                   Verbose
++         ) :
++         tRexParam(),
++         M_Comports( Dst ),
++         M_Dev( Dev ),
++         M_Log( Log ),
++         M_Verbose( Verbose )
++      {
++      }
++      bool verbose() const
++      {
++         return M_Verbose;
++      }
++      void comportAdd( comport const & Src )
++      {
++         if( M_Comports )
++         {
++            M_Comports->push_back( Src );
++         }
++      }
++      comports * comportsGet()
++      {
++         return M_Comports;
++      }
++      std::string const * devGet() const
++      {
++         return M_Dev;
++      }
++      std::ostream * out()
++      {
++         return M_Log;
++      }
++   private:
++      comportParam();
++   };
++
++
++
++   /**
++    *
++    * Comport lookup tRex user function.
++    *
++    * @param Param:        User parameter.
++    *
++   **/
++   void query_serport( tRexParam & Param )
++   {
++      bool More = true;
++      unsigned Ndx = 0;
++      while( More )
++      {
++         std::string VKey;
++         if( Param.getValueKey( VKey, Ndx ) == TREX_RC_OK )
++         {
++            if( VKey == "PortName" )
++            {
++               tRexData TRexValue;
++               if( Param.getStringValue( TRexValue, Ndx ) == TREX_RC_OK )
++               {
++                  comportParam & CParam
++                     = dynamic_cast<comportParam &>( Param );
++                  comport Tmp( TRexValue.c_str() );
++                  CParam.comportAdd( Tmp );
++               }
++               //More = false;
++            }
++            ++Ndx;
++         }
++         else
++         {
++            More = false;
++         }
++      }
++   }
++
++
++
++   /**
++    *
++    * Comport lookup tRex user function.
++    *
++    * @param Param:        User parameter.
++    *
++   **/
++   void query_serdevice( tRexParam & Param )
++   {
++      comportParam & CParam
++         = dynamic_cast<comportParam &>( Param );
++      bool More = true;
++      unsigned Ndx = 0;
++      while( More )
++      {
++         tRexData TRexSubkey;
++         if( Param.getSubkey( TRexSubkey, Ndx ) == TREX_RC_OK )
++         {
++            if( CParam.out() )
++               *CParam.out() << " - " << TRexSubkey.c_str() << std::endl;
++            if( !strcmp( "Device Parameters", TRexSubkey.c_str() ) )
++            {
++               comportParam SubParam
++                  (
++                     CParam.comportsGet(),
++                     CParam.devGet(),
++                     CParam.out(),
++                     CParam.verbose()
++                  );
++               std::string Key = CParam.getKey();
++               Key += "\\Device Parameters";
++               SubParam.access( Key.c_str(), query_serport );
++               // SubParam.access( Key.c_str(), tRex_ReadGeneric );
++            }
++            ++Ndx;
++         }
++         else
++         {
++            More = false;
++         }
++      }
++   }
++
++
++
++   /**
++    *
++    * Comport lookup tRex user function.
++    *
++    * @param Param:        User parameter.
++    *
++   **/
++   void query_serenum( tRexParam & Param )
++   {
++      comportParam & CParam
++         = dynamic_cast<comportParam &>( Param );
++      bool More = true;
++      for(
++            int Ndx=0;
++            More;
++            ++Ndx
++         )
++      {
++         tRexData Value;
++         if( Param.getStringValue( Value, Ndx ) == TREX_RC_OK )
++         {
++            char const * const JValue = Value.c_str();
++            if( JValue[0] )
++            {
++               comportParam SubParam
++                  (
++                     CParam.comportsGet(),
++                     CParam.devGet(),
++                     CParam.out(),
++                     CParam.verbose()
++                  );
++               if( CParam.out() )
++               {
++                  *CParam.out() << " - " << JValue << std::endl;
++               }
++               std::string JKey = "SYSTEM\\CurrentControlSet\\Enum\\";
++               JKey += JValue;
++               if( CParam.devGet() )
++               {
++                  // We want to find a special port
++                  if( strstr( JValue, CParam.devGet()->c_str() ) )
++                  {
++                     // Device pattern match
++                     SubParam.access( JKey.c_str(), query_serdevice );
++                     if( CParam.verbose() )
++                     {
++                        if( CParam.out() )
++                           *CParam.out()
++                              << "   --- generic() -------------------"
++                              << std::endl;
++                        SubParam.access( JKey.c_str(), tRex_ReadGeneric );
++                     }
++                  }
++               }
++               else
++               {
++                  // We want to list all ports
++                  if( CParam.verbose() )
++                  {
++                     if( CParam.out() )
++                        *CParam.out()
++                           << "   --- generic() -------------------"
++                           << std::endl;
++                     SubParam.access( JKey.c_str(), tRex_ReadGeneric );
++                  }
++               }
++            }
++         }
++         else
++         {
++            More = false;
++         }
++      }
++   }
++
++
++
++}
++
++
++
++/*
++ *
++ * Public function - see "tRexLookupComport.hpp".
++ *
++ */
++void tRexLookupComport( comports & Dst, std::string const & DeviceKey )
++{
++   std::string Comport;
++   comportParam Param( &Dst, &DeviceKey, 0, false );
++   Param.access
++      (
++         "SYSTEM\\CurrentControlSet\\Services\\serenum\\Enum",
++         query_serenum
++      );
++}
++
++
++
++/*
++ *
++ * Public function - see "tRexLookupComport.hpp".
++ *
++ */
++void tRexLookupComport( std::ostream & Log )
++{
++   comportParam Param( 0, 0, &Log, false );
++   Param.access
++      (
++         "SYSTEM\\CurrentControlSet\\Services\\serenum\\Enum",
++         query_serenum
++      );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

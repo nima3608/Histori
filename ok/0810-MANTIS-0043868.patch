@@ -1,0 +1,758 @@
+From 2b45e7a332f784fdb2eb851187cae863e05840c3 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 1 Dec 2016 19:57:29 +0000
+Subject: [PATCH 0810/1077] MANTIS 0043868 change: integration of EZ-Access
+ device for KIS kiosk
+
+massai_systools.lib
+V1.0.0.35
+- log less errors
+
+massai_text.lib
+V1.0.0.8
+- added parseServant to parse servant command line parameter
+
+tools.lib
+V1.0.1.19
+added in configItem: cfgCachedTextList, cfgTextList
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1112 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/configItem.h         |  78 ++++++++
+ .../Interfaces/inc/text/parseServant.h        |  36 ++++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   9 +-
+ .../Massai/cpp/Systools/src/mSysEventW32.cpp  |  55 ++++--
+ .../cpp/Systools/src/mSysProcessListW32.cpp   |   5 +-
+ .../Massai/cpp/Text/makefile.mak              |  11 +-
+ .../Massai/cpp/Text/src/TestParseServant.cpp  |  28 +++
+ .../Massai/cpp/Text/src/local_def.cpp         |  63 ++++---
+ .../Massai/cpp/Text/src/parseServant.cpp      |  75 ++++++++
+ .../cpp/Tools/inc/local_def_msystools.h       |  13 +-
+ .../Massai/cpp/Tools/src/configItem.cpp       | 176 ++++++++++++++++++
+ 11 files changed, 495 insertions(+), 54 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/text/parseServant.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/TestParseServant.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/parseServant.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+index d29cf78b..a9e016da 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -3,6 +3,7 @@
+ #include <string>
+ #include "tools/TraceInterface.h"
+ #include "cfgclnt/nConfigText.hpp"
++#include "cfgclnt/nConfigTextList.hpp"
+ #include "cfgclnt/nConfigNumber.hpp"
+ #include "cfgclnt/nConfigCache.hpp"
+ 
+@@ -178,4 +179,81 @@ namespace config
+ 
+       void create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max);
+   };
++
++  class cfgCachedTextList: private nConfig::cache<std::list<std::string>, nConfig::gclTextList>
++  {
++    public:
++      cfgCachedTextList
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::list<std::string>& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgCachedTextList
++      (
++        const std::string& item,
++        const std::list<std::string>& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgCachedTextList();
++      std::list<std::string> getValue();
++      std::string getItem();
++      void setValue(const std::list<std::string>& value);
++
++    private:
++      std::string item;
++      std::list<std::string> defaultValue;
++      long maxLength;
++      std::string rights;
++      std::string explanation;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, std::list<std::string>& defaultValue, long& maxLength);
++      std::list<std::string> uncached();
++  };
++
++  class cfgTextList: private nConfig::gcTextList
++  {
++    public:
++      cfgTextList
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::list<std::string>& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgTextList
++      (
++        const std::string& item,
++        const std::list<std::string>& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgTextList();
++      std::list<std::string> getValue() const throw(nConfig::exception);
++      std::string getItem();
++      void setValue(const std::list<std::string>& value);
++
++    private:
++      std::string item;
++      std::list<std::string> defaultValue;
++      long maxLength;
++      std::string rights;
++      std::string explanation;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, std::list<std::string>& defaultValue, long& maxLength);
++  };
+ }
+diff --git a/SelfServiceCommon/Interfaces/inc/text/parseServant.h b/SelfServiceCommon/Interfaces/inc/text/parseServant.h
+new file mode 100644
+index 00000000..764d9779
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/text/parseServant.h
+@@ -0,0 +1,36 @@
++// parse servant commandline parameter
++#pragma once
++
++#include <string>
++#include <map>
++
++namespace text
++{
++  class servant
++  {
++    public:
++      std::string iiop;
++      std::string host;
++      long port;
++      std::string name;
++
++      // parse [<host>:]<port>/<name>
++      bool parse(const std::string& iiop);
++  };
++
++  // map servant name to servant
++  typedef std::map<std::string, servant> servantMap;
++
++  class servantListParser
++  {
++    public:
++      std::string iiops;
++      servantMap servants;
++
++      // comma separated list of [<host>:]<port>/<name>
++      void parse(const std::string& iiops);
++
++      // replace $SERVANTPORT/<servantName> and $SERVANTPORT_LIST in commandLine
++      std::string substituteServants(const std::string& commandLine) const;
++  };
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index d630b5bb..65a4411a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 34);
++VERSION_ID_DT(systools, 1, 0, 0, 35);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 34);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.34
++@version 1.0.0.35
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.35
++\li 01.12.2016
++\li change SteT Mantis 0043868: integration of EZ-Access device for KIS kiosk
++- log less errors
++
+ \version 1.0.0.34
+ \li 22.04.2016
+ \li bugfix SteT Mantis 0041017: GPPDev: F+D Phoenix use wrong USB-Port
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+index a36807d0..fabae86a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+@@ -20,6 +20,11 @@ using mSysHotKey::HotKey;
+ using mSysException::standardException;
+ using namespace mSysEvent;
+ 
++namespace
++{
++  static volatile int CLASS_REGISTER_COUNTER = 0;
++}
++
+ namespace
+ {
+   enum WindowAttributes
+@@ -390,30 +395,46 @@ namespace mSysEvent
+ 
+   void SystemMessageProcessor::registerWindowClass()
+   {
+-    HINSTANCE hInstance = GetModuleHandle(0);
+-    WNDCLASS windowClass;
+-    windowClass.style         = 0;
+-    windowClass.lpfnWndProc   = windowCallback;
+-    windowClass.cbClsExtra    = 0;
+-    windowClass.cbWndExtra    = sizeof(SystemMessageProcessor*);;
+-    windowClass.hInstance     = hInstance;
+-    windowClass.hIcon         = 0;
+-    windowClass.hCursor       = 0;
+-    windowClass.hbrBackground = 0;
+-    windowClass.lpszMenuName  = 0;
+-    windowClass.lpszClassName = windowClassName;
+-    if(!RegisterClass(&windowClass))
++    if(CLASS_REGISTER_COUNTER++ == 0)
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "RegisterClass mSysEventCallbackWindow");
++      HINSTANCE hInstance = GetModuleHandle(0);
++      WNDCLASS windowClass;
++      windowClass.style         = 0;
++      windowClass.lpfnWndProc   = windowCallback;
++      windowClass.cbClsExtra    = 0;
++      windowClass.cbWndExtra    = sizeof(SystemMessageProcessor*);;
++      windowClass.hInstance     = hInstance;
++      windowClass.hIcon         = 0;
++      windowClass.hCursor       = 0;
++      windowClass.hbrBackground = 0;
++      windowClass.lpszMenuName  = 0;
++      windowClass.lpszClassName = windowClassName;
++      if(!RegisterClass(&windowClass))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "RegisterClass", GetLastError());
++      }
++    }
++    else
+     {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "RegisterClass", GetLastError());
++      m_trc.writeTrace(BasicRuntime_HERE, "ignore: RegisterClass mSysEventCallbackWindow");
+     }
+   }
+ 
+   void SystemMessageProcessor::unregisterWindowClass()
+   {
+-    HINSTANCE hInstance = GetModuleHandle(0);
+-    if(!UnregisterClass(windowClassName, hInstance))
++    if(--CLASS_REGISTER_COUNTER <= 0)
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "UnregisterClass mSysEventCallbackWindow");
++      HINSTANCE hInstance = GetModuleHandle(0);
++      if(!UnregisterClass(windowClassName, hInstance))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "UnregisterClass", GetLastError());
++      }
++    }
++    else
+     {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "UnregisterClass", GetLastError());
++      m_trc.writeTrace(BasicRuntime_HERE, "ignore: UnregisterClass mSysEventCallbackWindow");
+     }
+   }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 55ab5396..d9216aa1 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -911,7 +911,10 @@ namespace
+       "#####################",
+       m_properties.group.c_str(),
+       m_properties.commandLine.c_str());
+-    m_reset.setError();
++    if(m_watchDog && !m_stopping)
++    {
++      m_reset.setError();
++    }
+     m_cb.notify(*this);
+   }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 4fa2e168..8f1bc82f 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -23,7 +23,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\timeOfTrace.obj \
+                         $(_OBJ)\cEnvSubst.obj \
+                         $(_OBJ)\stoupper.obj \
+-                        $(_OBJ)\readEnv.obj
++                        $(_OBJ)\readEnv.obj \
++                        $(_OBJ)\parseServant.obj \
+ 
+ 
+ ######################################################################
+@@ -76,4 +77,12 @@ MY_BIN6_OBJS =          $(_OBJ)\TraceEventTimes.obj
+ 
+ ######################################################################
+ 
++MY_BIN7 =               $(_BIN)\TestParseServant.exe
++
++MY_BIN7_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
++
++MY_BIN7_OBJS =          $(_OBJ)\TestParseServant.obj
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/TestParseServant.cpp b/SelfServiceCommon/Massai/cpp/Text/src/TestParseServant.cpp
+new file mode 100644
+index 00000000..f45f26c8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/TestParseServant.cpp
+@@ -0,0 +1,28 @@
++// test parseServant.cpp implementation
++#include "text/parseServant.h"
++#include "text/mArgScan.hpp"
++
++#include <iostream>
++
++int main(int argc, char** argv)
++{
++  int result= 0;
++  argScan args(argc, argv);
++  if((argc < 3 ) || args.help() )
++  {
++    std::cout << "Usage: TestParseServant iiops commandline" << std::endl;
++    result= -1;
++  }
++  else
++  {
++    text::servantListParser parser;
++    parser.parse(args.argument(1));
++    std::string commandline = parser.substituteServants(args.argument(2));
++    for(text::servantMap::const_iterator it = parser.servants.begin(); it != parser.servants.end(); it++)
++    {
++      std::cout << (it->second.iiop) << " = " << (it->second.host) << ":" << (it->second.port) << "/" << (it->second.name) << std::endl;
++    }
++    std::cout << commandline << std::endl;
++  }
++  return result;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 359b8956..b42a173c 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,23 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 7);
++VERSION_ID_DT(text, 1, 0, 0, 8);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.7
++\version 1.0.0.8
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.8
++\li 01.12.2016
++\li extension - SteT Mantis 0043868: integration of EZ-Access device for KIS kiosk
++- added parseServant to parse servant command line parameter
++
+ \version 1.0.0.7
+ \li 28.10.20014
+ \li Mantis 0034299: switch resolution; start application with default resolution
+@@ -22,33 +27,33 @@ massai_text.lib
+ \li 12.08.2014
+ \li change - SteT Mantis 0033302: mstarter: use only defined system environment variables for substitution
+ - use these system environment variables
+-   -ALLUSERSPROFILE
+-   -APPDATA
+-   -COMPUTERNAME
+-   -ComSpec
+-   -CommonProgramFiles
+-   -CommonProgramW6432
+-   -HOMEDRIVE
+-   -HOMEPATH
+-   -HOMESHARE
+-   -LOCALAPPDATA
+-   -LOGONSERVER
+-   -PROGRAMFILES
+-   -PSModulePath
+-   -PUBLIC
+-   -Path
+-   -ProgramData
+-   -ProgramFiles
+-   -ProgramW6432
+-   -SYSTEMDRIVE
+-   -SYSTEMROOT
+-   -TEMP
+-   -TMP
+-   -USERDNSDOMAIN
+-   -USERDOMAIN
+-   -USERNAME
+-   -USERPROFILE
+-   -windir
++   - ALLUSERSPROFILE
++   - APPDATA
++   - COMPUTERNAME
++   - ComSpec
++   - CommonProgramFiles
++   - CommonProgramW6432
++   - HOMEDRIVE
++   - HOMEPATH
++   - HOMESHARE
++   - LOCALAPPDATA
++   - LOGONSERVER
++   - PROGRAMFILES
++   - PSModulePath
++   - PUBLIC
++   - Path
++   - ProgramData
++   - ProgramFiles
++   - ProgramW6432
++   - SYSTEMDRIVE
++   - SYSTEMROOT
++   - TEMP
++   - TMP
++   - USERDNSDOMAIN
++   - USERDOMAIN
++   - USERNAME
++   - USERPROFILE
++   - windir
+ 
+ \version 1.0.0.5
+ \li 16.09.2013
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/parseServant.cpp b/SelfServiceCommon/Massai/cpp/Text/src/parseServant.cpp
+new file mode 100644
+index 00000000..ec4ddfc9
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/parseServant.cpp
+@@ -0,0 +1,75 @@
++// parse servant commandline parameter
++#include "text/parseServant.h"
++#include "text/textTools.h"
++
++#include "boost/regex.hpp"
++
++namespace text
++{
++  bool servant::parse(const std::string& iiop)
++  {
++    bool result = false;
++    boost::regex checkServant("(?:([a-zA-Z0-9_.-]+):)?([0-9]+)/([^ ;:,]+)");
++    boost::smatch match;
++    if(boost::regex_match(iiop, match, checkServant))
++    {
++      host = match[1];
++      port = std::stol(match[2]);
++      name = match[3];
++      this->iiop = iiop;
++      result = true;
++    }
++    return result;
++  }
++
++  void servantListParser::parse(const std::string& iiops)
++  {
++    this->iiops = iiops;
++    servants.clear();
++    MASSAI::text::TextList iiopList = MASSAI::text::split(iiops, ",");
++    for(MASSAI::text::TextList::const_iterator it = iiopList.begin(); it != iiopList.end(); it++)
++    {
++      servant entry;
++      if(entry.parse(*it))
++      {
++        servants[entry.name]= entry;
++      }
++    }
++  }
++
++  std::string servantListParser::substituteServants(const std::string& commandLine) const
++  {
++    boost::regex expression("\\$SERVANTPORT/([^ ;:,]+)|(\\$SERVANTPORT_LIST)");
++    boost::smatch parsed;
++    std::string result;
++    std::string::const_iterator it= commandLine.begin();
++    std::string::const_iterator end= commandLine.end();
++    while(boost::regex_search(it, end, parsed, expression))
++    {
++      if(parsed[0].first != it)
++      {
++        result.append(it, parsed[0].first);                            // no variable found in this part
++      }
++      if(parsed[1].matched)                                            // $SERVANTPORT/<servantName> found
++      {
++        std::string servantName = std::string(parsed[1].first, parsed[1].second);
++        servantMap::const_iterator found = servants.find(servantName);
++        if(found != servants.end())
++        {
++          result.append(found->second.iiop);
++        }
++        else
++        {
++          result.append(parsed[0].first, parsed[0].second);
++        }
++      }
++      else                                                             // $SERVANTPORT_LIST found
++      {
++        result.append(iiops);
++      }
++      it= parsed[0].second;
++    }
++    result.append(it, end);                                            // no further variable found
++    return result;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 2444388b..46566571 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,18
+-#define FILE_VER_STR     "FileVersion", "1.0.1.18"
++#define FILE_VER_BIN     1,0,1,19
++#define FILE_VER_STR     "FileVersion", "1.0.1.19"
+ 
+ /*!
+ \file
+@@ -7,16 +7,21 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.18
++@version 1.0.1.19
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.19
++\li 01.12.2016
++\li SteT - Mantis  0043868: integration of EZ-Access device for KIS kiosk
++\li added in configItem: cfgCachedTextList, cfgTextList
++
+ \version 1.0.1.18
+ \li 01.12.2016
+ \li MOt - Mantis 0032431: ScheduledTask
+-\li extension: 
++\li extension:
+ \li   -added safety queries in the constructor of ScheduledTask
+ \li   -changed Notficiation 'CMD_SHUTDOWN_MCONTROL' to 'CMD_SHUTDOWN_PLATFORM'
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+index ffca5cdd..98fb92c2 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -346,4 +346,180 @@ namespace config
+   {
+     return item;
+   }
++
++
++  cfgCachedTextList::cfgCachedTextList
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::list<std::string>& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::cache<std::list<std::string>, nConfig::gclTextList>((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgCachedTextList::cfgCachedTextList
++  (
++    const std::string& item,
++    const std::list<std::string>& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::cache<std::list<std::string>, nConfig::gclTextList>(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgCachedTextList::create(const char*& rights, const char*& explanation, std::list<std::string>& defaultValue, long& maxLength)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: (%d); %.200s; %.200s",
++      this->item.c_str(),
++      this->maxLength,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    for(std::list<std::string>::const_iterator it = this->defaultValue.begin(); it != this->defaultValue.end(); it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++    }
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    maxLength = this->maxLength;
++  }
++
++  cfgCachedTextList::~cfgCachedTextList()
++  {}
++
++  std::list<std::string> cfgCachedTextList::getValue()
++  {
++    return cached();
++  }
++
++  void cfgCachedTextList::setValue(const std::list<std::string>& value)
++  {
++    if(cached() != value)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "set item %.200s:", item.c_str());
++      for(std::list<std::string>::const_iterator it = value.begin(); it != value.end(); it++)
++      {
++        trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++      }
++      set(value);
++    }
++  }
++
++  std::string cfgCachedTextList::getItem()
++  {
++    return item;
++  }
++
++  std::list<std::string> cfgCachedTextList::uncached()
++  {
++    std::list<std::string> result = get();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s:", item.c_str());
++    for(std::list<std::string>::const_iterator it = result.begin(); it != result.end(); it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++    }
++    return result;
++  }
++
++
++  cfgTextList::cfgTextList
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::list<std::string>& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::gcTextList((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgTextList::cfgTextList
++  (
++    const std::string& item,
++    const std::list<std::string>& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::gcTextList(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgTextList::create(const char*& rights, const char*& explanation, std::list<std::string>& defaultValue, long& maxLength)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: (%d); %.200s; %.200s",
++      this->item.c_str(),
++      this->maxLength,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    for(std::list<std::string>::const_iterator it = this->defaultValue.begin(); it != this->defaultValue.end(); it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++    }
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    maxLength = this->maxLength;
++  }
++
++  cfgTextList::~cfgTextList()
++  {}
++
++  std::list<std::string> cfgTextList::getValue() const throw(nConfig::exception)
++  {
++    std::list<std::string> result = get();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s:", item.c_str());
++    for(std::list<std::string>::const_iterator it = result.begin(); it != result.end(); it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++    }
++    return result;
++  }
++
++  std::string cfgTextList::getItem()
++  {
++    return item;
++  }
++
++  void cfgTextList::setValue(const std::list<std::string>& value)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "set item %.200s:", item.c_str());
++    for(std::list<std::string>::const_iterator it = value.begin(); it != value.end(); it++)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "value(%.200s)", it->c_str());
++    }
++    set(value);
++  }
+ }
+-- 
+2.41.0.windows.1
+

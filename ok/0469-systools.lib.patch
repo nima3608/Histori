@@ -1,0 +1,518 @@
+From 26abec559b1ac13e96fca0287b2f20b06e35eb77 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 4 Sep 2013 17:39:58 +0000
+Subject: [PATCH 0469/1077] systools.lib V1.0.0.9
+
+Mantis 0028873: GPPDev: Custom KPM150H RFID
+added mSysIO (timed io)
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@573 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysIO.h          |  57 +++
+ .../Massai/cpp/Systools/makefile.mak          |   2 +
+ .../Massai/cpp/Systools/src/local_def.cpp     |   8 +-
+ .../Massai/cpp/Systools/src/mSysIOW32.cpp     | 391 ++++++++++++++++++
+ 4 files changed, 457 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h b/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
+new file mode 100644
+index 00000000..1d7e160c
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
+@@ -0,0 +1,57 @@
++// timed input/output
++
++#ifndef MSYSIO_H_INCLUDED
++#define MSYSIO_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include <stdexcept>
++#include "tools/TraceInterface.h"
++
++namespace mSysIO
++{
++  typedef unsigned long Time_ms;
++
++  class IOException: public std::runtime_error
++  {
++    public:
++      explicit IOException(const std::string& what_arg);
++  };
++
++  class Reader
++  {
++    public:
++      virtual ~Reader();
++      virtual bool read(std::string& data, Time_ms timeout, size_t size) = 0;
++      virtual bool read(std::string& data, Time_ms timeout) = 0;
++      virtual bool read(std::string& data, size_t size) = 0;
++      virtual bool read(std::string& data) = 0;
++  };
++
++  class Writer
++  {
++    public:
++      virtual ~Writer();
++      virtual size_t write(const std::string& data, Time_ms timeout) = 0;
++      virtual size_t write(const std::string& data) = 0;
++  };
++
++  class ReadOptions
++  {
++    public:
++      ReadOptions();
++  };
++
++  class WriteOptions
++  {
++    public:
++      WriteOptions();
++  };
++
++  Reader* createReader(const std::string& name, const ReadOptions& options, MASSAI::trace::TraceInterface& trc);
++  Writer* createWriter(const std::string& name, const WriteOptions& options, MASSAI::trace::TraceInterface& trc);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index da98e63d..24ffdc54 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -45,6 +45,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysProcessTreeW32.obj \
+                         $(_OBJ)\mSysDeviceEventW32.obj \
+                         $(_OBJ)\mSysEventW32.obj \
++#                        $(_OBJ)\mSysHotKeyW32.obj \
++                        $(_OBJ)\mSysIOW32.obj \
+ 
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 6cbcdc5b..1dafb1fa 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,10 +1,16 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 8);
++VERSION_ID_DT(systools, 1, 0, 0, 9);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
++\date 04.09.2013
++\li V1.0.0.9
++\li Mantis 0028873: GPPDev: Custom KPM150H RFID
++added mSysIO (timed io)
++
++
+ \date 15.08.2013
+ \li V1.0.0.8
+ \li Mantis 0028547: mstarter: crashes sometimes at platform start
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
+new file mode 100644
+index 00000000..e80012f3
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
+@@ -0,0 +1,391 @@
++// timed input/output
++
++#include "systools/mSysIO.h"
++#include "mSysErrorW32.h"
++#include "systools/mSysTime.h"
++#include <windows.h>
++
++using namespace mSysIO;
++using MASSAI::trace::TraceInterface;
++
++namespace
++{
++  enum Constans
++  {
++    READ_BUFFER_SIZE = 4096,
++  };
++
++  class Overlapped
++  {
++    public:
++      Overlapped(const std::string& name, TraceInterface& trc);
++      ~Overlapped();
++
++      OVERLAPPED data;
++
++    private:
++      std::string m_name;
++      TraceInterface& m_trc;
++  };
++
++  class ReaderImpl: public Reader
++  {
++    public:
++      ReaderImpl(const std::string& name, const ReadOptions& options, TraceInterface& trc);
++      virtual ~ReaderImpl();
++      virtual bool read(std::string& data, Time_ms timeout, size_t size);
++      virtual bool read(std::string& data, Time_ms timeout);
++      virtual bool read(std::string& data, size_t size);
++      virtual bool read(std::string& data);
++
++    private:
++      bool read(std::string& data, Time_ms timeout, size_t size, bool useTime, bool useSize);
++      bool getData(Overlapped& overlapped, char* buffer, std::string& data, size_t& totalRead);
++      DWORD getWaitTime(bool useTime, unsigned long start, Time_ms timeout);
++      DWORD getBufferSize(bool useSize, size_t size, size_t totalRead);
++
++
++      TraceInterface& m_trc;
++      HANDLE m_handle;
++      std::string m_name;
++  };
++
++  class WriterImpl: public Writer
++  {
++    public:
++      WriterImpl(const std::string& name, const WriteOptions& options, TraceInterface& trc);
++      virtual ~WriterImpl();
++      virtual size_t write(const std::string& data, Time_ms timeout);
++      virtual size_t write(const std::string& data);
++
++    private:
++      TraceInterface& m_trc;
++      HANDLE m_handle;
++      std::string m_name;
++  };
++
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, const std::string& name, unsigned long errorCode);
++}
++
++namespace
++{
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, const std::string& name, unsigned long errorCode)
++  {
++    mSysError::traceLastError(trc, level, file, line, function,
++      (name + " " + where).c_str(), errorCode);
++  }
++
++  Overlapped::Overlapped(const std::string& name, TraceInterface& trc):
++    m_name(name),
++    m_trc(trc)
++  {
++    memset(&data, 0, sizeof(data));
++    data.hEvent = CreateEvent(0, true, false, 0);
++    if(data.hEvent == INVALID_HANDLE_VALUE)
++    {
++      traceLastError(m_trc, MajorError_HERE, "CreateEvent", m_name, GetLastError());
++    }
++  }
++
++  Overlapped::~Overlapped()
++  {
++    if(data.hEvent != INVALID_HANDLE_VALUE)
++    {
++      if(!CloseHandle(data.hEvent))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseEventHandle", m_name, GetLastError());
++      }
++    }
++  }
++
++
++  ReaderImpl::ReaderImpl(const std::string& name, const ReadOptions& options, TraceInterface& trc):
++    m_trc(trc),
++    m_handle(INVALID_HANDLE_VALUE),
++    m_name(name)
++  {
++    m_handle = CreateFile
++    (
++      name.c_str(),
++      GENERIC_READ,
++      FILE_SHARE_READ,
++      0,
++      OPEN_EXISTING,
++      FILE_FLAG_OVERLAPPED,
++      0
++    );
++    if(m_handle == INVALID_HANDLE_VALUE)
++    {
++      DWORD resultCode = GetLastError();
++      traceLastError(m_trc, MajorError_HERE, "CreateFile", m_name, resultCode);
++      throw IOException(mSysError::getErrorText(resultCode));
++    }
++  }
++
++  ReaderImpl::~ReaderImpl()
++  {
++    if(m_handle != INVALID_HANDLE_VALUE)
++    {
++      if(!CloseHandle(m_handle))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, GetLastError());
++      }
++    }
++  }
++
++  bool ReaderImpl::getData(Overlapped& overlapped, char* buffer, std::string& data,
++    size_t& totalRead)
++  {
++    bool result = true;
++    DWORD readCount = 0;
++    if(!GetOverlappedResult(m_handle, &overlapped.data, &readCount, false))
++    {
++      traceLastError(m_trc, MajorError_HERE, "GetOverlappedResult", m_name, GetLastError());
++      result = false;
++    }
++    else
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "read done (%d) from (%s)",
++        readCount, m_name.c_str());
++      m_trc.dumpTrace(MinorError_HERE, readCount, buffer);
++      data.append(buffer, readCount);
++      totalRead += readCount;
++    }
++    return result;
++  }
++
++  DWORD ReaderImpl::getWaitTime(bool useTime, unsigned long start, Time_ms timeout)
++  {
++    DWORD wait = 0;
++    if(useTime)
++    {
++      unsigned long now = mSysTime::getUpTime();
++      if(now - start < timeout)
++      {
++        wait = timeout - (now - start);
++      }
++    }
++    else
++    {
++      wait = INFINITE;
++    }
++    return wait;
++  }
++
++  DWORD ReaderImpl::getBufferSize(bool useSize, size_t size, size_t totalRead)
++  {
++    DWORD bufferSize = READ_BUFFER_SIZE;
++    if(useSize && bufferSize > size - totalRead)
++    {
++      bufferSize = size - totalRead;
++    }
++    return bufferSize;
++  }
++
++  bool ReaderImpl::read(std::string& data, Time_ms timeout, size_t size, bool useTime,
++    bool useSize)
++  {
++    bool success = false;
++    Overlapped overlapped(m_name, m_trc);
++    if(overlapped.data.hEvent != INVALID_HANDLE_VALUE)
++    {
++      unsigned long start = mSysTime::getUpTime();
++      unsigned long now = start;
++
++      if(useSize)
++      {
++        data.reserve(data.size() + size);
++      }
++      size_t totalRead = 0;
++
++      char buffer[READ_BUFFER_SIZE];
++      do
++      {
++        DWORD bufferSize = READ_BUFFER_SIZE;
++        m_trc.writeTrace(BasicRuntime_HERE, "read (%d)/(%d) from (%s)",
++          getBufferSize(useSize, size, totalRead), bufferSize, m_name.c_str());
++        if(!ReadFile(m_handle, buffer, bufferSize, 0, &overlapped.data))
++        {
++          DWORD readResult = GetLastError();
++          if(readResult != ERROR_IO_PENDING)
++          {
++            traceLastError(m_trc, MajorError_HERE, "ReadFile", m_name, readResult);
++            break;
++          }
++          else
++          {
++            DWORD waitResult = WaitForSingleObject(overlapped.data.hEvent,
++              getWaitTime(useTime, start, timeout));
++            if(waitResult == WAIT_TIMEOUT)
++            {
++              m_trc.writeTrace(MinorWarning_HERE, "read timeout (%s)", m_name.c_str());
++              CancelIo(m_handle);
++              break;
++            }
++            else if(!getData(overlapped, buffer, data, totalRead))
++            {
++              break;
++            }
++          }
++        }
++        else if(!getData(overlapped, buffer, data, totalRead))
++        {
++          break;
++        }
++        now = mSysTime::getUpTime();
++      } while((!useTime || now - start < timeout) && (!useSize || totalRead < size));
++      if(useSize)
++      {
++        success = totalRead >= size;
++      }
++      else
++      {
++        success = totalRead > 0;
++      }
++    }
++    return success;
++  }
++
++  bool ReaderImpl::read(std::string& data, Time_ms timeout, size_t size)
++  {
++    return read(data, timeout, size, true, true);
++  }
++
++  bool ReaderImpl::read(std::string& data, Time_ms timeout)
++  {
++    return read(data, timeout, 0, true, false);
++  }
++
++  bool ReaderImpl::read(std::string& data, size_t size)
++  {
++    return read(data, 0, size, true, false);
++  }
++
++  bool ReaderImpl::read(std::string& data)
++  {
++    return read(data, 0, 0, false, false);
++  }
++
++  WriterImpl::WriterImpl(const std::string& name, const WriteOptions& options,
++    TraceInterface& trc):
++    m_trc(trc),
++    m_handle(INVALID_HANDLE_VALUE),
++    m_name(name)
++  {
++    m_handle = CreateFile
++    (
++      name.c_str(),
++      GENERIC_WRITE,
++      FILE_SHARE_WRITE,
++      0,
++      OPEN_EXISTING,
++      FILE_FLAG_OVERLAPPED,
++      0
++    );
++    if(m_handle == INVALID_HANDLE_VALUE)
++    {
++      DWORD resultCode = GetLastError();
++      traceLastError(m_trc, MajorError_HERE, "CreateFile", m_name, resultCode);
++      throw IOException(mSysError::getErrorText(resultCode));
++    }
++  }
++
++  WriterImpl::~WriterImpl()
++  {
++  }
++
++  size_t WriterImpl::write(const std::string& data, Time_ms timeout)
++  {
++    DWORD written = 0;
++    Overlapped overlapped(m_name, m_trc);
++    if(overlapped.data.hEvent != INVALID_HANDLE_VALUE)
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "write (%d) to (%s)", data.size(), m_name.c_str());
++      m_trc.dumpTrace(MinorError_HERE, data.size(), data.data());
++      if(!WriteFile(m_handle, data.data(), data.size(), 0, &overlapped.data))
++      {
++        DWORD writeResult = GetLastError();
++        if(writeResult != ERROR_IO_PENDING)
++        {
++          traceLastError(m_trc, MajorError_HERE, "WriteFile", m_name, writeResult);
++        }
++        else
++        {
++          DWORD waitResult = WaitForSingleObject(overlapped.data.hEvent, timeout);
++          if (waitResult == WAIT_OBJECT_0)
++          {
++            if(!GetOverlappedResult(m_handle, &overlapped.data, &written, false))
++            {
++              traceLastError(m_trc, MajorError_HERE, "GetOverlappedResult",
++                m_name, GetLastError());
++            }
++            else
++            {
++              m_trc.writeTrace(MinorWarning_HERE, "written (%d)/(%d) to (%s)",
++                written, data.size(), m_name.c_str());
++            }
++          }
++          else if(waitResult == WAIT_TIMEOUT)
++          {
++            m_trc.writeTrace(MinorWarning_HERE, "write timeout (%s)", m_name.c_str());
++            CancelIo(m_handle);
++          }
++        }
++      }
++      else
++      {
++        DWORD readCount = 0;
++        if(!GetOverlappedResult(m_handle, &overlapped.data, &written, false))
++        {
++          traceLastError(m_trc, MajorError_HERE, "GetOverlappedResult", m_name, GetLastError());
++        }
++        else
++        {
++          m_trc.writeTrace(MinorWarning_HERE, "written (%d)/(%d) to (%s)",
++            written, data.size(), m_name.c_str());
++        }
++      }
++    }
++    return written;
++  }
++
++  size_t WriterImpl::write(const std::string& data)
++  {
++    return write(data, INFINITE);
++  }
++}
++
++namespace mSysIO
++{
++  IOException::IOException(const std::string& what_arg):
++    std::runtime_error(what_arg)
++  {}
++
++  ReadOptions::ReadOptions()
++  {}
++
++  WriteOptions::WriteOptions()
++  {}
++
++  Reader::~Reader()
++  {}
++
++  Writer::~Writer()
++  {}
++
++  Reader* createReader(const std::string& name, const ReadOptions& options, TraceInterface& trc)
++  {
++    ReaderImpl* result = new ReaderImpl(name, options, trc);
++    return result;
++  }
++
++  Writer* createWriter(const std::string& name, const WriteOptions& options, TraceInterface& trc)
++  {
++    WriterImpl* result = new WriterImpl(name, options, trc);
++    return result;
++  }
++}
+-- 
+2.41.0.windows.1
+

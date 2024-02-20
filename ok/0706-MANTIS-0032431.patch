@@ -1,0 +1,398 @@
+From 6d9e232ead2b78b609abe2ba6dda2648578e9996 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 2 Dec 2015 10:30:51 +0000
+Subject: [PATCH 0706/1077] MANTIS 0032431 added:   initCPU() and better
+ Error-Information
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@933 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 144 ++++++++++++++----
+ 1 file changed, 112 insertions(+), 32 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index b6390725..39fac2a5 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -401,8 +401,10 @@ namespace
+   class myChild: public mSysProcess::child
+   {
+     private:
++      BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege);
+       void openProcess();
+-      BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege); 
++      void initCPU();
++       
+ 
+       fromChild                        M_ChildErr;
+       fromChild                        M_ChildOut;
+@@ -427,6 +429,11 @@ namespace
+       bool                             M_NewProcessGroup;
+       child::Internal                  M_Internal;
+       DWORD                            M_Parent;
++      
++      mSysTime::Duration               M_LastSysCPU;
++      mSysTime::Duration               M_LastUserCPU;
++      
++      int                              M_NumProcesses;
+ 
+       myChild( myChild const & );
+       myChild & operator=( myChild const & );
+@@ -475,7 +482,7 @@ namespace
+         char const*                      pDomain,
+         char const*                      pPassword
+       );
+-      ~myChild();
++      ~myChild();     
+       unsigned long getExitCode() const;
+       mSysProcess::status getStatus() const;
+       mSysProcess::child& waitForTermination();
+@@ -545,6 +552,7 @@ namespace
+     M_Parent(ppid)
+   {
+     openProcess();
++    initCPU();
+   }
+ 
+   
+@@ -643,7 +651,7 @@ namespace
+     if( M_CanSynchronize )
+       dwDesiredAccess = dwDesiredAccess | SYNCHRONIZE;
+ 
+-    if( dwDesiredAccess)
++    if( errorString == "OpenProcess" )
+     {
+       M_HandleProcess = OpenProcess(dwDesiredAccess, false, M_ProcessId);
+     }
+@@ -658,6 +666,43 @@ namespace
+     
+     CloseHandle(hToken);
+   }
++  
++  
++  void myChild::initCPU()
++  {
++    FILETIME creation;
++    FILETIME exit;
++    FILETIME kernel;
++    FILETIME user;
++    
++    
++    SYSTEM_INFO sysInfo;
++    
++    GetSystemInfo(&sysInfo);
++    M_NumProcesses = sysInfo.dwNumberOfProcessors;
++
++    if( canQuery() )
++    {
++      if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++      {
++        M_LastUserCPU = mSysTime::getDuration(user);
++        M_LastSysCPU = mSysTime::getDuration(kernel);
++      }
++      else
++      {
++        std::string errorString = "ProcID=[" + getProcessId() + "] initCPU() - GetProcessTimes";
++        logLastError(M_Logging, errorString.c_str());
++      }
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        std::string errorString = "ProcID=[" + getProcessId() + "]" + " initCPU - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
++      } 
++    }
++  }
+ 
+ 
+   /**
+@@ -1194,7 +1239,8 @@ namespace
+         {
+           if( !GetExitCodeProcess( M_HandleProcess, &XCode ) )
+           {
+-             logLastError( M_Logging, "GetExitCodeProcess" );
++             std::string errorString = "ProcID=[" + getProcessId() + "] GetExitCodeProcess";
++             logLastError( M_Logging, errorString.c_str() );
+              return 0;
+           }
+         }
+@@ -1202,7 +1248,8 @@ namespace
+         {
+           if( M_Logging )
+           {
+-            M_Logging->lineOut( "getExitCode - query not allowed" );
++            std::string errorString = "ProcID=[" + getProcessId() + "] getExitCode() - query not allowed";
++            M_Logging->lineOut( errorString.c_str() );
+           } 
+         }
+      }
+@@ -1237,7 +1284,8 @@ namespace
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "getStatus - wait not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] getStatus - wait not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+       
+       return mSysProcess::STATUS_UNKNOWN;
+@@ -1261,7 +1309,8 @@ namespace
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "waitForTermination - wait not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] waitForTermination - wait not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1285,7 +1334,8 @@ namespace
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "waitForTermination - wait not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] waitForTermination - wait not allowed"; 
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1319,7 +1369,10 @@ namespace
+               ) )
+      {
+         if( GetLastError() != ERROR_NO_DATA )
+-           logLastError( M_Logging, "WriteFile" );
++        {
++          std::string errorString = "ProcID=[" + getProcessId() + "] WriteFile";
++          logLastError( M_Logging, errorString.c_str() );
++        }
+      }
+      return *this;
+   }
+@@ -1377,7 +1430,9 @@ namespace
+     if(!GenerateConsoleCtrlEvent(event, M_ProcessId))
+     {
+       result = false;
+-      logLastError( M_Logging, "GenerateConsoleCtrlEvent" );
++      
++      std::string errorString = "ProcID=[" + getProcessId() + "] GenerateConsoleCtrlEvent";
++      logLastError( M_Logging, errorString.c_str() );
+     }
+     return result;
+   }
+@@ -1395,14 +1450,16 @@ namespace
+     {
+       if ( !TerminateProcess(M_HandleProcess, static_cast<unsigned int>( -1 )) )
+       {
+-        logLastError( M_Logging, "TerminateProcess" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] TerminateProcess";
++        logLastError( M_Logging, errorString.c_str() );
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "kill not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] kill not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+ 	
+@@ -1460,14 +1517,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessTimes");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessTimes";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printTime - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] printTime() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+   }
+@@ -1499,14 +1558,16 @@ namespace
+       else
+       {
+         out << "\t\t\t\t\t\t\t\t";
+-        logLastError(M_Logging, "GetProcessTimes");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessTimes";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printShortTime - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] printShortTime() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+   }
+@@ -1536,14 +1597,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessIoCounters");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessIoCounters";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printCounters(GetProcessIoCounters) - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] printCounters() [GetProcessIoCounters] - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1568,14 +1631,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessMemoryInfo");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessMemoryInfo";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printCounters(GetProcessMemoryInfo) - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] printCounters() [GetProcessMemoryInfo] - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+   }
+@@ -1602,14 +1667,16 @@ namespace
+       else
+       {
+         out << "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+-        logLastError(M_Logging, "GetProcessMemoryInfo");
++        std::string errorString =  "ProcID=[" + getProcessId() + "] GetProcessMemoryInfo";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printShortCounters(GetProcessMemoryInfo) - query not allowed" );
++        std::string errorString =  "ProcID=[" + getProcessId() + "] printShortCounters() [GetProcessMemoryInfo] - query not allowed" ;
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1629,14 +1696,17 @@ namespace
+       else
+       {
+         out << "\t\t\t\t\t\t\t\t\t\t\t\t";
+-        logLastError(M_Logging, "GetProcessIoCounters");
++        
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessIoCounters";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "printShortCounters(GetProcessIoCounters) - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] printShortCounters() [GetProcessIoCounters] - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+   }
+@@ -1738,7 +1808,9 @@ namespace
+       {
+          // Could not get process times, use this!
+          result = mSysTime::getTimestamp();
+-         logLastError(M_Logging, "GetProcessTimes");
++         
++         std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessTimes";
++         logLastError(M_Logging, errorString.c_str() );
+       }
+     }
+     else
+@@ -1746,7 +1818,9 @@ namespace
+       if( M_Logging )
+       {
+         result = mSysTime::getTimestamp();
+-        M_Logging->lineOut( "getCreationTime - query not allowed" );
++        
++        std::string errorString = "ProcID=[" + getProcessId() + "] getCreationTime() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1795,14 +1869,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessIoCounters");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessIoCounters";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "getProcessIoUsage - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] getProcessIoUsage() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+     
+@@ -1828,14 +1904,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessTimes");
++        std::string errorString ="ProcID=[" + getProcessId() + "] GetProcessTimes";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "getProcessTimeUsage - query not allowed" );
++        std::string errorString ="ProcID=[" + getProcessId() + "] getProcessTimeUsage() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+      
+@@ -1855,14 +1933,16 @@ namespace
+       }
+       else
+       {
+-        logLastError(M_Logging, "GetProcessMemoryInfo");
++        std::string errorString = "ProcID=[" + getProcessId() + "] GetProcessMemoryInfo";
++        logLastError(M_Logging, errorString.c_str());
+       }
+     }
+     else
+     {
+       if( M_Logging )
+       {
+-        M_Logging->lineOut( "getProcessMemoryUsage - query not allowed" );
++        std::string errorString = "ProcID=[" + getProcessId() + "] getCreationTime() - query not allowed";
++        M_Logging->lineOut( errorString.c_str() );
+       } 
+     }
+       
+-- 
+2.41.0.windows.1
+

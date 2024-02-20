@@ -1,0 +1,140 @@
+From 2ae57e8309c6443a3fa158de638d3aece58973ab Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Sat, 10 Sep 2011 08:41:50 +0000
+Subject: [PATCH 0143/1076] =?UTF-8?q?=20-=20SetKioskData=20Link=20wird=20j?=
+ =?UTF-8?q?etzt=20auch=20aus=20dem=20Benutzer=20Autostart=20(falls=20vorha?=
+ =?UTF-8?q?nden)=20gel=C3=B6scht.=20=20-=20SetKioskData=20unterst=C3=BCtzt?=
+ =?UTF-8?q?=20jetzt=20auch=20mehrere=20Applikationen,=20die=20in=20der=20I?=
+ =?UTF-8?q?NI=20Datei=20angegeben=20werden=20k=C3=B6nnen.=20=20-=20Default?=
+ =?UTF-8?q?=20INI=20Datei=20f=C3=BCr=20SetKioskData=20hinzugef=C3=BCgt.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@178 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.ini | 12 ++++
+ .../Build/setup/SetKioskData/SetKioskData.iss | 66 ++++++++++++-------
+ 2 files changed, 54 insertions(+), 24 deletions(-)
+ create mode 100644 SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+new file mode 100644
+index 00000000..006c6915
+--- /dev/null
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+@@ -0,0 +1,12 @@
++[KIOSKDATA]
++Kiosk Name:=CUSS-TEMP
++Airport: (3L Code)=DTM
++Area: (Area in Terminal)=CheckIn
++Terminal:=A
++Applications=MAT_CKI
++[HOSTDATA]
++IPv4Address=139.2.249.21
++IPv4Subnet=255.255.240.0
++IPv4Gateway=139.2.240.1
++[APPDATA_MAT_CKI]
++CMD="C:\Programme\Internet Explorer\iexplore.exe" -K http://cuss-mat-01/Applications/MAT/MAT_App.html$ wnd=MAT_App
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 6102a4b9..d7406c13 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -78,6 +78,9 @@ ReadyLabel2a=Click Update to continue with the update, or click Back if you want
+ Name: {commonstartup}\Start Massai; Filename: {code:GetMassaiDir}\bin\mcontrol.exe; Parameters: -wait -NORMAL; WorkingDir: {code:GetMassaiDir}\bin; IconFilename: {code:GetMassaiDir}\bin\mcontrol.exe; Flags: runminimized
+ [InstallDelete]
+ Name: {commonstartup}\SetKioskData.lnk; Type: files
++; Falls SetKioskData über den Benutzer Autostart gestartet wird, muss auch dieser gelöscht werden.
++Name: {userstartup}\SetKioskData.lnk; Type: files
++
+ [Run]
+ Filename: {sys}\netsh; Parameters: "interface ip set address name=""LAN-Verbindung"" source=static addr={code:GetIPv4Address} mask={code:GetIPv4Subnet}"; WorkingDir: {sys}; Flags: runhidden
+ Filename: {sys}\netsh; Parameters: "interface ip set address name=""LAN-Verbindung"" gateway={code:GetIPv4Gateway} gwmetric=0"; WorkingDir: {sys}; Flags: runhidden
+@@ -239,6 +242,8 @@ begin
+ end;
+ 
+ procedure UpdateKioskData();
++var
++  i:Integer;
+ begin
+ 
+ 	SetStringInConfig('ENVIRONMENT.LEVEL.Kiosk_Name'	,LevelData[0], 'Name of the kiosk (used for SM-Interface)');
+@@ -246,9 +251,8 @@ begin
+ 	SetStringInConfig('ENVIRONMENT.LEVEL.Area'	 	 	,LevelData[2], 'Area name');
+ 	SetStringInConfig('ENVIRONMENT.LEVEL.Terminal'	 	,LevelData[3], 'Terminal name');
+ 
+-	{ TODO: Mehrere Airlines unterstuezen. }
+-	{ LOG('SetStringInConfig("APPLICATIONS.' + AppIDs[0] + '.Command_Line",' + AppLevelData[0] + ', "The command line to start the application");') }
+-	SetStringInConfig('APPLICATIONS.' + AppIDs[0] + '.Command_Line', AppLevelData[0], 'The command line to start the application');
++	for i := 0 to GetArrayLength(AppIDs)-1 do
++      SetStringInConfig('APPLICATIONS.' + AppIDs[i] + '.Command_Line', AppLevelData[i], 'The command line to start the application');
+ 
+ end;
+ 
+@@ -377,28 +381,42 @@ begin
+ 			IPv4LevelData[2]  := ProcessIniString('HOSTDATA', 'IPv4Gateway', '139.2.240.1');
+ 
+ 
+-			{ TODO: Mehrere Airlines unterstuezen. }
+-			DefaultID := 'GWI_CKI';
+-
+-			{ TODO: Dynamisch die vorkonfiguierten Airlines verwenden.}
+-			{ GetTextListValue('ENVIRONMENT.Applications.Installed_Applications', DefaultID, AppID, 100); }
+-			AppID := DefaultID;
++			
++      { TODO: Mehrere Airlines unterstuezen. }
++			DefaultID := 'MAT_CKI';
++			
++			AppID := ProcessIniString('KIOSKDATA', 'Applications', DefaultID);
++			
+ 			LOG('Found Applications: ' + AppID);
+-
+-			SetArrayLength(AppIDs, 1);
+-			AppIDs[0] := AppID;
+-
+-			{ TODO: Dynamisch die vorkonfiguierten Airlines verwenden.}
+-			{ GetTextValue('APPLICATIONS.' + AppIDs[0] + '.Command_Line','"C:\Programme\Internet Explorer\iexplore.exe" -K http://cus-cgn-003/Applications/gwi/gwi_app.html$ wnd=gwi_app', AppCMD, 256); }
+-			AppCMD := '"C:\Programme\Internet Explorer\iexplore.exe" -K http://cus-cgn-003/Applications/GWI/GWI_App.html$ wnd=GWI_App';
+-			LOG('Get CommandLine of Application ' + AppIDs[0] + ': ' + AppCMD);
+-
+-			SetArrayLength(AppLevelDataPrompts, 1);
+-			AppLevelDataPrompts[0] := AppIDs[0] + ' application CMD:';
+-			SetArrayLength(AppLevelData, 1);
+-
+-			AppLevelData[0]  := ProcessIniString('APPDATA_' + AppIDs[0], 'CMD', AppCMD);
+-
++			
++			{ Kopiere Komma seperierte Liste von Applikations ID's in ein Array. }
++			i := 0;
++			while Pos(',', AppID)<>0 do
++			begin
++			    SetArrayLength(AppIDs, i + 1);
++			    AppIDs[i] := Trim(Copy(AppID, 0, Pos(',', AppID) -1));
++			    AppID := Copy(AppID, Pos(',', AppID), Length(AppID) - Pos(',', AppID));
++			    i := i + 1;
++			end;
++      
++      { Falls nur eine Applikations ID vorhanden ist, verwende diese }
++      if GetArrayLength(AppIDs)=0 then
++      begin
++			   SetArrayLength(AppIDs, 1);
++			   AppIDs[0] := Trim(AppID);
++			end;
++			
++			for i := 0 to GetArrayLength(AppIDs)-1 do
++      begin 
++			   AppCMD := '"C:\Programme\Internet Explorer\iexplore.exe" -K http://<server>/Applications/<applicationName>/<applicationName>_App.html$ wnd=<applicationName>_App';
++			   SetArrayLength(AppLevelData, i + 1);
++         AppLevelData[i]  := ProcessIniString('APPDATA_' + AppIDs[i], 'CMD', AppCMD);
++         LOG('Get CommandLine of Application ' + AppIDs[i] + ': ' + AppCMD);
++
++			   SetArrayLength(AppLevelDataPrompts, i + 1);
++			   AppLevelDataPrompts[i] := AppIDs[i] + ' application CMD:';
++			end;
++			
+ 			Result:=true;
+ 	   end;
+ 	end;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,494 @@
+From 9cfd91957a1ad3e48f07f63d5c26f055fb11a2cd Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 24 Jan 2022 11:53:33 +0000
+Subject: [PATCH 1056/1077] MANTIS 56506 massaiCfgXB.exe version 2.5.0 - MANTIS
+ 56506: Config service file read confusion - Re-design XML file parsing to
+ avoid exceptions and double reads
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1696 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgFlatZ.hpp      |   4 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  13 +-
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   | 285 ++++++++----------
+ 4 files changed, 143 insertions(+), 172 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 479fbc9f..cd5df953 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -614,8 +614,17 @@
+ //!   addListener(), because the indication process may run into exception
+ //!   and thus takes time.
+ //! - Decouple just addListener()
+-#define FILE_VER_BIN 2,4,3,0
+-#define FILE_VER_DTS "2.4.3.0"
++// #define FILE_VER_BIN 2,4,3,0
++// #define FILE_VER_DTS "2.4.3.0"
++//
++//! @version 2.5.0
++//! @date    24.01.2022
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 56506: Config service file read confusion
++//! - Re-design XML file parsing to avoid exceptions and double reads
++#define FILE_VER_BIN 2,5,0,0
++#define FILE_VER_DTS "2.5.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgFlatZ.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgFlatZ.hpp
+index 8923622f..f7427160 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgFlatZ.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgFlatZ.hpp
+@@ -4,6 +4,8 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
++#include "xercesc/util/XMLString.hpp"
++
+ class cfgFlatZ
+ {
+ 
+@@ -18,7 +20,7 @@ public:
+ 
+    ~cfgFlatZ()
+    {
+-      delete M_String;
++      xercesc::XMLString::release( &M_String );
+    }
+ 
+    char const * c_str() const
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index b84dcaa5..ef42bb8d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -618,8 +618,17 @@
+ //!   addListener(), because the indication process may run into exception
+ //!   and thus takes time.
+ //! - Decouple just addListener()
+-#define FILE_VER_BIN 2,4,3,0
+-#define FILE_VER_DTS "2.4.3.0"
++// #define FILE_VER_BIN 2,4,3,0
++// #define FILE_VER_DTS "2.4.3.0"
++//
++//! @version 2.5.0
++//! @date    24.01.2022
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 56506: Config service file read confusion
++//! - Re-design XML file parsing to avoid exceptions and double reads
++#define FILE_VER_BIN 2,5,0,0
++#define FILE_VER_DTS "2.5.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+index b165f842..e25c1f07 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -36,20 +36,10 @@
+ // Compiler lib
+ #include <sstream>
+ 
+-using namespace xercesc;
+-
+-#if 0
+-
+-
+ 
+-#include "dom\dom.hpp"
+-#include "util\platformutils.hpp"
+-#include "parsers\domparser.hpp"
+-#include "sax\ErrorHandler.hpp"
+-#include "sax\SAXParseException.hpp"
+ 
++using namespace xercesc;
+ 
+-#endif
+ 
+ 
+ namespace
+@@ -80,16 +70,19 @@ void getAttribute
+             XMLString::transcode( AttribName.c_str() )
+          );
+    if( !Node )
++   {
+       AttribDest.erase();
++   }
+    else
++   {
+       AttribDest.assign
+          (
+             XMLString::transcode( Node->getNodeValue() )
+          );
++   }
+ }
+ 
+ 
+-
+ /**
+  *
+  * Read node meta data to the database.
+@@ -99,7 +92,7 @@ void getAttribute
+  * @param Dst:               The data back-end destination.
+  *
+ **/
+-void document2Meta
++void makeMeta
+ (
+    DOMNode const *      Node,
+    cfgEntity &          Dst
+@@ -218,213 +211,167 @@ void document2Meta
+ }
+ 
+ 
+-
+-/**
+- *
+- * Read node value data to the database.
+- *
+- * @param Node:              The DOM node.
+- *
+- * @param Dst:               The data back-end destination.
+- *
+- * @param Path:              Configuration item path.
+- *
+- * @param Level:             Hierarchy.
+- *
+-**/
+-void document2Value
++void makeValue
+ (
+-   DOMNode const *      Node,
+-   cfgEntity &          Dst,
+-   std::string const &  Path,
+-   int                  Level
++   cfgEntity &          dst,
++   DOMNode const *      start_node,
++   std::string const &  src_path
+ )
+ {
+-   while( Node )
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      "cfgFromXML: makeValue \"%s\" ...",
++      src_path.c_str()
++   );
++   std::string this_path = src_path;
++   DOMNamedNodeMap const * attribs = start_node->getAttributes();
++   if( attribs )
+    {
++      std::string NKey;
++      getAttribute( attribs, CFGTOKEN_ITEM_NAME, NKey );
+       writeTrace
+       (
+          BasicRuntime_HERE,
+-         "cfgFromXML: next node"
++         "cfgFromXML: makeValue \"%s\" item=\"%s\"",
++         src_path.c_str(),
++         NKey.c_str()
+       );
+-      if
+-      (
+-         ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
+-         !strcmp
+-            (
+-               XMLString::transcode( Node->getNodeName() ),
+-               CFGTOKEN_VALUE
+-            )
+-      )
+-      {
+-         DOMNamedNodeMap const * Attribs = Node->getAttributes();
+-
+-         std::string NKey;
+-         getAttribute( Attribs, CFGTOKEN_ITEM_NAME, NKey );
+-
+-         std::string NRef;
+-         getAttribute( Attribs, CFGTOKEN_META_REF, NRef );
+-
+-         std::string XPath;
+-         if( Path.size() )
+-            XPath = Path + "." + NKey;
+-         else
+-            XPath = NKey;
++      if( src_path.size() )
++         this_path = src_path + "." + NKey;
++      else
++         this_path = NKey;
++      std::string NRef;
++      getAttribute( attribs, CFGTOKEN_META_REF, NRef );
+ 
+-         DOMNode const * SubNode = Node->getFirstChild();
+-         cfgEntity::reference const Ref =
+-            static_cast<unsigned>( atoi( NRef.c_str() ) );
+-         if( Ref )
++      cfgEntity::reference const meta_ref =
++         static_cast<unsigned>( atoi( NRef.c_str() ) );
++      if( meta_ref )
++      {
++         try
+          {
+-            try
++            cfgMeta const * const Meta
++               = dst.getMeta( "", cfgEntity::PURP_TYPEGET, meta_ref );
++            if( Meta )
+             {
+                cfgFlatZ Flat;
+-               if( SubNode )
++               DOMNode const * value_node = start_node->getFirstChild();
++               if( value_node )
+                {
+                   Flat.setAndOwn
+                      (
+-                        XMLString::transcode( SubNode->getNodeValue() )
++                        XMLString::transcode( value_node->getNodeValue() )
+                      );
+                }
+-               cfgMeta const * const Meta
+-                  = Dst.getMeta( "", cfgEntity::PURP_TYPEGET, Ref );
+-               if( Meta )
++               cfgValue * const Value = Meta->valueFactory( Flat );
++               if( Value )
+                {
+-                  cfgValue * const Value = Meta->valueFactory( Flat );
+-                  if( Value )
+-                  {
+-                     writeTrace
+-                     (
+-                        BasicRuntime_HERE,
+-                        "cfgFromXML: create(%s)",
+-                        XPath.c_str()
+-                     );
+-                     Dst.itemCreate( *Meta, XPath.c_str(), Value, false );
+-                  }
+-                  else
+-                  {
+-                     writeTrace
+-                     (
+-                        BasicRuntime_HERE,
+-                        "cfgFromXML: no value - ignored(%s)",
+-                        XPath.c_str()
+-                     );
+-                  }
++                  writeTrace
++                  (
++                     BasicRuntime_HERE,
++                     "cfgFromXML: create(%s)",
++                     this_path.c_str()
++                  );
++                  dst.itemCreate( *Meta, this_path.c_str(), Value, false );
+                }
+                else
+                {
++
+                   writeTrace
+                   (
+                      BasicRuntime_HERE,
+-                     "cfgFromXML: no meta - ignored(%s)",
+-                     XPath.c_str()
++                     "cfgFromXML: no value - ignored(%s)",
++                     this_path.c_str()
+                   );
+                }
+             }
+-            catch( std::exception & ex )
+-            {
+-               writeTrace
+-               (
+-                  BasicRuntime_HERE,
+-                  "cfgFromXML: exception (%s) - ignored",
+-                  ex.what()
+-               );
+-            }
+-            catch( ... )
++            else
+             {
+                writeTrace
+                (
+                   BasicRuntime_HERE,
+-                  "cfgFromXML: exception - ignored"
++                  "cfgFromXML: no meta - ignored(%s)",
++                  this_path.c_str()
+                );
+             }
+          }
+-
+-         document2Value( SubNode, Dst, XPath, Level + 1 );
+-
+-      }
+-      else
+-      {
+-         writeTrace
+-         (
+-            BasicRuntime_HERE,
+-            "cfgFromXML: unusable"
+-         );
+-      }
+-      Node = Node->getNextSibling();
++         catch( std::exception & ex )
++         {
++            writeTrace
++            (
++               BasicRuntime_HERE,
++               "cfgFromXML: exception (%s) - ignored",
++               ex.what()
++            );
++         }
++         catch( cfgEntity_AlreadyExists & )
++         {
++            writeTrace
++            (
++               BasicRuntime_HERE,
++               "cfgFromXML: already exists exception - ignored"
++            );
++         }
++         catch( ... )
++         {
++            writeTrace
++            (
++               BasicRuntime_HERE,
++               "cfgFromXML: exception - ignored"
++            );
++         }
++      } // if( meta_ref )
++   } // if( attribs )
++   DOMNode const * child_node = start_node->getFirstChild();
++   while( child_node )
++   {
++      makeValue( dst, child_node, this_path );
++      child_node = child_node->getNextSibling();
+    }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      "cfgFromXML: makeValue \"%s\".",
++      src_path.c_str()
++   );
+ }
+ 
+ 
+-
+-/**
+- *
+- * Read node map data to the database.
+- *
+- * @param Node:      The DOM node.
+- *
+- * @param Dst:       The data back-end destination.
+- *
+-**/
+-void document2Map( DOMNode const * Node, cfgEntity & Dst )
++void entityFromTree( cfgEntity & dst, DOMNode const * dom_node )
+ {
+-   while( Node )
++   while( dom_node )
+    {
+-      if( Node->getNodeType() == DOMNode::ELEMENT_NODE )
++      if( dom_node->getNodeType() == DOMNode::ELEMENT_NODE )
+       {
+          if (
+                !strcmp
+                   (
+-                     XMLString::transcode( Node->getNodeName() ),
++                     XMLString::transcode( dom_node->getNodeName() ),
+                      CFGTOKEN_META
+                   )
+             )
+          {
+-            document2Meta( Node, Dst );
++            makeMeta( dom_node, dst );
+          }
+-         else if
+-            (
+-               !strcmp
+-                  (
+-                     XMLString::transcode( Node->getNodeName() ),
+-                     CFGTOKEN_VALUE
+-                  )
+-            )
++         else
++         if
++         (
++            !strcmp
++               (
++                  XMLString::transcode( dom_node->getNodeName() ),
++                  CFGTOKEN_VALUE
++               )
++         )
+          {
+-            std::string Path( "" );
+-            document2Value( Node, Dst, Path, 1 );
++            std::string src_path;
++            makeValue( dst, dom_node, src_path );
+          }
+       }
+-      Node = Node->getNextSibling();
+-   }
+-}
+-
+-
+-
+-/**
+- *
+- * Read root node data to the database.
+- *
+- * @param Node:              The DOM node.
+- *
+- * @param Dst:               The data back-end destination.
+- *
+-**/
+-void document2Root( DOMNode const * Node, cfgEntity & Dst )
+-{
+-   if
+-   (
+-      Node &&
+-      ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
+-      !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_MAP )
+-   )
+-   {
+-      document2Map( Node->getFirstChild(), Dst );
++      dom_node = dom_node->getNextSibling();
+    }
+ }
+ 
+ 
+-
+ /**
+  *
+  * Error handling callback class.
+@@ -492,7 +439,6 @@ private:
+ };
+ 
+ 
+-
+ } // namespace
+ 
+ 
+@@ -540,7 +486,7 @@ void cfgFromXML_readMap( cfgEntity & Dst, std::string const & Src )
+ 
+       DOMDocument * document = parser->getDocument();
+ 
+-      DOMTreeWalker * tree = document->createTreeWalker
++      DOMTreeWalker * tree_walker = document->createTreeWalker
+                               (
+                                  document->getDocumentElement(),
+                                  0,
+@@ -548,7 +494,12 @@ void cfgFromXML_readMap( cfgEntity & Dst, std::string const & Src )
+                                  false
+                               );
+ 
+-      document2Root( tree->getCurrentNode(), Dst );
++
++      DOMNode const * Node = tree_walker->getCurrentNode();
++      if( Node )
++      {
++         entityFromTree( Dst, Node->getFirstChild() );
++      }
+ 
+    }
+    catch( XMLException & InX )
+-- 
+2.41.0.windows.1
+

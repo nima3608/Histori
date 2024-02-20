@@ -1,0 +1,145 @@
+From 02ae8a173c3c4a17c0bc1fb2e301b1f363eb5548 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 1 Dec 2016 09:45:39 +0000
+Subject: [PATCH 0808/1076] MANTIS 0032431 \version 1.0.1.18 \li 01.12.2016 \li
+ MOt - Mantis 0032431: ScheduledTask \li extension: \li   -added safety
+ queries in the constructor of ScheduledTask \li   -changed Notficiation
+ 'CMD_SHUTDOWN_MCONTROL' to 'CMD_SHUTDOWN_PLATFORM'
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1111 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/Notification.h       |  4 +--
+ .../cpp/Tools/inc/local_def_msystools.h       | 13 +++++--
+ .../Massai/cpp/Tools/src/ScheduledTask.cpp    | 34 +++++++++++++++----
+ 3 files changed, 40 insertions(+), 11 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/Notification.h b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+index 46b43b38..24c3798c 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+@@ -44,8 +44,8 @@ namespace MASSAI
+ 
+     typedef enum
+     {
+-      //Shutdown mControl.exe
+-      CMD_SHUTDOWN_MCONTROL = 2000,
++      //Shutdown mStarter.exe
++      CMD_SHUTDOWN_PLATFORM = 2000,
+ 
+     } MC_TERMINATOR_THREAD_MSG;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 28e006c1..2444388b 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,17
+-#define FILE_VER_STR     "FileVersion", "1.0.1.17"
++#define FILE_VER_BIN     1,0,1,18
++#define FILE_VER_STR     "FileVersion", "1.0.1.18"
+ 
+ /*!
+ \file
+@@ -7,12 +7,19 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.17
++@version 1.0.1.18
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.18
++\li 01.12.2016
++\li MOt - Mantis 0032431: ScheduledTask
++\li extension: 
++\li   -added safety queries in the constructor of ScheduledTask
++\li   -changed Notficiation 'CMD_SHUTDOWN_MCONTROL' to 'CMD_SHUTDOWN_PLATFORM'
++
+ \version 1.0.1.17
+ \li 12.09.2016
+ \li SteT - Mantis 0041365: massaiCORBA: allow to activate console traces
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+index 66fd0192..16393d4e 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+@@ -46,6 +46,18 @@ namespace MASSAI
+         m_scheduleDaily(false),
+         m_scheduleInfo("")
+     {
++      if (task != NULL)
++      {
++        m_task = task;
++      }
++      else
++      {
++        stringstream execeptionInfo("");
++        execeptionInfo << "Task pointer is null!";
++
++        throw std::invalid_argument(execeptionInfo.str().c_str());
++      }
++
+       if( hour >= 0 && hour <=23 &&
+           minutes >= 0 && minutes <=59 )
+       {
+@@ -98,7 +110,7 @@ namespace MASSAI
+               {
+                   m_scheduleMonthly = stoi (scheduleFrequency);
+               }
+-              catch (const std::invalid_argument& ia) 
++              catch (const std::invalid_argument&) 
+               {
+                 m_scheduleMonthly = -2;
+               } 
+@@ -147,15 +159,25 @@ namespace MASSAI
+       }
+       
+       m_scheduleInfo = ssScheduleInfo.str();
+-      
++
+       long delay_hours   = 0;
+       long delay_minutes = 0;
+       
+       //Calculate Time with delay
+       unsigned long randomDelay = 0;
+-      if( delay > 0)
++      if (delay >= 0)
+       {
+-        randomDelay =  rand() % delay + 1;
++        if (delay != 0)
++        {
++          randomDelay = rand() % delay + 1;
++        }
++      }
++      else
++      {
++        stringstream execeptionInfo("");
++        execeptionInfo << "Delay is out of the valid range! Delay=" << delay;
++
++        throw std::invalid_argument(execeptionInfo.str().c_str());
+       }
+       
+       unsigned long minutes_of_execution_time = hour*60 + minutes + randomDelay;
+@@ -203,7 +225,7 @@ namespace MASSAI
+           delay_minutes >= 0 && delay_minutes <=59 )
+       {
+         m_delayExecutionTime = boost::posix_time::time_duration(delay_hours, delay_minutes, 0, 0);
+-        
++
+         TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d], DelayTime[%02d:%02d], Frequency[%s], Task-Command[%s], Task-User[%s]",
+           m_executionTime.hours(), 
+           m_executionTime.minutes(),
+@@ -217,7 +239,7 @@ namespace MASSAI
+       else
+       {
+         stringstream execeptionInfo("");
+-        execeptionInfo << "Delayed-Time is out of the valid range! Hour=" << delay_hours << ", delay_minutes=" << minutes;
++        execeptionInfo << "Delayed-Time is out of the valid range! This could be caused by a big delay-value. Hour=" << delay_hours << ", delay_minutes=" << minutes;
+ 
+         throw std::invalid_argument(execeptionInfo.str().c_str());
+       }
+-- 
+2.41.0.windows.1
+

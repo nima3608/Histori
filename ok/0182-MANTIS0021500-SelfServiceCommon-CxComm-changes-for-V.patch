@@ -1,0 +1,736 @@
+From 3e622446f97a645d68bfc3e306f71917346d447c Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 14 Nov 2011 14:31:10 +0000
+Subject: [PATCH 0182/1076] MANTIS0021500: SelfServiceCommon CxComm changes for
+ VC10 compatibilty
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@224 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/CxComm/StdApps/src/cxAPIexe.cpp       |  10 +-
+ .../cpp/CxComm/StdApps/src/cxProxy.cpp        |   6 +-
+ .../cpp/CxComm/StdApps/src/cxTestC.cpp        |  16 ++-
+ .../cpp/CxComm/StdApps/src/cxTestS.cpp        |   8 +-
+ .../Services/cpp/CxComm/dll/inc/dumpMem.hpp   |   4 +-
+ .../Services/cpp/CxComm/dll/inc/osTime.hpp    |   2 +
+ .../Services/cpp/CxComm/dll/inc/stList.hpp    |   4 +-
+ .../Services/cpp/CxComm/dll/inc/tcpMComm.hpp  | 114 +++++++++---------
+ .../Services/cpp/CxComm/dll/src/cxAPI.cpp     |  12 +-
+ .../Services/cpp/CxComm/dll/src/cxShHdl.cpp   |   1 -
+ .../Services/cpp/CxComm/dll/src/osTime.cpp    |   1 -
+ 11 files changed, 96 insertions(+), 82 deletions(-)
+
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxAPIexe.cpp b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxAPIexe.cpp
+index 09830778..2d89460e 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxAPIexe.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxAPIexe.cpp
+@@ -13,10 +13,12 @@
+  **************************************************************************
+  */
+ 
+-#include "cxComm/cxAPIi.h"
+ 
+-#include <fstream.h>
++
++#include <iostream>
+ #include <stdlib.h>
++
++#include "cxComm/cxAPIi.h"
+ #include "text/argScan.hpp"
+ 
+ int main( int argc, char ** argv )
+@@ -24,12 +26,12 @@ int main( int argc, char ** argv )
+    argScan A( argc, argv );
+    if( A.help() )
+    {
+-      cout << "cxAPI [<handle>]" << endl;
++      std::cout << "cxAPI [<handle>]" << std::endl;
+       return 0;
+    }
+    char Buffer[1000];
+    cxGetState( A.argumentInteger( 1 ), Buffer, sizeof( Buffer ) );
+-   cout << "cxAPI:\n" << Buffer << endl;
++   std::cout << "cxAPI:\n" << Buffer << std::endl;
+    return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxProxy.cpp b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxProxy.cpp
+index aa9d24f0..ddbfe6c8 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxProxy.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxProxy.cpp
+@@ -5,12 +5,12 @@
+  * Main source file for cxProxy.exe.
+  *
+ **/
++#include <iostream>
++#include <fstream>
++using namespace std;
+ 
+ #include "cxComm/cxAPI.h"
+-
+-#include <fstream.h>
+ #include "text/argScan.hpp"
+-#include <iostream.h>
+ #include "systools/matThread.hpp"
+ 
+ 
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestC.cpp b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestC.cpp
+index 11f56bc0..a9b70bde 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestC.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestC.cpp
+@@ -3,16 +3,22 @@
+ // CXTESTC.CPP
+ //
+ 
+-#include "cxComm/cxAPI.hpp"
+-
+-#include <iostream.h>
++#include <windows.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-#include "matHRT.hpp"
++#include <iostream>
+ 
+-#include <windows.h>
++#include "cxComm/cxAPI.hpp"
++
++
++#include "matHRT.hpp"
+ 
++using std::cout;
++using std::cin;
++using std::hex;
++using std::dec;
++using std::endl;
+ 
+ int confirm()
+ {
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestS.cpp b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestS.cpp
+index 47334c88..c42b8fd4 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestS.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/StdApps/src/cxTestS.cpp
+@@ -34,7 +34,8 @@
+ #include "cxComm/cxAPI.h"
+ 
+ #include "systools/matThread.hpp"
+-#include <fstream.h>
++#include <iostream>
++#include <fstream>
+ #include "text/argScan.hpp"
+ #include "matHRT.hpp"
+ 
+@@ -42,6 +43,11 @@
+ 
+ static long Servicehandle;
+ static long Killsec;
++using std::cin;
++using std::cout;
++using std::endl;
++using std::hex;
++using std::dec;
+ 
+ 
+ /**
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/dumpMem.hpp b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/dumpMem.hpp
+index a7e0349b..07f403ef 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/dumpMem.hpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/dumpMem.hpp
+@@ -6,7 +6,7 @@
+ 
+ #include <stdio.h>
+ 
+-static void dumpMem( ostream *pOS, char *Buf, long Len )
++static void dumpMem( std::ostream *pOS, char *Buf, long Len )
+ {
+    if( pOS )
+    {
+@@ -27,7 +27,7 @@ static void dumpMem( ostream *pOS, char *Buf, long Len )
+                 "%c",
+                 (*umem < ' ')? '.': *umem
+              );
+-          *pOS << "      " << Buffer << endl;
++          *pOS << "      " << Buffer << std::endl;
+       }
+    }
+ }
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/osTime.hpp b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/osTime.hpp
+index 5d5a6e21..c4359c65 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/osTime.hpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/osTime.hpp
+@@ -17,6 +17,8 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
++#define STD_IOS
++
+ #ifdef STD_IOS
+ 
+ #include <iostream>
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/stList.hpp b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/stList.hpp
+index 7fb13291..8781c2a0 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/stList.hpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/stList.hpp
+@@ -21,7 +21,7 @@
+ 
+ #ifdef STLIST_STREAM
+ 
+-#include <iostream.h>
++#include <iostream>
+ 
+ static int stList_Level = 0;
+ 
+@@ -529,7 +529,7 @@ template<class T> class stListCursor
+    // Private object data
+    //
+    const stList<T> *       pList;
+-   stList<T>::stCarrier *  pCarrier;
++   typename stList<T>::stCarrier *  pCarrier;
+ public:
+ 
+    //
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/tcpMComm.hpp b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/tcpMComm.hpp
+index 1a286a05..bae2f103 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/inc/tcpMComm.hpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/inc/tcpMComm.hpp
+@@ -62,7 +62,7 @@
+ #include "systools/matThread.hpp"
+ #include "msbFst.hpp"
+ 
+-#include <iostream.h>
++#include <iostream>
+ #include "dumpMem.hpp"
+ 
+ #ifdef TCPMCOMM_HRTIME
+@@ -377,14 +377,14 @@ class tcpSession : public tcpComm, private matThread
+    eventSemaphore              MS_RestartSema;
+ 
+    //! Stream to write trace events to (0 = no trace)
+-   ostream *                   MX_Trace;
++   std::ostream *                   MX_Trace;
+ 
+    /**
+     *
+     * Send event to the root class.
+     *
+    **/
+-   void informRoot( tcpEv::type const & Ev, tcpMCommLength Todo = 0 )
++   void informRoot( typename tcpEv::type const & Ev, tcpMCommLength Todo = 0 )
+    {
+       MS_Msg.Dataleft = Todo;
+       MS_Msg.Type = Ev;
+@@ -398,14 +398,14 @@ class tcpSession : public tcpComm, private matThread
+    **/
+    void function()
+    {
+-      SES_TRCT " ..." << endl;
++      SES_TRCT " ..." << std::endl;
+       MS_Msg.Session = this;
+       while( MS_MoreSession && *MS_ParentState )
+       {
+          //
+          // Open a session, receive messages, close a session
+          //
+-         SES_TRCT "open ..." << endl;
++         SES_TRCT "open ..." << std::endl;
+          MS_OpenAddr[0] = 0;
+          MS_OpenPort = 0;
+          informRoot( tcpEv::S_LISTENING );
+@@ -420,7 +420,7 @@ class tcpSession : public tcpComm, private matThread
+             //
+             // Open failed
+             //
+-            SES_TRCT "open failed RC=" << TRC << endl;
++            SES_TRCT "open failed RC=" << TRC << std::endl;
+             MS_State = S_CLS;
+             MS_OpenDoneSema.post();
+             informRoot( tcpEv::S_OPEN_FAILED );
+@@ -429,9 +429,9 @@ class tcpSession : public tcpComm, private matThread
+                //
+                // Pause only, if the loop is to be run again
+                //
+-               SES_TRCT "sleeping ..." << endl;
++               SES_TRCT "sleeping ..." << std::endl;
+                matThreadSleep( 4000 );
+-               SES_TRCT "sleeping." << endl;
++               SES_TRCT "sleeping." << std::endl;
+             }
+          }
+          else
+@@ -439,21 +439,21 @@ class tcpSession : public tcpComm, private matThread
+             //
+             // Session opened successfully, now receive messages
+             //
+-            SES_TRCT "opened: " << MS_OpenAddr << endl;
++            SES_TRCT "opened: " << MS_OpenAddr << std::endl;
+             MS_State = S_OPN;
+             MS_OpenDoneSema.post();
+             informRoot( tcpEv::S_OPENED );
+             int MoreRead = 1;
+             while( MoreRead && *MS_ParentState )
+             {
+-               SES_TRCT "RX ..." << endl;
++               SES_TRCT "RX ..." << std::endl;
+                if
+                (
+                   tcpComm::read( (char *)&MS_Msg.Header,
+                                  sizeof(MS_Msg.Header) )
+                )
+                {
+-                  SES_TRCT "RX failed." << endl;
++                  SES_TRCT "RX failed." << std::endl;
+                   MoreRead = 0;
+                }
+                else
+@@ -465,9 +465,9 @@ class tcpSession : public tcpComm, private matThread
+                   );
+                   MS_ReadCompleteSema.reset();
+                   informRoot( tcpEv::S_DATA, MS_Msg.Header.Datalength );
+-                  SES_TRCT "RX wait ..." << endl;
++                  SES_TRCT "RX wait ..." << std::endl;
+                   MS_ReadCompleteSema.wait();
+-                  SES_TRCT "RX wait." << endl;
++                  SES_TRCT "RX wait." << std::endl;
+                }
+             }
+             //
+@@ -476,7 +476,7 @@ class tcpSession : public tcpComm, private matThread
+             MS_State = S_CLS;
+             TRC = tcpComm::close();
+             informRoot( tcpEv::S_CLOSED );
+-            SES_TRCT "close = " << TRC << endl;
++            SES_TRCT "close = " << TRC << std::endl;
+          }
+          //
+          // Wait to loop again ...
+@@ -487,7 +487,7 @@ class tcpSession : public tcpComm, private matThread
+       //
+       // Finished with receiver thread
+       //
+-      SES_TRCT "." << endl;
++      SES_TRCT "." << std::endl;
+    }
+ 
+    /**
+@@ -518,7 +518,7 @@ public:
+       fmtQueue<tcpEv> * Q,
+       int * pMState,
+       portnumber Port,
+-      ostream * pTrace
++      std::ostream * pTrace
+    ) :
+       tcpComm( Port ),
+       matThread(),
+@@ -531,7 +531,7 @@ public:
+       MS_MoreSession( 1 ),
+       MX_Trace( pTrace )
+    {
+-      SES_TRCS << "tcpSession(" << Index << "," << Port << ")" << endl;
++      SES_TRCS << "tcpSession(" << Index << "," << Port << ")" << std::endl;
+       start( THREADPRTY_LOW );
+    };
+ 
+@@ -547,7 +547,7 @@ public:
+       fmtQueue<tcpEv> * Q,
+       int * pMState,
+       char const * pszService,
+-      ostream * pTrace
++      std::ostream * pTrace
+    ) :
+       tcpComm( pszService ),
+       matThread(),
+@@ -561,7 +561,7 @@ public:
+       MX_Trace( pTrace )
+    {
+       SES_TRCS << "tcpSession(" << Index << "," << pszService << ")"
+-               << endl;
++               << std::endl;
+       start();
+    };
+ 
+@@ -578,7 +578,7 @@ public:
+       int * pMState,
+       portnumber Port,
+       char const *Host,
+-      ostream * pTrace
++      std::ostream * pTrace
+     ) :
+ #ifdef TCPMCOMM_LINGER_TIME
+       tcpComm( Port, Host, TCPMCOMM_LINGER_TIME ),
+@@ -597,7 +597,7 @@ public:
+    {
+       SES_TRCS << "tcpSession(" << Index << "," << Port
+                << "," << Host << ")"
+-               << endl;
++               << std::endl;
+       start();
+    };
+ 
+@@ -614,7 +614,7 @@ public:
+       int * pMState,
+       char const * Service,
+       char const * Host,
+-      ostream * pTrace
++      std::ostream * pTrace
+    ) :
+ #ifdef TCPMCOMM_LINGER_TIME
+       tcpComm( Service, Host, TCPMCOMM_LINGER_TIME ),
+@@ -633,7 +633,7 @@ public:
+    {
+       SES_TRCS << "tcpSession(" << Index << "," << Service
+                << "," << Host << ")"
+-               << endl;
++               << std::endl;
+       start();
+    };
+ 
+@@ -645,21 +645,21 @@ public:
+    virtual ~tcpSession()
+    {
+ #ifdef TCPMCOMM_WAIT_RXTHREAD
+-      SES_TRCS << "~tcpSession() ..." << endl;
++      SES_TRCS << "~tcpSession() ..." << std::endl;
+ #endif
+       if( MS_MoreSession )
+          terminate();
+ #ifdef TCPMCOMM_WAIT_RXTHREAD
+       if( waitTerminated( 2000 ) != THREADRC_OK )
+       {
+-         SES_TRCS << "~tcpSession() - thread done timeout." << endl;
++         SES_TRCS << "~tcpSession() - thread done timeout." << std::endl;
+       }
+       else
+       {
+-         SES_TRCS << "~tcpSession()." << endl;
++         SES_TRCS << "~tcpSession()." << std::endl;
+       }
+ #else
+-      SES_TRCS << "~tcpSession()" << endl;
++      SES_TRCS << "~tcpSession()" << std::endl;
+ #endif
+    }
+ 
+@@ -704,7 +704,7 @@ public:
+    int readData( char * Buffer = 0, long Length = 0 )
+    {
+       int RC = 0;
+-      SES_TRCS << "RX:" << endl;
++      SES_TRCS << "RX:" << std::endl;
+       if( Length )
+       {
+          RC = tcpComm::read( Buffer, Length );
+@@ -850,7 +850,7 @@ class tcpMComm
+    int                         MM_Index;
+ 
+    //! The stream to write trace events to (0 = no traces)
+-   ostream *                   MX_Trace;
++   std::ostream *                   MX_Trace;
+ 
+    //! The list of child sessions
+    tcpSession<T> *             MM_ChildList[TCPMCOMM_MAX_SESSIONS];
+@@ -948,13 +948,13 @@ public:
+     * @param pTrace Trace stream to use (optional).
+     *
+    **/
+-   tcpMComm( portnumber Port, ostream * pTrace = 0 ) :
++   tcpMComm( portnumber Port, std::ostream * pTrace = 0 ) :
+       MM_Type( T_SERVER ),
+       MM_Port( Port ),
+       MM_Index( AnchorIndex++ ),
+       MX_Trace( pTrace )
+    {
+-      COM_TRACE << "tcpMComm(" << Port << ")" << endl;
++      COM_TRACE << "tcpMComm(" << Port << ")" << std::endl;
+       initialize();
+       MM_Service[0] = 0;
+       MM_ChildList[0] = new tcpSession<T>
+@@ -973,13 +973,13 @@ public:
+     * @param pTrace Trace stream to use (optional).
+     *
+    **/
+-   tcpMComm( char const * pszService, ostream * pTrace = 0 ) :
++   tcpMComm( char const * pszService, std::ostream * pTrace = 0 ) :
+       MM_Type( T_SERVER ),
+       MM_Port( 0 ),
+       MM_Index( AnchorIndex++ ),
+       MX_Trace( pTrace )
+    {
+-      COM_TRACE << "tcpMComm(" << pszService << ")" << endl;
++      COM_TRACE << "tcpMComm(" << pszService << ")" << std::endl;
+       initialize();
+       strcpy( MM_Service, pszService );
+       MM_ChildList[0] = new tcpSession<T>
+@@ -1004,14 +1004,14 @@ public:
+    (
+       portnumber Port,
+       char const * Host,
+-      ostream * pTrace = 0
++      std::ostream * pTrace = 0
+     ) :
+       MM_Type( T_CLIENT ),
+       MM_Port( Port ),
+       MM_Index( AnchorIndex++ ),
+       MX_Trace( pTrace )
+    {
+-      COM_TRACE << "tcpMComm(" << Port << "," << Host << ")" << endl;
++      COM_TRACE << "tcpMComm(" << Port << "," << Host << ")" << std::endl;
+       initialize();
+       MM_Service[0] = 0;
+       MM_ChildList[0] = new tcpSession<T>
+@@ -1036,14 +1036,14 @@ public:
+    (
+       char const * Service,
+       char const * Host,
+-      ostream * pTrace = 0
++      std::ostream * pTrace = 0
+     ) :
+       MM_Type( T_CLIENT ),
+       MM_Port( 0 ),
+       MM_Index( AnchorIndex++ ),
+       MX_Trace( pTrace )
+    {
+-      COM_TRACE << "tcpMComm(" << Service << "," << Host << ")" << endl;
++      COM_TRACE << "tcpMComm(" << Service << "," << Host << ")" << std::endl;
+       initialize();
+       strcpy( MM_Service, Service );
+       MM_ChildList[0] = new tcpSession<T>
+@@ -1080,7 +1080,7 @@ public:
+    ~tcpMComm()
+    {
+       MMutex.request();
+-      COM_TRACE << "~tcpMComm() ..." << endl;
++      COM_TRACE << "~tcpMComm() ..." << std::endl;
+       if( MM_State == 1 )
+       {
+          MM_State = 0;
+@@ -1103,9 +1103,9 @@ public:
+          // SHould not occur
+          //
+          MM_State = 0;
+-         COM_TRACE << "~tcpMComm() - error alredy destroyed" << endl;
++         COM_TRACE << "~tcpMComm() - error alredy destroyed" << std::endl;
+       }
+-      COM_TRACE << "~tcpMComm()." << endl;
++      COM_TRACE << "~tcpMComm()." << std::endl;
+       MMutex.release();
+    }
+ 
+@@ -1144,7 +1144,7 @@ public:
+          Datasize = *plData;
+       else
+          Datasize = 0;
+-      COM_TRACE << "write(" << Datasize << ") ..." << endl;
++      COM_TRACE << "write(" << Datasize << ") ..." << std::endl;
+       tcpMHeader<T> Hdr;
+       tcpMCommLength Totalsize = sizeof(Hdr) + Datasize;
+       Hdr.Info = Info;
+@@ -1166,7 +1166,7 @@ public:
+       //
+       while( !MM_ChildList[Session]->opened() )
+       {
+-         COM_TRACE << "write() - wait" << endl;
++         COM_TRACE << "write() - wait" << std::endl;
+          matThreadSleep( 100 );
+       }
+ #else
+@@ -1175,7 +1175,7 @@ public:
+       //
+       if( !MM_ChildList[Session]->opened() )
+       {
+-         COM_TRACE << "write() - failed, cannot open port" << endl;
++         COM_TRACE << "write() - failed, cannot open port" << std::endl;
+          delete [] pSData;
+          return TMRC_ERROR;
+       }
+@@ -1190,14 +1190,14 @@ public:
+          COM_TRACE << "write(): "
+                    << Info
+                    << " + data[" << Datasize << "]."
+-                   << endl;
++                   << std::endl;
+          return TMRC_OK;
+       case 10093:
+          // WSANOTINITIALISED
+-         COM_TRACE << "write() - hard error: " << TRC << endl;
++         COM_TRACE << "write() - hard error: " << TRC << std::endl;
+          return TMRC_HARD_ERROR;
+       default:
+-         COM_TRACE << "write() - failed: " << TRC << endl;
++         COM_TRACE << "write() - failed: " << TRC << std::endl;
+          return TMRC_ERROR;
+       }
+    }
+@@ -1224,7 +1224,7 @@ public:
+    {
+       tcpEv SMsg;
+       SMsg.Type = tcpEv::S_NONE;
+-      COM_TRACE << "read(" << *lData << ") ..." << endl;
++      COM_TRACE << "read(" << *lData << ") ..." << std::endl;
+       while( SMsg.Type != tcpEv::S_DATA )
+       {
+          if
+@@ -1238,7 +1238,7 @@ public:
+          )
+          {
+             int X = MM_SessionsAllocated++;
+-            COM_TRACE << "read() - allocate session " << X << endl;
++            COM_TRACE << "read() - allocate session " << X << std::endl;
+             if( MM_Port )
+                MM_ChildList[X] = new tcpSession<T>
+                                      (
+@@ -1276,7 +1276,7 @@ public:
+             //
+             ++MM_SessionsListening;
+             //
+-            COM_TRACE << "read() - S_LISTENING" << endl;
++            COM_TRACE << "read() - S_LISTENING" << std::endl;
+             break;
+          case tcpEv::S_OPENED:
+             //
+@@ -1288,7 +1288,7 @@ public:
+             //
+             --MM_SessionsListening;
+             //
+-            COM_TRACE << "read() - S_OPENED" << endl;
++            COM_TRACE << "read() - S_OPENED" << std::endl;
+             break;
+          case tcpEv::S_OPEN_FAILED:
+             //
+@@ -1296,7 +1296,7 @@ public:
+             //
+             --MM_SessionsListening;
+             //
+-            COM_TRACE << "read() - S_OPEN_FAILED" << endl;
++            COM_TRACE << "read() - S_OPEN_FAILED" << std::endl;
+             break;
+          case tcpEv::S_CLOSED:
+             //
+@@ -1308,7 +1308,7 @@ public:
+                //
+                // Client session closed
+                //
+-               COM_TRACE << "read() - S_CLOSED - return to client" << endl;
++               COM_TRACE << "read() - S_CLOSED - return to client" << std::endl;
+                return TMRC_SESSION_CLOSED;
+             }
+             else
+@@ -1316,7 +1316,7 @@ public:
+                //
+                // Server session closed
+                //
+-               COM_TRACE << "read() - S_CLOSED" << endl;
++               COM_TRACE << "read() - S_CLOSED" << std::endl;
+                if( MM_SessionsListening < TCPMCOMM_MIN_LISTENING )
+                {
+                   //
+@@ -1340,12 +1340,12 @@ public:
+          if( SMsg.Header.Datalength > *lData )
+          {
+ #ifdef TCPMCOMM_READ_PARTIAL
+-            COM_TRACE << "read() - TMRC_MORE_TO_COME." << endl;
++            COM_TRACE << "read() - TMRC_MORE_TO_COME." << std::endl;
+             if( !SMsg.Session->readData( pData, *lData ) )
+                FinalRC = TMRC_MORE_TO_COME;
+ #else
+             COM_TRACE << "read() - TMRC_BUFFER_TOO_SMALL (" << *lData
+-                      << "/" << SMsg.Header.Datalength << ")." << endl;
++                      << "/" << SMsg.Header.Datalength << ")." << std::endl;
+             char *pSData = new char[ SMsg.Header.Datalength ];
+             if( !SMsg.Session->readData( pSData, SMsg.Header.Datalength ) )
+                FinalRC = TMRC_BUFFER_TOO_SMALL;
+@@ -1371,7 +1371,7 @@ public:
+       COM_TRACE << "read(): "
+                 << Info
+                 << " + data[" << SMsg.Header.Datalength << "]."
+-                << endl;
++                << std::endl;
+       return FinalRC;
+    }
+ 
+@@ -1466,7 +1466,7 @@ public:
+     *           If the ptr is 0, the trace will be disabled.
+     *
+    **/
+-   void trace( ostream * OS )
++   void trace( std::ostream * OS )
+    {
+       MX_Trace = OS;
+    }
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxAPI.cpp b/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxAPI.cpp
+index 22cf9359..0afbc8ba 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxAPI.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxAPI.cpp
+@@ -29,7 +29,7 @@
+ #include "cxShHdl.hpp"
+ #include "blockMutex.hpp"
+ #include "stList.hpp"
+-#include <iostream.h>
++#include <iostream>
+ #include <stdlib.h>
+ 
+ 
+@@ -207,7 +207,7 @@ static int getLog()
+    {
+       if( File[0] )
+       {
+-         cout << "activate tcpComm logging to " << File << endl;
++         std::cout << "activate tcpComm logging to " << File << std::endl;
+          tcpCommModuleLog( File );
+       }
+       return 1;
+@@ -270,9 +270,9 @@ static int remoteName
+    char const * pszHost
+ )
+ {
+-   ostream * pOS;
++   std::ostream * pOS;
+    if( getLog() )
+-      pOS = &cout;
++      pOS = &std::cout;
+    else
+       pOS = 0;
+    comS T( Port, pszHost, pOS );
+@@ -679,7 +679,7 @@ DllExport long _stdcall cxWrite
+             ComList.ins
+                     (
+                        CXHandle,
+-                       new comS( pCXR->port(), pCXR->host(), &cout )
++                       new comS( pCXR->port(), pCXR->host(), &std::cout )
+                     );
+          else
+             ComList.ins
+@@ -754,7 +754,7 @@ DllExport long _stdcall cxRead
+       if( ComList.get( CXHandle ) == 0 )
+       {
+          if( getLog() )
+-            ComList.ins( CXHandle, new comS( pCXL->port(), &cout ) );
++            ComList.ins( CXHandle, new comS( pCXL->port(), &std::cout ) );
+          else
+             ComList.ins( CXHandle, new comS( pCXL->port() ) );
+       }
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxShHdl.cpp b/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxShHdl.cpp
+index 871e444a..1b93bfe2 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxShHdl.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/src/cxShHdl.cpp
+@@ -11,7 +11,6 @@
+ **/
+ #include "cxShHdl.hpp"
+ 
+-#include <iostream.h>
+ #include <stdio.h>
+ #include <windows.h>
+ 
+diff --git a/SelfServiceCommon/Services/cpp/CxComm/dll/src/osTime.cpp b/SelfServiceCommon/Services/cpp/CxComm/dll/src/osTime.cpp
+index e79ee43b..30cc175d 100644
+--- a/SelfServiceCommon/Services/cpp/CxComm/dll/src/osTime.cpp
++++ b/SelfServiceCommon/Services/cpp/CxComm/dll/src/osTime.cpp
+@@ -12,7 +12,6 @@
+ 
+ #include "ostime.hpp"
+ 
+-#include <iomanip.h>
+ #include <windows.h>
+ #include <stdio.h>
+ 
+-- 
+2.41.0.windows.1
+

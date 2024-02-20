@@ -1,0 +1,588 @@
+From 9be6485cd5a80106f53e1548c29422f9caa6b9b3 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 19 Oct 2012 13:04:22 +0000
+Subject: [PATCH 0353/1076] trace library V1.0.0.4 Mantis 0024741: TraceDLL:
+ use current working directory for relative paths Mantis 0024740: TraceDLL:
+ add Interface to request TraceLevel/Topic new header  
+ SelfServiceCommon\Interfaces\inc\trc\TrcHdlLevel.h  
+ SelfServiceCommon\Interfaces\inc\trc\TraceLevel.h
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@420 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/trc/TraceLevel.h           | 20 ++++++++++++++
+ .../Interfaces/inc/trc/TrcHdlLevel.h          | 22 ++++++++++++++++
+ .../Massai/cpp/Trace/inc/TraceCmd.h           |  5 +++-
+ .../Massai/cpp/Trace/inc/TraceConfig.h        |  2 ++
+ .../Massai/cpp/Trace/inc/TraceMgr.h           |  3 +++
+ .../Massai/cpp/Trace/inc/TraceProcessor.h     |  5 ++++
+ .../Massai/cpp/Trace/inc/TraceSession.h       |  3 +++
+ .../Massai/cpp/Trace/inc/local_def.h          | 12 ++++++---
+ .../Massai/cpp/Trace/src/TestTraceHdlLib.cpp  |  8 ++++++
+ .../Massai/cpp/Trace/src/TestTraceLib.cpp     |  7 ++++-
+ .../Massai/cpp/Trace/src/TraceClt.cpp         | 13 ++++++++++
+ .../Massai/cpp/Trace/src/TraceCmd.cpp         | 18 +++++++++++--
+ .../Massai/cpp/Trace/src/TraceConfig.cpp      |  6 +++++
+ .../Massai/cpp/Trace/src/TraceMgr.cpp         | 18 +++++++++++--
+ .../Massai/cpp/Trace/src/TraceProcessor.cpp   | 26 +++++++++++++++++++
+ .../Massai/cpp/Trace/src/TraceSession.cpp     |  8 ++++++
+ .../Massai/cpp/Trace/src/TraceSystem.cpp      | 26 +++++--------------
+ .../Massai/cpp/Trace/src/TrcHdlClt.cpp        | 13 ++++++++++
+ .../cpp/Trace/trace.makefile.common.mak       |  9 ++++---
+ 19 files changed, 193 insertions(+), 31 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/trc/TraceLevel.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/trc/TrcHdlLevel.h
+
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/TraceLevel.h b/SelfServiceCommon/Interfaces/inc/trc/TraceLevel.h
+new file mode 100644
+index 00000000..5734da9a
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/trc/TraceLevel.h
+@@ -0,0 +1,20 @@
++// get tracelevel and active topics of traceclt
++#ifndef TRACELEVEL_H_INCLUDED
++#define TRACELEVEL_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++long _stdcall getTraceLevel();
++bool _stdcall isTraceTopicActive(const char* pszTopic);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/TrcHdlLevel.h b/SelfServiceCommon/Interfaces/inc/trc/TrcHdlLevel.h
+new file mode 100644
+index 00000000..3ef8c996
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/trc/TrcHdlLevel.h
+@@ -0,0 +1,22 @@
++// get tracelevel and active topics of trchdlclt
++#ifndef TRCHDLLEVEL_H_INCLUDED
++#define TRCHDLLEVEL_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "TrcHdlClt.h"
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++long _stdcall getTraceLevel(trcHandle hdl);
++bool _stdcall isTraceTopicActive(trcHandle hdl, const char* pszTopic);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmd.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmd.h
+index 4cd66d08..ca6df915 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmd.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmd.h
+@@ -56,7 +56,10 @@ namespace MASSAI
+           const char* pszTopic);
+         TraceCmd(Command cmd, int hdl, const char* pData,
+           long dataSize);
+-        TraceCmd(Command cmd, int hdl, TraceSession* pSession);
++        TraceCmd(Command cmd, int hdl, const char* pData,
++          long dataSize, Materna::MSSD::eventSemaphore* pEvent);
++        TraceCmd(Command cmd, int hdl, TraceSession* pSession,
++          Materna::MSSD::eventSemaphore* pEvent);
+         TraceCmd(Command cmd, int hdl, Materna::MSSD::eventSemaphore* pEvent);
+         TraceCmd(Command cmd, mSysTime::Timestamp ts);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+index cc221805..fcd07789 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+@@ -49,6 +49,8 @@ namespace MASSAI
+ 
+         bool isActive(const std::string& topic);
+         void setTopic(const std::string& topic, bool active);
++
++        void cleanupTopic();
+       private:
+         virtual bool createTopic(const std::string& topic)= 0;
+         long m_tracelevel;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
+index 9af5aac4..0e71f59d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
+@@ -37,6 +37,9 @@ namespace MASSAI
+         int open(const char* pszSession);
+         void close(int handle);
+         void send(TraceCmd* pCmd);
++        long getTracelevel(int handle);
++        bool isActive(int handle, const char* pszTopic);
++
+       private:
+         TraceMgr();
+         TraceCommonConfig m_config;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+index fdb192ce..b8edef59 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+@@ -21,6 +21,7 @@
+ #pragma warning(disable:4786)
+ 
+ #include "TraceSession.h"
++#include "systools/mMutexCS.h"
+ #include <map>
+ #include <set>
+ 
+@@ -37,6 +38,9 @@ namespace MASSAI
+         void process(TraceCmd& cmd);
+         void start();
+         void stop();
++        long getTracelevel(int handle);
++        bool isActive(int handle, const char* pszTopic);
++
+       private:
+         void setThreadIndex(TraceCmd& cmd);
+         void initBaseSession(const std::string& sessionId);
+@@ -56,6 +60,7 @@ namespace MASSAI
+         TraceSession m_baseSession;
+         long m_threadCounter;
+         ThreadMap m_threadMap;
++        Materna::MSSD::Mutex m_access;
+     };
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+index 61363c31..0c7e9700 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+@@ -58,6 +58,9 @@ namespace MASSAI
+         void setSessionId(const std::string& sessionId);
+         void setHandle(int hdl);
+         void traceLine(const std::string& out) const;
++        long getTracelevel();
++        bool isActive(const char* pszTopic);
++
+       private:
+         typedef std::auto_ptr<std::ostream> OutputPtr;
+         TraceConfig m_config;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+index 4fd4466b..e06c4f8c 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+@@ -1,13 +1,19 @@
+-#define FILE_VER_BIN     1,0,0,3
+-#define FILE_VER_STR     "FileVersion", "1.0.0.3\0"
++#define FILE_VER_BIN     1,0,0,4
++#define FILE_VER_STR     "FileVersion", "1.0.0.4\0"
+ 
+ 
+ /*! \page trace trace library - Release Notes
+  *
+- *  @version 1.0.0.3
++ *  @version 1.0.0.4
+  *
+  *  \section change1 Change history
+  *
++ *  \date 19.10.2012 \li V1.0.0.4
++ *                   \li bugfix -  Mantis 0024741: TraceDLL: use current working directory for relative paths
++ *                   \li bugfix -  Mantis 0024740: TraceDLL: add Interface to request TraceLevel/Topic
++ *                  new header SelfServiceCommon\Interfaces\inc\trc\TrcHdlLevel.h
++ *                             SelfServiceCommon\Interfaces\inc\trc\TraceLevel.h
++ *
+  *  \date 19.03.2012 \li V1.0.0.3
+  *                   \li SteT -  Mantis 0017128: TrcServ: replace communication layer
+  *                       conflict with massai-tools.lib renamed TraceCallback to TraceLineCallback
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+index aec33fba..e8502356 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+@@ -13,6 +13,7 @@
+ 
+ 
+ #include "trc/TrcHdlClt.h"
++#include "trc/TrcHdlLevel.h"
+ #include "tools/localtrace.h"
+ #include "systools/mSysException.hpp"
+ 
+@@ -22,8 +23,11 @@ int main(int argc, char** argv)
+   MASSAI::localtrace::openTrace("TestTrace");
+   try
+   {
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(0), isTraceTopicActive(0, "TestTopic"));
+     int t1= openTraceHandle("TestTrace");
+     int t2= openTraceHandle("TestTrace");
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t1), isTraceTopicActive(t1, "TestTopic"));
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t2), isTraceTopicActive(t2, "TestTopic"));
+     char buffer[300];
+     for(int i= 0; i < sizeof(buffer); i++)
+     {
+@@ -38,10 +42,14 @@ int main(int argc, char** argv)
+       // writeTraceText(t3, MajorError_HERE, "T3");
+       //closeTrace(t3);
+     }
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t1), isTraceTopicActive(t1, "TestTopic"));
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t2), isTraceTopicActive(t2, "TestTopic"));
+     MASSAI::localtrace::writeTraceText(MajorError_HERE, "close1");
+     closeTrace(t1);
+     MASSAI::localtrace::writeTraceText(MajorError_HERE, "close2");
+     closeTrace(t2);
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t1), isTraceTopicActive(t1, "TestTopic"));
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(t2), isTraceTopicActive(t2, "TestTopic"));
+   }
+   catch(std::exception& ex)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+index 754a7d0b..52ffdb76 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+@@ -13,6 +13,7 @@
+ 
+ 
+ #include "trc/TraceClt.h"
++#include "trc/TraceLevel.h"
+ #include "tools/localtrace.h"
+ #include "systools/mSysException.hpp"
+ 
+@@ -22,8 +23,10 @@ int main(int argc, char** argv)
+   MASSAI::localtrace::openTrace("TestTrace");
+   try
+   {
+-    writeTraceText(0, TOPIC_HERE, "Before open");
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(), isTraceTopicActive("Test"));
++    writeTraceText(0, TOPIC_HERE, "Before open...");
+     openTrace("TestTrace");
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(), isTraceTopicActive("Test"));
+     char buffer[300];
+     for(int i= 0; i < sizeof(buffer); i++)
+     {
+@@ -36,9 +39,11 @@ int main(int argc, char** argv)
+       // writeTraceTextForTopic("TEST", TOPIC_HERE, "");
+       dumpTraceForTopic("Test", TOPIC_HERE, sizeof(buffer), buffer);
+     }
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(), isTraceTopicActive("Test"));
+     MASSAI::localtrace::writeTraceText(MajorError_HERE, "close");
+     closeTrace();
+     writeTraceText(0, TOPIC_HERE, "After close");  // this may be lost, because the process terminates before writing this
++    MASSAI::localtrace::writeTrace(MajorError_HERE, "Tracelevel: (%d)(%d)", getTraceLevel(), isTraceTopicActive("Test"));
+   }
+   catch(std::exception& ex)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
+index 9a6b406c..2bc6b4cd 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
+@@ -5,6 +5,7 @@
+ ****************************************************************************/
+ 
+ #include "trc/TraceClt.h"
++#include "trc/TraceLevel.h"
+ #include "TraceCmd.h"
+ #include "TraceMgr.h"
+ #include <stdarg.h>
+@@ -165,3 +166,15 @@ void _stdcall writeTraceCooked(const char* pszText)
+ {
+   getTrace().send(new TraceCmd(TRC_COOKED, 0, pszText, -1));
+ }
++
++// get the currently active tracelevel
++long _stdcall getTraceLevel()
++{
++  return getTrace().getTracelevel(0);
++}
++
++// check if a topic is currently active
++bool _stdcall isTraceTopicActive(const char* pszTopic)
++{
++  return getTrace().isActive(0, pszTopic);
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmd.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmd.cpp
+index 1a7f9d2a..02b35033 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmd.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmd.cpp
+@@ -58,7 +58,21 @@ namespace MASSAI
+     {
+       init(pData, dataSize);
+     }
+-    TraceCmd::TraceCmd(Command cmd, int hdl, TraceSession* pSession):
++    TraceCmd::TraceCmd(Command cmd, int hdl, const char* pData,
++      long dataSize, Materna::MSSD::eventSemaphore* pEvent):
++      cmd(cmd),
++      traceLevel(-1),
++      line(0),
++      hdl(hdl),
++      file(),
++      function(),
++      topic(),
++      pSession(0),
++      pEvent(pEvent)
++    {
++      init(pData, dataSize);
++    }
++    TraceCmd::TraceCmd(Command cmd, int hdl, TraceSession* pSession, Materna::MSSD::eventSemaphore* pEvent):
+       cmd(cmd),
+       traceLevel(-1),
+       line(0),
+@@ -67,7 +81,7 @@ namespace MASSAI
+       function(),
+       topic(),
+       pSession(pSession),
+-      pEvent(0)
++      pEvent(pEvent)
+     {
+       init(0, 0);
+     }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+index 3991431d..03692434 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+@@ -100,6 +100,10 @@ namespace MASSAI
+     {
+       m_topic[topic]= active;
+     }
++    void TraceBaseConfig::cleanupTopic()
++    {
++      m_topic.clear();
++    }
+ 
+     TraceCommonConfig::TraceCommonConfig():
+       m_envConfig(),
+@@ -118,6 +122,7 @@ namespace MASSAI
+       {
+         m_pSrvCommonConfig= SrvCommonConfigPtr(new TraceSrvCommonConfig());
+         setPath(m_pSrvCommonConfig->readPath(getPath()));
++        cleanupTopic();
+       }
+     }
+     void TraceCommonConfig::stop()
+@@ -169,6 +174,7 @@ namespace MASSAI
+       {
+         m_pSrvConfig= SrvConfigPtr(new TraceSrvConfig(m_hdl, m_sessionId));
+         setTracelevel(m_pSrvConfig->readTraceLevel(getTracelevel()));
++        cleanupTopic();
+       }
+     }
+     void TraceConfig::setSessionId(const std::string& sessionId)
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceMgr.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceMgr.cpp
+index c5d2d930..19aacce4 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceMgr.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceMgr.cpp
+@@ -39,7 +39,10 @@ namespace MASSAI
+     void TraceMgr::init(const char* pszSession)
+     {
+       tracetrace(BasicRuntime_HERE, "init (%.100s)", pszSession);
+-      send(new TraceCmd(TRC_INIT, 0, pszSession, -1));
++      Materna::MSSD::eventSemaphore event;
++      send(new TraceCmd(TRC_INIT, 0, pszSession, -1, &event));
++      event.wait();
++      tracetrace(BasicRuntime_HERE, "init done");
+     }
+     int TraceMgr::open(const char* pszSession)
+     {
+@@ -48,7 +51,10 @@ namespace MASSAI
+       tracetrace(BasicRuntime_HERE, "open (%.100s)=(%d)", pszSession, hdl);
+       pSession->setHandle(hdl);
+       pSession->setSessionId(pszSession);
+-      send(new TraceCmd(TRC_OPEN, hdl, pSession));
++      Materna::MSSD::eventSemaphore event;
++      send(new TraceCmd(TRC_OPEN, hdl, pSession, &event));
++      event.wait();
++      tracetrace(BasicRuntime_HERE, "open done (%d)", hdl);
+       return hdl;
+     }
+     void TraceMgr::close(int handle)
+@@ -68,6 +74,14 @@ namespace MASSAI
+       m_processor(m_config),
+       m_cmdQueue(m_processor)
+     {}
++    long TraceMgr::getTracelevel(int handle)
++    {
++      return m_processor.getTracelevel(handle);
++    }
++    bool TraceMgr::isActive(int handle, const char* pszTopic)
++    {
++      return m_processor.isActive(handle, pszTopic);
++    }
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+index f04b0f1f..17aac8be 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+@@ -15,6 +15,9 @@
+ 
+ #include "TraceProcessor.h"
+ #include "TraceCmd.h"
++#include "systools/mAutoMutexCS.h"
++
++using Materna::MSSD::AutoMutexCS;
+ 
+ namespace MASSAI
+ {
+@@ -62,6 +65,7 @@ namespace MASSAI
+     }
+     void TraceProcessor::process(TraceCmd& cmd)
+     {
++      AutoMutexCS mx(m_access);
+       setThreadIndex(cmd);
+       switch(cmd.cmd)
+       {
+@@ -178,5 +182,27 @@ namespace MASSAI
+       }
+       return result;
+     }
++    long TraceProcessor::getTracelevel(int handle)
++    {
++      long result = 0;
++      AutoMutexCS mx(m_access);
++      TraceSession* pSession= findSession(handle);
++      if(pSession != 0)
++      {
++        result = pSession->getTracelevel();
++      }
++      return result;
++    }
++    bool TraceProcessor::isActive(int handle, const char* pszTopic)
++    {
++      bool result = false;
++      AutoMutexCS mx(m_access);
++      TraceSession* pSession= findSession(handle);
++      if(pSession != 0 && pszTopic != 0)
++      {
++        result = pSession->isActive(pszTopic);
++      }
++      return result;
++    }
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index eca7ea3d..635d0f7c 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -318,6 +318,14 @@ namespace MASSAI
+         MASSAI::trace::tracetrace(MinorWarning_HERE, "move file: (%.1000s)", ex.what());
+       }
+     }
++    long TraceSession::getTracelevel()
++    {
++      return m_config.getTracelevel();
++    }
++    bool TraceSession::isActive(const char* pszTopic)
++    {
++      return m_config.isActive(pszTopic);
++    }
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
+index fee6b703..676f602f 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
+@@ -39,6 +39,9 @@ namespace
+     MASSAI::trace::tracetrace(level, file, line, function, "SystemError: (%.200s): (%.1000s)", command, buf);
+     LocalFree(buf);
+   }
++
++  fs::path base;
++  bool pathInitialized = false;
+ }
+ 
+ namespace MASSAI
+@@ -55,27 +58,12 @@ namespace MASSAI
+     }
+     fs::path getBasePath()
+     {
+-      fs::path result;
+-      char path[PATHLENGTH];
+-      int size= GetModuleFileName(0, path, PATHLENGTH);
+-      if(size > 0)
+-      {
+-        try
+-        {
+-          result= fs::path(path, fs::native).branch_path();
+-        }
+-        catch(std::exception& ex)
+-        {
+-          MASSAI::trace::tracetrace(MinorWarning_HERE, "module filename: (%.1000s)", ex.what());
+-          result= fs::current_path();
+-        }
+-      }
+-      else
++      if(!pathInitialized)
+       {
+-        traceError(MajorError_HERE, "GetModuleFileName", GetLastError());
+-        result= fs::current_path();
++        base = fs::current_path();
++        pathInitialized = true;
+       }
+-      return result;
++      return base;
+     }
+     void sysTrace(const std::string& text)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
+index 35f27806..1428648d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
+@@ -5,6 +5,7 @@
+ ****************************************************************************/
+ 
+ #include "trc/TrcHdlClt.h"
++#include "trc/TrcHdlLevel.h"
+ #include "TraceCmd.h"
+ #include "TraceMgr.h"
+ #include <stdarg.h>
+@@ -168,3 +169,15 @@ void _stdcall writeTraceCooked(trcHandle hdl, const char* pszText)
+ {
+   getTrace().send(new TraceCmd(TRC_COOKED, hdl, pszText, -1));
+ }
++
++// get the currently active tracelevel
++long _stdcall getTraceLevel(trcHandle hdl)
++{
++  return getTrace().getTracelevel(hdl);
++}
++
++// check if a topic is currently active
++bool _stdcall isTraceTopicActive(trcHandle hdl, const char* pszTopic)
++{
++  return getTrace().isActive(hdl, pszTopic);
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak b/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
+index a52d1777..7fad1df8 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
+@@ -19,7 +19,9 @@ DLL_LDFLAGS = \
+     /EXPORT:writeTraceCooked \
+     /EXPORT:setTraceDirectory \
+     /EXPORT:setTraceLevel \
+-    /EXPORT:setTraceTopic
++    /EXPORT:setTraceTopic \
++    /EXPORT:getTraceLevel \
++    /EXPORT:isTraceTopicActive
+ 
+ HDLDLL_LDFLAGS = \
+     /EXPORT:closeTrace \
+@@ -36,8 +38,9 @@ HDLDLL_LDFLAGS = \
+     /EXPORT:writeTraceCooked \
+     /EXPORT:setTraceDirectory \
+     /EXPORT:setTraceLevel \
+-    /EXPORT:setTraceTopic
+-
++    /EXPORT:setTraceTopic \
++    /EXPORT:getTraceLevel \
++    /EXPORT:isTraceTopicActive
+ 
+ COMMON_OBJS= \
+   $(_OBJ)\TraceSettings.obj \
+-- 
+2.41.0.windows.1
+

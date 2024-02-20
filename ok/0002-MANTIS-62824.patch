@@ -1,0 +1,179 @@
+From eee608b096a9b5e3abebbc7d564c443f1bf929c9 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 8 Jun 2022 13:44:46 +0000
+Subject: [PATCH 02/10] MANTIS 62824 Mantis 62824: Platform Devicehandlers with
+ VC19 Fix state-machine template
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1731 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/fsm/mStateMachine.hpp  |  2 +-
+ .../generic/fsm/mStateMachineQueue.hpp        | 14 ++++++------
+ .../generic/fsm/mStateMachineTime.hpp         | 22 +++++++++----------
+ 3 files changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
+index c1795335..7b9d74a1 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
+@@ -1570,7 +1570,7 @@ bool Materna::StateMachine::place<EVT>::inputTransitions
+ ) const
+ {
+    typename transList::const_iterator TrI = M_Transitions.begin();
+-   while( TrI.operator!=( M_Transitions.end() ) )
++   while( TrI != M_Transitions.end() )
+    {
+       bool RefT = false;
+       place const * pTarget =
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
+index e9c2d0ce..b03ab552 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
+@@ -164,7 +164,7 @@ namespace StateMachine
+                   ReasonStream
+                      << "Queued input(" << Evt << ") exception ["
+                      << Ex.what() << "].";
+-                  logging
++                  walker<EVT>::logging
+                      (
+                         walker<EVT>::Log_MajorWarning,
+                         ReasonStream.str().c_str()
+@@ -181,7 +181,7 @@ namespace StateMachine
+                   ReasonStream
+                      << "Queued input(" << Evt << ") exception ["
+                      << Ex << "].";
+-                  logging
++                  walker<EVT>::logging
+                      (
+                         walker<EVT>::Log_MajorWarning,
+                         ReasonStream.str().c_str()
+@@ -198,7 +198,7 @@ namespace StateMachine
+                   ReasonStream
+                      << "Queued input(" << Evt << ") exception ["
+                      << Ex << "].";
+-                  logging
++                  walker<EVT>::logging
+                      (
+                         walker<EVT>::Log_MajorWarning,
+                         ReasonStream.str().c_str()
+@@ -214,7 +214,7 @@ namespace StateMachine
+                   std::ostringstream ReasonStream;
+                   ReasonStream
+                      << "Queued input(" << Evt << ") exception.";
+-                  logging
++                  walker<EVT>::logging
+                      (
+                         walker<EVT>::Log_MajorWarning,
+                         ReasonStream.str().c_str()
+@@ -316,14 +316,14 @@ namespace StateMachine
+          throw( inputException )
+ #endif
+       {
+-         walker<EVT>::rc InputRC = walker<EVT>::MFSM_OK;
++         typename walker<EVT>::rc InputRC = walker<EVT>::MFSM_OK;
+          Materna::MSSD::fmtQueueRC RC = M_EventQueue.write( Evt );
+          switch( RC )
+          {
+          case Materna::MSSD::FMTQ_OK:
+             break;
+          case Materna::MSSD::FMTQ_FULL:
+-            logging( walker<EVT>::Log_MajorWarning, "Event queue full." );
++            walker<EVT>::logging( walker<EVT>::Log_MajorWarning, "Event queue full." );
+             if( !M_WorkerStackTraced )
+             {
+                // Write stack trace once.
+@@ -333,7 +333,7 @@ namespace StateMachine
+             InputRC = walker<EVT>::MFSM_ERROR;
+             break;
+          default:
+-            logging( walker<EVT>::Log_MinorError, "Event queue failed." );
++            walker<EVT>::logging( walker<EVT>::Log_MinorError, "Event queue failed." );
+             M_Active = false;
+ #ifndef FSM_NO_EXCEPTION
+             throw inputException( "Event queue failed" );
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
+index 4265181e..3e4f575b 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
+@@ -370,18 +370,18 @@ namespace StateMachine
+          // Prevent other threads to trigger a transition. In particular
+          // we do not want to miss a call to timerStop() due to some
+          // race-condition.
+-         transitionLock();
+-         if( TEvent.place() == &currentPlace() )
++         queuedWalker<EVT>::transitionLock();
++         if( TEvent.place() == &walker<EVT>::currentPlace() )
+          {
+             try
+             {
+-               if( inputSync( TEvent.event() ) != walker<EVT>::MFSM_OK )
++               if( queuedWalker<EVT>::inputSync( TEvent.event() ) != walker<EVT>::MFSM_OK )
+                {
+                   // State machine input failed
+                   std::ostringstream ReasonStream;
+                   ReasonStream
+                      << "Timed input(" << TEvent.event() << ") failed.";
+-                  logging( Log_MajorWarning, ReasonStream.str().c_str() );
++                  walker<EVT>::logging( walker<EVT>::Log_MajorWarning, ReasonStream.str().c_str() );
+                   if( M_TimeXH )
+                   {
+                      // Exception handler specified - throw it.
+@@ -395,7 +395,7 @@ namespace StateMachine
+                ReasonStream
+                   << "Timeout input(" << TEvent.event() << ") exception ["
+                   << Ex.what() << "].";
+-               logging( Log_MajorWarning, ReasonStream.str().c_str() );
++               walker<EVT>::logging( walker<EVT>::Log_MajorWarning, ReasonStream.str().c_str() );
+                if( M_TimeXH )
+                {
+                   // Exception handler specified - throw it.
+@@ -408,7 +408,7 @@ namespace StateMachine
+                ReasonStream
+                   << "Timeout input(" << TEvent.event() << ") exception ["
+                   << Ex << "].";
+-               logging( Log_MajorWarning, ReasonStream.str().c_str() );
++               walker<EVT>::logging( walker<EVT>::Log_MajorWarning, ReasonStream.str().c_str() );
+                if( M_TimeXH )
+                {
+                   // Exception handler specified - throw it.
+@@ -421,7 +421,7 @@ namespace StateMachine
+                ReasonStream
+                   << "Timeout input(" << TEvent.event() << ") exception ["
+                   << Ex << "].";
+-               logging( Log_MajorWarning, ReasonStream.str().c_str() );
++               walker<EVT>::logging( walker<EVT>::Log_MajorWarning, ReasonStream.str().c_str() );
+                if( M_TimeXH )
+                {
+                   // Exception handler specified - throw it.
+@@ -433,7 +433,7 @@ namespace StateMachine
+                std::ostringstream ReasonStream;
+                ReasonStream
+                   << "Timeout input(" << TEvent.event() << ") exception.";
+-               logging( Log_MajorWarning, ReasonStream.str().c_str() );
++               walker<EVT>::logging( walker<EVT>::Log_MajorWarning, ReasonStream.str().c_str() );
+                if( M_TimeXH )
+                {
+                   // Exception handler specified - throw it.
+@@ -442,7 +442,7 @@ namespace StateMachine
+             }
+          }
+          // Free state transitions.
+-         transitionUnlock();
++         queuedWalker<EVT>::transitionUnlock();
+       }
+ 
+    public:
+@@ -502,9 +502,9 @@ namespace StateMachine
+          queuedWalker<EVT>::workerStackTrace();
+          // Write the stack trace of the timedWalker worker thread.
+          traceWrite<EVT> Trace( this );
+-         logging
++         walker<EVT>::logging
+             (
+-               Log_MajorWarning,
++               walker<EVT>::Log_MajorWarning,
+                "Callstack of timedWalker worker thread:"
+             );
+          sTTimer< timedEvent<EVT> >::setTrace( &Trace );
+-- 
+2.41.0.windows.1
+

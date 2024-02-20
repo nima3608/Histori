@@ -1,0 +1,498 @@
+From d7f0e0aa5aafee9cf4936c2ff81a0df52cd6a44e Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 3 Aug 2012 08:54:24 +0000
+Subject: [PATCH 0305/1077] Mantis 23477 - Bugfixing mSysException
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@370 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/inc/testcaseException.hpp    |  41 ++++++
+ .../Massai/cpp/Systools/makefile.mak          |  25 +++-
+ .../cpp/Systools/src/TestSysException.cpp     | 123 ++++++------------
+ .../Massai/cpp/Systools/src/TestSysMain.cpp   |   4 +-
+ .../Massai/cpp/Systools/src/TestSysThread.cpp |  22 +++-
+ .../cpp/Systools/src/testcaseException.cpp    | 109 ++++++++++++++++
+ 6 files changed, 223 insertions(+), 101 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/testcaseException.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/testcaseException.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/testcaseException.hpp b/SelfServiceCommon/Massai/cpp/Systools/inc/testcaseException.hpp
+new file mode 100644
+index 00000000..e7e13ec2
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/testcaseException.hpp
+@@ -0,0 +1,41 @@
++/**
++ **************************************************************************
++ *
++ * @file testcaseException.hpp
++ *
++ * Generate system exceptions.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#ifndef TESTCASESEXCEPTION_HPP
++#define TESTCASESEXCEPTION_HPP
++
++enum testcaseException_Scenario
++   {
++      NoError,
++      DivZero,
++      PtrRead,
++      PtrWrite,
++      StackOverflow
++   };
++
++void testcaseException_Generate
++   (
++      testcaseException_Scenario        Scenario,
++      int                               Param
++   );
++
++#endif // #ifndef TESTCASESEXCEPTION_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 04b5f7a3..fa87962d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -45,27 +45,38 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+ 
+ ######################################################################
+ 
+-MY_BIN1 =               $(_BIN)\TestSysMain.exe
++MY_BIN1 =               $(_BIN)\TestSysException.exe
+ 
+ MY_BIN1_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN1_OBJS =          $(_OBJ)\TestSysMain.obj
++MY_BIN1_OBJS =          $(_OBJ)\testcaseException.obj \
++                        $(_OBJ)\TestSysException.obj
+ 
+ ######################################################################
+ 
+-MY_BIN2 =               $(_BIN)\TestSysProcess.exe
++MY_BIN2 =               $(_BIN)\TestSysMain.exe
+ 
+ MY_BIN2_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN2_OBJS =          $(_OBJ)\TestSysProcess.obj
++MY_BIN2_OBJS =          $(_OBJ)\testcaseException.obj \
++                        $(_OBJ)\TestSysMain.obj
+ 
+ ######################################################################
+ 
+-MY_BIN3 =               $(_BIN)\TestSysThread.exe
++MY_BIN3 =               $(_BIN)\TestSysProcess.exe
+ 
+-MY_BIN3_USER_LIBS =     $(LIB_SYSTOOLS)
++MY_BIN3_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN3_OBJS =          $(_OBJ)\TestSysThread.obj
++MY_BIN3_OBJS =          $(_OBJ)\TestSysProcess.obj
++
++######################################################################
++
++MY_BIN4 =               $(_BIN)\TestSysThread.exe
++
++MY_BIN4_USER_LIBS =     $(LIB_SYSTOOLS)
++
++MY_BIN4_OBJS =          $(_OBJ)\testcaseException.obj \
++                        $(_OBJ)\TestSysThread.obj
+ 
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysException.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysException.cpp
+index 9f7c8c63..e28a4121 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysException.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysException.cpp
+@@ -1,120 +1,71 @@
+-#include "Tools/mSysException.hpp"
+-
+-#include "systools/mSysThread.hpp"
+-#include "trc/TraceClt.h"
+-
+-#include <stdarg.h>
++#include "systools/mSysException.hpp"
++#include "testcaseException.hpp"
+ 
+ #include <iostream>
+ using namespace std;
+ 
+ 
+-long _stdcall writeTrace
+-   (
+-      long,
+-      CX_CONSTSTR,
+-      short,
+-      CX_CONSTSTR,
+-      CX_CONSTSTR pszFormat,
+-      ...
+-   )
+-{
+-   va_list   arg_ptr;
+-   char String[4096];
+-   /* get pointer to first argument */
+-   va_start( arg_ptr, pszFormat);
+-   _vsnprintf(String, sizeof(String), pszFormat, arg_ptr);
+-   String[sizeof(String)-1]= 0;
+-   va_end( arg_ptr);
+-   cout << "trace(" << String << ")" << endl;
+-   return 0;
+-}
+-
+-
+-void doIt( int * X )
+-{
+-   cout << "doIt(" << reinterpret_cast<unsigned int>( X ) << ")" << endl;
+-#if 1
+-   char MegaBuffer[1234567];
+-   MegaBuffer[sizeof(MegaBuffer) - 3] = 42;
+-#else
+-#if 1
+-   *X += 1;
+-#else
+-   int R = 13.1;
+-   R = R / 0;
+-   cout << "Resultat=" << R << endl;
+-#endif
+-#endif
+-}
+-
+-
+-
+-void doIt1( int * X )
+-{
+-   doIt( X );
+-}
+-
+ 
+ 
+-void doIt2( int * X )
++void doIt_catchSE( testcaseException_Scenario Scenario, int Param )
+ {
+-   doIt1( X );
+-}
+-
+-
+-
+-class testThread : public mSysThread::thread
+-{
+-   void function()
++   mSysException::exception * sysex = 0;
++   __try
+    {
+-      int * Null = 0;
+-      doIt2( Null );
++      // Do something daring ...
++      testcaseException_Generate( Scenario, Param );
+    }
+-public:
+-   explicit testThread( threadException const * Ex ) :
+-      thread( Ex )
++   __except
++      (
++         mSysException::filter_create
++            (
++               sysex,
++               GetExceptionInformation()
++            )
++      )
+    {
++      if( sysex )
++      {
++         // Here we throw the SEH exception as a std::exception
++         throw( *sysex );
++      }
+    }
+-private:
+-   testThread();
+-};
++}
+ 
+ 
+ 
+-int main()
++void doIt_catchCPP( testcaseException_Scenario Scenario, int Param )
+ {
+    try
+    {
+-      //
+-      mSysException::standardException Guard;
+-      //
+-#if 1
+-      int * Null = 0;
+-      doIt2( Null );
+-#else
+-      threadExceptionTraceTerm ExTrm( "main" );
+-      testThread Thread( ExTrm.handler() );
+-      Thread.start();
+-      Thread.waitTerminated();
+-#endif
++      doIt_catchSE( Scenario, Param );
+       cout << "OK";
+-      return 0;
+    }
+    catch( mSysException::exception const & X )
+    {
+       cout << "mSysException::exception [" << X.what() << "]" << endl;
+-      return 1;
+    }
+    catch( std::exception const & X )
+    {
+       cout << "stdx[" << X.what() << "]" << endl;
+-      return 1;
+    }
+    catch(...)
+    {
+       cout << "FATAL: unknown exception" << endl;
+-      return 1;
+    }
+ }
+ 
++
++
++int main()
++{
++   doIt_catchCPP( NoError, 0 );
++   doIt_catchCPP( DivZero, 42 );
++   doIt_catchCPP( PtrRead, 0 );
++   doIt_catchCPP( PtrRead, 7 );
++   doIt_catchCPP( PtrWrite, 0 );
++   doIt_catchCPP( PtrWrite, 7 );
++   doIt_catchCPP( StackOverflow, 0 );
++   return 0;
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
+index ebc570d1..29a88792 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
+@@ -13,6 +13,7 @@
+ **/
+ 
+ #include "systools/mSysMain.hpp"
++#include "testcaseException.hpp"
+ 
+ #include <iostream>
+ using namespace std;
+@@ -63,8 +64,7 @@ public:
+          cout
+             << "myProcessX::myProcessX - Simulate access violation"
+             << endl;
+-         int * X = (int *)13;
+-         *X = 42;
++         testcaseException_Generate( PtrWrite, 0x42 );
+       }
+    }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThread.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThread.cpp
+index 92beffbf..c51e856c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThread.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThread.cpp
+@@ -1,5 +1,6 @@
+ #include "systools/mSysThread.hpp"
+ 
++#include "testcaseException.hpp"
+ #include "systools/mAutoMutex.hpp"
+ #include <iostream>
+ 
+@@ -72,6 +73,7 @@ public:
+ 
+    explicit testThread( int Cycles, int Throw = -1 ) :
+       mSysThread::thread( &Xcept, &TraceToStdout ),
++//      mSysThread::thread( 0, &TraceToStdout ),
+       M_Cycles( Cycles ),
+       M_Throw( Throw )
+    {
+@@ -93,7 +95,11 @@ private:
+          {
+             std::cout << "X" << std::flush;
+             mSysThread::sleep( 150 );
++#if 0
+             throw( std::exception( "ERROR" ) );
++#else
++            testcaseException_Generate( PtrWrite, 0x42 );
++#endif
+          }
+       }
+       std::cout << "\nfunction." << std::endl;
+@@ -117,17 +123,20 @@ int main()
+ 
+       traceMain( "main Start" );
+       Y.start();
+-      Y.stackTrace();
++      mSysThread::sleep( 100 );
++      Y.stackTrace( "This is a test Stacktrace" );
+       Y.waitTerminated();
+       traceMain( "main terminated" );
+ 
+    }
+ 
++#if 0
++   dauert sonst zu lange
+    {
+-      // Restart an instance 5 times
++      // Restart an instance 3 times
+       std::cout << "\n---------- Normal thread" << std::endl;
+       testThread Y( 10 );
+-      for( int Starts=0; Starts < 5; ++Starts )
++      for( int Starts=0; Starts < 3; ++Starts )
+       {
+          traceMain( "main Starts=", Starts );
+          Y.start();
+@@ -137,9 +146,9 @@ int main()
+    }
+ 
+    {
+-      // Create 5 instances, destroy each after 5 seconds
++      // Create 3 instances, destroy each after 5 seconds
+       std::cout << "\n---------- Aborted thread" << std::endl;
+-      for( int Run = 0; Run < 5; ++Run )
++      for( int Run = 0; Run < 3; ++Run )
+       {
+          traceMain( "main Run=", Run );
+          testThread Y( 1000 );
+@@ -148,12 +157,13 @@ int main()
+          traceMain( "\nmain terminating" );
+       }
+    }
++#endif
+ 
+    {
+       // Restart a throwing instance 5 times
+       std::cout << "\n---------- Throwing thread" << std::endl;
+       testThread Y( 100, 5 );
+-      for( int Starts=0; Starts < 5; ++Starts )
++      for( int Starts=0; Starts < 3; ++Starts )
+       {
+          mSysThread::sleep( 1000 );
+          traceMain( "main Starts=", Starts );
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/testcaseException.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/testcaseException.cpp
+new file mode 100644
+index 00000000..5d53cb3e
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/testcaseException.cpp
+@@ -0,0 +1,109 @@
++/**
++ **************************************************************************
++ *
++ * @file testcaseException.cpp
++ *
++ * testcaseException_Generate system exceptions.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "testcaseException.hpp"
++
++#include <iostream>
++using namespace std;
++
++
++
++void testcaseException_Recursion( unsigned Depth )
++{
++   if( Depth )
++   {
++      char MegaBuffer[123456];
++      MegaBuffer[sizeof(MegaBuffer) - 3] = 42;
++      testcaseException_Recursion( Depth - 1 );
++   }
++}
++
++
++
++void testcaseException_GenNow
++   (
++      testcaseException_Scenario        Scenario,
++      int Param
++   )
++{
++   switch( Scenario )
++   {
++   case StackOverflow:
++      {
++         cout << "testcaseException( StackOverflow ) ..." << endl;
++         testcaseException_Recursion( 100 );
++      }
++      break;
++   case PtrRead:
++      {
++         cout << "testcaseException( PtrRead ) ..." << endl;
++         int * X = (int *)Param;
++         int R = *X;
++      }
++      break;
++   case PtrWrite:
++      {
++         cout << "testcaseException( PtrWrite ) ..." << endl;
++         int * X = (int *)Param;
++         *X = 33;
++      }
++      break;
++   case DivZero:
++      {
++         cout << "testcaseException( DivZero ) ..." << endl;
++         int R = Param;
++         R = R / 0;
++         cout << "Divide by zero result=" << R << endl;
++      }
++   default:
++         cout << "testcaseException( NoError ) ..." << endl;
++   }
++   cout << "testcaseException()." << endl;
++}
++
++
++
++void testcaseException_Inflate
++   (
++      testcaseException_Scenario        Scenario,
++      int                               Param,
++      unsigned                          Depth
++   )
++{
++   if( Depth == 0 )
++      testcaseException_GenNow( Scenario, Param );
++   else
++      testcaseException_Inflate( Scenario, Param, Depth - 1 );
++}
++
++
++
++void testcaseException_Generate
++   (
++      testcaseException_Scenario        Scenario,
++      int                               Param
++   )
++{
++   testcaseException_Inflate( Scenario, Param, 3 );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
++
+-- 
+2.41.0.windows.1
+

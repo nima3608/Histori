@@ -1,0 +1,241 @@
+From 56bf6631ad451629c355446dc070259ef4666c97 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 12 Dec 2019 12:50:27 +0000
+Subject: [PATCH 0906/1000] MANTIS 0056855 CfgValues: add PORT commandline
+ parameter
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1510 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgValues_def.h   |  9 ++-
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 65 +++++++++++++------
+ 2 files changed, 51 insertions(+), 23 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 6882a745..86417c2c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -94,8 +94,13 @@
+ //
+ // 29.10.2018  GiT     - Mantis 0052260: CfgValues: Bugfix removefromlist willfull ignored more than one operation
+ //
+-#define FILE_VER_BIN 1,2,1,0
+-#define FILE_VER_DTS "1.2.1.0\0"
++//#define FILE_VER_BIN 1,2,1,1
++//#define FILE_VER_DTS "1.2.1.1\0"
++//
++// 12.12.2019  GiT     - Mantis 0052260: CfgValues: add PORT commandline parameter
++//
++#define FILE_VER_BIN 1,2,1,1
++#define FILE_VER_DTS "1.2.1.1\0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index 5ededbcb..6f6bea42 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -700,12 +700,12 @@ void soutItems( unsigned N )
+ }
+ 
+ 
+-int erase(char const * Host, const char* DelItem)
++int erase(char const * Host, long Port, const char* DelItem)
+ {
+     corbaClient<Config::Directory> DirClient
+     (
+         Host,
+-        CFGMGR_PORT,
++        Port,
+         CFGMGR_SRVNAME_DIRECTORY
+     );
+     Config::Directory * const DirProxy = DirClient.proxy();
+@@ -734,7 +734,7 @@ int erase(char const * Host, const char* DelItem)
+     return c_exit_good;
+ }
+ 
+-int removeFromList(char const * Host,
++int removeFromList(char const * Host, long Port,
+   const char* RemItem,
+   const char* RemValue
+   )
+@@ -745,7 +745,7 @@ int removeFromList(char const * Host,
+     SAcc.Item = CORBA::string_dup( RemItem );
+ 
+     corbaClient<Config::Textlist>
+-        TextlistClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXTLIST );
++        TextlistClnt( Host, Port, CFGMGR_SRVNAME_TEXTLIST );
+     Config::Textlist * const TextlistProxy = TextlistClnt.proxy();
+     if( !TextlistProxy )
+     {
+@@ -832,6 +832,31 @@ int main( int argc, char ** argv )
+       {
+          Host = CFGMGR_HOST;
+       }
++      char const * PortArg = Arg.option( "PORT" );
++      int Port;
++      if( PortArg )
++      {
++         std::cout << DSPLLIN "CfgMgr Port:" << PortArg << std::endl;
++         try
++         {
++          std::istringstream(PortArg) >> Port;
++          if(!Port)
++          {
++            std::cout << DSPLERR " Port can't be 0, the default port " << CFGMGR_PORT << " is used"<< std::endl;
++            Port = CFGMGR_PORT;
++          }          
++         }
++         catch( ... )
++         {
++            std::cout << DSPLERR " Port argument error, value ignored - the default port " << CFGMGR_PORT << " is used"<< std::endl;
++            Port = CFGMGR_PORT;
++         }          
++      }
++      else
++      {
++         Port = CFGMGR_PORT;
++      }
++      
+       //
+       // First try, if the READ-option is given
+       //
+@@ -862,7 +887,7 @@ int main( int argc, char ** argv )
+          }
+          //
+          corbaClient<Config::Node>
+-            NodeClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_DIRECTORY );
++            NodeClnt( Host, Port, CFGMGR_SRVNAME_DIRECTORY );
+          Config::Node * const NodeProxy = NodeClnt.proxy();
+          if( !NodeProxy )
+          {
+@@ -881,7 +906,7 @@ int main( int argc, char ** argv )
+          case Config::Directory::CFG_DIR:
+             {
+                corbaClient<Config::Directory>
+-                  DirClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_DIRECTORY );
++                  DirClnt( Host, Port, CFGMGR_SRVNAME_DIRECTORY );
+                Config::Directory * const DirProxy = DirClnt.proxy();
+                if( !DirProxy )
+                {
+@@ -903,7 +928,7 @@ int main( int argc, char ** argv )
+          case Config::Directory::CFG_TEXT:
+             {
+                corbaClient<Config::Text>
+-                  TextClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXT );
++                  TextClnt( Host, Port, CFGMGR_SRVNAME_TEXT );
+                Config::Text * const TextProxy = TextClnt.proxy();
+                if( !TextProxy )
+                {
+@@ -922,7 +947,7 @@ int main( int argc, char ** argv )
+          case Config::Directory::CFG_TEXTLIST:
+             {
+                corbaClient<Config::Textlist>
+-                  TextlistClnt( Host, CFGMGR_PORT,
++                  TextlistClnt( Host, Port,
+                                 CFGMGR_SRVNAME_TEXTLIST );
+                Config::Textlist * const TextlistProxy
+                   = TextlistClnt.proxy();
+@@ -955,7 +980,7 @@ int main( int argc, char ** argv )
+          case Config::Directory::CFG_NUMBER:
+             {
+                corbaClient<Config::Number>
+-                  NumberClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_NUMBER );
++                  NumberClnt( Host, Port, CFGMGR_SRVNAME_NUMBER );
+                Config::Number * const NumberProxy = NumberClnt.proxy();
+                if( !NumberProxy )
+                {
+@@ -974,7 +999,7 @@ int main( int argc, char ** argv )
+          case Config::Directory::CFG_SELECTION:
+             {
+                corbaClient<Config::Selection>
+-                  SelectionClnt( Host, CFGMGR_PORT,
++                  SelectionClnt( Host, Port,
+                                  CFGMGR_SRVNAME_SELECTION );
+                Config::Selection * const SelectionProxy
+                   = SelectionClnt.proxy();
+@@ -1077,7 +1102,7 @@ int main( int argc, char ** argv )
+ 
+             if(FAction == "erase" || FAction == "delete")
+             {
+-              if(erase(Host, FItm.c_str()) == c_exit_good)
++              if(erase(Host, Port, FItm.c_str()) == c_exit_good)
+                 ++SetRecordsTotal;
+               else
+                 ++SetRecordsFailed;
+@@ -1086,7 +1111,7 @@ int main( int argc, char ** argv )
+ 
+             if(FAction == "removefromlist")
+             {
+-              if( removeFromList(Host, FItm.c_str(), FVal.c_str()) == c_exit_good)
++              if( removeFromList(Host, Port, FItm.c_str(), FVal.c_str()) == c_exit_good)
+                 ++SetRecordsTotal;
+               else
+                 ++SetRecordsFailed;
+@@ -1104,7 +1129,7 @@ int main( int argc, char ** argv )
+                   // Write a TEXT value
+                   //
+                   corbaClient<Config::Text>
+-                     TextClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXT );
++                     TextClnt( Host, Port, CFGMGR_SRVNAME_TEXT );
+                   Config::Text * const TextProxy = TextClnt.proxy();
+                   if( !TextProxy )
+                   {
+@@ -1176,7 +1201,7 @@ int main( int argc, char ** argv )
+                   // Write a TEXTLIST value
+                   //
+                   corbaClient<Config::Textlist>
+-                     TextlistClnt( Host, CFGMGR_PORT,
++                     TextlistClnt( Host, Port,
+                                    CFGMGR_SRVNAME_TEXTLIST );
+                   Config::Textlist * const TextlistProxy
+                      = TextlistClnt.proxy();
+@@ -1344,7 +1369,7 @@ int main( int argc, char ** argv )
+                   corbaClient<Config::Number> NumberClnt
+                                                 (
+                                                    Host,
+-                                                   CFGMGR_PORT,
++                                                   Port,
+                                                    CFGMGR_SRVNAME_NUMBER
+                                                 );
+                   Config::Number * const NumberProxy = NumberClnt.proxy();
+@@ -1419,7 +1444,7 @@ int main( int argc, char ** argv )
+                   // Write a SELECTION value
+                   //
+                   corbaClient<Config::Selection>
+-                     SelectionClnt( Host, CFGMGR_PORT,
++                     SelectionClnt( Host, Port,
+                                     CFGMGR_SRVNAME_SELECTION );
+                   Config::Selection * const SelectionProxy
+                      = SelectionClnt.proxy();
+@@ -1582,7 +1607,7 @@ int main( int argc, char ** argv )
+       char const * const DelItem = Arg.option( "ERASE" );
+       if( DelItem )
+       {
+-    return erase(Host, DelItem);
++        return erase(Host, Port, DelItem);
+       }
+       //
+       // Then try, if the REMOVEFROMLIST-option is given
+@@ -1591,9 +1616,7 @@ int main( int argc, char ** argv )
+       char const * const RemValue = Arg.option( "VALUE" );
+       if( RemItem && RemValue)
+       {
+-      return removeFromList(Host, 
+-          RemItem,
+-          RemValue);
++      return removeFromList(Host, Port, RemItem, RemValue);
+       }
+       //
+       // No explicit command - invalid syntax!
+@@ -1605,7 +1628,7 @@ int main( int argc, char ** argv )
+             " Information & Communications\n"
+          << HINDENT1 "usage:"
+             " CfgValues"
+-            " [-host:<Config-host>]\n"
++            " [-host:<Config-host>] [-port:<Config-port>]\n"
+             HINDENT2 "{\n"
+             HINDENT2 "   -read:<to-file>"
+                      " [-item:<Config-item|Config-section>]\n"
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1082 @@
+From f037a473749cc1d985b4f92c14cb0fed09ada637 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 5 Jan 2011 15:05:01 +0000
+Subject: [PATCH 0082/1076] Add tracesToLocal
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@104 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/tracesFiler.hpp      | 110 ++++
+ .../Interfaces/inc/Tools/tracesToLocal.hpp    |  98 ++++
+ .../Massai/cpp/Tools/makefile.mak             |   2 +
+ .../Massai/cpp/Tools/src/tracesFiler.cpp      | 298 ++++++++++
+ .../Massai/cpp/Tools/src/tracesToLocal.cpp    | 517 ++++++++++++++++++
+ 5 files changed, 1025 insertions(+)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/tracesFiler.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/tracesToLocal.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/tracesToLocal.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/tracesFiler.hpp b/SelfServiceCommon/Interfaces/inc/Tools/tracesFiler.hpp
+new file mode 100644
+index 00000000..99e94e8f
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/tracesFiler.hpp
+@@ -0,0 +1,110 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesFiler.hpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACESFILER_HPP
++#define TRACESFILER_HPP
++
++namespace traces
++{
++
++
++   /**
++    *
++    * Yet another trace class.
++    * Behaviour like the implementation in "TracesEx.cpp", the difference
++    * is in the interface served.
++    *
++   **/
++   class filer
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation reference.
++      impl * M_Impl;
++
++   public:
++
++      //! How do we use trace subdirectories?
++      enum subdirMode
++      {
++         Subdir_None,   //!< Do not use trace subdirectories.
++         Subdir_DDMM,   //!< use a subdirectory DDMM for a new day.
++         Subdir_MM_DD   //!< use a subdirectory MM_DD for a new day.
++      };
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param BaseFilename:           The name of the trace file, which
++       *                                will be extended for different
++       *                                generations. Do not provide an
++       *                                extension like e.g. ".trc".
++       *
++       * @param Path:                   Traces root path. The actual path
++       *                                will be extended with date info.
++       *
++       * @param SubdirMode:             Do we use trace sub-directories?
++       *
++       * @param MaxFilesize:            The maximum size a trace file is
++       *                                to grow, before a new file is used.
++       *
++      **/
++      filer
++         (
++            char const *        BaseFilename,
++            char const *        Path,
++            subdirMode          SubdirMode,
++            unsigned            MaxFilesize
++         );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~filer() throw();
++
++      /**
++       *
++       * Write a trace entry.
++       *
++       * @param Entry:          The string to write.
++       *
++      **/
++      void write( char const * Entry ) throw();
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      filer();
++
++      //! Copy constructor - intentionally not implemented.
++      filer( filer const & Src );
++
++      //! Assignment - intentionally not implemented.
++      filer & operator=( filer const & Src );
++
++   };
++
++
++}
++
++#endif // #ifndef TRACESFILER_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/tracesToLocal.hpp b/SelfServiceCommon/Interfaces/inc/Tools/tracesToLocal.hpp
+new file mode 100644
+index 00000000..cd909523
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/tracesToLocal.hpp
+@@ -0,0 +1,98 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToLocal.hpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2011 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACESTOLOCAL_HPP
++#define TRACESTOLOCAL_HPP
++
++
++#include "traces.hpp"
++
++
++namespace tracesToLocal
++{
++
++   /**
++    *
++    * Trace writer implementation. By overloading the "writer" interface
++    * class it defines and implements the write() and currentLevel()
++    * methods.
++    *
++   **/
++   class writer : public traces::writer
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation object reference.
++      impl * const      M_Impl;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param Name:           The application name, used for
++       *                        the traces configuration.
++       *
++      **/
++      explicit writer( char const * Name );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~writer() throw();
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      traces::level currentLevel() const;
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      void write
++         (
++            traces::meta const &        Meta,
++            char const *                Text
++         );
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      writer();
++
++      //! Copy constructor - intentionally not implemented.
++      writer( writer const & Src );
++
++      //! Assignment - intentionally not implemented.
++      writer& operator=( writer const & Src );
++
++   };
++
++} // namespace tracesToLocal
++
++
++#endif // #ifndef TRACESTOLOCAL_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 4501e7ee..0bddd68d 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -26,7 +26,9 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\TraceDelegate.obj \
+                         $(_OBJ)\TraceClient.obj \
+                         $(_OBJ)\TraceHandle.obj \
++                        $(_OBJ)\tracesFiler.obj \
+                         $(_OBJ)\tracesMetaLFL.obj \
++                        $(_OBJ)\tracesToLocal.obj \
+                         $(_OBJ)\tracesToTrc.obj
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+new file mode 100644
+index 00000000..06570607
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+@@ -0,0 +1,298 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesFiler.cpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "Tools/tracesFiler.hpp"
++
++#include <fstream>
++#include <iostream>
++#include <string>
++
++// For SYSTEMTIME
++#include <windows.h>
++
++// For _mkdir
++#include <direct.h>
++
++
++
++namespace
++{
++
++
++   void createDir( char const * pszPath )
++   {
++      char  szPath[1024];
++      char *pEnd = szPath;
++      char del= 0;
++      if( !pszPath )
++         return;
++      strcpy( szPath, pszPath );
++      do
++      {
++         while( *pEnd != 0 && *pEnd != '/' && *pEnd != '\\' )
++            ++pEnd;
++         del = *pEnd;
++         *pEnd = 0;
++         // Ok, if it already exists. Other errors are ignored.
++         (void)_mkdir(szPath);
++         *pEnd = del;
++         ++pEnd;
++       } while( del != 0 );
++   }
++
++
++}
++
++
++
++namespace traces
++{
++
++
++   /**
++    *
++    * Pimpl-idiom implementation class.
++    *
++   **/
++   class filer::impl
++   {
++
++      //! Save constructor parameter "BaseFilename".
++      std::string const         M_BaseFilename;
++
++      //! Save constructor parameter "MaxFilesize".
++      unsigned int const        M_MaxFilesize;
++
++      //! Has a file already been opened?
++      bool                      M_Open;
++
++      //! The day of the month, when the file has been opened.
++      unsigned int              M_OpenDay;
++
++      //! Trace file output stream.
++      std::ofstream             M_OStream;
++
++      //! Save constructor parameter "Path".
++      std::string const         M_Path;
++
++      //! Do we create trace subdirectories?
++      subdirMode const          M_SubdirMode;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param BaseFilename:           The name of the trace file, which
++       *                                will be extended for different
++       *                                generations. Do not provide an
++       *                                extension like e.g. ".trc".
++       *
++       * @param Path:                   Traces root path. The actual path
++       *                                will be extended with date info.
++       *
++       * @param SubdirMode:             Do we use trace sub-directories?
++       *
++       * @param MaxFilesize:            The maximum size a trace file is
++       *                                to grow, before a new file is used.
++       *
++      **/
++      impl
++         (
++            char const *        BaseFilename,
++            char const *        Path,
++            subdirMode          SubdirMode,
++            unsigned int        MaxFilesize
++         ) :
++         M_BaseFilename( BaseFilename ),
++         M_MaxFilesize( MaxFilesize ),
++         M_Open( false ),
++         M_OpenDay( 0 ),
++         M_OStream(),
++         M_Path( Path ),
++         M_SubdirMode( SubdirMode )
++      {
++      }
++
++      /**
++       *
++       * Open a new trace file for writing.
++       *
++       * @param T:              A reference for the current time.
++       *
++      **/
++      void openNewFile( SYSTEMTIME const & T )
++      {
++         std::string Filename = M_Path;
++         if( M_SubdirMode != Subdir_None )
++         {
++            Filename += "\\";
++            char MmDd[10];
++            if( M_SubdirMode == Subdir_MM_DD )
++            {
++               // Make subdirectory "MM_DD"
++               sprintf
++               (
++                  MmDd,
++                  "%02d_%02d",
++                  T.wMonth, T.wDay
++               );
++            }
++            else
++            {
++               // Make subdirectory "DDMM"
++               sprintf
++               (
++                  MmDd,
++                  "%02d%02d",
++                  T.wDay, T.wMonth
++               );
++            }
++            Filename += MmDd;
++            createDir( Filename.c_str() );
++         }
++         Filename += "\\";
++         Filename += M_BaseFilename;
++         char Hms[18];
++         sprintf
++         (
++            Hms, ".%02d%02d%02d.trc",
++            T.wHour, T.wMinute, T.wSecond
++         );
++         Filename += Hms;
++         M_OStream.open( Filename.c_str() );
++         M_OpenDay = T.wDay;
++      }
++
++      /**
++       *
++       * Write a trace entry.
++       *
++       * @param Entry:          The string to write.
++       *
++      **/
++      void write( char const * Entry ) throw()
++      {
++         try
++         {
++            SYSTEMTIME T;
++            GetLocalTime( &T );
++            if( !M_Open )
++            {
++               // First call to write - open a new trace file.
++               openNewFile( T );
++               M_Open = true;
++            }
++            else if
++               (
++                  static_cast<unsigned int>( M_OStream.tellp() ) >
++                  M_MaxFilesize
++               )
++            {
++               // File size exceeds maximum allowed - new trace file.
++               M_OStream.close();
++               openNewFile( T );
++            }
++            else if( T.wDay != M_OpenDay )
++            {
++               // Date changed - new trace file.
++               M_OStream.close();
++               openNewFile( T );
++            }
++            char Timestamp[20];
++            sprintf
++               (
++                  Timestamp, "%02d:%02d:%02d.%1d ",
++                  T.wHour, T.wMinute, T.wSecond, T.wMilliseconds / 100
++               );
++            M_OStream << Timestamp << Entry << std::endl;
++         }
++         catch( ... )
++         {
++         }
++      }
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      impl();
++
++   };
++
++
++}
++
++
++
++/*
++ *
++ * Method implementation, see "tracesFiler.hpp".
++ *
++ */
++traces::filer::filer
++   (
++      char const * BaseFilename,
++      char const * Path,
++      subdirMode   SubdirMode,
++      unsigned int MaxFilesize
++   ) :
++   M_Impl
++      (
++         new traces::filer::impl
++            (
++               BaseFilename, Path, SubdirMode,
++               MaxFilesize
++            )
++      )
++{
++}
++
++
++
++/*
++ *
++ * Method implementation, see "tracesFiler.hpp".
++ *
++ */
++traces::filer::~filer() throw()
++{
++   try
++   {
++      delete M_Impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Method implementation, see "tracesFiler.hpp".
++ *
++ */
++void traces::filer::write( char const * Entry ) throw()
++{
++   M_Impl->write( Entry );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToLocal.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToLocal.cpp
+new file mode 100644
+index 00000000..d51e10fb
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToLocal.cpp
+@@ -0,0 +1,517 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToLocal.cpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2010 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "Tools/tracesToLocal.hpp"
++
++#include "mAutoMutex.hpp"
++#include "nConfigCache.hpp"
++#include "nConfigNumber.hpp"
++#include "nConfigSelection.hpp"
++#include "nConfigText.hpp"
++#include "tracesMac.hpp"
++#include "Tools/tracesFiler.hpp"
++
++#include <iostream>
++#include <string>
++
++
++
++namespace
++{
++
++
++   /**
++    *
++    * List of possible trace level selections.
++    *
++   **/
++   nConfig::selection const CfgTraceLevelValues[] =
++   {
++      nConfig::selection( 0, "Level 0", "No traces (lowest level)" ),
++      nConfig::selection( 1, "Level 1", "Major error" ),
++      nConfig::selection( 2, "Level 2", "Minor error" ),
++      nConfig::selection( 3, "Level 3", "Major warning" ),
++      nConfig::selection( 4, "Level 4", "Minor warning" ),
++      nConfig::selection( 5, "Level 5", "Basic runtime" ),
++      nConfig::selection( 6, "Level 6", "Basic process" ),
++      nConfig::selection( 7, "Level 7", "Secondary runtime" ),
++      nConfig::selection( 8, "Level 8",
++         "Secondary frequent (highest level, show all)" )
++   };
++
++
++   /**
++    *
++    * Tracelevel configuration class.
++    *
++   **/
++   class cfgTraceLevel :
++      public nConfig::cache<traces::level,nConfig::gclSelection>
++   {
++
++      traces::level uncached()
++      {
++         switch( getIndex() )
++         {
++         default:
++         case 0: return traces::Lvl_None;
++         case 1: return traces::Lvl_MajorError;
++         case 2: return traces::Lvl_MinorError;
++         case 3: return  traces::Lvl_MajorWarning;
++         case 4: return  traces::Lvl_MinorWarning;
++         case 5: return  traces::Lvl_BasicRuntime;
++         case 6: return  traces::Lvl_BasicProcess;
++         case 7: return  traces::Lvl_SecondaryRuntime;
++         case 8: return  traces::Lvl_SecondaryFrequent;
++         }
++      }
++
++   protected:
++
++     /**
++      *
++      * This method is called, when the configuration subsystem needs
++      * to create a new configuration item.
++      *
++     **/
++      void create
++           (
++              char const * &               Rights,
++              char const * &               Explanation,
++              long &                       DefaultNdx,
++              nConfig::selection const * & Begin,
++              nConfig::selection const * & End
++           )
++      {
++         Rights = 0;         // Use the default
++         Explanation = "Select the amount of trace entries to be written.";
++         DefaultNdx = 5; // Basic runtime
++         Begin = CfgTraceLevelValues;
++         End = CfgTraceLevelValues
++             + sizeof(CfgTraceLevelValues)/sizeof(nConfig::selection);
++      }
++
++   public:
++
++      cfgTraceLevel
++         (
++            std::string const & L_ConfigClientName,
++            std::string const & Item
++         ) :
++         nConfig::cache<traces::level,nConfig::gclSelection>
++         (
++            Item.c_str(),
++            L_ConfigClientName.c_str()
++         )
++      {
++      }
++
++   private:
++
++      cfgTraceLevel();
++
++   };
++
++
++   /**
++    *
++    * Trace file maximum size configuration class.
++    *
++   **/
++   class cfgTraceMaxFilesize :
++      public nConfig::cache<unsigned int,nConfig::gclNumber>
++   {
++
++      //! Called by nConfig::cache template to get the value.
++      unsigned int uncached()
++      {
++         return static_cast<unsigned int>( get() );
++      }
++
++   protected:
++
++      //! Called by the configuration client library to create the item.
++      void create
++         (
++            char const * & Rights,
++            char const * & Explanation,
++            long &         Def,
++            long &         Min,
++            long &         Max
++         )
++      {
++         Rights = "rwl";
++         Explanation = "Enter the maximum size in bytes, to which a trace"
++                       " file may grow before it is closed and a new trace"
++                       " file is used. Please note: Values below 1000 will"
++                       " not be accepted.";
++         Def = 10000000;        // Default to 10MB.
++         Min = 1000;            // A ridiculous minimum.
++         Max = LONG_MAX;
++      }
++
++   public:
++
++      //! Constructor.
++      cfgTraceMaxFilesize
++         (
++            std::string const & L_ConfigClientName,
++            std::string const & Item
++         ) :
++         nConfig::cache<unsigned int,nConfig::gclNumber>
++         (
++            Item.c_str(),
++            L_ConfigClientName.c_str()
++         )
++      {
++      }
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      cfgTraceMaxFilesize();
++
++   };
++
++
++   /**
++    *
++    * Trace path configuration class.
++    *
++   **/
++   class cfgTracePath :
++      public nConfig::cache<std::string,nConfig::gclText>
++   {
++
++      //! Called by nConfig::cache template to get the value.
++      std::string uncached()
++      {
++         return get();
++      }
++
++   protected:
++
++      //! Called by the configuration client library to create the item.
++      void create
++         (
++            char const * & Rights,
++            char const * & Explanation,
++            char const * & Def
++         )
++      {
++         Rights = "rwl";
++         Explanation = "Enter the root path for traces. Trace files will"
++                       " be created here or in subdirectories.";
++         Def = "trc";
++      }
++
++   public:
++
++      //! Constructor.
++      cfgTracePath
++         (
++            std::string const & L_ConfigClientName,
++            std::string const & Item
++         ) :
++         nConfig::cache<std::string,nConfig::gclText>
++         (
++            Item.c_str(),
++            L_ConfigClientName.c_str()
++         )
++      {
++      }
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      cfgTracePath();
++
++   };
++
++
++   /**
++    *
++    * List of possible trace level selections.
++    *
++   **/
++   nConfig::selection const CfgTraceToConsole[] =
++   {
++      nConfig::selection( 0, "No", "Quiescent console" ),
++      nConfig::selection( 1, "Yes", "Duplicate trace output to console" )
++   };
++
++
++   /**
++    *
++    * Tracelevel configuration class.
++    *
++   **/
++   class cfgTraceToConsole :
++      public nConfig::cache<bool,nConfig::gclSelection>
++   {
++
++      bool uncached()
++      {
++         switch( getIndex() )
++         {
++         default:
++         case 0: return false;
++         case 1: return true;
++         }
++      }
++
++   protected:
++
++     /**
++      *
++      * This method is called, when the configuration subsystem needs
++      * to create a new configuration item.
++      *
++     **/
++      void create
++           (
++              char const * &               Rights,
++              char const * &               Explanation,
++              long &                       DefaultNdx,
++              nConfig::selection const * & Begin,
++              nConfig::selection const * & End
++           )
++      {
++         Rights = 0;         // Use the default
++         Explanation = "Shall traces be written to the console too?";
++         DefaultNdx = 0; // No
++         Begin = CfgTraceToConsole;
++         End = CfgTraceToConsole
++             + sizeof(CfgTraceToConsole)/sizeof(nConfig::selection);
++      }
++
++   public:
++
++      cfgTraceToConsole
++         (
++            std::string const & L_ConfigClientName,
++            std::string const & Item
++         ) :
++         nConfig::cache<bool,nConfig::gclSelection>
++         (
++            Item.c_str(),
++            L_ConfigClientName.c_str()
++         )
++      {
++      }
++
++   private:
++
++      cfgTraceToConsole();
++
++   };
++
++
++   /**
++    *
++    * Create a trace header from FILE and LINE data.
++    *
++    * @param F:         Filename from __FILE__ macro.
++    *
++    * @param L:         Source line from __LINE__ macro.
++    *
++    * @return:          A pretty trace line header.
++    *
++   **/
++   std::string makeFL( char const * F, int L )
++   {
++      std::string File( F );
++      // Strip path info
++      std::string::size_type const Slash = File.find_last_of( "\\" );
++      if( Slash != std::string::npos )
++         File = File.substr( Slash + 1 );
++      // Strip extension
++      std::string::size_type const Dot = File.find_last_of( "." );
++      if( Slash != std::string::npos )
++         File = File.substr( 0, Dot );
++      //
++      std::ostringstream R;
++      R << File << "(" << L << "):";
++      // To align trace data fill with spaces to get a min size of 30.
++      int Ind = 30 - static_cast<int>( R.str().size() );
++      while( --Ind >= 0 ) R << " ";
++      return R.str();
++   }
++
++
++}
++
++
++
++/**
++ *
++ * Traces macro class constructor.
++ *
++ * @param Lvl:          The trace level to meet for this statement.
++ *
++ * @param Fil:          The source file name.
++ *
++ * @param Lin:          The line number in the source file.
++ *
++**/
++traces::metaLFL::metaLFL( traces::level Lvl, char const * Fil, int Lin ) :
++   M_Level( Lvl ),
++   M_Formatted( makeFL( Fil, Lin ) )
++{
++}
++
++
++
++/**
++ *
++ * Writer implementation class.
++ *
++**/
++class tracesToLocal::writer::impl
++{
++
++   //! Holds the complete configuration path prefix.
++   std::string const                    M_APrefix;
++
++   Materna::MSSD::mutexSemaphore        M_Mutex;
++   //! Trace level configuration object.
++   cfgTraceLevel                        M_TraceLevel;
++
++   //! Trace file size maximum configuration object.
++   cfgTraceMaxFilesize                  M_TraceMaxFilesize;
++
++   //! Trace path configuration object.
++   cfgTracePath                         M_TracePath;
++
++   //! Trace to console configuration object.
++   cfgTraceToConsole                    M_TraceToConsole;
++
++   //! Trace file control.
++   traces::filer                        M_Filer;
++
++public:
++
++   //! Constructor.
++   explicit impl( char const * Name ) :
++      M_APrefix
++         (
++            std::string( Name ) + ".Trace control."
++         ),
++      M_Mutex(),
++      M_TraceLevel( Name, M_APrefix + "Tracelevel" ),
++      M_TraceMaxFilesize( Name, M_APrefix + "File size maximum" ),
++      M_TracePath( Name, M_APrefix + "File path" ),
++      M_TraceToConsole( Name, M_APrefix + "To console" ),
++      M_Filer
++         (
++            Name,
++            M_TracePath.get(),
++            traces::filer::Subdir_None,
++            M_TraceMaxFilesize.get()
++         )
++   {
++   }
++
++   ~impl()
++   {
++   }
++
++   //! Implementation class method - like interface class method.
++   traces::level currentLevel()
++   {
++      return M_TraceLevel.cached();
++   }
++
++   //! Implementation class method - like interface class method.
++   void write( char const * Entry ) throw()
++   {
++      try
++      {
++         if( M_TraceToConsole.cached() )
++         {
++            // Do not re-enter.
++            Materna::MSSD::autoMutex AutoMutex( M_Mutex );
++            std::cout << Entry << std::endl;
++         }
++         M_Filer.write( Entry );
++      }
++      catch( ... )
++      {
++      }
++   }
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   impl();
++
++};
++
++
++
++// Method implementation - see "gciTrace.hpp"
++traces::level tracesToLocal::writer::currentLevel() const
++{
++   return M_Impl->currentLevel();
++}
++
++
++
++// Method implementation, see "tracesToLocal.hpp".
++void tracesToLocal::writer::write
++   (
++      traces::meta const &      Meta,
++      char const *              Text
++   )
++{
++   // Source-file-line information
++   std::string TraceBuffer = Meta.getFormatted();
++   // Trace entry
++   TraceBuffer += Text;
++   M_Impl->write( TraceBuffer.c_str() );
++}
++
++
++
++// Method implementation, see "tracesToLocal.hpp".
++tracesToLocal::writer::writer
++   (
++      char const *              Filename
++   ) :
++   M_Impl( new impl( Filename ) )
++{
++}
++
++
++
++// Method implementation, see "tracesToLocal.hpp".
++tracesToLocal::writer::~writer() throw()
++{
++   try
++   {
++      delete M_Impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

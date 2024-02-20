@@ -1,0 +1,1124 @@
+From 8f6e2ec225f357edb5aca45df6ca3d361dfcdc0f Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 6 Oct 2014 14:01:10 +0000
+Subject: [PATCH 0504/1000] MANTIS 0032431 Implemented the basic functionality
+ of LRESULT CALLBACK WindowConfig::wndProc
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@731 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h | 131 +++---
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  47 ++-
+ .../Massai/cpp/mControl/inc/mControl_impl.h   |  24 +-
+ .../cpp/mControl/inc/mControl_servant.h       |  14 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  22 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 395 ++++++++++++++++--
+ .../cpp/mControl/src/mControl_dialog.cpp      |  85 ++--
+ .../Massai/cpp/mControl/src/mControl_impl.cpp |   5 +-
+ .../Massai/cpp/mControl/src/mControl_main.cpp |  60 +--
+ .../cpp/mControl/src/mControl_tools.cpp       |  73 ++++
+ 10 files changed, 628 insertions(+), 228 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 1028ecd0..65d2347a 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -25,69 +25,100 @@ namespace mControl
+ {
+ 	class WindowConfig
+     {
+-        protected:
+-            WNDCLASSEX      m_Wcex;
++    private:
++        WNDCLASSEX      m_Wcex;
+ 
+-            LPCTSTR         m_Title; 
+-            LPCTSTR         m_ClassName;
+-            
+-            HWND            m_HWnd; 
+-
+-            HINSTANCE       m_HInstance; 
+-            
+-            HMENU           m_HMenu; 
+-            
+-            int             m_style; 
+-            int             m_exStyle; 
+-            int             m_x, m_y; 
+-            int             m_width, m_height;
++        LPCTSTR         m_title; 
+ 
+-        public:
+-            /**
+-            * Initializes the WNDCLASSEX Object and calls the RegisterWindow() Method of the Windows API.
+-            */
+-            int registerWindow();
++        HWND            m_hWnd; 
++        HBITMAP         m_hbmMain;
+ 
++        int             m_exStyle; 
++        int             m_xCoordinate, m_yCoordinate; 
++        int             m_width, m_height;
+ 
+-
+-            /**
+-            * Initializes the HWDW Object and calls the CreateWindow() Method of the Windows API.
+-            */
+-            int createWindow();
+-
++        HBITMAP         m_hBitmap_info_1, 
++                        m_hBitmap_info_2;
+             
++        HWND            m_hWndLoad,
++                        m_hWndInfo_1,
++                        m_hWndInfo_2;
+ 
+-            /**
+-            * Calls the ShowWindow() Method of the Window API, with the correct Parameters.
+-            */
+-            void showWindow(int cmd);
+ 
+ 
++    protected:
++        // returns a pointer the window (stored as the WindowLong)
++        inline static WindowConfig *GetObjectFromWindow(HWND hWnd)
++        {
++            return (WindowConfig *)GetWindowLong(hWnd, GWL_USERDATA);
++        }
+ 
+-            /**
+-            * Attribut getter Methods
+-            */
+-            HWND getHwnd();
++    public:
++        /**
++        * Initializes the WNDCLASSEX Object and calls the RegisterWindow() Method of the Windows API.
++        */
++        int registerWindow();
+ 
+-            //Constructor
+-            WindowConfig(HINSTANCE hInst);
++        static LRESULT CALLBACK startUPWndProc(HWND hWnd, UINT msg, WPARAM w, LPARAM l); 
++        LRESULT CALLBACK wndProc(HWND, UINT, WPARAM, LPARAM);
+ 
++        /**
++        * Initializes the HWDW Object and calls the CreateWindow() Method of the Windows API.
++        */
++        int createWindow();
+ 
++            
+ 
+-            /**
+-            * Other (might useful) Methods. Not yet implemented
+-            */
+-            void SetInstance(HINSTANCE hInstance); // Required
+-            void SetClassName(LPCTSTR lpClassName); // Required
+-            void SetStyle(UINT uiStyle);
+-            void SetIcon(HICON hIcon);
+-            void SetIconSmall(HICON hIcon);
+-            void SetCursor(HCURSOR hCursor);
+-            void SetBackground(HBRUSH hbrBackground);
+-            void SetMenu(LPCTSTR lpMenuName);
+-            void SetClsExtra(int cbClsExtra);
+-            void SetWndExtra(int cbWndExtra);
+-            LPCTSTR GetClassName() const;
++        /**
++        * Calls the ShowWindow() Method of the Window API, with the correct Parameters.
++        */
++        void showWindow(int cmd);
++
++
++
++        //Constructor
++        WindowConfig(HINSTANCE hInst);
++
++
++
++        /**
++        * Attribut getter Methods
++        */
++        HBITMAP getHBitMap(){ return m_hbmMain; }
++        HBITMAP getHBitMapInfo1(){ return m_hBitmap_info_1; }
++        HBITMAP getHBitMapInfo2(){ return m_hBitmap_info_2; }
++        HWND getHwnd(){ return m_hWnd; }
++        HWND getHwndLoad(){ return m_hWndLoad; }
++        HWND getHwndInfo1(){ return m_hWndInfo_1; }
++        HWND getHwndInfo2(){ return m_hWndInfo_2; }
++
++        HINSTANCE getInstance(){ return m_Wcex.hInstance; }
++        LPCTSTR getClassName() const;
++
++        /**
++        * Attribut setter Methods
++        */
++        void setInstance(HINSTANCE hInstance){ m_Wcex.hInstance = hInstance; }
++        void setClassName(LPCTSTR lpClassName){ m_Wcex.lpszClassName = lpClassName; }
++        void setStyle(UINT uiStyle){ m_Wcex.style = uiStyle; }
++        void setX(int x){ m_xCoordinate = x; }
++        void setY(int y){ m_yCoordinate = y; }
++        void setWidth(int width){ m_width = width; }
++        void setHeight(int height){ m_height = height; }
++        void setHWnd(HWND hWnd){ m_hWnd = hWnd; }
++        void setHWndLoad(HWND hWnd){ m_hWndLoad = hWnd; }
++        void setHWndInfo1(HWND hWnd){ m_hWndInfo_1 = hWnd; }
++        void setHWndInfo2(HWND hWnd){ m_hWndInfo_2 = hWnd; }
++        void setHBitMap(HBITMAP bitMap){ m_hbmMain = bitMap; }
++        void setHBitMapInfo1(HBITMAP bitMap){ m_hBitmap_info_1 = bitMap; }
++        void setHBitMapInfo2(HBITMAP bitMap){ m_hBitmap_info_2 = bitMap; }
++        
++        //void setIcon(HICON hIcon){}
++        //void setIconSmall(HICON hIcon);
++        //void setCursor(HCURSOR hCursor);
++        //void setBackground(HBRUSH hbrBackground);
++        //void setMenu(LPCTSTR lpMenuName)
+     };
+ }
++
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index a171c706..ed84cfb2 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -17,6 +17,9 @@
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Notification.h"
+ 
++#include "..\inc\mControl_config.h"
++
++
+ //Windows includes
+ #include <windows.h>
+ #include <stdlib.h>
+@@ -32,35 +35,43 @@ namespace mControl
+     class Dialog  : public Runnable
+     {
+     private:
+-      NotificationQueue &         m_notificationQueue; 
++        NotificationQueue &         m_notificationQueue; 
++        WindowConfig                m_windowConfig;
+ 
+     public:
+-      /**
+-      * Windows MessageQueue Handler
+-      */
+-      static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
++        /**
++        * Calls the ShowWindow() Methods of the Window-API with the given Parameter
++        */
++        int init(int nCmdShow);
++
++
++
++        /**
++        * Windows MessageQueue Handler
++        */
++        static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+ 
+ 
+ 
+-      /**
+-      * Needs to be implemented from the Runnable interface.
+-      * Here the it should handle the Messages, which are insereted by the Scheduler and the Rebooter.
+-      */
+-      void run();
++        /**
++        * Needs to be implemented from the Runnable interface.
++        * Here the it should handle the Messages, which are insereted by the Scheduler and the Rebooter.
++        */
++        void run();
+ 	  
+ 
+ 
+-      /**
+-      * getter Methods
+-      */
+-      NotificationQueue& getNotificationQueue();
++        /**
++        * getter Methods
++        */
++        NotificationQueue& getNotificationQueue();
+ 
+ 
+ 
+-      //Constructor
+-      Dialog(NotificationQueue& queue);
+-      //Destructor
+-	  ~Dialog();
++        //Constructor
++        Dialog(NotificationQueue& queue, HINSTANCE hInst);
++        //Destructor
++	    ~Dialog();
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+index cc1d2b5e..7ec18429 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+@@ -24,24 +24,24 @@ namespace mControl
+     class mControl_Impl
+     {
+         private:
+-          NotificationQueue   m_notificationQueue;
+-          Scheduler      m_scheduledTasks;
+-          KioskReboot         m_kioskRebooter;
+-          Dialog              m_Dialog;
++            NotificationQueue   m_notificationQueue;
++            Scheduler           m_scheduledTasks;
++            KioskReboot         m_kioskRebooter;
++            Dialog              m_Dialog;
+           
+         public:
+-          /**
+-          * getter Methods
+-          */
+-          Scheduler&     getScheduler();
+-          KioskReboot&        getRebooter();
+-          Dialog&             getDialog();
+-          NotificationQueue&  getQueue();
++            /**
++            * getter Methods
++            */
++            Scheduler&          getScheduler();
++            KioskReboot&        getRebooter();
++            Dialog&             getDialog();
++            NotificationQueue&  getQueue();
+ 
+ 
+ 
+           //Constructor
+-          mControl_Impl();
++          mControl_Impl(HINSTANCE hInst);
+           //Destructor
+           ~mControl_Impl();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+index 25d19096..60c31efc 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+@@ -22,13 +22,15 @@
+ 
+ namespace mControl
+ {
+-    class Servant : public POA_Controller::kioskControl
++    class MControlServant : public POA_Controller::kioskControl
+     {
+-        public:
+-            //Constructor
+-	        Servant();
+-            //Destructor
+-	        ~Servant();
++    private:
++
++    public:
++        //Constructor
++	    MControlServant();
++        //Destructor
++	    ~MControlServant();
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index e4ff437c..7f8b22a5 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -13,8 +13,28 @@
+ #ifndef TOOLS_H
+ #define TOOLS_H
+ 
++//Windows includes
++#include <windows.h>
++#include <stdlib.h>
++#include <tchar.h>
++#include <string>
++
++#include <sys\stat.h>
++
++using namespace std;
++
+ namespace mControl
+ {
+-    class Tools;
++    class Tools
++    {
++    public:
++            
++        static HBITMAP CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName);
++            
++        static bool fileExists (const string& name);          
++
++        static bool serverMode(bool flag){ return flag; }
++    };
+ }
++
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index ba30d024..7d0a4482 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -9,49 +9,55 @@
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
++#include <Windows.h>
+ 
+ #include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_dialog.h"
++#include "..\inc\mControl_tools.h"
++
++#include <Commctrl.h>
++
++
++
++#include <iostream>
++
++#include "trc/trace.h"
+ 
+ namespace mControl
+ {
+     WindowConfig::WindowConfig(HINSTANCE hInst) :
+         m_Wcex(),
+-        m_Title(TEXT(APP_NAME)),
+-        m_ClassName(TEXT(CLASS_NAME)),
+-        m_HWnd(),
+-        m_HInstance(),    
+-        m_HMenu(),
+-        m_style(CS_HREDRAW | CS_VREDRAW), 
++        m_title(TEXT(APP_NAME)),
++        m_hWnd(), 
++        m_hbmMain(),
+         m_exStyle(0), 
+-        m_x(CW_USEDEFAULT),
+-        m_y(CW_USEDEFAULT),
++        m_xCoordinate(CW_USEDEFAULT),
++        m_yCoordinate(CW_USEDEFAULT),
+         m_width(500),
+         m_height(500)
+     {
+-        m_HInstance = hInst;
++        m_Wcex.hInstance = hInst;
+     }
+ 
+     int WindowConfig::registerWindow()
+     {
+         m_Wcex.cbSize = sizeof(WNDCLASSEX);
+-        m_Wcex.style          = m_style;
+-        m_Wcex.lpfnWndProc    = Dialog::WndProc;
++        m_Wcex.style          = CS_HREDRAW | CS_VREDRAW;
++        m_Wcex.lpfnWndProc    = startUPWndProc;
+         m_Wcex.cbClsExtra     = 0;
+         m_Wcex.cbWndExtra     = 0;
+-        m_Wcex.hInstance      = m_HInstance;
+-        m_Wcex.hIcon          = LoadIcon(m_HInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++        m_Wcex.hIcon          = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+         m_Wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
+         m_Wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
+         m_Wcex.lpszMenuName   = NULL;
+-        m_Wcex.lpszClassName  = m_ClassName;
++        m_Wcex.lpszClassName  = TEXT(CLASS_NAME);
+         m_Wcex.hIconSm        = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+ 
+         if (!RegisterClassEx(&m_Wcex))
+         {
+             MessageBox(NULL,
+                 _T("Call to RegisterClassEx failed!"),
+-                _T("Win32 Guided Tour"),
++                _T("mControl"),
+                 NULL);
+ 
+             return 1;
+@@ -61,49 +67,372 @@ namespace mControl
+     int WindowConfig::createWindow()
+     {
+         // The parameters to CreateWindow explained:
+-        // m_ClassName: the name of the application
+-        // m_Title: the text that appears in the title bar
++        // m_className: the name of the application
++        // m_title: the text that appears in the title bar
+         // WS_OVERLAPPEDWINDOW: the type of window to create
+         // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
+         // m_width, m_height: initial size (width, length)
+         // NULL: the parent of this window
+         // NULL: this application dows not have a menu bar
+-        // m_HInstance: the first parameter from WinMain
++        // m_hInstance: the first parameter from WinMain
+         // NULL: not used in this application
+-        m_HWnd = ::CreateWindow(
+-            m_ClassName,
+-            m_Title,
+-            m_style,
++        m_hWnd = ::CreateWindow(
++            m_Wcex.lpszClassName,
++            m_title,
++            m_Wcex.style,
+             CW_USEDEFAULT, CW_USEDEFAULT,
+             m_width, m_height,
+             NULL,
+             NULL,
+-            m_HInstance,
+-            NULL
++            m_Wcex.hInstance,
++            (void *)this
+         );
+ 
+-        if (!m_HWnd)
++        if (!m_hWnd)
+         {
+             MessageBox(NULL,
+                 _T("Call to CreateWindow failed!"),
+-                _T("Win32 Guided Tour"),
++                _T("mControl"),
+                 NULL);
+ 
+             return 1;
+         }
+     }
+ 
+-    HWND WindowConfig::getHwnd()
+-    {
+-        return m_HWnd;
+-    }
+-
+     void WindowConfig::showWindow(int cmd)
+     {
+         // The parameters to ShowWindow explained:
+         // hWnd: the value returned from CreateWindow
+         // nCmdShow: the fourth parameter from WinMain
+-        ::ShowWindow(m_HWnd, cmd); 
+-        UpdateWindow(m_HWnd);
++        ::ShowWindow(m_hWnd, cmd); 
++        UpdateWindow(m_hWnd);
++    }
++
++    LRESULT CALLBACK WindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
++    { 
++        WindowConfig* pWnd;
++
++        if (msg == WM_NCCREATE)
++        {
++            TRACE(HERE,"WM_NCCREATE");
++
++            // get the pointer to the window from
++            // lpCreateParams which was set in CreateWindow
++            SetWindowLong(hWnd, GWL_USERDATA, 
++               (long)((LPCREATESTRUCT(lParam))->lpCreateParams));
++        }
++
++        // get the pointer to the window
++        pWnd = GetObjectFromWindow(hWnd);
++
++        // if we have the pointer, go to the message handler of the window
++        // else, use DefWindowProc
++        if (pWnd)
++            return pWnd->wndProc(hWnd, msg, wParam, lParam);
++        else
++            return DefWindowProc(hWnd, msg, wParam, lParam);
++    }
++
++    LRESULT CALLBACK WindowConfig::wndProc
++        (
++            HWND hWnd, 
++            UINT message, 
++            WPARAM wParam, 
++            LPARAM lParam
++        )
++    {  
++        static int                  x,cx,
++                                    y,cy,
++                                    cxLoad,
++                                    cyLoad;
++
++        PAINTSTRUCT                 ps;
++
++        RECT                        rect;
++
++        BITMAP                      bitmap;
++
++        HDC                         hdc,
++                                    hdcMem;
++
++        long                        rc;
++
++        INITCOMMONCONTROLSEX        iccex;
++
++        TCHAR           greeting[] = _T("Hello, World!");        
++
++
++        switch (message)
++        {
++            case WM_CREATE:
++                TRACE(HERE,"WM_CREATE");
++
++                iccex.dwSize = sizeof(INITCOMMONCONTROLSEX);
++                iccex.dwICC  = ICC_PROGRESS_CLASS;
++
++                if (!InitCommonControlsEx(&iccex))
++                {
++                TRACE(HERE,"Error initializing CommonControls ");
++                }
++
++                x =  0;
++                y =  0;
++                cx = GetSystemMetrics(SM_CXSCREEN);
++                cy = GetSystemMetrics(SM_CYSCREEN);
++
++                hdc = GetDC(hWnd);
++
++
++
++                if(Tools::serverMode(false))
++                    this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small.bmp") );
++                else
++                {
++                    if(cx<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
++                    {
++                        this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
++                    }
++                    else if(cx>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
++                    {
++                        this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
++                    }
++
++                    if(!this->m_hbmMain)
++                    {
++                        if(Tools::fileExists(".\\mcontrol.bmp"))
++                        {
++                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol.bmp") );
++                        } 
++                        else if(Tools::fileExists(".\\mcontrol_1280.bmp"))
++                        {
++                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
++                        } 
++                        else if(Tools::fileExists(".\\mcontrol_1024.bmp"))
++                        {
++                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
++                        }
++                    }
++                }
++
++                ReleaseDC(hWnd, hdc);
++
++                if(!Tools::serverMode(false))
++                {
++
++                    cyLoad = 20;
++
++                    //TRACE(HERE,"x = %d, y = %d, cx = %d, cy = %d",x,y,cx,cy);
++
++                    SetWindowPos(hWnd,HWND_TOPMOST,x,y,cx,cy,0);
++                }
++                else
++                {
++                    x = 0;
++                    y = 0;
++
++                    cx = 384;
++                    cy = 288;
++
++                    cyLoad = 10;
++                }
++
++                //GetClientRect(hWnd,&rect);
++
++                //TRACE(HERE,"x = %d, y = %d, cx = %d, cy = %d",rect.left,rect.top,rect.right,rect.bottom);
++
++                cxLoad = cx; // - cx/4;
++
++                this->setHWndLoad( CreateWindow(
++                                        PROGRESS_CLASS,
++                                        NULL,
++                                        WS_CHILD | WS_VISIBLE | PBS_SMOOTH,
++                                        0,
++                                        cy   - cyLoad,
++                                        cxLoad,
++                                        cyLoad,
++                                        hWnd,
++                                        NULL,
++                                        this->getInstance(),
++                                        NULL) 
++                                );
++
++                SendMessage(this->getHwndLoad(),PBM_SETRANGE,0,MAKELPARAM(0,100));
++                SendMessage(this->getHwndLoad(),PBM_SETPOS,0,0);
++                SendMessage(this->getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
++
++                UpdateWindow(this->m_hWndLoad);
++
++                this->setHWndInfo1( CreateWindow(
++                                        TEXT("STATIC"),
++                                        NULL,
++                                        WS_CHILD | SS_BITMAP | SS_REALSIZEIMAGE | SS_CENTERIMAGE,
++                                        0,
++                                        0,
++                                        100,
++                                        100,
++                                        hWnd,
++                                        NULL,
++                                        this->getInstance(),
++                                        NULL)
++                                );
++
++                SetClassLong(this->getHwndInfo1() ,GCL_STYLE,CS_HREDRAW | CS_VREDRAW);
++
++                hdc = GetDC(this->getHwndInfo1());
++
++                this->setHBitMapInfo1( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_ds.bmp") );
++                if(!this->getHBitMapInfo1())
++                {
++                    TRACE(HERE,".\\mcontrol_small_ds.bmp not found");
++                }
++
++                BITMAP tmpBmp;
++                GetObjectA(this->getHBitMapInfo1(), sizeof(BITMAP), &tmpBmp);
++                
++                
++                int iLpos,iTpos;
++                ((cx-tmpBmp.bmWidth)!=0)?iLpos=(cx-tmpBmp.bmWidth)/2:iLpos=0;
++                ((cy-tmpBmp.bmHeight)!=0)?iTpos=(cy-tmpBmp.bmHeight)/2:iTpos=0;
++                
++                MoveWindow(this->getHwndInfo1(),iLpos,iTpos,tmpBmp.bmWidth,tmpBmp.bmHeight,false);
++                SendMessage(this->getHwndInfo1(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->m_hBitmap_info_1);
++
++                ReleaseDC(this->getHwndInfo1(), hdc);
++
++                this->setHWndInfo2( CreateWindow(
++                                        TEXT("STATIC"),
++                                        NULL,
++                                        WS_CHILD | SS_BITMAP | SS_REALSIZEIMAGE | SS_CENTERIMAGE,
++                                        0,
++                                        0,
++                                        100,
++                                        100,
++                                        hWnd,
++                                        NULL,
++                                        getInstance(),
++                                        NULL)
++                                );
++
++                SetClassLong(this->getHwndInfo2() ,GCL_STYLE,CS_HREDRAW | CS_VREDRAW);
++
++                hdc = GetDC(this->getHwndInfo2());
++
++                this->setHBitMapInfo2( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_su.bmp") );
++                if(!this->getHBitMapInfo2())
++                {
++                    TRACE(HERE,".\\mcontrol_small_su.bmp not found");
++                }
++
++                BITMAP tmpBmp1;
++                GetObjectA(this->getHBitMapInfo2(), sizeof(BITMAP), (LPSTR)&tmpBmp1);
++                
++                ((cx-tmpBmp1.bmWidth)!=0)?iLpos=(cx-tmpBmp1.bmWidth)/2:iLpos=0;
++                ((cy-tmpBmp1.bmHeight)!=0)?iTpos=(cy-tmpBmp1.bmHeight)/2:iTpos=0;
++                
++                MoveWindow(this->getHwndInfo2(),iLpos,iTpos,tmpBmp1.bmWidth,tmpBmp1.bmHeight,false);
++                SendMessage(this->getHwndInfo2(),STM_SETIMAGE, (WPARAM)IMAGE_BITMAP,(LPARAM)this->getHBitMapInfo2());
++
++                ReleaseDC(this->getHwndInfo2(), hdc);
++
++                ShowWindow(this->getHwndInfo1(),SW_HIDE);
++                ShowWindow(this->getHwndInfo2(),SW_HIDE);
++                
++                break;
++
++            case WM_PAINT:
++                TRACE(HERE,"WM_PAINT");
++
++                hdc = BeginPaint(hWnd, &ps);
++
++
++                if(this->m_hbmMain)
++                  {
++                    GetObjectA(m_hbmMain,sizeof(BITMAP),&bitmap);
++
++                    hdcMem = CreateCompatibleDC (hdc);
++                    SelectObject(hdcMem, m_hbmMain);
++
++                    GetClientRect(hWnd,&rect);
++
++                    //x = rect.right / 2  - bitmap.bmWidth / 2;
++                    //y = rect.bottom / 2 - bitmap.bmHeight / 2;
++
++                    if(Tools::serverMode(false))
++                      BitBlt(hdc,0,0,cx,cy,hdcMem,0,0,SRCCOPY);
++                    else
++                      StretchBlt(hdc,
++                                 0,0, rect.right, rect.bottom,
++                                 hdcMem,
++                                 0,0, bitmap.bmWidth, bitmap.bmHeight,
++                                 SRCCOPY);
++
++                    DeleteDC(hdcMem);
++                  }
++                
++                // End application specific layout section.
++                EndPaint(hWnd, &ps);
++                
++                break;
++
++            case WM_DESTROY:
++                TRACE(HERE,"WM_DESTROY");
++
++                DestroyWindow(this->m_hWndLoad);
++                DestroyWindow(this->m_hWndInfo_1);
++                DestroyWindow(this->m_hWndInfo_2);
++
++                PostQuitMessage(0);
++                break;
++
++            case WM_CLOSE:
++                TRACE(HERE,"WM_CLOSE");
++
++                TRACE(HERE,"shutting down controller...");
++
++                //waitForStarterTermination();
++
++                // execute system commands after platform stopped
++                //execSysCmdsShutdown();
++
++                //if(pAlert) delete pAlert;
++
++                PostQuitMessage(0);
++
++                break;
++
++            //case WM_MCONTROL_PROGRESS:
++            case WM_KEYUP:
++                TRACE(SecondaryRuntime_HERE,"WM_KEYUP");
++
++                switch(wParam)
++                {
++                case VK_F1:
++                    MessageBox(hWnd,
++                            TEXT("You may use the following function keys:\n\n"
++                                 "[F1]\t\tto display this help message.\n"
++                                 "[F8]\t\tto minimize this window and to start the Windows Explorer for administration work.\n"
++                                 "[F9]/[F11]\tto minimize this window for administration work.\n"
++                                 "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"
++                                 "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
++                            TEXT("Massai"),
++                            MB_ICONINFORMATION | MB_OK);
++                    break;
++                case VK_F8:
++                    break;
++                case VK_F9:
++                case VK_F11:
++                    break;
++                case VK_F12:
++                    break;
++                }
++                break;
++            
++            default:
++                //TRACE(HERE,"default [%d]", message);
++                return DefWindowProc(hWnd, message, wParam, lParam);
++                break;
++        }
++
++        return 0;
+     }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index b8a9fdf4..c9b6557e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -16,6 +16,8 @@
+ #include "..\inc\mControl_dialog.h"
+ #include "..\inc\mControl_notification.h"
+ 
++#include "..\inc\mControl_tools.h"
++
+ #include "trc/trace.h"
+ 
+ #include "Poco/AutoPtr.h"
+@@ -25,13 +27,13 @@ using namespace std;
+ 
+ namespace mControl
+ {
+-  NotificationQueue& Dialog::getNotificationQueue()
+-  {
++    NotificationQueue& Dialog::getNotificationQueue()
++    {
+     return m_notificationQueue;
+-  }
++    }
+   
+-  void Dialog::run()
+-  {
++    void Dialog::run()
++    {
+     TRACE(HERE,"Dialog-Thread run() started...");
+     TRACE(HERE,"Size of NotificationQueue in Dialog: [%d] ", m_notificationQueue.size());
+ 
+@@ -42,58 +44,43 @@ namespace mControl
+     //work as long as there are Notifications
+     while(!m_notificationQueue.empty())
+     {    
+-      //get next Notification
+-      pNf = m_notificationQueue.waitDequeueNotification();
+-      pWorkNf = dynamic_cast<MControlNotification*>(pNf.get());
++        //get next Notification
++        pNf = m_notificationQueue.waitDequeueNotification();
++        pWorkNf = dynamic_cast<MControlNotification*>(pNf.get());
+       
+-      if (pWorkNf)
+-      {
++        if (pWorkNf)
++        {
+         string data = pWorkNf->data();
+         TRACE(HERE,"MControlNotification dequeued");
+         pWorkNf->printString();
+-      }
++        }
++    }
+     }
+-  }
+ 	    
+-  Dialog::Dialog(NotificationQueue& queue) :
+-    m_notificationQueue(queue)
+-  {
+-  }
+-
+-	Dialog::~Dialog()
+-  {
+-  }
+-
+-  LRESULT CALLBACK Dialog::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+-  {
+-      PAINTSTRUCT ps;
+-      HDC hdc;
+-      TCHAR greeting[] = _T("Hello, World!");
+-
+-      switch (message)
+-      {
+-      case WM_PAINT:
+-          hdc = BeginPaint(hWnd, &ps);
++    Dialog::Dialog(NotificationQueue& queue, HINSTANCE hInst) :
++        m_notificationQueue(queue),
++        m_windowConfig(hInst)
++    {
++    }
+ 
+-          // Here your application is laid out.
+-          // For this introduction, we just print out "Hello, World!"
+-          // in the top left corner.
+-          TextOut(hdc,
+-              5, 5,
+-              greeting, _tcslen(greeting));
+-          // End application specific layout section.
++    Dialog::~Dialog()
++    {
++    }
+ 
+-          EndPaint(hWnd, &ps);
+-          break;
+-      case WM_DESTROY:
+-          PostQuitMessage(0);
+-          break;
+-      default:
+-          return DefWindowProc(hWnd, message, wParam, lParam);
+-          break;
+-      }
++    int Dialog::init(int nCmdShow)
++    {
++        m_windowConfig.registerWindow();
++        m_windowConfig.createWindow();
++        m_windowConfig.showWindow(nCmdShow);
+ 
+-      return 0;
+-  }
++        // Main message loop:
++        MSG msg;
++        while (GetMessage(&msg, NULL, 0, 0))
++        {
++            TranslateMessage(&msg);
++            DispatchMessage(&msg);
++        }
+ 
++        return (int) msg.wParam;
++    }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+index 50b26ebb..82a66074 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+@@ -14,12 +14,11 @@
+ 
+ namespace mControl
+ {
+-  
+-  mControl_Impl::mControl_Impl() :
++  mControl_Impl::mControl_Impl(HINSTANCE hInst) :
+     m_notificationQueue(),
+     m_scheduledTasks(m_notificationQueue),
+     m_kioskRebooter(100, m_notificationQueue),
+-    m_Dialog(m_notificationQueue)
++    m_Dialog(m_notificationQueue, hInst)
+   {}
+ 
+   Scheduler& mControl_Impl::getScheduler() 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 89b3d05a..09eb600e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -39,14 +39,6 @@ using Poco::ThreadPool;
+ using Poco::AutoPtr;
+ 
+ 
+-
+-// Global variables                                                 //VARIABLEN IN KLASSE PACKEN
+-
+-    
+-
+-    HINSTANCE hInst;
+-
+-
+ //---------------------------------------------------------------------------
+ //
+ //  function:   int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPreInst, char *szCmdLine, int iCmdShow)
+@@ -60,53 +52,9 @@ using Poco::AutoPtr;
+ //---------------------------------------------------------------------------
+ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+ {
++    openTrace("mControl");
+ 
+-    WNDCLASSEX wcex;
+-    mControl_Impl impl;
+-
+-    WindowConfig windowConfig(hInstance);
+-    windowConfig.registerWindow();
+-    windowConfig.createWindow();
+-    windowConfig.showWindow(nCmdShow);
+-
+-    // Main message loop:
+-    MSG msg;
+-    while (GetMessage(&msg, NULL, 0, 0))
+-    {
+-        TranslateMessage(&msg);
+-        DispatchMessage(&msg);
+-    }
+-
+-    return (int) msg.wParam;
+-}
+-
+-
+-
+-
+-int common_main(int argc, char** argv)
+-{
+-  //just an empty console application right now
+-  
+-  openTrace("mControl");
+-  TRACE(HERE,"mControl-Main started...");
+-  
+-  mControl_Impl impl;
+-  
+-  //Start Rebooter and Scheduler
+-  ThreadPool::defaultPool().start(impl.getRebooter());
+-  //Poco::Thread::sleep(100);
+-
+-  ThreadPool::defaultPool().start(impl.getScheduler());
+-  //Poco::Thread::sleep(100);
+-  
+-  ThreadPool::defaultPool().start(impl.getDialog());
+-
+-  // tell workers they're done
+-  Poco::Thread::sleep(100);
+-  impl.getQueue().wakeUpAll(); 
+-  ThreadPool::defaultPool().joinAll();
++    mControl_Impl impl(hInstance);
++    impl.getDialog().init(nCmdShow);
+ 
+-  cout<<"\nmControl-Main finished, press any key to continue...";
+-  getchar();
+-  return 0;
+-}
++}
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index fddb369b..537c6e85 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -12,6 +12,79 @@
+ 
+ #include "..\inc\mControl_tools.h"
+ 
++#include <string>
++
++using namespace std;
++
+ namespace mControl
+ {
++    
++    HBITMAP Tools::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
++    {
++        BITMAPFILEHEADER * pbmfh;
++        BOOL               bSuccess;
++        DWORD              dwFileSize, dwHighSize, dwBytesRead;
++        HANDLE             hFile;
++        HBITMAP            hBitmap;
++
++         // Open the file: read access, prohibit write access
++
++         hFile = CreateFile(szFileName,
++                            GENERIC_READ,
++                            FILE_SHARE_READ,
++                            NULL,
++                            OPEN_EXISTING,
++                            FILE_FLAG_SEQUENTIAL_SCAN,
++                            NULL);
++
++         if(hFile == INVALID_HANDLE_VALUE)
++           return(NULL);
++
++              // Read in the whole file
++
++         dwFileSize = GetFileSize (hFile, &dwHighSize);
++
++         if(dwHighSize)
++         {
++           CloseHandle(hFile);
++           return(NULL);
++         }
++
++         pbmfh = (struct tagBITMAPFILEHEADER *)malloc (dwFileSize);
++
++         if(!pbmfh)
++         {
++           CloseHandle (hFile);
++           return(NULL);
++         }
++
++         bSuccess = ReadFile(hFile, pbmfh, dwFileSize, &dwBytesRead, NULL);
++         CloseHandle (hFile);
++
++         // Verify the file
++
++         if(!bSuccess || (dwBytesRead != dwFileSize)
++                      || (pbmfh->bfType != * (WORD *) "BM")
++                      || (pbmfh->bfSize != dwFileSize))
++         {
++           free (pbmfh);
++           return(NULL);
++         }
++              // Create the DDB
++
++         hBitmap = CreateDIBitmap(hdc,
++                                  (BITMAPINFOHEADER *) (pbmfh + 1),
++                                  CBM_INIT,
++                                  (BYTE *) pbmfh + pbmfh->bfOffBits,
++                                  (BITMAPINFO *) (pbmfh + 1),
++                                  DIB_RGB_COLORS);
++         free (pbmfh);
++
++         return(hBitmap);
++    }
++
++    bool Tools::fileExists (const string& name) {
++        struct stat buffer;   
++        return (stat (name.c_str(), &buffer) == 0); 
++    }  
+ }
+-- 
+2.41.0.windows.1
+

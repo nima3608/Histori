@@ -1,0 +1,1865 @@
+From 23bd07b13b2e8ef826aa914acddff9992cc7ba94 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 31 Jul 2013 19:22:00 +0000
+Subject: [PATCH 0452/1076] systools.lib V1.0.0.7 Mantis 0028323: GPPDev:
+ Custom VKP-80II added mSysDeviceEvent; listen on changes in device
+ configuration (USB device connected; disconnected) added mSysEvent; listen on
+ system events; helper for mSysDeviceEvent
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@550 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysDeviceEvent.h | 161 ++++
+ .../Interfaces/inc/systools/mSysEvent.h       |  24 +
+ .../cpp/Systools/inc/mSysDeviceEventW32.h     |  73 ++
+ .../Massai/cpp/Systools/inc/mSysEventW32.h    |  77 ++
+ .../Massai/cpp/Systools/makefile.mak          |  14 +-
+ .../cpp/Systools/src/TestSysDeviceEvents.cpp  | 130 +++
+ .../cpp/Systools/src/mSysDeviceEventW32.cpp   | 753 ++++++++++++++++++
+ .../Massai/cpp/Systools/src/mSysEventW32.cpp  | 544 +++++++++++++
+ 8 files changed, 1775 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
+new file mode 100644
+index 00000000..ffd96f95
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
+@@ -0,0 +1,161 @@
++// wait for device events
++
++#ifndef DEVICE_EVENT_H_INCLUDED
++#define DEVICE_EVENT_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include <set>
++#include <cstdint>
++#include <iostream>
++
++namespace mSysDevice
++{
++  class UniversallyUniqueIdentifier
++  {
++    public:
++      uint32_t  time_low;
++      uint16_t  time_mid;
++      uint16_t  time_hi_and_version;
++      uint8_t   clock_seq_hi_and_reserved;
++      uint8_t   clock_seq_low;
++      uint8_t   node[6];
++      std::string getText() const;
++  };
++
++  class Device
++  {
++    public:
++      UniversallyUniqueIdentifier uuid;
++      std::string name;
++      std::string getText() const;
++  };
++
++
++  typedef int VolumeId;
++  typedef std::set<VolumeId> VolumeIdSet;
++
++  enum Hardware
++  {
++    HW_MEDIA,
++    HW_DEVICE,
++  };
++
++  enum Location
++  {
++    LOC_LOCAL,
++    LOC_NETWORK,
++  };
++
++  class Volume
++  {
++    public:
++      VolumeIdSet ids;
++      Hardware hardware;
++      Location location;
++      std::string getText() const;
++  };
++
++
++  class Port
++  {
++    public:
++      std::string name;
++      std::string getText() const;
++  };
++
++
++  class OEMDevice
++  {
++    public:
++      uint32_t id;
++      uint32_t function;
++      std::string getText() const;
++  };
++
++
++  class File
++  {
++    public:
++      std::string getText() const;
++  };
++
++  class FileCustom: public File
++  {
++    public:
++      UniversallyUniqueIdentifier uuid;
++      std::string getText() const;
++  };
++
++  enum DeviceEvent
++  {
++    DEVICE_ADDED,
++    DEVICE_REMOVE_QUERY,
++    DEVICE_REMOVE_PENDING,
++    DEVICE_REMOVE_FAILED,
++    DEVICE_REMOVE_COMPLETE,
++    DEVICE_SPECIFIC,
++  };
++
++  enum ConfigEvent
++  {
++    CONFIG_CHANGE_QUERY,
++    CONFIG_CHANGE_CANCELED,
++    CONFIG_CHANGE_COMPLETE,
++  };
++
++  class DeviceEventListener
++  {
++    public:
++      virtual ~DeviceEventListener();
++
++      virtual void userDefinedEvent(const std::string& event);
++      virtual void deviceNodesChanged();
++
++      virtual void configEvent(ConfigEvent event);
++
++      virtual void deviceEvent(DeviceEvent event, const Device& dev);
++      virtual void deviceEvent(DeviceEvent event, const Volume& volume);
++      virtual void deviceEvent(DeviceEvent event, const Port& port);
++      virtual void deviceEvent(DeviceEvent event, const OEMDevice& device);
++      virtual void deviceEvent(DeviceEvent event, const File& file);
++
++      virtual void customEvent(const Device& dev);
++      virtual void customEvent(const Volume& volume);
++      virtual void customEvent(const Port& port);
++      virtual void customEvent(const OEMDevice& device);
++      virtual void customEvent(const FileCustom& file);
++  };
++
++  // see mSystem::System::getDeviceEventProcessor() in mSysEvent.h for obtaining a DeviceEventProcessor
++  class DeviceEventProcessor
++  {
++    public:
++      virtual ~DeviceEventProcessor();
++      virtual void addListener(DeviceEventListener& listener) = 0;
++      virtual void rmvListener(DeviceEventListener& listener) = 0;
++  };
++
++  std::ostream& operator<<(std::ostream& out, const UniversallyUniqueIdentifier& data);
++  std::ostream& operator<<(std::ostream& out, const Device& data);
++  std::ostream& operator<<(std::ostream& out, const VolumeIdSet& data);
++  std::ostream& operator<<(std::ostream& out, const Hardware& data);
++  std::ostream& operator<<(std::ostream& out, const Location& data);
++  std::ostream& operator<<(std::ostream& out, const Volume& data);
++  std::ostream& operator<<(std::ostream& out, const Port& data);
++  std::ostream& operator<<(std::ostream& out, const OEMDevice& data);
++  std::ostream& operator<<(std::ostream& out, const File& data);
++  std::ostream& operator<<(std::ostream& out, const FileCustom& data);
++  std::ostream& operator<<(std::ostream& out, const DeviceEvent& data);
++  std::ostream& operator<<(std::ostream& out, const ConfigEvent& data);
++
++  std::string getVolumeIdText(VolumeId data);
++  std::string getHardwareText(Hardware data);
++  std::string getLocationText(Location data);
++  std::string getDeviceEventText(DeviceEvent data);
++  std::string getConfigEventText(ConfigEvent data);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+new file mode 100644
+index 00000000..6d05d039
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+@@ -0,0 +1,24 @@
++// wait for system events
++
++#ifndef SYSEVENTS_H_INCLUDED
++#define SYSEVENTS_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "systools/mSysDeviceEvent.h"
++#include "tools/TraceInterface.h"
++
++namespace mSysEvent
++{
++  class System
++  {
++    public:
++      virtual ~System();
++      virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor() = 0;
++  };
++
++  System* createSystem(MASSAI::trace::TraceInterface& trc);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
+new file mode 100644
+index 00000000..fa1f64e0
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
+@@ -0,0 +1,73 @@
++// device broadcast event, listen on WM_DEVICECHANGE events
++
++#ifndef MSYSDEVICEEVENTW32_H_INCLUDED
++#define MSYSDEVICEEVENTW32_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "systools/mMutexCS.h"
++#include "systools/mSysDeviceEvent.h"
++#include "tools/TraceInterface.h"
++#include "mSysEventW32.h"
++#include <windows.h>
++#include <Dbt.h>
++#include <list>
++
++
++namespace mSysDevice
++{
++  typedef std::list<DeviceEventListener*> DeviceEventListenerList;
++
++  class DeviceEventProcessorImpl:
++    public DeviceEventProcessor,
++    private mSysEvent::SystemMessageListener,
++    private DeviceEventListener,
++    private mSysEvent::SystemMessageCall
++  {
++    public:
++      DeviceEventProcessorImpl(mSysEvent::SystemMessageProcessor& processor, MASSAI::trace::TraceInterface& trc);
++      virtual ~DeviceEventProcessorImpl();
++      void init();
++      virtual void addListener(DeviceEventListener& listener);
++      virtual void rmvListener(DeviceEventListener& listener);
++
++    private:
++      DeviceEventListenerList getListener();
++      void registerDeviceEvents(HWND messageWindow);
++      void unregisterDeviceEvents();
++
++      void userDefinedEvent(const _DEV_BROADCAST_USERDEFINED& param);
++      bool allowDeviceRemove(const DEV_BROADCAST_HDR& header);
++      void customEvent(const DEV_BROADCAST_HDR& header);
++      void deviceEvent(DeviceEvent event, const DEV_BROADCAST_HDR& header);
++
++      virtual void execute(HWND messageWindow);
++      virtual void message(UINT message, WPARAM wParam, LPARAM lParam);
++
++      virtual void userDefinedEvent(const std::string& event);
++      virtual void deviceNodesChanged();
++
++      virtual void configEvent(ConfigEvent event);
++
++      virtual void deviceEvent(DeviceEvent event, const Device& dev);
++      virtual void deviceEvent(DeviceEvent event, const Volume& volume);
++      virtual void deviceEvent(DeviceEvent event, const Port& port);
++      virtual void deviceEvent(DeviceEvent event, const OEMDevice& device);
++      virtual void deviceEvent(DeviceEvent event, const File& file);
++
++      virtual void customEvent(const Device& dev);
++      virtual void customEvent(const Volume& volume);
++      virtual void customEvent(const Port& port);
++      virtual void customEvent(const OEMDevice& device);
++      virtual void customEvent(const FileCustom& file);
++
++      mSysEvent::SystemMessageProcessor& m_processor;
++      DeviceEventListenerList m_listener;
++      Materna::MSSD::Mutex m_access;
++      MASSAI::trace::TraceInterface& m_trc;
++      HDEVNOTIFY m_interfaceNotification;
++    };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
+new file mode 100644
+index 00000000..1651478e
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
+@@ -0,0 +1,77 @@
++#ifndef MSYSEVENTSEW32_H_INCLUDED
++#define MSYSEVENTSEW32_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "systools/mMutexCS.h"
++#include "systools/mSysEvent.h"
++#include "systools/mSysThread.hpp"
++#include "tools/TraceInterface.h"
++#include <windows.h>
++#include <map>
++#include <list>
++
++namespace mSysEvent
++{
++  class SystemMessageListener
++  {
++    public:
++      virtual ~SystemMessageListener();
++      virtual void message(UINT message, WPARAM wParam, LPARAM lParam) = 0;
++  };
++
++  class SystemMessageCall
++  {
++    public:
++      virtual ~SystemMessageCall();
++      virtual void execute(HWND messageWindow) = 0;
++  };
++
++  typedef std::list<SystemMessageCall*> CallList;
++  typedef std::list<SystemMessageListener*> ListenerList;
++  typedef std::map<UINT, ListenerList> ListenerMap;
++
++  class SystemMessageProcessor:
++    public System,
++    private mSysThread::thread,
++    private SystemMessageListener
++  {
++    public:
++      SystemMessageProcessor(MASSAI::trace::TraceInterface& trc);
++      ~SystemMessageProcessor();
++
++      void init();
++
++      void addListener(UINT msg, SystemMessageListener& listener);
++      void rmvListener(UINT msg, SystemMessageListener& listener);
++      void invoke(SystemMessageCall& call);
++
++      // System
++      virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor();
++
++      LRESULT handleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
++
++    private:
++      ListenerList getListener(UINT msg);
++      virtual void function();
++      virtual void message(UINT message, WPARAM wParam, LPARAM lParam);
++      void postWindowMessage(UINT message, WPARAM wParam, LPARAM lParam);
++      void checkCallList();
++      void invokeCallList();
++      void registerWindowClass();
++      void unregisterWindowClass();
++      void createWindow();
++
++      Materna::MSSD::Mutex m_access;
++      CallList m_callList;
++      ListenerMap m_listener;
++      MASSAI::trace::TraceInterface& m_trc;
++      DWORD m_threadId;
++      bool m_terminate;
++      mSysDevice::DeviceEventProcessor* m_deviceEventProcessor;
++      HWND m_window;
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 056c51a2..da98e63d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -42,7 +42,9 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mMutexCSW32.obj \
+                         $(_OBJ)\mSysWindowW32.obj \
+                         $(_OBJ)\mSysServiceMonitorW32.obj \
+-                        $(_OBJ)\mSysProcessTreeW32.obj
++                        $(_OBJ)\mSysProcessTreeW32.obj \
++                        $(_OBJ)\mSysDeviceEventW32.obj \
++                        $(_OBJ)\mSysEventW32.obj \
+ 
+ 
+ ######################################################################
+@@ -96,5 +98,15 @@ MY_BIN6_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
+ 
+ MY_BIN6_OBJS =          $(_OBJ)\TestSysProcessTree.obj
+ 
++######################################################################
++
++MY_BIN7 =               $(_BIN)\TestSysDeviceEvents.exe
++
++MY_BIN7_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
++
++MY_BIN7_LINKLIBS =      User32.lib
++
++MY_BIN7_OBJS =          $(_OBJ)\TestSysDeviceEvents.obj
++
+ #######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
+new file mode 100644
+index 00000000..031ccd5c
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
+@@ -0,0 +1,130 @@
++// Test mSysDeviceEvents
++
++#include "systools/mSysDeviceEvent.h"
++#include "systools/mSysEvent.h"
++#include "tools/TraceLocal.h"
++#include "systools/mEventSem.hpp"
++#include "systools/mSysException.hpp"
++#include "systools/mSysProcessTerminate.h"
++#include <iostream>
++
++
++using namespace mSysEvent;
++using namespace mSysDevice;
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceInterface;
++using mSysException::standardException;
++using Materna::MSSD::eventSemaphore;
++using Materna::MSSD::eventSemaphore_Exception;
++
++namespace
++{
++  class DeviceEventListenerImpl: public DeviceEventListener
++  {
++    public:
++      DeviceEventListenerImpl(TraceInterface& trc):
++        m_trc(trc)
++      {}
++
++      ~DeviceEventListenerImpl()
++      {}
++
++      void userDefinedEvent(const std::string& event)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "userDefinedEvent (%s)", event.c_str());
++      }
++
++      void deviceNodesChanged()
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceNodesChanged");
++      }
++
++      void configEvent(ConfigEvent event)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "configEvent (%s; %d)", getConfigEventText(event).c_str(), event);
++      }
++
++      void deviceEvent(DeviceEvent event, const Device& dev)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceEvent (%s; %d) dev:(%s)", getDeviceEventText(event).c_str(), event, dev.getText().c_str());
++      }
++
++      void deviceEvent(DeviceEvent event, const Volume& volume)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceEvent (%s; %d) volume:(%s)", getDeviceEventText(event).c_str(), event, volume.getText().c_str());
++      }
++
++      void deviceEvent(DeviceEvent event, const Port& port)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceEvent (%s; %d) port:(%s)", getDeviceEventText(event).c_str(), event, port.getText().c_str());
++      }
++
++      void deviceEvent(DeviceEvent event, const OEMDevice& device)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceEvent (%s; %d) dev:(%s)", getDeviceEventText(event).c_str(), event, device.getText().c_str());
++      }
++
++      void deviceEvent(DeviceEvent event, const File& file)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "deviceEvent (%s; %d) file:(%s)", getDeviceEventText(event).c_str(), event, file.getText().c_str());
++      }
++
++      void customEvent(const Device& dev)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "customEvent (%s) dev:(%s)", dev.getText().c_str());
++      }
++
++      void customEvent(const Volume& volume)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "customEvent (%s) volume:(%s)", volume.getText().c_str());
++      }
++
++      void customEvent(const Port& port)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "customEvent (%s) port:(%s)", port.getText().c_str());
++      }
++
++      void customEvent(const OEMDevice& device)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "customEvent (%s) device:(%s)", device.getText().c_str());
++      }
++
++      void customEvent(const FileCustom& file)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "customEvent (%s) file:(%s)", file.getText().c_str());
++      }
++
++    private:
++      TraceInterface& m_trc;
++  };
++}
++
++int main(int argc, char **argv)
++{
++  eventSemaphore terminate;
++  TraceLocal trc("TestSysDeviceEvents");
++  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_LATE, &terminate, &trc);
++  standardException guard;
++  try
++  {
++    DeviceEventListenerImpl listener(trc);
++    System* system = createSystem(trc);
++    DeviceEventProcessor* deviceEvents = system->getDeviceEventProcessor();
++    deviceEvents->addListener(listener);
++    terminate.wait();
++    delete system;
++  }
++  catch(const eventSemaphore_Exception&)
++  {
++    trc.writeTrace(MajorError_HERE, "open semaphore failed");
++  }
++  catch(const std::exception& x)
++  {
++    trc.writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  mSysProcessTerminate::resetShutdownHook();
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
+new file mode 100644
+index 00000000..31f3367d
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
+@@ -0,0 +1,753 @@
++// device broadcast event, listen on WM_DEVICECHANGE events
++
++#include "systools/mSysDeviceEvent.h"
++#include "mSysDeviceEventW32.h"
++#include "systools/mAutoMutexCS.h"
++#include "mSysEventW32.h"
++#include "mSysErrorW32.h"
++#include <sstream>
++#include <iomanip>
++#include <list>
++
++using Materna::MSSD::AutoMutexCS;
++using mSysEvent::SystemMessageProcessor;
++using mSysEvent::SystemMessageListener;
++using namespace mSysDevice;
++
++namespace
++{
++  DeviceEvent getDeviceEvent(WPARAM wparam)
++  {
++    switch(wparam)
++    {
++      case DBT_DEVICEARRIVAL:           return DEVICE_ADDED;
++      case DBT_DEVICEQUERYREMOVEFAILED: return DEVICE_REMOVE_FAILED;
++      case DBT_DEVICEREMOVECOMPLETE:    return DEVICE_REMOVE_COMPLETE;
++      case DBT_DEVICEREMOVEPENDING:     return DEVICE_REMOVE_PENDING;
++      case DBT_DEVICETYPESPECIFIC:      return DEVICE_SPECIFIC;
++      default:                          return DEVICE_SPECIFIC;
++    }
++  }
++
++  ConfigEvent getConfigEvent(WPARAM wparam)
++  {
++    switch(wparam)
++    {
++      case DBT_CONFIGCHANGECANCELED: return CONFIG_CHANGE_CANCELED;
++      case DBT_CONFIGCHANGED:        return CONFIG_CHANGE_COMPLETE;
++      case DBT_QUERYCHANGECONFIG:    return CONFIG_CHANGE_QUERY;
++      default:                       return CONFIG_CHANGE_QUERY;
++    }
++  }
++
++  UniversallyUniqueIdentifier getUUID(const GUID& guid)
++  {
++    UniversallyUniqueIdentifier result;
++    result.time_low                  = guid.Data1;
++    result.time_mid                  = guid.Data2;
++    result.time_hi_and_version       = guid.Data3;
++    result.clock_seq_hi_and_reserved = guid.Data4[0];
++    result.clock_seq_low             = guid.Data4[1];
++    for(unsigned int i = 0; i < sizeof(result.node)/sizeof(*result.node); i++)
++    {
++      result.node[i] = guid.Data4[i+2];
++    }
++    return result;
++  }
++
++  Device getDevice(const DEV_BROADCAST_DEVICEINTERFACE& device)
++  {
++    Device result;
++    int length = device.dbcc_size - sizeof(DEV_BROADCAST_DEVICEINTERFACE) + 1;
++    if(length > 0)
++    {
++      result.name = std::string(device.dbcc_name, length);
++    }
++    result.uuid = getUUID(device.dbcc_classguid);
++    return result;
++  }
++
++  File getFile(const DEV_BROADCAST_HANDLE& device)
++  {
++    File result;
++    return result;
++  }
++
++  FileCustom getFileCustom(const DEV_BROADCAST_HANDLE& file)
++  {
++    FileCustom result;
++    result.uuid = getUUID(file.dbch_eventguid);
++    return result;
++  }
++
++  OEMDevice getOEMDevice(const DEV_BROADCAST_OEM& device)
++  {
++    OEMDevice result;
++    result.id = device.dbco_identifier;
++    result.function = device.dbco_suppfunc;
++    return result;
++  }
++
++  Port getPort(const DEV_BROADCAST_PORT& port)
++  {
++    Port result;
++    int length = port.dbcp_size - sizeof(DEV_BROADCAST_PORT) + 1;
++    if(length > 0)
++    {
++      result.name = std::string(port.dbcp_name, length);
++    }
++    return result;
++  }
++
++  VolumeIdSet getVolumeIds(DWORD mask)
++  {
++    VolumeIdSet result;
++    DWORD bit = 1;
++    for(VolumeId i = 0; i < sizeof(mask)*8; i++)
++    {
++      if(mask & bit)
++      {
++        result.insert(i);
++      }
++      bit<<= 1;
++    }
++    return result;
++  }
++
++  Hardware getHardware(WORD flags)
++  {
++    return (flags & DBTF_MEDIA)?HW_MEDIA:HW_DEVICE;
++  }
++
++  Location getLocation(WORD flags)
++  {
++    return (flags & DBTF_NET)?LOC_NETWORK:LOC_LOCAL;
++  }
++
++  Volume getVolume(const DEV_BROADCAST_VOLUME& volume)
++  {
++    Volume result;
++    result.ids = getVolumeIds(volume.dbcv_unitmask);
++    result.hardware = getHardware(volume.dbcv_flags);
++    result.location = getLocation(volume.dbcv_flags);
++    return result;
++  }
++
++  std::string getName(const _DEV_BROADCAST_USERDEFINED& param)
++  {
++    int length = param.dbud_dbh.dbch_size - sizeof(_DEV_BROADCAST_USERDEFINED) + 1;
++    if(length > 0)
++    {
++      return std::string(param.dbud_szName, length);
++    }
++    else
++    {
++      return std::string();
++    }
++  }
++}
++
++namespace mSysDevice
++{
++  DeviceEventProcessorImpl::DeviceEventProcessorImpl(SystemMessageProcessor& processor, MASSAI::trace::TraceInterface& trc):
++    DeviceEventProcessor(),
++    SystemMessageListener(),
++    DeviceEventListener(),
++    m_processor(processor),
++    m_listener(),
++    m_access(),
++    m_trc(trc),
++    m_interfaceNotification(0)
++  {}
++
++  DeviceEventProcessorImpl::~DeviceEventProcessorImpl()
++  {
++    m_processor.rmvListener(WM_DEVICECHANGE, *this);
++    unregisterDeviceEvents();
++  }
++
++  void DeviceEventProcessorImpl::init()
++  {
++    m_processor.addListener(WM_DEVICECHANGE, *this);
++    m_processor.invoke(*this);
++  }
++
++  void DeviceEventProcessorImpl::addListener(DeviceEventListener& listener)
++  {
++    AutoMutexCS mx(m_access);
++    m_listener.push_back(&listener);
++  }
++
++  void DeviceEventProcessorImpl::rmvListener(DeviceEventListener& listener)
++  {
++    AutoMutexCS mx(m_access);
++    m_listener.remove(&listener);
++  }
++
++  DeviceEventListenerList DeviceEventProcessorImpl::getListener()
++  {
++    DeviceEventListenerList result;
++    AutoMutexCS mx(m_access);
++    {
++      result = m_listener;
++    }
++    return result;
++  }
++
++#ifndef DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
++#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 4
++#endif
++
++  void DeviceEventProcessorImpl::registerDeviceEvents(HWND messageWindow)
++  {
++    DEV_BROADCAST_DEVICEINTERFACE interfaceFilter;
++    ZeroMemory(&interfaceFilter, sizeof(interfaceFilter));
++    interfaceFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
++    interfaceFilter.dbcc_size = sizeof(interfaceFilter);
++
++    m_interfaceNotification = RegisterDeviceNotification
++    (
++      messageWindow,
++      &interfaceFilter,
++      DEVICE_NOTIFY_WINDOW_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
++    );
++    if(!m_interfaceNotification)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegisterDeviceNotification", GetLastError());
++    }
++  }
++
++  void DeviceEventProcessorImpl::unregisterDeviceEvents()
++  {
++    if(!UnregisterDeviceNotification(m_interfaceNotification))
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "UnregisterDeviceNotification", GetLastError());
++    }
++  }
++
++  void DeviceEventProcessorImpl::execute(HWND messageWindow)
++  {
++    registerDeviceEvents(messageWindow);
++  }
++
++  void DeviceEventProcessorImpl::message(UINT message, WPARAM wParam, LPARAM lParam)
++  {
++    if(message == WM_DEVICECHANGE)
++    {
++      switch(wParam)
++      {
++        case DBT_CONFIGCHANGECANCELED:
++        case DBT_CONFIGCHANGED:
++        case DBT_QUERYCHANGECONFIG:
++        {
++          configEvent(getConfigEvent(wParam));
++          break;
++        }
++        case DBT_DEVNODES_CHANGED:
++        {
++          deviceNodesChanged();
++          break;
++        }
++        case DBT_CUSTOMEVENT:
++        {
++          customEvent(*reinterpret_cast<const DEV_BROADCAST_HDR*>(lParam));
++          break;
++        }
++        case DBT_DEVICEQUERYREMOVE:
++        case DBT_DEVICEARRIVAL:
++        case DBT_DEVICEQUERYREMOVEFAILED:
++        case DBT_DEVICEREMOVECOMPLETE:
++        case DBT_DEVICEREMOVEPENDING:
++        case DBT_DEVICETYPESPECIFIC:
++        {
++          deviceEvent(getDeviceEvent(wParam), *reinterpret_cast<const DEV_BROADCAST_HDR*>(lParam));
++          break;
++        }
++        case DBT_USERDEFINED:
++        {
++          userDefinedEvent(*reinterpret_cast<const _DEV_BROADCAST_USERDEFINED*>(lParam));
++          break;
++        }
++        default:
++        {
++          m_trc.writeTrace(MajorWarning_HERE, "unknown event (%d)", wParam);
++          break;
++        }
++      }
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const DEV_BROADCAST_HDR& header)
++  {
++    switch(header.dbch_devicetype)
++    {
++      case DBT_DEVTYP_DEVICEINTERFACE:
++      {
++        Device dev = getDevice(*reinterpret_cast<const DEV_BROADCAST_DEVICEINTERFACE*>(&header));
++        customEvent(dev);
++        break;
++      }
++      case DBT_DEVTYP_HANDLE:
++      {
++        FileCustom file = getFileCustom(*reinterpret_cast<const DEV_BROADCAST_HANDLE*>(&header));
++        customEvent(file);
++        break;
++      }
++      case DBT_DEVTYP_OEM:
++      {
++        OEMDevice dev = getOEMDevice(*reinterpret_cast<const DEV_BROADCAST_OEM*>(&header));
++        customEvent(dev);
++        break;
++      }
++      case DBT_DEVTYP_PORT:
++      {
++        Port port = getPort(*reinterpret_cast<const DEV_BROADCAST_PORT*>(&header));
++        customEvent(port);
++        break;
++      }
++      case DBT_DEVTYP_VOLUME:
++      {
++        Volume volume = getVolume(*reinterpret_cast<const DEV_BROADCAST_VOLUME*>(&header));
++        customEvent(volume);
++        break;
++      }
++      default:
++      {
++        m_trc.writeTrace(MajorWarning_HERE, "unknown type (%d)", header.dbch_devicetype);
++        break;
++      }
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const DEV_BROADCAST_HDR& header)
++  {
++    switch(header.dbch_devicetype)
++    {
++      case DBT_DEVTYP_DEVICEINTERFACE:
++      {
++        Device dev = getDevice(*reinterpret_cast<const DEV_BROADCAST_DEVICEINTERFACE*>(&header));
++        deviceEvent(event, dev);
++        break;
++      }
++      case DBT_DEVTYP_HANDLE:
++      {
++        File file = getFile(*reinterpret_cast<const DEV_BROADCAST_HANDLE*>(&header));
++        deviceEvent(event, file);
++        break;
++      }
++      case DBT_DEVTYP_OEM:
++      {
++        OEMDevice dev = getOEMDevice(*reinterpret_cast<const DEV_BROADCAST_OEM*>(&header));
++        deviceEvent(event, dev);
++        break;
++      }
++      case DBT_DEVTYP_PORT:
++      {
++        Port port = getPort(*reinterpret_cast<const DEV_BROADCAST_PORT*>(&header));
++        deviceEvent(event, port);
++        break;
++      }
++      case DBT_DEVTYP_VOLUME:
++      {
++        Volume volume = getVolume(*reinterpret_cast<const DEV_BROADCAST_VOLUME*>(&header));
++        deviceEvent(event, volume);
++        break;
++      }
++      default:
++      {
++        m_trc.writeTrace(MajorWarning_HERE, "unknown type (%d) for (%s) (%d)", header.dbch_devicetype, getDeviceEventText(event).c_str(), event);
++        break;
++      }
++    }
++  }
++
++  void DeviceEventProcessorImpl::userDefinedEvent(const _DEV_BROADCAST_USERDEFINED& param)
++  {
++    std::string name = getName(param);
++    userDefinedEvent(name);
++  }
++
++  void DeviceEventProcessorImpl::userDefinedEvent(const std::string& event)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->userDefinedEvent(event);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceNodesChanged()
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceNodesChanged();
++    }
++  }
++
++  void DeviceEventProcessorImpl::configEvent(ConfigEvent event)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->configEvent(event);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Device& dev)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceEvent(event, dev);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Volume& volume)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceEvent(event, volume);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Port& port)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceEvent(event, port);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const OEMDevice& device)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceEvent(event, device);
++    }
++  }
++
++  void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const File& file)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->deviceEvent(event, file);
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const Device& dev)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->customEvent(dev);
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const Volume& volume)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->customEvent(volume);
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const Port& port)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->customEvent(port);
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const OEMDevice& device)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->customEvent(device);
++    }
++  }
++
++  void DeviceEventProcessorImpl::customEvent(const FileCustom& file)
++  {
++    DeviceEventListenerList listener = getListener();
++    DeviceEventListenerList::iterator it = listener.begin();
++    DeviceEventListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->customEvent(file);
++    }
++  }
++
++
++  std::string UniversallyUniqueIdentifier::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string Device::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string Volume::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string Port::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string OEMDevice::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string File::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::string FileCustom::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++
++  DeviceEventListener::~DeviceEventListener()
++  {}
++
++  void DeviceEventListener::userDefinedEvent(const std::string& event)
++  {}
++
++  void DeviceEventListener::deviceNodesChanged()
++  {}
++
++  void DeviceEventListener::configEvent(ConfigEvent event)
++  {}
++
++  void DeviceEventListener::deviceEvent(DeviceEvent event, const Device& dev)
++  {}
++
++  void DeviceEventListener::deviceEvent(DeviceEvent event, const Volume& volume)
++  {}
++
++  void DeviceEventListener::deviceEvent(DeviceEvent event, const Port& port)
++  {}
++
++  void DeviceEventListener::deviceEvent(DeviceEvent event, const OEMDevice& device)
++  {}
++
++  void DeviceEventListener::deviceEvent(DeviceEvent event, const File& file)
++  {}
++
++  void DeviceEventListener::customEvent(const Device& dev)
++  {}
++
++  void DeviceEventListener::customEvent(const Volume& volume)
++  {}
++
++  void DeviceEventListener::customEvent(const Port& port)
++  {}
++
++  void DeviceEventListener::customEvent(const OEMDevice& device)
++  {}
++
++  void DeviceEventListener::customEvent(const FileCustom& file)
++  {}
++
++
++  DeviceEventProcessor::~DeviceEventProcessor()
++  {}
++
++
++  std::ostream& operator<<(std::ostream& out, const UniversallyUniqueIdentifier& data)
++  {
++    out << std::hex << std::setfill('0') << std::setw(8) << data.time_low << "-";
++    out << std::hex << std::setfill('0') << std::setw(4) << data.time_mid << "-";
++    out << std::hex << std::setfill('0') << std::setw(4) << data.time_hi_and_version << "-";
++    out << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(data.clock_seq_hi_and_reserved) << "-";
++    out << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(data.clock_seq_low) << "-";
++    for(unsigned int i = 0; i < sizeof(data.node)/sizeof(*data.node); i++)
++    {
++      out << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(data.node[i]);
++    }
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Device& data)
++  {
++    out << "uuid(" << data.uuid << "); ";
++    out << "name(" << data.name << ")";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const VolumeIdSet& data)
++  {
++    VolumeIdSet::const_iterator it = data.begin();
++    VolumeIdSet::const_iterator end = data.end();
++    out << "{";
++    for(; it != end; it++)
++    {
++      out << getVolumeIdText(*it) << "; ";
++    }
++    out << "}";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Hardware& data)
++  {
++    out << getHardwareText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Location& data)
++  {
++    out << getLocationText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Volume& data)
++  {
++    int hw = data.hardware;
++    int loc = data.location;
++    out << "ids(" << data.ids << "); ";
++    out << "hardware(" << data.hardware << "; " << hw << "); ";
++    out << "location(" << data.location << "; " << loc << ")";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Port& data)
++  {
++    out << "name(" << data.name << ")";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const OEMDevice& data)
++  {
++    out << "id(" << data.id << "); ";
++    out << "function(" << data.function << ")";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const File& data)
++  {
++    out << "()";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const FileCustom& data)
++  {
++    out << "uuid(" << data.uuid << ")";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const DeviceEvent& data)
++  {
++    out << getDeviceEventText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ConfigEvent& data)
++  {
++    out << getConfigEventText(data);
++    return out;
++  }
++
++  std::string getVolumeIdText(VolumeId data)
++  {
++    return std::string(1, 'A' + data);
++  }
++
++  std::string getHardwareText(Hardware data)
++  {
++    switch(data)
++    {
++      case HW_MEDIA:  return "Media";
++      case HW_DEVICE: return "Device";
++      default:        return "unknown";
++    }
++  }
++
++  std::string getLocationText(Location data)
++  {
++    switch(data)
++    {
++      case LOC_LOCAL:   return "Local";
++      case LOC_NETWORK: return "Network";
++      default:          return "unknown";
++    }
++  }
++
++  std::string getDeviceEventText(DeviceEvent data)
++  {
++    switch(data)
++    {
++      case DEVICE_ADDED:           return "ADDED";
++      case DEVICE_REMOVE_FAILED:   return "REMOVE_FAILED";
++      case DEVICE_REMOVE_COMPLETE: return "REMOVE_COMPLETE";
++      case DEVICE_REMOVE_PENDING:  return "REMOVE_PENDING";
++      case DEVICE_SPECIFIC:        return "SPECIFIC";
++      default:                     return "unknown";
++    }
++  }
++
++  std::string getConfigEventText(ConfigEvent data)
++  {
++    switch(data)
++    {
++      case CONFIG_CHANGE_QUERY:    return "QUERY";
++      case CONFIG_CHANGE_CANCELED: return "CANCELED";
++      case CONFIG_CHANGE_COMPLETE: return "COMPLETE";
++      default:                     return "unknown";
++    }
++  }
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+new file mode 100644
+index 00000000..a4e2d220
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+@@ -0,0 +1,544 @@
++#include "systools/mSysEvent.h"
++#include "mSysEventW32.h"
++
++#include "systools/mAutoMutexCS.h"
++#include "systools/mSysException.hpp"
++#include "mSysErrorW32.h"
++#include "mSysDeviceEventW32.h"
++#include <windows.h>
++
++using Materna::MSSD::AutoMutexCS;
++using MASSAI::trace::TraceInterface;
++using mSysThread::thread;
++using mSysDevice::DeviceEventProcessor;
++using mSysDevice::DeviceEventProcessorImpl;
++using mSysException::standardException;
++using namespace mSysEvent;
++
++namespace
++{
++  enum WindowAttributes
++  {
++    GWLP_USER_OWNER = 0,
++  };
++
++  enum Messages
++  {
++    WM_CALL_LIST = WM_USER,
++  };
++
++  const char* windowClassName = "mSysEventCallbackWindow";
++
++  LRESULT CALLBACK windowCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
++  {
++    LRESULT result = 0;
++    SystemMessageProcessor* pProcessor = 0;
++    switch(msg)
++    {
++      case WM_NCCREATE:
++      {
++        CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
++        pProcessor = reinterpret_cast<SystemMessageProcessor*>(pCreate->lpCreateParams);
++        SetWindowLongPtr(hwnd, GWLP_USER_OWNER, reinterpret_cast<LONG_PTR>(pProcessor));
++        break;
++      }
++      default:
++      {
++        pProcessor = reinterpret_cast<SystemMessageProcessor*>(GetWindowLongPtr(hwnd, GWLP_USER_OWNER));
++        break;
++      }
++    }
++    if(pProcessor)
++    {
++      result = pProcessor->handleMessage(hwnd, msg, wParam, lParam);
++    }
++    else
++    {
++      result = DefWindowProc(hwnd, msg, wParam, lParam);
++    }
++    return result;
++  }
++
++  const char* getMessageText(unsigned int msg)
++  {
++    switch(msg)
++    {
++      case WM_NULL:                   return "WM_NULL";
++      case WM_CREATE:                 return "WM_CREATE";
++      case WM_DESTROY:                return "WM_DESTROY";
++      case WM_MOVE:                   return "WM_MOVE";
++      case WM_SIZE:                   return "WM_SIZE";
++      case WM_ACTIVATE:               return "WM_ACTIVATE";
++      case WM_SETFOCUS:               return "WM_SETFOCUS";
++      case WM_KILLFOCUS:              return "WM_KILLFOCUS";
++      case WM_ENABLE:                 return "WM_ENABLE";
++      case WM_SETREDRAW:              return "WM_SETREDRAW";
++      case WM_SETTEXT:                return "WM_SETTEXT";
++      case WM_GETTEXT:                return "WM_GETTEXT";
++      case WM_GETTEXTLENGTH:          return "WM_GETTEXTLENGTH";
++      case WM_PAINT:                  return "WM_PAINT";
++      case WM_CLOSE:                  return "WM_CLOSE";
++      case WM_QUERYENDSESSION:        return "WM_QUERYENDSESSION";
++      case WM_QUIT:                   return "WM_QUIT";
++      case WM_QUERYOPEN:              return "WM_QUERYOPEN";
++      case WM_ERASEBKGND:             return "WM_ERASEBKGND";
++      case WM_SYSCOLORCHANGE:         return "WM_SYSCOLORCHANGE";
++      case WM_ENDSESSION:             return "WM_ENDSESSION";
++      case WM_SHOWWINDOW:             return "WM_SHOWWINDOW";
++      case WM_WININICHANGE:           return "WM_WININICHANGE";
++      case WM_DEVMODECHANGE:          return "WM_DEVMODECHANGE";
++      case WM_ACTIVATEAPP:            return "WM_ACTIVATEAPP";
++      case WM_FONTCHANGE:             return "WM_FONTCHANGE";
++      case WM_TIMECHANGE:             return "WM_TIMECHANGE";
++      case WM_CANCELMODE:             return "WM_CANCELMODE";
++      case WM_SETCURSOR:              return "WM_SETCURSOR";
++      case WM_MOUSEACTIVATE:          return "WM_MOUSEACTIVATE";
++      case WM_CHILDACTIVATE:          return "WM_CHILDACTIVATE";
++      case WM_QUEUESYNC:              return "WM_QUEUESYNC";
++      case WM_GETMINMAXINFO:          return "WM_GETMINMAXINFO";
++      case WM_PAINTICON:              return "WM_PAINTICON";
++      case WM_ICONERASEBKGND:         return "WM_ICONERASEBKGND";
++      case WM_NEXTDLGCTL:             return "WM_NEXTDLGCTL";
++      case WM_SPOOLERSTATUS:          return "WM_SPOOLERSTATUS";
++      case WM_DRAWITEM:               return "WM_DRAWITEM";
++      case WM_MEASUREITEM:            return "WM_MEASUREITEM";
++      case WM_DELETEITEM:             return "WM_DELETEITEM";
++      case WM_VKEYTOITEM:             return "WM_VKEYTOITEM";
++      case WM_CHARTOITEM:             return "WM_CHARTOITEM";
++      case WM_SETFONT:                return "WM_SETFONT";
++      case WM_GETFONT:                return "WM_GETFONT";
++      case WM_SETHOTKEY:              return "WM_SETHOTKEY";
++      case WM_GETHOTKEY:              return "WM_GETHOTKEY";
++      case WM_QUERYDRAGICON:          return "WM_QUERYDRAGICON";
++      case WM_COMPAREITEM:            return "WM_COMPAREITEM";
++      case WM_COMPACTING:             return "WM_COMPACTING";
++      case WM_COMMNOTIFY:             return "WM_COMMNOTIFY";
++      case WM_WINDOWPOSCHANGING:      return "WM_WINDOWPOSCHANGING";
++      case WM_WINDOWPOSCHANGED:       return "WM_WINDOWPOSCHANGED";
++      case WM_POWER:                  return "WM_POWER";
++      case WM_COPYDATA:               return "WM_COPYDATA";
++      case WM_CANCELJOURNAL:          return "WM_CANCELJOURNAL";
++      case WM_NOTIFY:                 return "WM_NOTIFY";
++      case WM_INPUTLANGCHANGEREQUEST: return "WM_INPUTLANGCHANGEREQUEST";
++      case WM_INPUTLANGCHANGE:        return "WM_INPUTLANGCHANGE";
++      case WM_TCARD:                  return "WM_TCARD";
++      case WM_HELP:                   return "WM_HELP";
++      case WM_USERCHANGED:            return "WM_USERCHANGED";
++      case WM_NOTIFYFORMAT:           return "WM_NOTIFYFORMAT";
++      case WM_CONTEXTMENU:            return "WM_CONTEXTMENU";
++      case WM_STYLECHANGING:          return "WM_STYLECHANGING";
++      case WM_STYLECHANGED:           return "WM_STYLECHANGED";
++      case WM_DISPLAYCHANGE:          return "WM_DISPLAYCHANGE";
++      case WM_GETICON:                return "WM_GETICON";
++      case WM_SETICON:                return "WM_SETICON";
++      case WM_NCCREATE:               return "WM_NCCREATE";
++      case WM_NCDESTROY:              return "WM_NCDESTROY";
++      case WM_NCCALCSIZE:             return "WM_NCCALCSIZE";
++      case WM_NCHITTEST:              return "WM_NCHITTEST";
++      case WM_NCPAINT:                return "WM_NCPAINT";
++      case WM_NCACTIVATE:             return "WM_NCACTIVATE";
++      case WM_GETDLGCODE:             return "WM_GETDLGCODE";
++      case WM_SYNCPAINT:              return "WM_SYNCPAINT";
++      case WM_NCMOUSEMOVE:            return "WM_NCMOUSEMOVE";
++      case WM_NCLBUTTONDOWN:          return "WM_NCLBUTTONDOWN";
++      case WM_NCLBUTTONUP:            return "WM_NCLBUTTONUP";
++      case WM_NCLBUTTONDBLCLK:        return "WM_NCLBUTTONDBLCLK";
++      case WM_NCRBUTTONDOWN:          return "WM_NCRBUTTONDOWN";
++      case WM_NCRBUTTONUP:            return "WM_NCRBUTTONUP";
++      case WM_NCRBUTTONDBLCLK:        return "WM_NCRBUTTONDBLCLK";
++      case WM_NCMBUTTONDOWN:          return "WM_NCMBUTTONDOWN";
++      case WM_NCMBUTTONUP:            return "WM_NCMBUTTONUP";
++      case WM_NCMBUTTONDBLCLK:        return "WM_NCMBUTTONDBLCLK";
++      case WM_KEYDOWN:                return "WM_KEYDOWN";
++      case WM_KEYUP:                  return "WM_KEYUP";
++      case WM_CHAR:                   return "WM_CHAR";
++      case WM_DEADCHAR:               return "WM_DEADCHAR";
++      case WM_SYSKEYDOWN:             return "WM_SYSKEYDOWN";
++      case WM_SYSKEYUP:               return "WM_SYSKEYUP";
++      case WM_SYSCHAR:                return "WM_SYSCHAR";
++      case WM_SYSDEADCHAR:            return "WM_SYSDEADCHAR";
++      case WM_KEYLAST:                return "WM_KEYLAST";
++      case WM_IME_STARTCOMPOSITION:   return "WM_IME_STARTCOMPOSITION";
++      case WM_IME_ENDCOMPOSITION:     return "WM_IME_ENDCOMPOSITION";
++      case WM_IME_COMPOSITION:        return "WM_IME_COMPOSITION";
++      case WM_INITDIALOG:             return "WM_INITDIALOG";
++      case WM_COMMAND:                return "WM_COMMAND";
++      case WM_SYSCOMMAND:             return "WM_SYSCOMMAND";
++      case WM_TIMER:                  return "WM_TIMER";
++      case WM_HSCROLL:                return "WM_HSCROLL";
++      case WM_VSCROLL:                return "WM_VSCROLL";
++      case WM_INITMENU:               return "WM_INITMENU";
++      case WM_INITMENUPOPUP:          return "WM_INITMENUPOPUP";
++      case WM_MENUSELECT:             return "WM_MENUSELECT";
++      case WM_MENUCHAR:               return "WM_MENUCHAR";
++      case WM_ENTERIDLE:              return "WM_ENTERIDLE";
++      case WM_CTLCOLORMSGBOX:         return "WM_CTLCOLORMSGBOX";
++      case WM_CTLCOLOREDIT:           return "WM_CTLCOLOREDIT";
++      case WM_CTLCOLORLISTBOX:        return "WM_CTLCOLORLISTBOX";
++      case WM_CTLCOLORBTN:            return "WM_CTLCOLORBTN";
++      case WM_CTLCOLORDLG:            return "WM_CTLCOLORDLG";
++      case WM_CTLCOLORSCROLLBAR:      return "WM_CTLCOLORSCROLLBAR";
++      case WM_CTLCOLORSTATIC:         return "WM_CTLCOLORSTATIC";
++      case WM_MOUSEMOVE:              return "WM_MOUSEMOVE";
++      case WM_LBUTTONDOWN:            return "WM_LBUTTONDOWN";
++      case WM_LBUTTONUP:              return "WM_LBUTTONUP";
++      case WM_LBUTTONDBLCLK:          return "WM_LBUTTONDBLCLK";
++      case WM_RBUTTONDOWN:            return "WM_RBUTTONDOWN";
++      case WM_RBUTTONUP:              return "WM_RBUTTONUP";
++      case WM_RBUTTONDBLCLK:          return "WM_RBUTTONDBLCLK";
++      case WM_MBUTTONDOWN:            return "WM_MBUTTONDOWN";
++      case WM_MBUTTONUP:              return "WM_MBUTTONUP";
++      case WM_MBUTTONDBLCLK:          return "WM_MBUTTONDBLCLK";
++      case WM_PARENTNOTIFY:           return "WM_PARENTNOTIFY";
++      case WM_ENTERMENULOOP:          return "WM_ENTERMENULOOP";
++      case WM_EXITMENULOOP:           return "WM_EXITMENULOOP";
++      case WM_NEXTMENU:               return "WM_NEXTMENU";
++      case WM_SIZING:                 return "WM_SIZING";
++      case WM_CAPTURECHANGED:         return "WM_CAPTURECHANGED";
++      case WM_MOVING:                 return "WM_MOVING";
++      case WM_POWERBROADCAST:         return "WM_POWERBROADCAST";
++      case WM_DEVICECHANGE:           return "WM_DEVICECHANGE";
++      case WM_MDICREATE:              return "WM_MDICREATE";
++      case WM_MDIDESTROY:             return "WM_MDIDESTROY";
++      case WM_MDIACTIVATE:            return "WM_MDIACTIVATE";
++      case WM_MDIRESTORE:             return "WM_MDIRESTORE";
++      case WM_MDINEXT:                return "WM_MDINEXT";
++      case WM_MDIMAXIMIZE:            return "WM_MDIMAXIMIZE";
++      case WM_MDITILE:                return "WM_MDITILE";
++      case WM_MDICASCADE:             return "WM_MDICASCADE";
++      case WM_MDIICONARRANGE:         return "WM_MDIICONARRANGE";
++      case WM_MDIGETACTIVE:           return "WM_MDIGETACTIVE";
++      case WM_MDISETMENU:             return "WM_MDISETMENU";
++      case WM_ENTERSIZEMOVE:          return "WM_ENTERSIZEMOVE";
++      case WM_EXITSIZEMOVE:           return "WM_EXITSIZEMOVE";
++      case WM_DROPFILES:              return "WM_DROPFILES";
++      case WM_MDIREFRESHMENU:         return "WM_MDIREFRESHMENU";
++      case WM_IME_SETCONTEXT:         return "WM_IME_SETCONTEXT";
++      case WM_IME_NOTIFY:             return "WM_IME_NOTIFY";
++      case WM_IME_CONTROL:            return "WM_IME_CONTROL";
++      case WM_IME_COMPOSITIONFULL:    return "WM_IME_COMPOSITIONFULL";
++      case WM_IME_SELECT:             return "WM_IME_SELECT";
++      case WM_IME_CHAR:               return "WM_IME_CHAR";
++      case WM_IME_KEYDOWN:            return "WM_IME_KEYDOWN";
++      case WM_IME_KEYUP:              return "WM_IME_KEYUP";
++      case WM_CUT:                    return "WM_CUT";
++      case WM_COPY:                   return "WM_COPY";
++      case WM_PASTE:                  return "WM_PASTE";
++      case WM_CLEAR:                  return "WM_CLEAR";
++      case WM_UNDO:                   return "WM_UNDO";
++      case WM_RENDERFORMAT:           return "WM_RENDERFORMAT";
++      case WM_RENDERALLFORMATS:       return "WM_RENDERALLFORMATS";
++      case WM_DESTROYCLIPBOARD:       return "WM_DESTROYCLIPBOARD";
++      case WM_DRAWCLIPBOARD:          return "WM_DRAWCLIPBOARD";
++      case WM_PAINTCLIPBOARD:         return "WM_PAINTCLIPBOARD";
++      case WM_VSCROLLCLIPBOARD:       return "WM_VSCROLLCLIPBOARD";
++      case WM_SIZECLIPBOARD:          return "WM_SIZECLIPBOARD";
++      case WM_ASKCBFORMATNAME:        return "WM_ASKCBFORMATNAME";
++      case WM_CHANGECBCHAIN:          return "WM_CHANGECBCHAIN";
++      case WM_HSCROLLCLIPBOARD:       return "WM_HSCROLLCLIPBOARD";
++      case WM_QUERYNEWPALETTE:        return "WM_QUERYNEWPALETTE";
++      case WM_PALETTEISCHANGING:      return "WM_PALETTEISCHANGING";
++      case WM_PALETTECHANGED:         return "WM_PALETTECHANGED";
++      case WM_HOTKEY:                 return "WM_HOTKEY";
++      case WM_PRINT:                  return "WM_PRINT";
++      case WM_PRINTCLIENT:            return "WM_PRINTCLIENT";
++      case WM_HANDHELDFIRST:          return "WM_HANDHELDFIRST";
++      case WM_HANDHELDLAST:           return "WM_HANDHELDLAST";
++      case WM_AFXFIRST:               return "WM_AFXFIRST";
++      case WM_AFXLAST:                return "WM_AFXLAST";
++      case WM_PENWINFIRST:            return "WM_PENWINFIRST";
++      case WM_PENWINLAST:             return "WM_PENWINLAST";
++      default:
++        if(msg < WM_USER)
++        {
++          return "system message";
++        }
++        else if(msg < 0x7FFF)
++        {
++          return "user message";
++        }
++        else if(msg < 0xBFFF)
++        {
++          return "application message";
++        }
++        else if(msg < 0xFFFF)
++        {
++          return "application string message";
++        }
++        else
++        {
++          return "system message";
++        }
++    }
++  }
++}
++
++namespace mSysEvent
++{
++  SystemMessageListener::~SystemMessageListener()
++  {}
++
++  SystemMessageCall::~SystemMessageCall()
++  {}
++
++  SystemMessageProcessor::SystemMessageProcessor(TraceInterface& trc):
++    System(),
++    thread(0),
++    SystemMessageListener(),
++    m_access(),
++    m_callList(),
++    m_listener(),
++    m_trc(trc),
++    m_threadId(0),
++    m_terminate(false),
++    m_deviceEventProcessor(0)
++  {}
++
++  SystemMessageProcessor::~SystemMessageProcessor()
++  {
++    m_terminate = true;
++    postWindowMessage(WM_CLOSE, 0,0);
++    waitTerminated();
++    delete m_deviceEventProcessor;
++  }
++
++  void SystemMessageProcessor::init()
++  {
++    addListener(WM_CALL_LIST, *this);
++    start();
++  }
++
++  void SystemMessageProcessor::addListener(UINT msg, SystemMessageListener& listener)
++  {
++    AutoMutexCS mx(m_access);
++    m_listener[msg].push_back(&listener);
++  }
++
++  void SystemMessageProcessor::rmvListener(UINT msg, SystemMessageListener& listener)
++  {
++    AutoMutexCS mx(m_access);
++    m_listener[msg].remove(&listener);
++  }
++
++  ListenerList SystemMessageProcessor::getListener(UINT msg)
++  {
++    AutoMutexCS mx(m_access);
++    return m_listener[msg];
++  }
++
++  void SystemMessageProcessor::invoke(SystemMessageCall& call)
++  {
++    AutoMutexCS mx(m_access);
++    m_callList.push_back(&call);
++    checkCallList();
++  }
++
++  void SystemMessageProcessor::checkCallList()
++  {
++    AutoMutexCS mx(m_access);
++    if(m_callList.size() > 0)
++    {
++      postWindowMessage(WM_CALL_LIST, 0,0);
++    }
++  }
++
++  void SystemMessageProcessor::invokeCallList()
++  {
++    for(;;)
++    {
++      SystemMessageCall* call = 0;
++      {
++        AutoMutexCS mx(m_access);
++        if(m_callList.size() > 0)
++        {
++          call = m_callList.front();
++          m_callList.pop_front();
++        }
++        else
++        {
++          break;
++        }
++      }
++      if(call != 0)
++      {
++        call->execute(m_window);
++      }
++    }
++  }
++
++  void SystemMessageProcessor::message(UINT message, WPARAM wParam, LPARAM lParam)
++  {
++    invokeCallList();
++  }
++
++  void SystemMessageProcessor::postWindowMessage(UINT message, WPARAM wParam, LPARAM lParam)
++  {
++    if(!PostMessage(m_window, message, wParam, lParam))
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "PostMessage", GetLastError());
++    }
++  }
++
++  void SystemMessageProcessor::registerWindowClass()
++  {
++    HINSTANCE hInstance = GetModuleHandle(0);
++    WNDCLASS windowClass;
++    windowClass.style         = 0;
++    windowClass.lpfnWndProc   = windowCallback;
++    windowClass.cbClsExtra    = 0;
++    windowClass.cbWndExtra    = sizeof(SystemMessageProcessor*);;
++    windowClass.hInstance     = hInstance;
++    windowClass.hIcon         = 0;
++    windowClass.hCursor       = 0;
++    windowClass.hbrBackground = 0;
++    windowClass.lpszMenuName  = 0;
++    windowClass.lpszClassName = windowClassName;
++    if(!RegisterClass(&windowClass))
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegisterClass", GetLastError());
++    }
++  }
++
++  void SystemMessageProcessor::unregisterWindowClass()
++  {
++    HINSTANCE hInstance = GetModuleHandle(0);
++    if(!UnregisterClass(windowClassName, hInstance))
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "UnregisterClass", GetLastError());
++    }
++  }
++
++  void SystemMessageProcessor::createWindow()
++  {
++    HINSTANCE hInstance = GetModuleHandle(0);
++    m_window = CreateWindow
++    (
++      windowClassName,
++      "",
++      WS_OVERLAPPEDWINDOW,
++      0,
++      0,
++      0,
++      0,
++      0,
++      0,
++      hInstance,
++      reinterpret_cast<void*>(this)
++    );
++    if(m_window == 0)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "CreateWindow", GetLastError());
++    }
++  }
++
++  void SystemMessageProcessor::function()
++  {
++    standardException guard;
++    try
++    {
++      m_threadId = GetCurrentThreadId();
++      MSG msg;
++      // create message queue for the current thread
++      PeekMessage(&msg, reinterpret_cast<HWND>(INVALID_HANDLE_VALUE), 0, 0, PM_NOREMOVE);
++      registerWindowClass();
++      createWindow();
++      checkCallList();
++      while(!m_terminate)
++      {
++        BOOL result = GetMessage(&msg, m_window, 0, 0);
++        if(result == 0)
++        {
++          m_trc.writeTrace(BasicRuntime_HERE, "received WM_QUIT, finish");
++          break;
++        }
++        else if(result == -1)
++        {
++          mSysError::traceLastError(m_trc, MajorError_HERE, "GetMessage", GetLastError());
++          break;
++        }
++        else
++        {
++          TranslateMessage(&msg);
++          DispatchMessage(&msg);
++        }
++      }
++      unregisterWindowClass();
++    }
++    catch(const std::exception& x)
++    {
++      m_trc.writeTrace(MajorError_HERE, x.what());
++    }
++    catch(...)
++    {
++      m_trc.writeTrace(MajorError_HERE, "unknown exception");
++    }
++  }
++
++  LRESULT SystemMessageProcessor::handleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "process (%d)(%s)(%d)(%d)", message, getMessageText(message), wParam, lParam);
++    LRESULT result = 0;
++    switch(message)
++    {
++      case WM_CLOSE:
++      {
++        if(m_window)
++        {
++          result = DefWindowProc(hwnd, message, wParam, lParam);
++        }
++        else
++        {
++          PostQuitMessage(0);
++          result = 0;
++        }
++        break;
++      }
++      case WM_DESTROY:
++      {
++        PostQuitMessage(0);
++        result = 0;
++        break;
++      }
++      case WM_CREATE:
++      {
++        result = 0;
++        break;
++      }
++      default:
++      {
++        ListenerList listener = getListener(message);
++        ListenerList::iterator it = listener.begin();
++        ListenerList::iterator end = listener.end();
++        for(; it != end; it++)
++        {
++          (*it)->message(message, wParam, lParam);
++        }
++        result = DefWindowProc(hwnd, message, wParam, lParam);
++        break;
++      }
++    }
++    return result;
++  }
++
++  DeviceEventProcessor* SystemMessageProcessor::getDeviceEventProcessor()
++  {
++    AutoMutexCS mx(m_access);
++    if(!m_deviceEventProcessor)
++    {
++      DeviceEventProcessorImpl* processor = new DeviceEventProcessorImpl(*this, m_trc);
++      processor->init();
++      m_deviceEventProcessor = processor;
++    }
++    return m_deviceEventProcessor;
++  }
++
++  System::~System()
++  {}
++
++  System* createSystem(TraceInterface& trc)
++  {
++    SystemMessageProcessor* result = new SystemMessageProcessor(trc);
++    result->init();
++    return result;
++  }
++}
+-- 
+2.41.0.windows.1
+

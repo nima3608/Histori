@@ -1,0 +1,125 @@
+From 6ff8f2ac12ff9a8f188c8c425dabb0a375172d66 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 13 Nov 2017 15:01:24 +0000
+Subject: [PATCH 0889/1076] MANTIS 0048338 change: SmartCardReader: Desko Penta
+ does not read reliable
+
+massai_systools.lib
+V1.0.0.37
+- added retry mechanism for SCardGetStatusChange; ignore SCARD_STATE_IGNORE
+  - SCARD_STATE_IGNORE: This reader should be ignored.
+  - SCARD_STATE_UNKNOWN: The given reader name is not recognized by the resource manager.
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1284 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp     | 11 ++++--
+ .../Systools/src/mSysSmartCardReaderW32.cpp   | 35 ++++++++++++++-----
+ 2 files changed, 35 insertions(+), 11 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index cb2df68f..1b71ccd5 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 36);
++VERSION_ID_DT(systools, 1, 0, 0, 37);
+ 
+ /*!
+ \file
+@@ -8,12 +8,19 @@ VERSION_ID_DT(systools, 1, 0, 0, 36);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.36
++@version 1.0.0.37
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.37
++\li 14.03.2017
++\li change SteT Mantis 0048338: SmartCardReader: Desko Penta does not read reliable
++- added retry mechanism for SCardGetStatusChange; ignore SCARD_STATE_IGNORE
++  - SCARD_STATE_IGNORE: This reader should be ignored.
++  - SCARD_STATE_UNKNOWN: The given reader name is not recognized by the resource manager.
++
+ \version 1.0.0.36
+ \li 14.03.2017
+ \li change SteT Mantis 0044501: mSysProcessTerminate::setShutdownHook does not work as expected
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+index cfab71dc..116ae2ef 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+@@ -29,6 +29,7 @@ namespace
+   {
+     WAIT_TIMEOUT_MS = 10000,
+     MAX_RESPONSE_SIZE = 1024,
++    RETRY_COUNT = 1
+   };
+ 
+   const char* CARD_READER_NOTIFICATION = "\\\\?PnP?\\Notification";
+@@ -114,6 +115,7 @@ namespace
+     private:
+       bool selectReader(const char* buffer, unsigned int size);
+       void freeAutoAllocate(LPTSTR buffer);
++      bool shouldRetryGetStatusChange(LONG result, DWORD status);
+       LONG wait(const std::string& reader, DWORD& status);
+ 
+       TraceInterface& trc;
+@@ -454,18 +456,28 @@ namespace
+       SCARD_READERSTATE cardState[1];
+       memset(cardState, 0, sizeof(cardState));
+       SCARD_READERSTATE& it = cardState[0];
+-      it.dwCurrentState = status & ~SCARD_STATE_CHANGED;
++      it.dwCurrentState = status & ~(SCARD_STATE_CHANGED);
+       it.szReader = reader.c_str();
+-      trc.writeTrace(BasicRuntime_HERE, ">SCardGetStatusChange(0x%x)(%s)",
+-        it.dwCurrentState, getCardStatusText(it.dwCurrentState).c_str());
+-      result = SCardGetStatusChange(context, WAIT_TIMEOUT_MS, cardState, sizeof(cardState)/sizeof(*cardState));
+-      trc.writeTrace(BasicRuntime_HERE, "<SCardGetStatusChange:(0x%x)(%s)",
+-        result, getErrorCodeText(result).c_str());
++      for(int i = 0; i <= RETRY_COUNT; i++)
++      {
++        trc.writeTrace(BasicRuntime_HERE, ">SCardGetStatusChange(0x%x)(%s)",
++          it.dwCurrentState, getCardStatusText(it.dwCurrentState).c_str());
++        result = SCardGetStatusChange(context, WAIT_TIMEOUT_MS, cardState, sizeof(cardState)/sizeof(*cardState));
++        trc.writeTrace(BasicRuntime_HERE, "<SCardGetStatusChange:(0x%x)(%s)",
++          result, getErrorCodeText(result).c_str());
++        if(result == SCARD_S_SUCCESS)
++        {
++          status = it.dwEventState;
++          trc.writeTrace(BasicRuntime_HERE, "SCardGetStatusChange:(0x%x)(%s)",
++            status, getCardStatusText(status).c_str());
++        }
++        if(!shouldRetryGetStatusChange(result, status))
++        {
++          break;
++        }
++      }
+       if(result == SCARD_S_SUCCESS)
+       {
+-        status = it.dwEventState;
+-        trc.writeTrace(BasicRuntime_HERE, "SCardGetStatusChange:(0x%x)(%s)",
+-          status, getCardStatusText(status).c_str());
+         atr = std::string(reinterpret_cast<const char*>(it.rgbAtr), it.cbAtr);
+         if(it.cbAtr > 0)
+         {
+@@ -477,6 +489,11 @@ namespace
+     return result;
+   }
+ 
++  bool CardReaderAccess::shouldRetryGetStatusChange(LONG result, DWORD status)
++  {
++    return (result == SCARD_S_SUCCESS) && (status & SCARD_STATE_IGNORE);
++  }
++
+   CardReaderImpl::CardReaderImpl(TraceInterface& trc):
+     trc(trc),
+     ignoreEvents(),
+-- 
+2.41.0.windows.1
+

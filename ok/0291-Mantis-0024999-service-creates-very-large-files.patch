@@ -1,0 +1,1514 @@
+From d2149173ae79326db49d693b489fd12725b7f78d Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 7 Nov 2012 20:15:26 +0000
+Subject: [PATCH 0291/1000] Mantis 0024999: service creates very large files
+ Billing.exe V1.0.0.6 LogService.exe V1.0.3.29 massaiSNMP.dll V1.0.3.29
+ Statistics.exe V1.0.1.4
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@436 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/BillingService/inc/BillingS_def.h     |  43 +--
+ .../Massai/cpp/BillingService/src/File.cpp    |  62 ++--
+ .../cpp/LogService/inc/LogService_def.h       | 312 +++++++++---------
+ .../cpp/LogService/inc/massaiSNMP_def.h       | 285 ++++++++--------
+ .../cpp/LogService/src/compStateLog.cpp       |  13 +-
+ .../Massai/cpp/LogService/src/xlog.cpp        | 167 ++++------
+ .../StatisticsService/inc/Statistics_def.h    | 147 +++++----
+ .../Massai/cpp/StatisticsService/src/File.cpp |  48 +--
+ 8 files changed, 507 insertions(+), 570 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+index 8b686c42..87f07a7b 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+@@ -1,24 +1,27 @@
+-/*! \page billingservice Billing Service - Release Notes
+- *
+- *
+- *  \date 16.12.2011 \li V1.0.0.5
+- *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
+- *                       shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
+- *
+- *  \date 27.04.2006 \li V 1.0.0.4
+- *                   \li SteT EDB 26755: BillingService parsed die Antwort vom GPP nicht
+- *
+- *  \date 27.04.2006 \li V 1.0.0.3
+- *                   \li SteT EDB 26729: Remove CTRL_BREAK
+- *
+- *  \date 25.10.2006 \li V1.0.0.2
+- *                   \li SteT EDB 26693: Abgleich des neuen CC Streams SelfServicePlatform mit den alten Streams
+- *                   \li limit trace output
+- *
+- */
++#define FILE_VER_BIN     1,0,0,6
++#define FILE_VER_STR     "FileVersion", "1.0.0.6\0"
++
++/*!
++\page Billing.exe Billing Service - Release Notes
++
++\date 07.11.2012 \li V1.0.0.6
++                 \li SteT Mantis 0024999: service creates very large files (VC10)
++
++\date 16.12.2011 \li V1.0.0.5
++                 \li SteT Mantis 0021947: mstarter: problems at shutdown
++                     shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
+ 
+-#define FILE_VER_BIN     1,0,0,5
+-#define FILE_VER_STR     "FileVersion", "1.0.0.5\0"
++\date 27.04.2006 \li V 1.0.0.4
++                 \li SteT EDB 26755: BillingService parsed die Antwort vom GPP nicht
++
++\date 27.04.2006 \li V 1.0.0.3
++                 \li SteT EDB 26729: Remove CTRL_BREAK
++
++\date 25.10.2006 \li V1.0.0.2
++                 \li SteT EDB 26693: Abgleich des neuen CC Streams SelfServicePlatform mit den alten Streams
++                 \li limit trace output
++
++ */
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Billing Service\0"
+ #define INTERNALNAME     "InternalName"     ,"Billing Service\0"
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+index 9b1acdd4..19ae2031 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+@@ -45,26 +45,19 @@ using std::string;
+ 
+ class cfg : public nConfig::gcText
+ {
+-
+    /** This method is called, when the configuration subsystem needs to
+     *  create a new confuguration item.
+     */
+-
+    void create(const char * & Rights, const char * & Explanation, const char * & Default)
+    {
+       Rights = "rwl";    // "[r][w][+]"
+-
+       Explanation = "Output path for statistical data";
+-
+       Default = ".\\billing";
+    }
+ 
+ public:
+-
+    /** Constructor */
+-
+    cfg(char *pszItem,char *pszUser) : nConfig::gcText(pszItem,pszUser) { }
+-
+ };
+ 
+ //---------------------------------------------------------------------------
+@@ -78,7 +71,6 @@ public:
+ //  author:     Materna Information & Communications (ts)
+ //
+ //---------------------------------------------------------------------------
+-
+ void readOutputPath(char* pBuffer, int size)
+ {
+   int    iLen;
+@@ -127,7 +119,6 @@ static bool readdone= false;
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeContentCharData(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -140,8 +131,8 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+       case 0x9:
+       case 0xd:
+       case 0xa:
+-		out << *it;
+-		break;
++        out << *it;
++        break;
+       case '&':
+         out << "&amp;";
+         break;
+@@ -162,16 +153,16 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+         else
+         if ( *it >= ' ')
+         {
+-			out << *it;
+-		}
+-		else
++          out << *it;
++       }
++       else
++       {
+           out << '.';
++       }
+     }
+   }
+ }
+ 
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void writeAttValueApos(ostream& out, string::const_iterator first, string const_iterator last)
+@@ -183,7 +174,6 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeAttValueApos(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -197,8 +187,8 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+       case 0x9:
+       case 0xd:
+       case 0xa:
+-		out << *it;
+-		break;
++        out << *it;
++        break;
+       case '&':
+         out << "&amp;";
+         break;
+@@ -218,17 +208,17 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+         else
+         if ( *it >= ' ')
+         {
+-			out << *it;
+-		}
+-		else
++          out << *it;
++        }
++        else
++        {
+           out << '.';
++        }
+     }
+   }
+   out << "\'";
+ }
+ 
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void writeAttValueQuot(ostream& out, string::const_iterator first, string const_iterator last)
+@@ -240,7 +230,6 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -254,8 +243,8 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+       case 0x9:
+       case 0xd:
+       case 0xa:
+-		out << *it;
+-		break;
++        out << *it;
++        break;
+       case '&':
+         out << "&amp;";
+         break;
+@@ -275,10 +264,12 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+         else
+         if ( *it >= ' ')
+         {
+-			out << *it;
+-		}
+-		else
++          out << *it;
++        }
++        else
++        {
+           out << '.';
++        }
+     }
+   }
+   out << "\"";
+@@ -295,7 +286,6 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ Response::Response(const string& setRsp, bool setbParseError)
+ {
+   Rsp= setRsp;
+@@ -313,7 +303,6 @@ Response::Response(const string& setRsp, bool setbParseError)
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writePrinter(ostream& out, const string& PrinterType, const ResponseList& Response, int iUsed)
+ {
+   string Used;
+@@ -340,7 +329,6 @@ void writePrinter(ostream& out, const string& PrinterType, const ResponseList& R
+ 
+ }
+ 
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void write(const string& KioskId, const string& Location, const string& AppName,
+@@ -364,7 +352,6 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+ {
+   string Start, End, Duration;
+   string StartDate, EndDate, StartMonth;
+-  long pos;
+   char Name[350];
+   ofstream *pOut;
+   struct tm saveTime, *pST;
+@@ -386,14 +373,15 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+     delete pOut;
+     pOut=new ofstream(Name, std::ios_base::out | std::ios_base::ate);
+   }
+-  pos= (*pOut).tellp();
+-  if (pos == 0)
++  std::streamoff pos= (*pOut).tellp();
++  if (pos <= sizeof("<BILLING></BILLING>"))
+   {
++    (*pOut).seekp(0);
+     (*pOut) << "<BILLING>" << endl;
+   }
+   else
+   {
+-    (*pOut).seekp(-(sizeof("</BILLING>")+2), std::ios_base::end);
++    (*pOut).seekp(pos - (sizeof("</BILLING>")+2));
+   }
+   if ((*pOut).good())
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+index af9f16c4..4a07d138 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+@@ -11,161 +11,165 @@
+ 
+ #include "Tools/VERSION.H"
+ 
+-#define FILE_VER_BIN     1,0,3,28
+-#define FILE_VER_STR     "FileVersion", "1.0.3.28\0"
++#define FILE_VER_BIN     1,0,3,29
++#define FILE_VER_STR     "FileVersion", "1.0.3.29\0"
+ 
+-/*! \page LogService.exe - Logging Service
+- *                         writes logging\svc.log logging\platform*.log logging\statistics*.log
+- *                         sends SNMP-Traps
+- *                         alternativ solution: massaiSNMP.dll
+- *
+- *  !!! immer auch wenn nötig massaiSNMP_def.h pflegen !!!
+- *
+- *  @version 1.0.3.28
+- *
+- *  \section change1 Change history
+- *
+- *  \date 22.10.2012 \li V1.0.3.28
+- *                   \li extension - SteT Mantis 0024774: LogService: new event-/comp-configuration for aegan airlines A3_CKC
+- *
+- *  \date 02.10.2012 \li V1.0.3.27
+- *                   \li bugfix - SteT Mantis 0024647: LogService writes 00000000-00:00:00 as timestamp in and svc.log, platform.log
+- *
+- *  \date 07.09.2012 \li V1.0.3.26
+- *                   \li bugfix - Mantis 0021005: LogService.exe: hobbit connection; write always
+- *
+- *  \date 09.08.2012 \li V1.0.3.25
+- *                   \li extension - SteT Mantis 0024151: LogService: add event for DNATA_CKI
+- *
+- *  \date 17.07.2012 \li V1.0.3.24
+- *                   \li extension - SteT Mantis 0023931: add events for UN_KioskcheckinUN
+- *
+- *  \date 09.07.2012 \li V1.0.3.23
+- *                   \li extension - SteT Mantis 0023840: logservice: add events for TLL_CKI
+- *
+- *  \date 31.02.2012 \li V1.0.3.22
+- *                   \li extension - SteT Mantis 0023249: GPP: support two different papertypes for a single printer
+- *
+- *  \date 15.02.2012 \li V1.0.3.21
+- *                   \li extension - SteT Mantis 0022404: New device omron v4ku
+- *
+- *  \date 16.12.2011 \li V1.0.3.20
+- *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
+- *                       shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
+- *
+- *  \date 17.11.2011 \li V1.0.3.19
+- *                   \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty
+- *
+- *  \date 27.06.2011 \li V1.0.3.18
+- *                   \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
+- *                   \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
+- *                   \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
+- *                   \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
+- *
+- *                   \li the configuration item SERVICES.LOGGING.eventDefinition is not used anymore
+- *                       the eventDefinition is hardcoded
+- *
+- *  \date 27.06.2011 \li V1.0.3.17
+- *                   \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
+- *
+- *  \date 08.06.2011 \li V1.0.3.16
+- *                   \li extension - SteT
+- *                   \li eventConfiguration.txt new entries:
+- *                       1082* massai.notification.drivers.BTPDev.*
+- *                       31*   *,LH_SBD
+- *                       1092* *BTPDev*
+- *                   \li compDefinition new entries:
+- *                       APPLICATIONS.LH_SBD.compDefinition
+- *                       BagTagPrinter.GENERAL.compDefinition
+- *                       CONVEYOR2_DEVICE.GENERAL.compDefinition
+- *
+- *  \date 06.04.2011 \li V1.0.3.15
+- *                   \li extension - SteT Mantis 18587: TK_CHECKINKIOSK added in eventConfiguration and compSource
+- *
+- *  \date 11.08.2010 \li V1.0.3.14
+- *                   \li extension - GiT 1030801,MAT_CLA added to eventConfiguration
+- *
+- *  \date 06.04.2010 \li V1.0.3.13
+- *                   \li extension - SteT AY_CKC added to compDefinition and eventConfiguration
+- *
+- *  \date 02.03.2010 \li V1.0.3.12
+- *                   \li extension - SteT LH_CKI added to compDefinition and eventConfiguration
+- *
+- *  \date 15.10.2009 \li V1.0.3.11
+- *                   \li bugfix   - SteT: Mantis 0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
+- *
+- *  \date 22.04.2009 \li V1.0.3.10
+- *                   \li extension - SteT Mantis 7952: entries for temperature added
+- *                       Definition added:
+- *                       SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.cfg
+- *                       SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.csp
+- *
+- *  \date 09.03.2009 \li V1.0.3.9
+- *                   \li bugfix - SteT Mantis 7410, same events for GPPDev and BPPDev
+- *
+- *  \date 09.12.2008 \li V1.0.3.8
+- *                   \li bugfix - SteT, do not ignore duplicate entries in compConfigurationSource
+- *
+- *  \date 18.11.2008 \li V1.0.3.7
+- *                   \li bugfix - SteT EDB 28171: UAE_EKCKI added in eventConfiguration
+- *                   \li          UAE_EKCKI added with same id as UAE_CKI
+- *
+- *  \date 25.06.2008 \li V1.0.3.6
+- *                   \li SteT EDB 28061: mControl waits initial for initialization of LogService/massaiSNMP.dll
+- *                   \li synchronized by named semaphore "MassaiLoggingService"
+- *
+- *  \date 09.06.2008 \li V1.0.3.5
+- *                   \li SteT: added HP Openview setup events to eventConfiguration.txt
+- *
+- *  \date 21.12.2007 \li V1.0.3.4
+- *                   \li change - SteT EDB 27938: created compConfiguration dynamically, 20071205
+- *
+- * \li every component/application creates his own compDefSection
+- *     the new configuration item "SERVICES.LOGGING.compConfigurationSource" stores the list of other compDefSection configuration item names
+- *     the configuration item "SERVICES.LOGGING.compConfiguration" is not used anymore
+- *
+- *     this configuration entry also defines the component SYSTEM
+- *      default state is ERROR, the other states are combined by the configurated componentes
+- *      for example:
+- *       SERVICES.LOGGING.compConfigurationSource =
+- *           COMPONENT;&;BPP_COMP.OK;DEVICES.BPPDev.compDefSection
+- *           COMPONENT;&;CRD_COMP.OK;DEVICES.CRDDev.compDefSection
+- *           NO_BAGGAGE;&;APP_BER_CKI.AVAILABLE;APPLICATIONS.BER_CKI.compDefSection
+- *           ;;;SERVICES.LOGGING.compDefSectionSystem
+- *
+- *      generates:
+- *       SYSTEM;COMPONENT=BPP_COMP.OK & CRD_COMP.OK; NO_BAGGAGE= APP_BER_CKI.AVAILABLE;ERROR
+- *
+- *
+- *
+- *  \li
+- *   lines for SERVICES.LOGGING.compConfiguration are stored under:
+- *     SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.csp
+- *   according compConfigurationDefinition are stored under:
+- *   SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.cfg
+- *
+- *
+- *
+- * \li the additional attribute HIDDEN for components suppresses the the component in the evaluation
+- *       the depending components use the the reasons of the suppressed component
+- *
+- *  \date 21.12.2006 \li V1.0.3.3
+- *                   \li feature - MaK EDB26532 asynchronous sending, min/maxInterval
+- *
+- *  \date 27.10.2006 \li V 1.0.3.2
+- *                   \li MaM EDB 26815: SNMP Func was temp. missing in PLF R1070
+- *
+- *  \date 27.10.2006 \li V 1.0.3.1
+- *                   \li SteT EDB 26729: Remove CTRL_BREAK
+- *
+- *  \date 13.10.2006 \li V1.0.3.0
+- *                   \li feature - EDB26522 distribute status log to various targets
+- *                   \li removed proView connectivity
+- *
+- *  \date 29.09.2006 \li V1.0.2.6
+- *                   \li bugfix - EDB26522 update status.log upon shtudown
+- *
+- */
++/*!
++\page LogService.exe - Logging Service
++                       writes logging\svc.log logging\platform*.log logging\statistics*.log
++                       sends SNMP-Traps
++                       alternativ solution: massaiSNMP.dll
++
++!!! immer auch wenn nötig massaiSNMP_def.h pflegen !!!
++
++@version 1.0.3.29
++
++\section change1 Change history
++
++\date 07.11.2012 \li V1.0.3.29
++                 \li SteT Mantis 0024999: service creates very large files (VC10)
++
++\date 22.10.2012 \li V1.0.3.28
++                 \li extension - SteT Mantis 0024774: LogService: new event-/comp-configuration for aegan airlines A3_CKC
++
++\date 02.10.2012 \li V1.0.3.27
++                 \li bugfix - SteT Mantis 0024647: LogService writes 00000000-00:00:00 as timestamp in and svc.log, platform.log
++
++\date 07.09.2012 \li V1.0.3.26
++                 \li bugfix - Mantis 0021005: LogService.exe: hobbit connection; write always
++
++\date 09.08.2012 \li V1.0.3.25
++                 \li extension - SteT Mantis 0024151: LogService: add event for DNATA_CKI
++
++\date 17.07.2012 \li V1.0.3.24
++                 \li extension - SteT Mantis 0023931: add events for UN_KioskcheckinUN
++
++\date 09.07.2012 \li V1.0.3.23
++                 \li extension - SteT Mantis 0023840: logservice: add events for TLL_CKI
++
++\date 31.02.2012 \li V1.0.3.22
++                 \li extension - SteT Mantis 0023249: GPP: support two different papertypes for a single printer
++
++\date 15.02.2012 \li V1.0.3.21
++                 \li extension - SteT Mantis 0022404: New device omron v4ku
++
++\date 16.12.2011 \li V1.0.3.20
++                 \li SteT Mantis 0021947: mstarter: problems at shutdown
++                     shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
++
++\date 17.11.2011 \li V1.0.3.19
++                 \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty
++
++\date 27.06.2011 \li V1.0.3.18
++                 \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
++                 \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
++                 \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
++                 \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
++
++                 \li the configuration item SERVICES.LOGGING.eventDefinition is not used anymore
++                     the eventDefinition is hardcoded
++
++\date 27.06.2011 \li V1.0.3.17
++                 \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
++
++\date 08.06.2011 \li V1.0.3.16
++                 \li extension - SteT
++                 \li eventConfiguration.txt new entries:
++                     1082* massai.notification.drivers.BTPDev.*
++                     31*   *,LH_SBD
++                     1092* *BTPDev*
++                 \li compDefinition new entries:
++                     APPLICATIONS.LH_SBD.compDefinition
++                     BagTagPrinter.GENERAL.compDefinition
++                     CONVEYOR2_DEVICE.GENERAL.compDefinition
++
++\date 06.04.2011 \li V1.0.3.15
++                 \li extension - SteT Mantis 18587: TK_CHECKINKIOSK added in eventConfiguration and compSource
++
++\date 11.08.2010 \li V1.0.3.14
++                 \li extension - GiT 1030801,MAT_CLA added to eventConfiguration
++
++\date 06.04.2010 \li V1.0.3.13
++                 \li extension - SteT AY_CKC added to compDefinition and eventConfiguration
++
++\date 02.03.2010 \li V1.0.3.12
++                 \li extension - SteT LH_CKI added to compDefinition and eventConfiguration
++
++\date 15.10.2009 \li V1.0.3.11
++                 \li bugfix   - SteT: Mantis 0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
++
++\date 22.04.2009 \li V1.0.3.10
++                 \li extension - SteT Mantis 7952: entries for temperature added
++                     Definition added:
++                     SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.cfg
++                     SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.csp
++
++\date 09.03.2009 \li V1.0.3.9
++                 \li bugfix - SteT Mantis 7410, same events for GPPDev and BPPDev
++
++\date 09.12.2008 \li V1.0.3.8
++                 \li bugfix - SteT, do not ignore duplicate entries in compConfigurationSource
++
++\date 18.11.2008 \li V1.0.3.7
++                 \li bugfix - SteT EDB 28171: UAE_EKCKI added in eventConfiguration
++                 \li          UAE_EKCKI added with same id as UAE_CKI
++
++\date 25.06.2008 \li V1.0.3.6
++                 \li SteT EDB 28061: mControl waits initial for initialization of LogService/massaiSNMP.dll
++                 \li synchronized by named semaphore "MassaiLoggingService"
++
++\date 09.06.2008 \li V1.0.3.5
++                 \li SteT: added HP Openview setup events to eventConfiguration.txt
++
++\date 21.12.2007 \li V1.0.3.4
++                 \li change - SteT EDB 27938: created compConfiguration dynamically, 20071205
++
++li every component/application creates his own compDefSection
++   the new configuration item "SERVICES.LOGGING.compConfigurationSource" stores the list of other compDefSection configuration item names
++   the configuration item "SERVICES.LOGGING.compConfiguration" is not used anymore
++
++   this configuration entry also defines the component SYSTEM
++    default state is ERROR, the other states are combined by the configurated componentes
++    for example:
++     SERVICES.LOGGING.compConfigurationSource =
++         COMPONENT;&;BPP_COMP.OK;DEVICES.BPPDev.compDefSection
++         COMPONENT;&;CRD_COMP.OK;DEVICES.CRDDev.compDefSection
++         NO_BAGGAGE;&;APP_BER_CKI.AVAILABLE;APPLICATIONS.BER_CKI.compDefSection
++         ;;;SERVICES.LOGGING.compDefSectionSystem
++
++    generates:
++     SYSTEM;COMPONENT=BPP_COMP.OK & CRD_COMP.OK; NO_BAGGAGE= APP_BER_CKI.AVAILABLE;ERROR
++
++
++
++\li
++ lines for SERVICES.LOGGING.compConfiguration are stored under:
++   SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.csp
++ according compConfigurationDefinition are stored under:
++ SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.cfg
++
++
++
++li the additional attribute HIDDEN for components suppresses the the component in the evaluation
++     the depending components use the the reasons of the suppressed component
++
++\date 21.12.2006 \li V1.0.3.3
++                 \li feature - MaK EDB26532 asynchronous sending, min/maxInterval
++
++\date 27.10.2006 \li V 1.0.3.2
++                 \li MaM EDB 26815: SNMP Func was temp. missing in PLF R1070
++
++\date 27.10.2006 \li V 1.0.3.1
++                 \li SteT EDB 26729: Remove CTRL_BREAK
++
++\date 13.10.2006 \li V1.0.3.0
++                 \li feature - EDB26522 distribute status log to various targets
++                 \li removed proView connectivity
++
++\date 29.09.2006 \li V1.0.2.6
++                 \li bugfix - EDB26522 update status.log upon shtudown
++
++*/
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Log Service (Ex)\0"
+ #define INTERNALNAME     "InternalName"     ,"Log Service (Ex)\0"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h b/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
+index d475d580..6aaa1717 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
+@@ -11,149 +11,152 @@
+ 
+ #include "Tools/VERSION.H"
+ 
+-#define FILE_VER_BIN     1,0,3,28
+-#define FILE_VER_STR     "FileVersion", "1.0.3.28\0"
++#define FILE_VER_BIN     1,0,3,29
++#define FILE_VER_STR     "FileVersion", "1.0.3.29\0"
+ 
+-/*! \page massaiSNMP.dll - plugin for MS SNMP-Service;
+- *                         writes logging\svc.log logging\platform*.log logging\statistics*.log;
+- *                         sends SNMP-Traps
+- *                         alternativ solution: logservice.exe
+- *
+- *  !!! immer auch wenn nötig logService_def.h pflegen !!!
+- *
+- *  @version 1.0.3.28
+- *
+- *  \section change1 Change history
+- *
+- *  \date 22.10.2012 \li V1.0.3.28
+- *                   \li extension - SteT Mantis 0024774: LogService: new event-/comp-configuration for aegan airlines A3_CKC
+- *
+- *  \date 02.10.2012 \li V1.0.3.27
+- *                   \li bugfix - SteT Mantis 0024647: LogService writes 00000000-00:00:00 as timestamp in and svc.log, platform.log
+- *
+- *  \date 07.09.2012 \li V1.0.3.26
+- *                   \li bugfix - Mantis 0021005: LogService.exe: hobbit connection; write always
+- *
+- *  \date 09.08.2012 \li V1.0.3.25
+- *                   \li extension - SteT Mantis 0024151: LogService: add event for DNATA_CKI
+- *
+- *  \date 17.07.2012 \li V1.0.3.24
+- *                   \li extension - SteT Mantis 0023931: add events for UN_KioskcheckinUN
+- *
+- *  \date 09.07.2012 \li V1.0.3.23
+- *                   \li extension - SteT Mantis 0023840: logservice: add events for TLL_CKI
+- *
+- *  \date 31.02.2012 \li V1.0.3.22
+- *                   \li extension - SteT Mantis 0023249: GPP: support two different papertypes for a single printer
+- *
+- *  \date 15.02.2012 \li V1.0.3.21
+- *                   \li extension - SteT Mantis 0022404: New device omron v4ku
+- *
+- *  \date 17.11.2011 \li V1.0.3.19
+- *                   \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty
+- *
+- *  \date 27.06.2011 \li V1.0.3.18
+- *                   \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
+- *                   \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
+- *                   \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
+- *                   \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
+- *
+- *                   \li the configuration item SERVICES.LOGGING.eventDefinition is not used anymore
+- *                       the eventDefinition is hardcoded
+- *
+- *  \date 27.06.2011 \li V1.0.3.17
+- *                   \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
+- *
+- *  \date 08.06.2011 \li V1.0.3.16
+- *                   \li extension - SteT
+- *                   \li eventConfiguration.txt new entries:
+- *                       1082* massai.notification.drivers.BTPDev.*
+- *                       31*   *,LH_SBD
+- *                       1092* *BTPDev*
+- *                   \li compDefinition new entries:
+- *                       APPLICATIONS.LH_SBD.compDefinition
+- *                       BagTagPrinter.GENERAL.compDefinition
+- *                       CONVEYOR2_DEVICE.GENERAL.compDefinition
+- *
+- *  \date 06.04.2011 \li V1.0.3.15
+- *                   \li extension - SteT Mantis 18587: TK_CHECKINKIOSK added in eventConfiguration and compSource
+- *
+- *  \date 11.08.2010 \li V1.0.3.14
+- *                   \li extension - GiT 1030801,MAT_CLA added to eventConfiguration
+- *
+- *  \date 06.04.2010 \li V1.0.3.13
+- *                   \li extension - SteT AY_CKC added to compDefinition and eventConfiguration
+- *
+- *  \date 02.03.2010 \li V1.0.3.12
+- *                   \li extension - SteT LH_CKI added to compDefinition and eventConfiguration
+- *
+- *  \date 15.10.2009 \li V1.0.3.11
+- *                   \li bugfix   - SteT: Mantis 0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
+- *
+- *  \date 22.04.2009 \li V1.0.3.10
+- *                   \li extension - SteT Mantis 7952: entries for temperature added
+- *                       Definition added:
+- *                       SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.cfg
+- *                       SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.csp
+- *
+- *
+- *  \date 09.03.2009 \li V1.0.3.9
+- *                   \li bugfix - SteT Mantis 7410, same events for GPPDev and BPPDev
+- *
+- *  \date 09.12.2008 \li V1.0.3.8
+- *                   \li bugfix - SteT, do not ignore duplicate entries in compConfigurationSource
+- *
+- *  \date 18.11.2008 \li V1.0.3.7
+- *                   \li bugfix - SteT EDB 28171: UAE_EKCKI added in eventConfiguration
+- *                   \li          UAE_EKCKI added with same id as UAE_CKI
+- *
+- *  \date 25.06.2008 \li V1.0.3.6
+- *                   \li SteT EDB 28061: mControl waits initial for initialization of LogService/massaiSNMP.dll
+- *                   \li synchronized by named semaphore "MassaiLoggingService"
+- *
+- *  \date 09.06.2008 \li V1.0.3.5
+- *                   \li SteT: added HP Openview setup events to eventConfiguration.txt
+- *
+- *  \date 21.12.2007 \li V1.0.3.4
+- *                   \li change - SteT EDB 27938: created compConfiguration dynamically, 20071205
+- *
+- * \li every component/application creates his own compDefSection
+- *     the new configuration item "SERVICES.LOGGING.compConfigurationSource" stores the list of other compDefSection configuration item names
+- *     the configuration item "SERVICES.LOGGING.compConfiguration" is not used anymore
+- *
+- *     this configuration entry also defines the component SYSTEM
+- *      default state is ERROR, the other states are combined by the configurated componentes
+- *      for example:
+- *       SERVICES.LOGGING.compConfigurationSource =
+- *           COMPONENT;&;BPP_COMP.OK;DEVICES.BPPDev.compDefSection
+- *           COMPONENT;&;CRD_COMP.OK;DEVICES.CRDDev.compDefSection
+- *           NO_BAGGAGE;&;APP_BER_CKI.AVAILABLE;APPLICATIONS.BER_CKI.compDefSection
+- *           ;;;SERVICES.LOGGING.compDefSectionSystem
+- *
+- *      generates:
+- *       SYSTEM;COMPONENT=BPP_COMP.OK & CRD_COMP.OK; NO_BAGGAGE= APP_BER_CKI.AVAILABLE;ERROR
+- *
+- *
+- *
+- *  \li
+- *   lines for SERVICES.LOGGING.compConfiguration are stored under:
+- *     SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.csp
+- *   according compConfigurationDefinition are stored under:
+- *   SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.cfg
+- *
+- *
+- *  \date 21.12.2006 \li V1.0.3.3
+- *                   \li feature - MaK EDB26532 asynchronous sending, min/maxInterval
+- *
+- *  \date 13.10.2006 \li V1.0.3.0
+- *                   \li feature - EDB26532 distribute status log to various targets
+- *                   \li removed proView connectivity
+- *
+- *  \date 29.09.2006 \li V1.0.2.6
+- *                   \li bugfix - EDB26522 update status.log upon shtudown
+- *
+- */
++/*!
++\page massaiSNMP.dll - plugin for MS SNMP-Service;
++                       writes logging\svc.log logging\platform*.log logging\statistics*.log;
++                       sends SNMP-Traps
++                       alternativ solution: logservice.exe
++
++!!! immer auch wenn nötig logService_def.h pflegen !!!
++
++@version 1.0.3.29
++
++\section change1 Change history
++
++\date 07.11.2012 \li V1.0.3.29
++                 \li SteT Mantis 0024999: service creates very large files (VC10)
++
++\date 22.10.2012 \li V1.0.3.28
++                 \li extension - SteT Mantis 0024774: LogService: new event-/comp-configuration for aegan airlines A3_CKC
++
++\date 02.10.2012 \li V1.0.3.27
++                 \li bugfix - SteT Mantis 0024647: LogService writes 00000000-00:00:00 as timestamp in and svc.log, platform.log
++
++\date 07.09.2012 \li V1.0.3.26
++                 \li bugfix - Mantis 0021005: LogService.exe: hobbit connection; write always
++
++\date 09.08.2012 \li V1.0.3.25
++                 \li extension - SteT Mantis 0024151: LogService: add event for DNATA_CKI
++
++\date 17.07.2012 \li V1.0.3.24
++                 \li extension - SteT Mantis 0023931: add events for UN_KioskcheckinUN
++
++\date 09.07.2012 \li V1.0.3.23
++                 \li extension - SteT Mantis 0023840: logservice: add events for TLL_CKI
++
++\date 31.02.2012 \li V1.0.3.22
++                 \li extension - SteT Mantis 0023249: GPP: support two different papertypes for a single printer
++
++\date 15.02.2012 \li V1.0.3.21
++                 \li extension - SteT Mantis 0022404: New device omron v4ku
++
++\date 17.11.2011 \li V1.0.3.19
++                 \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty
++
++\date 27.06.2011 \li V1.0.3.18
++                 \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
++                 \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
++                 \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
++                 \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
++
++                 \li the configuration item SERVICES.LOGGING.eventDefinition is not used anymore
++                     the eventDefinition is hardcoded
++
++\date 27.06.2011 \li V1.0.3.17
++                 \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
++
++\date 08.06.2011 \li V1.0.3.16
++                 \li extension - SteT
++                 \li eventConfiguration.txt new entries:
++                     1082* massai.notification.drivers.BTPDev.*
++                     31*   *,LH_SBD
++                     1092* *BTPDev*
++                 \li compDefinition new entries:
++                     APPLICATIONS.LH_SBD.compDefinition
++                     BagTagPrinter.GENERAL.compDefinition
++                     CONVEYOR2_DEVICE.GENERAL.compDefinition
++
++\date 06.04.2011 \li V1.0.3.15
++                 \li extension - SteT Mantis 18587: TK_CHECKINKIOSK added in eventConfiguration and compSource
++
++\date 11.08.2010 \li V1.0.3.14
++                 \li extension - GiT 1030801,MAT_CLA added to eventConfiguration
++
++\date 06.04.2010 \li V1.0.3.13
++                 \li extension - SteT AY_CKC added to compDefinition and eventConfiguration
++
++\date 02.03.2010 \li V1.0.3.12
++                 \li extension - SteT LH_CKI added to compDefinition and eventConfiguration
++
++\date 15.10.2009 \li V1.0.3.11
++                 \li bugfix   - SteT: Mantis 0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
++
++\date 22.04.2009 \li V1.0.3.10
++                 \li extension - SteT Mantis 7952: entries for temperature added
++                     Definition added:
++                     SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.cfg
++                     SelfServiceCommon\Massai\cpp\LogService\compSource\SERVICES.LOGGING.compDefinitionTemperature.csp
++
++
++\date 09.03.2009 \li V1.0.3.9
++                 \li bugfix - SteT Mantis 7410, same events for GPPDev and BPPDev
++
++\date 09.12.2008 \li V1.0.3.8
++                 \li bugfix - SteT, do not ignore duplicate entries in compConfigurationSource
++
++\date 18.11.2008 \li V1.0.3.7
++                 \li bugfix - SteT EDB 28171: UAE_EKCKI added in eventConfiguration
++                 \li          UAE_EKCKI added with same id as UAE_CKI
++
++\date 25.06.2008 \li V1.0.3.6
++                 \li SteT EDB 28061: mControl waits initial for initialization of LogService/massaiSNMP.dll
++                 \li synchronized by named semaphore "MassaiLoggingService"
++
++\date 09.06.2008 \li V1.0.3.5
++                 \li SteT: added HP Openview setup events to eventConfiguration.txt
++
++\date 21.12.2007 \li V1.0.3.4
++                 \li change - SteT EDB 27938: created compConfiguration dynamically, 20071205
++
++li every component/application creates his own compDefSection
++   the new configuration item "SERVICES.LOGGING.compConfigurationSource" stores the list of other compDefSection configuration item names
++   the configuration item "SERVICES.LOGGING.compConfiguration" is not used anymore
++
++   this configuration entry also defines the component SYSTEM
++    default state is ERROR, the other states are combined by the configurated componentes
++    for example:
++     SERVICES.LOGGING.compConfigurationSource =
++         COMPONENT;&;BPP_COMP.OK;DEVICES.BPPDev.compDefSection
++         COMPONENT;&;CRD_COMP.OK;DEVICES.CRDDev.compDefSection
++         NO_BAGGAGE;&;APP_BER_CKI.AVAILABLE;APPLICATIONS.BER_CKI.compDefSection
++         ;;;SERVICES.LOGGING.compDefSectionSystem
++
++    generates:
++     SYSTEM;COMPONENT=BPP_COMP.OK & CRD_COMP.OK; NO_BAGGAGE= APP_BER_CKI.AVAILABLE;ERROR
++
++
++
++\li
++ lines for SERVICES.LOGGING.compConfiguration are stored under:
++   SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.csp
++ according compConfigurationDefinition are stored under:
++ SelfServiceCommon_Main_Dev\SelfServiceCommon\Massai\cpp\LogService\compSource\*.cfg
++
++
++\date 21.12.2006 \li V1.0.3.3
++                 \li feature - MaK EDB26532 asynchronous sending, min/maxInterval
++
++\date 13.10.2006 \li V1.0.3.0
++                 \li feature - EDB26532 distribute status log to various targets
++                 \li removed proView connectivity
++
++\date 29.09.2006 \li V1.0.2.6
++                 \li bugfix - EDB26522 update status.log upon shtudown
+ 
++*/
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Massai SNMP (ex)\0"
+ #define INTERNALNAME     "InternalName"     ,"Massai SNMP (ex)\0"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/compStateLog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/compStateLog.cpp
+index bf0ba935..7015e41d 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/compStateLog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/compStateLog.cpp
+@@ -250,13 +250,14 @@ bool componentStateLog::openLogFile()
+ 
+     if(pLogFile->is_open())
+     {
+-      int pos = pLogFile->tellp();
+-      if(pos <= 0 )
++      std::streamoff pos = pLogFile->tellp();
++      if(pos <= sizeof("</COMPSTATES><COMPSTATES>") )
+       {
++        pLogFile->seekp(0);
+         startTag("COMPSTATES");
+       } else
+       {
+-        pLogFile->seekp(-(sizeof("</COMPSTATES>")+2), std::ios_base::end);
++        pLogFile->seekp(pos - (sizeof("</COMPSTATES>")+2));
+         levelUp();
+       }
+       return true;
+@@ -351,7 +352,11 @@ void componentStateLog::newEntry(const std::string& state, TIMESTAMPMODE mode)
+     {
+       if(flushed)
+       {
+-        pLogFile->seekp(-(sizeof("</COMPSTATES>")+2), std::ios_base::end);
++        std::streamoff pos = pLogFile->tellp();
++        if(pos > (sizeof("</COMPSTATES>")+2))
++        {
++          pLogFile->seekp(pos - (sizeof("</COMPSTATES>")+2));
++        }
+         levelUp();
+       }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/xlog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/xlog.cpp
+index 6fc687a3..2f4a4b1f 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/xlog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/xlog.cpp
+@@ -105,39 +105,36 @@ public:
+ //    30.04.2003 added parameter git
+ //---------------------------------------------------------------------------
+ 
+-std::string getOutputPath(/*CfgText* cnfPath*/const std::string sSLPath)
++std::string getOutputPath(const std::string sSLPath)
+ {
+-char   *pStr;
+-int    iLen;
+-char szOutputPathTmp[328];
+-
+- szOutputPathTmp[0]=0;
+- try
+- {
+-  if(/*cnfPath->get()*/sSLPath.length())
++  int    iLen;
++  char szOutputPathTmp[328];
++  szOutputPathTmp[0]=0;
++  try
+   {
+-    strcpy(szOutputPathTmp,/*cnfPath->get()*/sSLPath.c_str());
+-    //strcpy(szOutputPathTmp,"c:\\geisler\\massai\\availstat");
++    if(sSLPath.length())
++    {
++      strcpy(szOutputPathTmp, sSLPath.c_str());
+ 
+-    iLen= strlen(szOutputPathTmp);
+-    if(iLen>0) while(szOutputPathTmp[iLen-1]==' ' && (iLen>0))iLen--;
+-    szOutputPathTmp[iLen]=0;
++      iLen= strlen(szOutputPathTmp);
++      if(iLen>0) while(szOutputPathTmp[iLen-1]==' ' && (iLen>0))iLen--;
++      szOutputPathTmp[iLen]=0;
+ 
+-    if (iLen > 0)
+-    {
+-   if (szOutputPathTmp[iLen-1] != ':' && szOutputPathTmp[iLen-1] != '/' && szOutputPathTmp[iLen-1] != '\\')
+-   {
+-     szOutputPathTmp[iLen]= '/';
+-     szOutputPathTmp[iLen+1]= 0;
+-   }
++      if (iLen > 0)
++      {
++        if (szOutputPathTmp[iLen-1] != ':' && szOutputPathTmp[iLen-1] != '/' && szOutputPathTmp[iLen-1] != '\\')
++        {
++          szOutputPathTmp[iLen]= '/';
++          szOutputPathTmp[iLen+1]= 0;
++        }
++      }
+     }
+   }
+- }
+- catch(...)
+- {
+-    writeTrace(BasicRuntime_HERE, "getOutputPath: exception ");
+- }
+-    return(std::string(szOutputPathTmp));
++  catch(...)
++  {
++     writeTrace(BasicRuntime_HERE, "getOutputPath: exception ");
++  }
++  return(std::string(szOutputPathTmp));
+ }
+ 
+ 
+@@ -155,7 +152,6 @@ char szOutputPathTmp[328];
+ 
+ void xlog::OpenXLogFile()
+ {
+-
+   char Name[300];
+ 
+   struct tm saveTime;
+@@ -164,39 +160,39 @@ void xlog::OpenXLogFile()
+ 
+   try
+   {
+-   tnow = time(0);
+-   pST = localtime(&tnow);
+-
+-   if (pST)
+-  saveTime= *pST;
+- //              ts 02.12.2002           file name month corrected
+-   sprintf(Name, "%sStat%04d%02d%02d.xml",
+-    getOutputPath(/*xlog::cnfAvailStatPath*/xlog::sSLPath).c_str(),
+-    (saveTime.tm_year%5000)+1900,
+-    (saveTime.tm_mon%12)+1,
+-    (saveTime.tm_mday%32)
++    tnow = time(0);
++    pST = localtime(&tnow);
++
++    if (pST)
++      saveTime= *pST;
++    //              ts 02.12.2002           file name month corrected
++    sprintf(Name, "%sStat%04d%02d%02d.xml",
++    getOutputPath(xlog::sSLPath).c_str(),
++      (saveTime.tm_year%5000)+1900,
++      (saveTime.tm_mon%12)+1,
++      (saveTime.tm_mday%32)
+     );
+-   writeTrace(BasicRuntime_HERE, "OpenXLogFile: %s",Name);
++    writeTrace(BasicRuntime_HERE, "OpenXLogFile: %s",Name);
+ 
+-   pout = new ofstream(Name, std::ios_base::out | std::ios_base::in | std::ios_base::ate);
+-   if (!(*pout).good())
+-   {
+-  delete pout;
+-  pout=new ofstream(Name, std::ios_base::out | std::ios_base::ate);
+-   }
+-   if(!(*pout).good())
+-   {
+-   writeTrace(BasicRuntime_HERE, "OpenXLogFile can't open %s",Name);
+-   delete pout;
+-   pout = NULL;
+-   }
+-   }
+-   catch(...)
+-   {
+-     writeTrace(BasicRuntime_HERE, "OpenXLogFile Exception");
+-   if (pout) delete pout;
+-   pout = NULL;
+-   }
++    pout = new ofstream(Name, std::ios_base::out | std::ios_base::in | std::ios_base::ate);
++    if (!(*pout).good())
++    {
++      delete pout;
++      pout=new ofstream(Name, std::ios_base::out | std::ios_base::ate);
++    }
++    if(!(*pout).good())
++    {
++      writeTrace(BasicRuntime_HERE, "OpenXLogFile can't open %s",Name);
++      delete pout;
++      pout = NULL;
++    }
++  }
++  catch(...)
++  {
++    writeTrace(BasicRuntime_HERE, "OpenXLogFile Exception");
++    if (pout) delete pout;
++    pout = NULL;
++  }
+ }
+ 
+ 
+@@ -298,15 +294,15 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+ 
+ void cpTimeStruct(struct tm* dst, struct tm* src)
+ {
+- dst->tm_hour = src->tm_hour;
+- dst->tm_isdst = src->tm_isdst;
+- dst->tm_mday = src->tm_mday;
+- dst->tm_min = src->tm_min;
+- dst->tm_mon = src->tm_mon;
+- dst->tm_sec = src->tm_sec;
+- dst->tm_wday = src->tm_wday;
+- dst->tm_yday = src->tm_yday;
+- dst->tm_year = src->tm_year;
++  dst->tm_hour = src->tm_hour;
++  dst->tm_isdst = src->tm_isdst;
++  dst->tm_mday = src->tm_mday;
++  dst->tm_min = src->tm_min;
++  dst->tm_mon = src->tm_mon;
++  dst->tm_sec = src->tm_sec;
++  dst->tm_wday = src->tm_wday;
++  dst->tm_yday = src->tm_yday;
++  dst->tm_year = src->tm_year;
+ }
+ 
+ int xlog::xStatLogWriteEvent(const LogEntry* ple)
+@@ -316,7 +312,6 @@ int xlog::xStatLogWriteEvent(const LogEntry* ple)
+   struct tm pSTime,pnSTime;
+   struct tm pETime,pnETime;
+ 
+-  time_t tstart,tend;
+   int y,m,sm,em,res;
+ 
+   pTime = localtime( &(ple->intStart));
+@@ -396,23 +391,21 @@ int xlog::xStatLogWriteEvent(const LogEntry* ple)
+ 
+ int xlog::xStatLogWrite(const LogEntry* le)
+ {
+-
+-  int pos;
+-
+   if(!pout)
+   {
+    writeTrace(BasicRuntime_HERE, "xStatLogWriteEvent xlogfile not open");
+    return -1;
+   }
+ 
+-  pos = (*pout).tellp();
+-  if (pos == 0)
++  std::streamoff pos = (*pout).tellp();
++  if (pos <= sizeof("<STATISTIC></STATISTIC>"))
+   {
++    (*pout).seekp(0);
+     (*pout) << "<STATISTIC>" << endl;
+   }
+   else
+   {
+-    (*pout).seekp(-(sizeof("</STATISTIC>")+2), std::ios_base::end);
++    (*pout).seekp(pos - (sizeof("</STATISTIC>")+2));
+   }
+ 
+ 
+@@ -493,11 +486,8 @@ int xlog::xStatLogWrite(const LogEntry* le)
+   (*pout) << "</EVENT>" << endl;
+   (*pout) << endl;
+   (*pout) << "</STATISTIC>" << endl;
+-
+ //  (*pout).flush();
+-
+  }
+-
+  return 0;
+ }
+ 
+@@ -727,8 +717,6 @@ void xlog::addxLogEntry(const std::string& KioskId,
+ ---------------------------------------------------------------------------*/
+ void xlog::closeXLog()
+ {
+-  D_DEV_AVAIL at;
+-
+  if(!sSLPath.size()) return;
+ 
+  try
+@@ -736,26 +724,8 @@ void xlog::closeXLog()
+   OpenXLogFile();
+   for(ComponentsLogLists::iterator it = CLogLists->begin(); it != CLogLists->end(); ++it)
+   {
+-
+-  // state change
+-/*  switch((*it)->avail_typ)
+-  {
+-   case DEV_AVAILABLE:
+-     (*it)->avail_typ = DEV_UNAVAILABLE;
+-     break;
+-   case DEV_UNAVAILABLE:
+-     (*it)->avail_typ = DEV_AVAILABLE;
+-     break;
+-   default:
+-     continue;
+-     break;
+-  }
+-*/
+    (*it)->intEnd = time(0);
+-  //(*it)->Description = "Application shut down";
+-
+    xStatLogWriteEvent(*it);
+-
+   }
+  }
+  catch(...)
+@@ -768,7 +738,6 @@ void xlog::closeXLog()
+ 
+ void xlog::FlushXLogData()
+ {
+-  D_DEV_AVAIL at;
+   int start;
+ 
+   if(!sSLPath.size()) return;
+diff --git a/SelfServiceCommon/Massai/cpp/StatisticsService/inc/Statistics_def.h b/SelfServiceCommon/Massai/cpp/StatisticsService/inc/Statistics_def.h
+index dbaeaff2..dd9f8923 100644
+--- a/SelfServiceCommon/Massai/cpp/StatisticsService/inc/Statistics_def.h
++++ b/SelfServiceCommon/Massai/cpp/StatisticsService/inc/Statistics_def.h
+@@ -1,5 +1,78 @@
+-#define FILE_VER_BIN     1,0,1,3
+-#define FILE_VER_STR     "FileVersion", "1.0.1.3\0"
++#define FILE_VER_BIN     1,0,1,4
++#define FILE_VER_STR     "FileVersion", "1.0.1.4\0"
++
++/*!
++\page Statistics.exe Statistics Service - Release Notes
++
++\date 07.11.2012 \li V1.0.1.4
++                 \li SteT Mantis 0024999: service creates very large files (VC10)
++
++\date 16.12.2011 \li V1.0.1.3
++                 \li SteT Mantis 0021947: mstarter: problems at shutdown
++                     shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
++
++\date 17.11.2011 \li V 1.0.1.2
++                 \li GiT: Mantis0021568: SelfServiceCommon StatisticsService changes for VC10 compatibilty
++
++\date 12.04.2011 \li V 1.0.1.1
++                 \li PtM: convert '"' -> '&quot;' to avoid values parsing problems
++
++\date 18.06.2008 \li V 1.0.1.0
++                 \li PtM: new Statistics constructor. (more data in the header)
++
++\date 14.05.2008 \li V 1.0.0.12
++                 \li SteT EDB 28033: define name/partitioning of statistics files with configuration
++
++\li new configuration item SERVICES.STATISTICS.OutputFilename added
++
++   the pattern %KEY(:LENGTH)?%
++                   with KEY=[A-Za-z0-9_]+
++                        LENGTH=[0-9]+
++
++   is replaced by the according value (trimmed to the length if defined)
++
++   the following keys are supported
++       KIOSKID
++       LOCATION
++       APPNAME
++       APPTYPE
++       DAYOFYEAR                // 001..366
++       DAYOFMONTH               // 01..31
++       MONTHOFYEAR              // 01..12 (01: january, ...)
++       DAYOFWEEK                // 1..6 (1: monday, ...)
++       WEEKOFYEAR               // 01..53
++       WEEKOFMONTH              // 1..5
++       MONTHFORWEEK             // 01..12 (1: january, ...)
++       YEARFORWEEK              // 1970...
++       YEAR                     // 1970...
++       YEARFORWEEK_IC           // 00...99
++       YEAR_IC                  // 00...99
++       HOUR                     // 00..23
++       MINUTE                   // 00..59
++       SECOND                   // 00..59,60,61
++
++   all other keys are just removed from the text
++
++   the default value Stat%YEAR_IC%%MONTHOFYEAR%.xml produces the same filename as the previous version
++
++\li Statistics.exe needs vc6-re300l.dll
++
++\li the keys are also available for the configuration item SERVICES.STATISTICS.OutputPath
++
++\date 06.09.2007 \li V 1.0.0.11
++                 \li SteT EDB 27806: write access to log file synchronized
++
++\date 24.08.2007 \li V 1.0.0.10
++                 \li bugfix: reduced memory leak caused by config access (PtM).
++
++\date 27.04.2006 \li V 1.0.0.9
++                 \li SteT EDB 26729: Remove CTRL_BREAK
++
++\date 25.10.2006 \li V1.0.0.8
++                 \li SteT EDB 26693: Abgleich des neuen CC Streams SelfServicePlatform mit den alten Streams
++                 \li limit trace output
++
++ */
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Statistics Service\0"
+ #define INTERNALNAME     "InternalName"     ,"Statistics\0"
+@@ -8,73 +81,3 @@
+ 
+ 
+ 
+-/*! \page statisticsservice Statistics Service - Release Notes
+- *
+- *  \date 16.12.2011 \li V1.0.1.3
+- *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
+- *                       shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
+- *
+- *  \date 17.11.2011 \li V 1.0.1.2
+- *                   \li GiT: Mantis0021568: SelfServiceCommon StatisticsService changes for VC10 compatibilty
+- *
+- *  \date 12.04.2011 \li V 1.0.1.1
+- *                   \li PtM: convert '"' -> '&quot;' to avoid values parsing problems
+- *
+- *  \date 18.06.2008 \li V 1.0.1.0
+- *                   \li PtM: new Statistics constructor. (more data in the header)
+- *
+- *  \date 14.05.2008 \li V 1.0.0.12
+- *                   \li SteT EDB 28033: define name/partitioning of statistics files with configuration
+- *
+- *  \li new configuration item SERVICES.STATISTICS.OutputFilename added
+- *
+- *     the pattern %KEY(:LENGTH)?%
+- *                     with KEY=[A-Za-z0-9_]+
+- *                          LENGTH=[0-9]+
+- *
+- *     is replaced by the according value (trimmed to the length if defined)
+- *
+- *     the following keys are supported
+- *         KIOSKID
+- *         LOCATION
+- *         APPNAME
+- *         APPTYPE
+- *         DAYOFYEAR                // 001..366
+- *         DAYOFMONTH               // 01..31
+- *         MONTHOFYEAR              // 01..12 (01: january, ...)
+- *         DAYOFWEEK                // 1..6 (1: monday, ...)
+- *         WEEKOFYEAR               // 01..53
+- *         WEEKOFMONTH              // 1..5
+- *         MONTHFORWEEK             // 01..12 (1: january, ...)
+- *         YEARFORWEEK              // 1970...
+- *         YEAR                     // 1970...
+- *         YEARFORWEEK_IC           // 00...99
+- *         YEAR_IC                  // 00...99
+- *         HOUR                     // 00..23
+- *         MINUTE                   // 00..59
+- *         SECOND                   // 00..59,60,61
+- *
+- *     all other keys are just removed from the text
+- *
+- *     the default value Stat%YEAR_IC%%MONTHOFYEAR%.xml produces the same filename as the previous version
+- *
+- *  \li Statistics.exe needs vc6-re300l.dll
+- *
+- *  \li the keys are also available for the configuration item SERVICES.STATISTICS.OutputPath
+- *
+- *  \date 06.09.2007 \li V 1.0.0.11
+- *                   \li SteT EDB 27806: write access to log file synchronized
+- *
+- *  \date 24.08.2007 \li V 1.0.0.10
+- *                   \li bugfix: reduced memory leak caused by config access (PtM).
+- *
+- *  \date 27.04.2006 \li V 1.0.0.9
+- *                   \li SteT EDB 26729: Remove CTRL_BREAK
+- *
+- *  \date 25.10.2006 \li V1.0.0.8
+- *                   \li SteT EDB 26693: Abgleich des neuen CC Streams SelfServicePlatform mit den alten Streams
+- *                   \li limit trace output
+- *
+- */
+-
+-
+diff --git a/SelfServiceCommon/Massai/cpp/StatisticsService/src/File.cpp b/SelfServiceCommon/Massai/cpp/StatisticsService/src/File.cpp
+index c88e42b9..9969a46c 100644
+--- a/SelfServiceCommon/Massai/cpp/StatisticsService/src/File.cpp
++++ b/SelfServiceCommon/Massai/cpp/StatisticsService/src/File.cpp
+@@ -66,7 +66,6 @@ mThreadMutex fileAccess;
+ //  author:     Materna Information & Communications (ts)
+ //
+ //---------------------------------------------------------------------------
+-
+ std::string readConfigText(const std::string& item, const std::string& description, const std::string& defaultValue)
+ {
+   std::string cfg= "SERVICES.STATISTICS.";
+@@ -106,7 +105,6 @@ std::string readConfigText(const std::string& item, const std::string& descripti
+   return "";
+ }
+ 
+-
+ std::string readOutputPath()
+ {
+   return readConfigText("OutputPath", "output path", ".\\statistics");
+@@ -121,7 +119,6 @@ std::string readOutputPath()
+ //  author:     Materna Information & Communications (SteT)
+ //
+ //---------------------------------------------------------------------------
+-
+ std::string readOutputFilename()
+ {
+   // sprintf(Name, "%sStat%02d%02d.xml", getOutputPath(), saveTime.tm_year%100, (saveTime.tm_mon%12)+1);
+@@ -162,28 +159,6 @@ std::string getFilename(const Materna::MSSD::TextMap& data)
+ 
+   return path + filename;
+ }
+-/*
+-char *getOutputPath()
+-{
+-  char   *pOutputPath;
+-  int    iLen;
+-
+-  pOutputPath = readOutputPath();
+-
+-  iLen= strlen(pOutputPath);
+-
+-  if (iLen > 0)
+-  {
+-    if (pOutputPath[iLen-1] != ':' && pOutputPath[iLen-1] != '/' && pOutputPath[iLen-1] != '\\')
+-    {
+-      pOutputPath[iLen]= '/';
+-      pOutputPath[iLen+1]= 0;
+-    }
+-  }
+-  checkPath(pOutputPath);
+-  return pOutputPath;
+-}
+-*/
+ 
+ /*---------------------------------------------------------------------------
+ 
+@@ -196,7 +171,6 @@ char *getOutputPath()
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeContentCharData(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -242,8 +216,6 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+   }
+ }
+ 
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void writeAttValueApos(ostream& out, string::const_iterator first, string const_iterator last)
+@@ -255,7 +227,6 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeAttValueApos(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -300,8 +271,6 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+    out << "\'";
+ }
+ 
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void writeAttValueQuot(ostream& out, string::const_iterator first, string const_iterator last)
+@@ -313,7 +282,6 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+@@ -405,13 +373,12 @@ Materna::MSSD::TextMap fillData(const string& KioskId, const string& Location, c
+  AUTHOR:    Materna Information & Communications (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-void write(const string& KioskId, const string& Location, const string& AppName, const string& AppType, 
++void write(const string& KioskId, const string& Location, const string& AppName, const string& AppType,
+            const std::string& KioskName, const std::string& Area, const std::string& Terminal,
+            time_t start, time_t end, bool bClosed, const ItemList& itemList)
+ {
+   string Start, End, Duration;
+   string StartDate, EndDate, StartMonth;
+-  long pos;
+   std::string name;
+   ofstream *pOut;
+   struct tm saveTime, *pST;
+@@ -437,14 +404,15 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+     delete pOut;
+     pOut=new ofstream(name.c_str(), std::ios_base::out | std::ios_base::ate);
+   }
+-  pos= (*pOut).tellp();
+-  if (pos == 0)
++  std::streamoff pos= (*pOut).tellp();
++  if (pos <= sizeof("<STATISTICS></STATISTICS>"))
+   {
++    (*pOut).seekp(0);
+     (*pOut) << "<STATISTICS>" << endl;
+   }
+   else
+   {
+-    (*pOut).seekp(-(sizeof("</STATISTICS>")+2), std::ios_base::end);
++    (*pOut).seekp(pos - (sizeof("</STATISTICS>") + 2));
+   }
+   if ((*pOut).good())
+   {
+@@ -473,9 +441,6 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+     sprintf(Buffer, "%d", end-start);
+     Duration= Buffer;
+ 
+-
+-
+-
+     (*pOut) << "<EVENT";
+     (*pOut) << " AppName=";
+     writeAttValueQuot((*pOut), AppName.begin(), AppName.end());
+@@ -519,8 +484,5 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+   {
+     TRACE(HERE_1,"Can not open (%.1000s).", name.c_str());
+   }
+-
+   delete pOut;
+-
+ }
+-
+-- 
+2.41.0.windows.1
+

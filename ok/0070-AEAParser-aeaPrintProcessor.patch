@@ -1,0 +1,1396 @@
+From b3162f901234ba447bbb84679f0f481d6b549e4e Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 13 Dec 2010 19:56:26 +0000
+Subject: [PATCH 0070/1076] AEAParser: aeaPrintProcessor
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@88 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/AEAParser/aeaBagtagPectab.h           |   3 +-
+ .../inc/AEAParser/aeaBagtagPrintJob.h         |  12 +-
+ .../inc/AEAParser/aeaBoardingPassPectab.h     |   3 +-
+ .../inc/AEAParser/aeaBoardingPassPrintJob.h   |  28 ++--
+ .../inc/AEAParser/aeaBoardingPassTemplate.h   |   3 +-
+ .../Interfaces/inc/AEAParser/aeaLogo.h        |   3 +-
+ .../inc/AEAParser/aeaPrintProcessor.h         |  36 ++++-
+ .../Massai/cpp/AEAParser/inc/aeaContext.h     |  24 +--
+ .../cpp/AEAParser/inc}/aeaReceipt.h           |   0
+ .../inc/aeaSimulator_BoardingPassImpl.h       |   2 +-
+ .../Massai/cpp/AEAParser/makefile.mak         |   1 +
+ .../cpp/AEAParser/src/aeaBagtagPectab.cpp     |   8 +-
+ .../AEAParser/src/aeaBoardingPassPectab.cpp   |   9 +-
+ .../AEAParser/src/aeaBoardingPassPrintJob.cpp |  26 +++
+ .../AEAParser/src/aeaBoardingPassTemplate.cpp |  68 ++++----
+ .../Massai/cpp/AEAParser/src/aeaContext.cpp   |  83 +++++++---
+ .../Massai/cpp/AEAParser/src/aeaLogo.cpp      |   9 +-
+ .../cpp/AEAParser/src/aeaPrintProcessor.cpp   | 149 +++++++++++++++++-
+ .../Massai/cpp/AEAParser/src/aeaReceipt.cpp   |   2 +-
+ .../AEAParser/src/aeaSimulator_BagtagImpl.cpp |  30 ++--
+ .../src/aeaSimulator_BoardingPassImpl.cpp     |  59 +++----
+ .../Massai/cpp/Text/makefile.mak              |   3 +-
+ 22 files changed, 425 insertions(+), 136 deletions(-)
+ rename SelfServiceCommon/{Interfaces/inc/AEAParser => Massai/cpp/AEAParser/inc}/aeaReceipt.h (100%)
+ create mode 100644 SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPrintJob.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPectab.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPectab.h
+index 3ad8d77c..85c5461a 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPectab.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPectab.h
+@@ -28,6 +28,7 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
++    class AEAPrintProcessorContext;
+     typedef std::list<std::string> StringList;
+ 
+     class BagTagPectabField
+@@ -171,7 +172,7 @@ namespace MASSAI
+     {
+       public:
+         BagTagPectabData();
+-        bool readPectabData(const std::string& contextId, const std::string& pectabCmd) throw(ParseException);
++        bool readPectabData(const std::string& contextId, const std::string& pectabCmd, AEAPrintProcessorContext& processor) throw(ParseException);
+         const std::string& pectab() const;
+         const std::string& pectabId() const;
+         const std::string& pectabVersion() const;
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
+index 715cf745..b54283f7 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
+@@ -20,21 +20,27 @@
+ 
+ #include <string>
+ #include <map>
++#include <list>
++#include <memory>
+ 
+ namespace MASSAI
+ {
+   namespace AEA
+   {
+-    struct AEABagtagPrintJob
++    struct AEABagtagPrintJobPart
+     {
+       public:
+         typedef std::map<std::string, std::string> TextMap;
+         TextMap fields;
+         TextMap logos;
+         TextMap templates;
+-        std::string context;
+         std::string pectab;
+-        std::string transactionCode;
++    };
++    typedef std::list<std::auto_ptr<AEABagtagPrintJobPart> > JobList;
++    struct AEABagtagPrintJob
++    {
++      public:
++        JobList jobs;
+         int printCount;
+     };
+   }
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPectab.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPectab.h
+index c9d9d3d5..82fbc9cc 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPectab.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPectab.h
+@@ -28,6 +28,7 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
++    class AEAPrintProcessorContext;
+     class PectabPrintPosition
+     {
+       public:
+@@ -104,7 +105,7 @@ namespace MASSAI
+     {
+       public:
+         PectabData();
+-        bool PectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd) throw(ParseException);
++        bool PectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd, AEAPrintProcessorContext& processor) throw(ParseException);
+ 
+         const std::string& pectab() const;
+         const std::string& pectabId() const;
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
+index 052dca84..571a9c27 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
+@@ -18,16 +18,16 @@
+ #ifndef AEABOARDINGPASSPRINTJOB_H_INCLUDED
+ #define AEABOARDINGPASSPRINTJOB_H_INCLUDED
+ 
+-#include "aeaReceipt.h"
+ #include <string>
+ #include <map>
+ #include <list>
++#include <memory>
+ 
+ namespace MASSAI
+ {
+   namespace AEA
+   {
+-    struct AEATicketPrintJob
++    struct AEATicketPrintJobPart
+     {
+       public:
+         typedef std::map<std::string, std::string> TextMap;
+@@ -36,19 +36,29 @@ namespace MASSAI
+         TextMap templates;
+         std::string formatCode;
+         std::string paperType;
+-        std::string context;
+         std::string pectab;
+-        std::string transactionCode;
+-        char delimiter;
+         int printCount;
+     };
++    struct AEATicketPrintJob
++    {
++      public:
++        typedef std::list<std::auto_ptr<AEATicketPrintJobPart> > PrintJobPartList;
++        PrintJobPartList printJobParts;
++    };
++    struct AEAReceiptField
++    {
++      public:
++        AEAReceiptField(std::string font, std::string fontsize, std::string clf, std::string content);
++        std::string font;
++        std::string fontsize;
++        std::string clf;
++        std::string content;
++    };
+     struct AEAReceiptPrintJob
+     {
+       public:
+-        typedef std::list<receipt::ReceiptCommand> CommandList;
+-        CommandList fields;
+-        std::string context;
+-        std::string transactionCode;
++        typedef std::list<AEAReceiptField> FieldList;
++        FieldList fields;
+     };
+   }
+ }
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassTemplate.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassTemplate.h
+index 5547e18b..d9f1aaa9 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassTemplate.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassTemplate.h
+@@ -27,6 +27,7 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
++    class AEAPrintProcessorContext;
+     class TemplateField
+     {
+       public:
+@@ -122,7 +123,7 @@ namespace MASSAI
+     {
+       public:
+         TemplateData();
+-        bool readTemplateData(const std::string& templateCmd) throw(ParseException);
++        bool readTemplateData(const std::string& templateCmd, AEAPrintProcessorContext& processor) throw(ParseException);
+         const std::string& templateId() const;
+ 
+         const TemplateFieldMap& getFields() const;
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaLogo.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaLogo.h
+index 1a3e997e..20932d44 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaLogo.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaLogo.h
+@@ -27,11 +27,12 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
++    class AEAPrintProcessorContext;
+     class LogoData
+     {
+       public:
+         LogoData();
+-        bool readLogoData(const std::string& logoCmd) throw(ParseException);
++        bool readLogoData(const std::string& logoCmd, AEAPrintProcessorContext& processor) throw(ParseException);
+         const std::string& logo() const;
+         // const std::string& logoInBase64() const;
+         const std::string& logoId() const;
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
+index 52faeb94..15b377c4 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
+@@ -37,16 +37,16 @@ namespace MASSAI
+         virtual ~AEAPrintProcessor();
+ 
+         virtual bool parseContent(const std::string& context);
+-        virtual bool parseContent(const std::string& context, ContextType type, LogoData& logo);
++        virtual bool parseContent(const std::string& context, const ContextType& type, LogoData& logo);
+         virtual bool parseContent(const std::string& context, PectabData& pectab);
+         virtual bool parseContent(const std::string& context, BagTagPectabData& pectab);
+         virtual bool parseContent(const std::string& context, TemplateData& template_);
+ 
+-        virtual void processLoad(const std::string& context, ContextType type, LogoData& logo);
++        virtual void processLoad(const std::string& context, const ContextType& type, LogoData& logo);
+         virtual void processLoad(const std::string& context, PectabData& pectab);
+         virtual void processLoad(const std::string& context, BagTagPectabData& pectab);
+         virtual void processLoad(const std::string& context, TemplateData& template_);
+-        virtual void processClear(const std::string& context, ContextType type, LogoData& logo);
++        virtual void processClear(const std::string& context, const ContextType& type, LogoData& logo);
+         virtual void processClear(const std::string& context, PectabData& pectab);
+         virtual void processClear(const std::string& context, BagTagPectabData& pectab);
+         virtual void processClear(const std::string& context, TemplateData& template_);
+@@ -55,6 +55,36 @@ namespace MASSAI
+         virtual void process(const std::string& context, AEATicketPrintJob& job);
+         virtual void process(const std::string& context, AEAReceiptPrintJob& job);
+     };
++    class AEAPrintProcessorContext
++    {
++      public:
++        AEAPrintProcessorContext(const std::string& context, const ContextType& type, AEAPrintProcessor* pProcessor);
++        ~AEAPrintProcessorContext();
++
++        bool parseContent();
++        bool parseContent(LogoData& logo);
++        bool parseContent(PectabData& pectab);
++        bool parseContent(BagTagPectabData& pectab);
++        bool parseContent(TemplateData& template_);
++
++        void processLoad(LogoData& logo);
++        void processLoad(PectabData& pectab);
++        void processLoad(BagTagPectabData& pectab);
++        void processLoad(TemplateData& template_);
++        void processClear(LogoData& logo);
++        void processClear(PectabData& pectab);
++        void processClear(BagTagPectabData& pectab);
++        void processClear(TemplateData& template_);
++
++        void process(AEABagtagPrintJob& job);
++        void process(AEATicketPrintJob& job);
++        void process(AEAReceiptPrintJob& job);
++      private:
++        std::string m_context;
++        ContextType m_contextType;
++        AEAPrintProcessor* m_pProcessor;
++    };
++
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+index 2fe3c7d7..3790cfd7 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+@@ -29,7 +29,7 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
+-    class AEAPrintProcessor;
++    class AEAPrintProcessorContext;
+     class AEAContextBase
+     {
+       public:
+@@ -38,11 +38,11 @@ namespace MASSAI
+         const std::string& contextId() const;
+         const std::string& transactionCode() const;
+       protected:
+-        bool inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         bool inputTransactionCode(const std::string& cmd, AEAResult& rsp);
+       private:
+-        bool clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
+-        bool loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
++        bool loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         bool getLogoStatus(const std::string& cmd, AEAResult& rsp);
+         void logostatus(std::string& logos);
+ 
+@@ -55,11 +55,11 @@ namespace MASSAI
+     {
+       public:
+         BagtagAEAContext(const std::string& contextId, const std::string& transactionCode);
+-        bool input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         const BagTagPectabData* pectab(const std::string& pectabId, const std::string& pectabVersion) const;
+       private:
+-        bool clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
+-        bool loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
++        bool loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         bool getPectabStatus(const std::string& cmd, AEAResult& rsp);
+         void pectabstatus(std::string& pectabs);
+ 
+@@ -70,17 +70,17 @@ namespace MASSAI
+     {
+       public:
+         BoardingAEAContext(const std::string& contextId, const std::string& transactionCode);
+-        bool input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         const PectabData* pectab(const std::string& pectabId) const;
+         const TemplateData* template_(const std::string& templateId) const;
+       private:
+-        bool clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
+-        bool loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
++        bool loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         bool getPectabStatus(const std::string& cmd, AEAResult& rsp);
+         void pectabstatus(std::string& pectabs);
+ 
+-        bool clearTemplates(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
+-        bool loadTemplate(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor);
++        bool clearTemplates(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
++        bool loadTemplate(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor);
+         bool getTemplateStatus(const std::string& cmd, AEAResult& rsp);
+         void templatestatus(std::string& templates);
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaReceipt.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaReceipt.h
+similarity index 100%
+rename from SelfServiceCommon/Interfaces/inc/AEAParser/aeaReceipt.h
+rename to SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaReceipt.h
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaSimulator_BoardingPassImpl.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaSimulator_BoardingPassImpl.h
+index 1c02e488..4c198941 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaSimulator_BoardingPassImpl.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaSimulator_BoardingPassImpl.h
+@@ -17,7 +17,7 @@
+ 
+ #include "aeaSimulator_Impl.h"
+ #include "aeaContext.h"
+-#include "AEAParser/aeaReceipt.h"
++#include "aeaReceipt.h"
+ 
+ namespace MASSAI
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+index 4f54878f..25205482 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+@@ -26,6 +26,7 @@ MY_LIB1_OBJS =  $(_OBJ)\local_def.obj \
+                 $(_OBJ)\aeaContext.obj \
+                 $(_OBJ)\aeaReceipt.obj \
+                 $(_OBJ)\aeaSimulator_Impl.obj \
++                $(_OBJ)\aeaBoardingPassPrintJob.obj \
+                 $(_OBJ)\aeaSimulator_BoardingPassImpl.obj \
+                 $(_OBJ)\aeaSimulator_BagtagImpl.obj \
+                 $(_OBJ)\aeaSimulator.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
+index 44cba843..0ae8189e 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
+@@ -13,6 +13,7 @@
+ #pragma warning (disable:4786)
+ 
+ #include "AEAParser/aeaBagtagPectab.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ #include "aeaToken.h"
+ #include "TraceClt.h"
+ 
+@@ -646,7 +647,7 @@ namespace MASSAI
+ 
+     BagTagPectabData::BagTagPectabData()
+     {}
+-    bool BagTagPectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd) throw(ParseException)
++    bool BagTagPectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd, AEAPrintProcessorContext& processor) throw(ParseException)
+     {
+       std::string::const_iterator it= pectabCmd.begin();
+       std::string::const_iterator end= pectabCmd.end();
+@@ -703,6 +704,11 @@ namespace MASSAI
+           success= true;
+           m_pectab= pectabCmd;
+ 
++          if(!processor.parseContent(*this))
++          {
++            success= true;
++          }
++          else
+           {
+             std::string::const_iterator readEnd;
+             std::string::const_iterator readBegin2;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
+index 3dc5c7ea..2a210224 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
+@@ -13,6 +13,7 @@
+ #pragma warning (disable:4786)
+ 
+ #include "AEAParser/aeaBoardingPassPectab.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ #include "aeaToken.h"
+ #include "TraceClt.h"
+ 
+@@ -493,7 +494,7 @@ namespace MASSAI
+ 
+     PectabData::PectabData()
+     {}
+-    bool PectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd) throw(ParseException)
++    bool PectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd, AEAPrintProcessorContext& processor) throw(ParseException)
+     {
+       std::string::const_iterator it= pectabCmd.begin();
+       std::string::const_iterator end= pectabCmd.end();
+@@ -556,7 +557,11 @@ namespace MASSAI
+ 
+           success= true;
+           m_pectab= pectabCmd;
+-          // read fields?
++          if(!processor.parseContent(*this))
++          {
++            success= true;
++          }
++          else
+           {
+             std::string::const_iterator readEnd;
+             std::string::const_iterator readBegin2;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPrintJob.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPrintJob.cpp
+new file mode 100644
+index 00000000..e1695f9b
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPrintJob.cpp
+@@ -0,0 +1,26 @@
++//---------------------------------------------------------------------------
++//
++//  file:       aeaBoardingPassPrintJob.cpp
++//
++//  purpose:
++//
++//  author:     Materna Information & Communications
++//
++//  history:
++//---------------------------------------------------------------------------
++
++#include "AEAParser/aeaBoardingPassPrintJob.h"
++
++namespace MASSAI
++{
++  namespace AEA
++  {
++    AEAReceiptField::AEAReceiptField(std::string font, std::string fontsize, std::string clf, std::string content):
++      font(font),
++      fontsize(fontsize),
++      clf(clf),
++      content(content)
++    {}
++  }
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassTemplate.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassTemplate.cpp
+index a574f041..ccef89d8 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassTemplate.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassTemplate.cpp
+@@ -13,6 +13,7 @@
+ #pragma warning (disable:4786)
+ 
+ #include "AEAParser/aeaBoardingPassTemplate.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ #include "aeaToken.h"
+ #include "TraceClt.h"
+ 
+@@ -414,7 +415,7 @@ namespace MASSAI
+ 
+     TemplateData::TemplateData()
+     {}
+-    bool TemplateData::readTemplateData(const std::string& templateCmd) throw(ParseException)
++    bool TemplateData::readTemplateData(const std::string& templateCmd, AEAPrintProcessorContext& processor) throw(ParseException)
+     {
+       std::string::const_iterator it= templateCmd.begin();
+       std::string::const_iterator end= templateCmd.end();
+@@ -435,38 +436,45 @@ namespace MASSAI
+           if(Tokenizer::readChar(it, end, readBegin, it)) // delimiter for this command
+           {
+             wrtTrace(SecondaryRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+-            char delimiter= *readBegin;
+-            std::string::const_iterator readEnd;
+-            std::string::const_iterator readBegin2;
+-            success= true;
+-            TemplateField field;
+-            while(it != end)
++            if(!processor.parseContent(*this))
+             {
+-              Tokenizer::readToChar(delimiter, it, end, readBegin, it);   // Field Definition
+-              wrtTrace(SecondaryRuntime_HERE, "field (%.1000s)", std::string(readBegin, it).c_str());
+-              std::auto_ptr<TemplateField> pField= std::auto_ptr<TemplateField>(field.readTemplateField(readBegin, it, readBegin2, readEnd));
+-              if(pField.get() == 0)
+-              {
+-                success= false;
+-                break;
+-              }
+-              else if(fieldId < pField->getId())
+-              {
+-                fieldId= pField->getId();
+-                m_fieldMap[pField->getId()]= pField;
+-              }
+-              else
+-              {
+-                fieldId= pField->getId();
+-                success= false;
+-                break;
+-              }
+-              if(readEnd != it)
++              success= true;
++            }
++            else
++            {
++              char delimiter= *readBegin;
++              std::string::const_iterator readEnd;
++              std::string::const_iterator readBegin2;
++              success= true;
++              TemplateField field;
++              while(it != end)
+               {
+-                success= false;
+-                break;
++                Tokenizer::readToChar(delimiter, it, end, readBegin, it);   // Field Definition
++                wrtTrace(SecondaryRuntime_HERE, "field (%.1000s)", std::string(readBegin, it).c_str());
++                std::auto_ptr<TemplateField> pField= std::auto_ptr<TemplateField>(field.readTemplateField(readBegin, it, readBegin2, readEnd));
++                if(pField.get() == 0)
++                {
++                  success= false;
++                  break;
++                }
++                else if(fieldId < pField->getId())
++                {
++                  fieldId= pField->getId();
++                  m_fieldMap[pField->getId()]= pField;
++                }
++                else
++                {
++                  fieldId= pField->getId();
++                  success= false;
++                  break;
++                }
++                if(readEnd != it)
++                {
++                  success= false;
++                  break;
++                }
++                Tokenizer::readChar(delimiter, it, end, readBegin, it);
+               }
+-              Tokenizer::readChar(delimiter, it, end, readBegin, it);
+             }
+           }
+         }
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+index dc25da47..04032b54 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+@@ -16,6 +16,7 @@
+ #include "aeaContext.h"
+ #include "aeaToken.h"
+ #include "TraceClt.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ 
+ using namespace MASSAI::AEA;
+ 
+@@ -46,14 +47,14 @@ namespace MASSAI
+       m_contextId(contextId),
+       m_transactionCode(transactionCode)
+     {}
+-    bool AEAContextBase::inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool AEAContextBase::inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool acceptInput= true;
+-      if(loadLogo(cmd, rsp, pProcessor))
++      if(loadLogo(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext LoadLogo");
+       }
+-      else if(clearLogos(cmd, rsp, pProcessor))
++      else if(clearLogos(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext ClearLogos");
+       }
+@@ -80,7 +81,7 @@ namespace MASSAI
+       }
+       return isTransactionCodeRequest;
+     }
+-    bool AEAContextBase::clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool AEAContextBase::clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isClearLogo= false;
+       std::string::const_iterator it= cmd.begin();
+@@ -92,6 +93,12 @@ namespace MASSAI
+         if(lcEnd == end)
+         {
+           wrtTrace(BasicRuntime_HERE, "ClearLogos clear all logos");
++          Logos::iterator it= m_logos.begin();
++          Logos::iterator end= m_logos.end();
++          for(; it != end; it++)
++          {
++            processor.processClear(it->second);
++          }
+           m_logos.clear();
+         }
+         else
+@@ -109,6 +116,7 @@ namespace MASSAI
+             else
+             {
+               wrtTrace(BasicRuntime_HERE, "ClearLogos (%.1000s)", std::string(logoBegin, logoEnd).c_str());
++              processor.processClear(logoIt->second);
+               m_logos.erase(logoIt);
+             }
+           }
+@@ -119,15 +127,16 @@ namespace MASSAI
+       }
+       return isClearLogo;
+     }
+-    bool AEAContextBase::loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool AEAContextBase::loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isLoadLogo= true;
+       try
+       {
+         LogoData lg;
+-        isLoadLogo= lg.readLogoData(cmd);
++        isLoadLogo= lg.readLogoData(cmd, processor);
+         if(isLoadLogo)
+         {
++          processor.processLoad(lg);
+           m_logos[lg.logoId()]= lg;
+           std::string response= m_transactionCode + LOGO_LOAD + RETURN_OK;
+           logostatus(response);
+@@ -205,22 +214,22 @@ namespace MASSAI
+     BagtagAEAContext::BagtagAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
+-    bool BagtagAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BagtagAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool acceptInput= true;
+       if(inputTransactionCode(cmd, rsp))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext TransactionCode");
+       }
+-      else if(inputLogo(cmd, rsp, pProcessor))
++      else if(inputLogo(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext Logo");
+       }
+-      else if(loadPectab(cmd, rsp, pProcessor))
++      else if(loadPectab(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext LoadPectab");
+       }
+-      else if(clearPectabs(cmd, rsp, pProcessor))
++      else if(clearPectabs(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext ClearPectabs");
+       }
+@@ -246,7 +255,7 @@ namespace MASSAI
+         return &((*it).second);
+       }
+     }
+-    bool BagtagAEAContext::clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BagtagAEAContext::clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isClearPectab= false;
+       std::string::const_iterator it= cmd.begin();
+@@ -258,6 +267,12 @@ namespace MASSAI
+         if(pcEnd == end)
+         {
+           wrtTrace(BasicRuntime_HERE, "ClearPectabs clear all pectabs");
++          BagTagPectabDatas::iterator it= m_pectabs.begin();
++          BagTagPectabDatas::iterator end= m_pectabs.end();
++          for(; it != end; it++)
++          {
++            processor.processClear(it->second);
++          }
+           m_pectabs.clear();
+         }
+         else
+@@ -277,6 +292,7 @@ namespace MASSAI
+             else
+             {
+               wrtTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", pectabId.c_str(), pectabIt->second.version());
++              processor.processClear(pectabIt->second);
+               m_pectabs.erase(pectabIt);
+             }
+           }
+@@ -287,15 +303,16 @@ namespace MASSAI
+       }
+       return isClearPectab;
+     }
+-    bool BagtagAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BagtagAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isLoadPectab= true;
+       try
+       {
+         BagTagPectabData pt;
+-        isLoadPectab= pt.readPectabData(contextId(), cmd);
++        isLoadPectab= pt.readPectabData(contextId(), cmd, processor);
+         if(isLoadPectab)
+         {
++          processor.processLoad(pt);
+           m_pectabs[std::make_pair(pt.pectabId(), pt.pectabVersion())]= pt;
+           std::string response= transactionCode() + PECTAB_LOAD + RETURN_OK;
+           pectabstatus(response);
+@@ -346,22 +363,22 @@ namespace MASSAI
+     BoardingAEAContext::BoardingAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
+-    bool BoardingAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BoardingAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool acceptInput= true;
+       if(inputTransactionCode(cmd, rsp))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext TransactionCode");
+       }
+-      else if(inputLogo(cmd, rsp, pProcessor))
++      else if(inputLogo(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext Logo");
+       }
+-      else if(clearPectabs(cmd, rsp, pProcessor))
++      else if(clearPectabs(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext ClearPectabs");
+       }
+-      else if(loadPectab(cmd, rsp, pProcessor))
++      else if(loadPectab(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext LoadPectab");
+       }
+@@ -369,11 +386,11 @@ namespace MASSAI
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext PectabStatus");
+       }
+-      else if(loadTemplate(cmd, rsp, pProcessor))
++      else if(loadTemplate(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext LoadTemplate");
+       }
+-      else if(clearTemplates(cmd, rsp, pProcessor))
++      else if(clearTemplates(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "AEAContext ClearTemplates");
+       }
+@@ -388,7 +405,7 @@ namespace MASSAI
+       return acceptInput;
+     }
+ 
+-    bool BoardingAEAContext::clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BoardingAEAContext::clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isClearPectab= false;
+       std::string::const_iterator it= cmd.begin();
+@@ -400,6 +417,12 @@ namespace MASSAI
+         if(pcEnd == end)
+         {
+           wrtTrace(BasicRuntime_HERE, "ClearPectabs clear all pectabs");
++          Pectabs::iterator it= m_pectabs.begin();
++          Pectabs::iterator end= m_pectabs.end();
++          for(; it != end; it++)
++          {
++            processor.processClear(it->second);
++          }
+           m_pectabs.clear();
+         }
+         else
+@@ -417,6 +440,7 @@ namespace MASSAI
+             else if((*pectabIt).second.version() == Tokenizer::pectabVersion(versionBegin, versionEnd))
+             {
+               wrtTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
++              processor.processClear(pectabIt->second);
+               m_pectabs.erase(pectabIt);
+             }
+             else
+@@ -446,15 +470,16 @@ namespace MASSAI
+       }
+       return isPectabStatusRequest;
+     }
+-    bool BoardingAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BoardingAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isLoadPectab= true;
+       try
+       {
+         PectabData pt;
+-        isLoadPectab= pt.readPectabData(contextId(), cmd);
++        isLoadPectab= pt.readPectabData(contextId(), cmd, processor);
+         if(isLoadPectab)
+         {
++          processor.processLoad(pt);
+           m_pectabs[pt.pectabId()]= pt;
+           std::string response= transactionCode() + PECTAB_LOAD + RETURN_OK;
+           pectabstatus(response);
+@@ -485,7 +510,7 @@ namespace MASSAI
+         (*it).second.getVersion(pectabs);
+       }
+     }
+-    bool BoardingAEAContext::clearTemplates(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BoardingAEAContext::clearTemplates(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isClearTemplate= false;
+       std::string::const_iterator it= cmd.begin();
+@@ -497,6 +522,12 @@ namespace MASSAI
+         if(lcEnd == end)
+         {
+           wrtTrace(BasicRuntime_HERE, "ClearTemplates clear all templates");
++          Templates::iterator it= m_templates.begin();
++          Templates::iterator end= m_templates.end();
++          for(; it != end; it++)
++          {
++            processor.processClear(it->second);
++          }
+           m_templates.clear();
+         }
+         else
+@@ -514,6 +545,7 @@ namespace MASSAI
+             else
+             {
+               wrtTrace(BasicRuntime_HERE, "ClearTemplates (%.1000s)", std::string(templateBegin, templateEnd).c_str());
++              processor.processClear(templateIt->second);
+               m_templates.erase(templateIt);
+             }
+           }
+@@ -524,15 +556,16 @@ namespace MASSAI
+       }
+       return isClearTemplate;
+     }
+-    bool BoardingAEAContext::loadTemplate(const std::string& cmd, AEAResult& rsp, AEAPrintProcessor* pProcessor)
++    bool BoardingAEAContext::loadTemplate(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor)
+     {
+       bool isLoadTemplate= true;
+       try
+       {
+         TemplateData td;
+-        isLoadTemplate= td.readTemplateData(cmd);
++        isLoadTemplate= td.readTemplateData(cmd, processor);
+         if(isLoadTemplate)
+         {
++          processor.processLoad(td);
+           m_templates[td.templateId()]= td;
+           std::string response= transactionCode() + TEMPLATE_LOAD + RETURN_OK;
+           templatestatus(response);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaLogo.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaLogo.cpp
+index 55b4df3b..c8720d39 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaLogo.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaLogo.cpp
+@@ -15,6 +15,7 @@
+ #pragma warning (disable:4786)
+ 
+ #include "AEAParser/aeaLogo.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ #include "aeaToken.h"
+ #include "TraceClt.h"
+ 
+@@ -31,7 +32,7 @@ namespace MASSAI
+   {
+     LogoData::LogoData()
+     {}
+-    bool LogoData::readLogoData(const std::string& logoCmd) throw(ParseException)
++    bool LogoData::readLogoData(const std::string& logoCmd, AEAPrintProcessorContext& processor) throw(ParseException)
+     {
+       std::string::const_iterator it= logoCmd.begin();
+       std::string::const_iterator end= logoCmd.end();
+@@ -51,7 +52,11 @@ namespace MASSAI
+           if(Tokenizer::readDigit(4, it, end, readBegin, it))
+           {
+             int size= Tokenizer::digit(readBegin, it);
+-            if(end - it == size)
++            if(!processor.parseContent(*this))
++            {
++              success= true;
++            }
++            else if(end - it == size)
+             {
+               std::string logoData= std::string(it, end);
+               if(logoData.size() >= 1 && (logoData.data()[0] == 0xA)) // binary data
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
+index 5bca864e..df8d0095 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
+@@ -29,7 +29,7 @@ namespace MASSAI
+     {
+       return false;
+     }
+-    bool AEAPrintProcessor::parseContent(const std::string& context, ContextType type, LogoData& logo)
++    bool AEAPrintProcessor::parseContent(const std::string& context, const ContextType& type, LogoData& logo)
+     {
+       return parseContent(context);
+     }
+@@ -45,7 +45,7 @@ namespace MASSAI
+     {
+       return parseContent(context);
+     }
+-    void AEAPrintProcessor::processLoad(const std::string& context, ContextType type, LogoData& logo)
++    void AEAPrintProcessor::processLoad(const std::string& context, const ContextType& type, LogoData& logo)
+     {}
+     void AEAPrintProcessor::processLoad(const std::string& context, PectabData& pectab)
+     {}
+@@ -53,7 +53,7 @@ namespace MASSAI
+     {}
+     void AEAPrintProcessor::processLoad(const std::string& context, TemplateData& template_)
+     {}
+-    void AEAPrintProcessor::processClear(const std::string& context, ContextType type, LogoData& logo)
++    void AEAPrintProcessor::processClear(const std::string& context, const ContextType& type, LogoData& logo)
+     {}
+     void AEAPrintProcessor::processClear(const std::string& context, PectabData& pectab)
+     {}
+@@ -67,6 +67,149 @@ namespace MASSAI
+     {}
+     void AEAPrintProcessor::process(const std::string& context, AEAReceiptPrintJob& job)
+     {}
++
++    AEAPrintProcessorContext::AEAPrintProcessorContext(const std::string& context, const ContextType& type, AEAPrintProcessor* pProcessor):
++      m_context(context),
++      m_contextType(type),
++      m_pProcessor(pProcessor)
++    {}
++    AEAPrintProcessorContext::~AEAPrintProcessorContext()
++    {}
++
++    bool AEAPrintProcessorContext::parseContent()
++    {
++      if(m_pProcessor)
++      {
++        return m_pProcessor->parseContent(m_context);
++      }
++      else
++      {
++        return true;
++      }
++    }
++    bool AEAPrintProcessorContext::parseContent(LogoData& logo)
++    {
++      if(m_pProcessor)
++      {
++        return m_pProcessor->parseContent(m_context, m_contextType, logo);
++      }
++      else
++      {
++        return true;
++      }
++    }
++    bool AEAPrintProcessorContext::parseContent(PectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        return m_pProcessor->parseContent(m_context, pectab);
++      }
++      else
++      {
++        return true;
++      }
++    }
++    bool AEAPrintProcessorContext::parseContent(BagTagPectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        return m_pProcessor->parseContent(m_context, pectab);
++      }
++      else
++      {
++        return true;
++      }
++    }
++    bool AEAPrintProcessorContext::parseContent(TemplateData& template_)
++    {
++      if(m_pProcessor)
++      {
++        return m_pProcessor->parseContent(m_context, template_);
++      }
++      else
++      {
++        return true;
++      }
++    }
++
++    void AEAPrintProcessorContext::processLoad(LogoData& logo)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processLoad(m_context, m_contextType, logo);
++      }
++    }
++    void AEAPrintProcessorContext::processLoad(PectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processLoad(m_context, pectab);
++      }
++    }
++    void AEAPrintProcessorContext::processLoad(BagTagPectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processLoad(m_context, pectab);
++      }
++    }
++    void AEAPrintProcessorContext::processLoad(TemplateData& template_)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processLoad(m_context, template_);
++      }
++    }
++    void AEAPrintProcessorContext::processClear(LogoData& logo)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processClear(m_context, m_contextType, logo);
++      }
++    }
++    void AEAPrintProcessorContext::processClear(PectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processClear(m_context, pectab);
++      }
++    }
++    void AEAPrintProcessorContext::processClear(BagTagPectabData& pectab)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processClear(m_context, pectab);
++      }
++    }
++    void AEAPrintProcessorContext::processClear(TemplateData& template_)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->processClear(m_context, template_);
++      }
++    }
++
++    void AEAPrintProcessorContext::process(AEABagtagPrintJob& job)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->process(m_context, job);
++      }
++    }
++    void AEAPrintProcessorContext::process(AEATicketPrintJob& job)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->process(m_context, job);
++      }
++    }
++    void AEAPrintProcessorContext::process(AEAReceiptPrintJob& job)
++    {
++      if(m_pProcessor)
++      {
++        m_pProcessor->process(m_context, job);
++      }
++    }
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
+index 2009f259..64d1f300 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
+@@ -11,7 +11,7 @@
+ 
+ #pragma warning (disable:4786)
+ 
+-#include "AEAParser/aeaReceipt.h"
++#include "aeaReceipt.h"
+ 
+ namespace MASSAI
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
+index 6c518b48..2b6e0411 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
+@@ -16,6 +16,7 @@
+ #include "aeaToken.h"
+ #include "aeaBagtagResponse.h"
+ #include "AEAParser/aeaBagtagPrintJob.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ #include <vector>
+ 
+ namespace
+@@ -41,7 +42,8 @@ namespace MASSAI
+       writeTraceText(BasicRuntime_HERE, "BagtagAEAPrintSimulation::input()");
+       dumpTrace(BasicRuntime_HERE, cmd.size(), cmd.data());
+       // rsp.printJobs.clear();
+-      if(getContext().input(cmd, rsp, getPrintProcessor()))
++      AEAPrintProcessorContext processor(getContextId(), BAGTAG, getPrintProcessor());
++      if(getContext().input(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "Setup command");
+       }
+@@ -80,6 +82,7 @@ namespace MASSAI
+ 
+     bool BagtagAEAPrintSimulation::printTicket(const BagtagAEAContext& context, const std::string& cmd, AEAResult& rsp) throw(ParseException)
+     {
++      AEAPrintProcessorContext processor(context.contextId(), BOARDINGPASS, getPrintProcessor());
+       bool isPrintCommand= false;
+       Iterator it= cmd.begin();
+       Iterator end= cmd.end();
+@@ -91,6 +94,7 @@ namespace MASSAI
+       {
+         //rsp.command= COMMAND_PRINT_BAGTAG;
+         isPrintCommand= true;
++        AEABagtagPrintJob printJob;
+         try
+         {
+           if(Tokenizer::readDigit(2, it, end, readBegin, it))
+@@ -105,10 +109,10 @@ namespace MASSAI
+               {
+                 wrtTrace(SecondaryRuntime_HERE, "Number of tags (%.1000s)", std::string(readBegin, it).c_str());
+                 int printCount= Tokenizer::digit(readBegin, it);
+-                jobCount+= printCount;
++                printJob.printCount= printCount;
+                 if(Tokenizer::readChar(it, end, readBegin, it))  // delimiter for this command
+                 {
+-                  typedef std::vector<std::auto_ptr<AEABagtagPrintJob> > JobList;
++                  typedef std::vector<std::auto_ptr<AEABagtagPrintJobPart> > JobList;
+                   typedef std::list<JobList> JobListList;
+                   JobListList jobs;
+                   wrtTrace(BasicRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+@@ -117,9 +121,9 @@ namespace MASSAI
+                   bool endOfJob= false;
+                   do  // Print Job Loop
+                   {
++                    jobCount+= printCount;
+                     pPectab= context.pectab(pectabId, pectabVersion);
+-                    std::auto_ptr<AEABagtagPrintJob> jobBase= std::auto_ptr<AEABagtagPrintJob>(new AEABagtagPrintJob());
+-                    jobBase->context= context.contextId();
++                    std::auto_ptr<AEABagtagPrintJobPart> jobBase= std::auto_ptr<AEABagtagPrintJobPart>(new AEABagtagPrintJobPart());
+                     // jobBase->isGenerated= true;
+                     if(pPectab == 0)
+                     {
+@@ -167,11 +171,10 @@ namespace MASSAI
+                         }
+                       }
+                       {
+-
+                         // check fields
+                         {
+-                          AEABagtagPrintJob::TextMap::const_iterator it= jobBase->fields.begin();
+-                          AEABagtagPrintJob::TextMap::const_iterator end= jobBase->fields.end();
++                          AEABagtagPrintJobPart::TextMap::const_iterator it= jobBase->fields.begin();
++                          AEABagtagPrintJobPart::TextMap::const_iterator end= jobBase->fields.end();
+                           for(; it != end; ++it)
+                           {
+                             const BagTagPectabField* pPectabField= pPectab->getField((*it).first);
+@@ -179,13 +182,15 @@ namespace MASSAI
+                               throw InvalidField("Not defined in Pectab", (*it).first);
+                           }
+                         }
++                        printJob.jobs.push_back(jobBase);
++/*
+                         JobList jobList(printCount);
+                         // draw fields
+                         for(int i= 0; i < printCount; i++)
+                         {
+-                          std::auto_ptr<AEABagtagPrintJob> job= std::auto_ptr<AEABagtagPrintJob>(new AEABagtagPrintJob(*jobBase.get()));
++                          std::auto_ptr<AEABagtagPrintJobPart> job= std::auto_ptr<AEABagtagPrintJobPart>(new AEABagtagPrintJobPart(*jobBase.get()));
+                           // job->useTemplateFile= false;
+-                          job->printCount= 1;
++                          // job->printCount= 1;
+                           // SVG::SVGContext svgContext(m_printWidth, m_printHeight, SVG::P_BAGTAG);
+                           BagTagPectabFieldMap::const_iterator it= pPectab->getFields().begin();
+                           BagTagPectabFieldMap::const_iterator end= pPectab->getFields().end();
+@@ -210,10 +215,11 @@ namespace MASSAI
+                           jobList[i]= job;
+                         }
+                         jobs.push_back(jobList);
++*/
+                       }
+-
+                     }
+                   } while(!endOfJob);
++                  /*
+                   for(int i= 0; i < printCount; i++)
+                   {
+                     JobListList::iterator it= jobs.begin();
+@@ -221,8 +227,10 @@ namespace MASSAI
+                     for(; it != end; it++)
+                     {
+                       // rsp.printJobs.push_back((*it)[i]);
++                      processor.process(*(*it)[i].get());
+                     }
+                   }
++                  */
+                 }
+               }
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+index ca9f8556..daa7cd95 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+@@ -17,6 +17,7 @@
+ #include "AEAParser/aeaResponse.h"
+ #include "aeaBoardingPassResponse.h"
+ #include "AEAParser/aeaBoardingPassPrintJob.h"
++#include "AEAParser/aeaPrintProcessor.h"
+ 
+ using namespace MASSAI::AEA;
+ 
+@@ -57,7 +58,8 @@ namespace MASSAI
+       AEAResult rsp;
+       writeTraceText(BasicRuntime_HERE, "BoardingPassAEAPrintSimulation::input()");
+       dumpTrace(BasicRuntime_HERE, cmd.size(), cmd.data());
+-      if(getContext().input(cmd, rsp, getPrintProcessor()))
++      AEAPrintProcessorContext processor(getContextId(), BOARDINGPASS, getPrintProcessor());
++      if(getContext().input(cmd, rsp, processor))
+       {
+         writeTraceText(BasicRuntime_HERE, "Setup command");
+       }
+@@ -100,14 +102,16 @@ namespace MASSAI
+ 
+     bool BoardingPassAEAPrintSimulation::printTicket(const BoardingAEAContext& context, const std::string& cmd, AEAResult& rsp) throw(ParseException)
+     {
++      AEAPrintProcessorContext processor(context.contextId(), BOARDINGPASS, getPrintProcessor());
+       bool isPrintCommand= true;
+       Iterator it= cmd.begin();
+       Iterator end= cmd.end();
+       Iterator readBegin;
+       char delimiter;
+-      AEATicketPrintJob::TextMap allData;
+-      std::auto_ptr<AEATicketPrintJob> job;
+-      std::auto_ptr<AEATicketPrintJob> all;
++      AEATicketPrintJob printJob;
++      AEATicketPrintJobPart::TextMap allData;
++      std::auto_ptr<AEATicketPrintJobPart> job;
++      std::auto_ptr<AEATicketPrintJobPart> all;
+       const PectabData* pPectab= 0;
+       const PectabData* pPectabAll= 0;
+       std::string actionCode;
+@@ -135,8 +139,7 @@ namespace MASSAI
+           while(Tokenizer::readText(actionCode, it, end, readBegin, it))  // Document Begin
+           {
+             wrtTrace(BasicRuntime_HERE, "Print Ticket (%.1000s)", std::string(readBegin, it).c_str());
+-            job= std::auto_ptr<AEATicketPrintJob>(new AEATicketPrintJob());
+-            job->context= context.contextId();
++            job= std::auto_ptr<AEATicketPrintJobPart>(new AEATicketPrintJobPart());
+             if(Tokenizer::readChar(it, end, readBegin, it))  // delimiter for this command
+             {
+               wrtTrace(BasicRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+@@ -267,8 +270,8 @@ namespace MASSAI
+ 
+                   // draw logos
+                   {
+-                    AEATicketPrintJob::TextMap::const_iterator it= job->logos.begin();
+-                    AEATicketPrintJob::TextMap::const_iterator end= job->logos.end();
++                    AEATicketPrintJobPart::TextMap::const_iterator it= job->logos.begin();
++                    AEATicketPrintJobPart::TextMap::const_iterator end= job->logos.end();
+                     for(; it != end; ++it)
+                     {
+                       const PectabField* pPectabField= pPectab->getField((*it).first);
+@@ -285,8 +288,8 @@ namespace MASSAI
+                   }
+                   // draw templates logos
+                   {
+-                    AEATicketPrintJob::TextMap::const_iterator it= job->templates.begin();
+-                    AEATicketPrintJob::TextMap::const_iterator end= job->templates.end();
++                    AEATicketPrintJobPart::TextMap::const_iterator it= job->templates.begin();
++                    AEATicketPrintJobPart::TextMap::const_iterator end= job->templates.end();
+                     for(; it != end; ++it)
+                     {
+                       const PectabField* pPectabField= pPectab->getField((*it).first);
+@@ -303,8 +306,8 @@ namespace MASSAI
+                   }
+                   // draw templates non logos
+                   {
+-                    AEATicketPrintJob::TextMap::const_iterator it= job->templates.begin();
+-                    AEATicketPrintJob::TextMap::const_iterator end= job->templates.end();
++                    AEATicketPrintJobPart::TextMap::const_iterator it= job->templates.begin();
++                    AEATicketPrintJobPart::TextMap::const_iterator end= job->templates.end();
+                     for(; it != end; ++it)
+                     {
+                       const PectabField* pPectabField= pPectab->getField((*it).first);
+@@ -321,8 +324,8 @@ namespace MASSAI
+                   }
+                   // draw barcode and text from print command
+                   {
+-                    AEATicketPrintJob::TextMap::const_iterator it= job->fields.begin();
+-                    AEATicketPrintJob::TextMap::const_iterator end= job->fields.end();
++                    AEATicketPrintJobPart::TextMap::const_iterator it= job->fields.begin();
++                    AEATicketPrintJobPart::TextMap::const_iterator end= job->fields.end();
+                     for(; it != end; ++it)
+                     {
+                       const PectabField* pPectabField= pPectab->getField((*it).first);
+@@ -347,6 +350,7 @@ namespace MASSAI
+               }
+               wrtTrace(BasicRuntime_HERE, "Add Job (%.1000s)", job->paperType.c_str());
+               // rsp.printJobs.push_back(job);
++              printJob.printJobParts.push_back(job);
+             }
+           }
+           if(it != end)
+@@ -355,6 +359,7 @@ namespace MASSAI
+           }
+           if(pPectab != 0)
+           {
++            processor.process(printJob);
+             rsp= AEAResult(new AEACouponResponse(responseTransactionCode, responseDelimiter, jobCount, 3));
+           }
+           else
+@@ -390,27 +395,20 @@ namespace MASSAI
+     // RD#FONT0#SIZE3#FREEBOARDING-RECEIPT#FONT1#SIZE2#NAMEHASSELHORN/DIETRICHM#ALCDLH#FONT3#SIZE7#FLNR404
+     bool BoardingPassAEAPrintSimulation::printReceipt(const BoardingAEAContext& context, const std::string& cmd, AEAResult& rsp) throw(ParseException)
+     {
++      AEAPrintProcessorContext processor(context.contextId(), BOARDINGPASS, getPrintProcessor());
+       bool isPrintCommand= false;
+       Iterator it= cmd.begin();
+       Iterator end= cmd.end();
+       Iterator readBegin;
+       char delimiter;
+-      AEATicketPrintJob::TextMap allData;
+-      std::auto_ptr<AEATicketPrintJob> job;
++      AEAReceiptPrintJob job;
+ 
+       if(Tokenizer::readText(PRINT_RECEIPT, it, end, readBegin, it))
+       {
+-        // rsp.command= COMMAND_PRINT_RECEIPT;
+         wrtTrace(BasicRuntime_HERE, "Print Receipt (%.1000s)", std::string(readBegin, it).c_str());
+         isPrintCommand= true;
+         try
+         {
+-          job= std::auto_ptr<AEATicketPrintJob>(new AEATicketPrintJob());
+-          job->context= context.contextId();
+-          job->paperType= RECEIPT_DOCUMENT_TYPE;
+-          job->printCount= 1;
+-          //job->useTemplateFile= false;
+-          //job->isGenerated= false;
+           // SVG::SVGContext svgContext(m_printWidth*96/m_resolutionX, m_printHeight*96/m_resolutionY, SVG::P_RECEIPT);
+ 
+           receipt::Font contentFont;
+@@ -422,7 +420,6 @@ namespace MASSAI
+           {
+             wrtTrace(BasicRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+             delimiter= *readBegin;
+-            // rsp.delimiter= delimiter;
+             while(Tokenizer::readToChar(delimiter, it, end, readBegin, it)) // Field Content
+             {
+               wrtTrace(SecondaryRuntime_HERE, "Field Content (%.1000s)", std::string(readBegin, it).c_str());
+@@ -441,6 +438,15 @@ namespace MASSAI
+                   {
+                     wrtTrace(SecondaryRuntime_HERE, "Print (%.100s)->(%.100s)", command.pCommand->code, command.content.c_str());
+                     // receiptPrinting.svg(svgContext, context, command, contentFont, labelFont);
++                    if(contentFont.fontId == 0)
++                    {
++                      throw receipt::PrintReceiptInvalidFontException();
++                    }
++                    if(contentFont.fontSizeId == 0)
++                    {
++                      throw receipt::PrintReceiptInvalidFontSizeException();
++                    }
++                    job.fields.push_back(AEAReceiptField(contentFont.fontId->id, contentFont.fontSizeId->id, command.pCommand->code, command.content));
+                     break;
+                   }
+                   case receipt::RC_SET_FONTSIZE:
+@@ -465,10 +471,7 @@ namespace MASSAI
+                 break;
+               }
+             }
+-            // svgContext.finalize();
+-            // job->svgClfs["GENERIC_SVG"]= svgContext.svgContent;
+-            wrtTrace(BasicRuntime_HERE, "Add Job (%.1000s)", job->paperType.c_str());
+-            // rsp.printJobs.push_back(job);
++            processor.process(job);
+             rsp= AEAResult(new AEAReceiptResponse(getTransactionCode()));
+           }
+         }
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 3b9a434d..b5402204 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -17,7 +17,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mHex.obj \
+                         $(_OBJ)\mHexString.obj \
+                         $(_OBJ)\textTemplate.obj \
+-                        $(_OBJ)\textTools.obj
++                        $(_OBJ)\textTools.obj \
++                        $(_OBJ)\base64.obj
+ 
+ ######################################################################
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,222 @@
+From 4948016073f44b80d4028d3c34bfad9a70875293 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 20 Jul 2016 11:49:06 +0000
+Subject: [PATCH 0693/1000] MANTIS 0032431 -added tracing for errors
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1049 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/dateTimeTools.h      |  12 +-
+ .../Massai/cpp/Tools/src/dateTimeTools.cpp    | 150 +++++++++++-------
+ 2 files changed, 98 insertions(+), 64 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h b/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
+index 9102b71b..4e816c26 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
+@@ -42,15 +42,19 @@ namespace MASSAI
+ 
+ 
+     /**
+-    *   Returns the actual System-Time.
++    *   Saves the actual system time in the buffer.
++    *
++    *   @return: An object that contains the time, or NULL if there's a failure
+     */
+-    static boost::posix_time::time_duration getActualSystemTime();
++    static boost::posix_time::time_duration* getActualSystemTime();
+ 
+ 
+     /**
+-    *   Returns the actual System-Date.
++    *   Saves the actual system date in the buffer.
++    *
++    *   @return: An object that contains the date, or NULL if there's a failure
+     */
+-    static boost::gregorian::date getActualSystemDate(); 
++    static boost::gregorian::date* getActualSystemDate(); 
+     
+     
+     /**
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
+index 3c94cde1..89ebfcaf 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
+@@ -12,6 +12,7 @@
+ 
+ //MATERNA includes
+ #include "tools/dateTimeTools.h"
++#include "trc/trace.h"
+ 
+ //Compiler includes
+ #include <sstream>
+@@ -20,78 +21,107 @@
+ 
+ namespace MASSAI
+ {
+-   boost::posix_time::time_duration DateTimeTools::getActualSystemTime()  
++  boost::posix_time::time_duration* DateTimeTools::getActualSystemTime() 
+   {
+-      time_t t = time(0);   
+-      struct tm * now = localtime( & t );
+-
+-      boost::posix_time::time_duration today( now->tm_hour,now->tm_min,now->tm_sec,0 );
+-
+-      return today;
++      time_t rawtime = time(NULL);
++      struct tm timeinfo;
++      long   error = localtime_s(&timeinfo, &rawtime);
++
++      if(!error)
++      {
++        return new boost::posix_time::time_duration(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, 0 );
++      }
++      else
++      {
++        TRACE(MajorError_HERE, "ERROR: Could not get actual system time, error=[%d]", error);
++      } 
++      
++      return NULL;
+   }
+ 
+ 
+-  boost::gregorian::date DateTimeTools::getActualSystemDate()  
++  boost::gregorian::date* DateTimeTools::getActualSystemDate()  
+   {
+-      time_t t = time(0);  
+-      struct tm * now = localtime( & t );
+-
+-      boost::gregorian::date actualDate( ((1900) + (now->tm_year)), ((1) + (now->tm_mon)), (now->tm_mday) );
+-
+-      return actualDate;
++      time_t rawtime = time(NULL);
++      struct tm timeinfo;
++      long   error = localtime_s(&timeinfo, &rawtime);
++      
++      if(!error)
++      {
++        unsigned short year   = (unsigned short)(timeinfo.tm_year + 1900);
++        unsigned short month  = (unsigned short)(timeinfo.tm_mon  + 1);
++        unsigned short day    = (unsigned short)(timeinfo.tm_mday);
++
++        return new boost::gregorian::date(year, month, day);    
++      }
++      else
++      {
++        TRACE(MajorError_HERE, "ERROR: Could not get actual system time, error=[%d]", error);
++      }      
++      
++      return NULL;
+   }
+   
+   
+   std::string DateTimeTools::timeStamp()
+   {
+     std::stringstream sStream ("");
+-
+-    boost::gregorian::date              actualDate ( MASSAI::DateTimeTools::getActualSystemDate() );
+-    boost::posix_time::time_duration    actualTime ( MASSAI::DateTimeTools::getActualSystemTime() );
+-
+-    std::stringstream ssHour ("");
+-    std::stringstream ssMinute ("");
+-    std::stringstream ssSecond ("");
+-    std::stringstream ssDay ("");
+-    std::stringstream ssMonth ("");
+-
+-    if( actualTime.hours() < 10 )
+-        ssHour << "0" << actualTime.hours();         
+-    else
+-        ssHour << actualTime.hours();
+-
+-    if( actualTime.minutes() < 10 )
+-        ssMinute << "0" << actualTime.minutes();         
+-    else
+-        ssMinute << actualTime.minutes();
+-
+-    if( actualTime.seconds() < 10 )
+-        ssSecond << "0" << actualTime.seconds();         
+-    else
+-        ssSecond << actualTime.seconds();
+-
+-    if( actualDate.year_month_day().day < 10 )
+-        ssDay << "0" << actualDate.year_month_day().day;         
+-    else
+-        ssDay << actualDate.year_month_day().day;
+-
+-    if( actualDate.year_month_day().month.as_number()  < 10 )
+-        ssMonth << "0" << actualDate.year_month_day().month.as_number() ;         
++    
++    long error = 0;
++    
++    boost::gregorian::date*            actualDate = MASSAI::DateTimeTools::getActualSystemDate();
++    boost::posix_time::time_duration*  actualTime = MASSAI::DateTimeTools::getActualSystemTime();
++    
++    if( actualDate != NULL && actualTime != NULL)
++    {
++      std::stringstream ssHour ("");
++      std::stringstream ssMinute ("");
++      std::stringstream ssSecond ("");
++      std::stringstream ssDay ("");
++      std::stringstream ssMonth ("");
++
++      if( actualTime->hours() < 10 )
++          ssHour << "0" << actualTime->hours();         
++      else
++          ssHour << actualTime->hours();
++
++      if( actualTime->minutes() < 10 )
++          ssMinute << "0" << actualTime->minutes();         
++      else
++          ssMinute << actualTime->minutes();
++
++      if( actualTime->seconds() < 10 )
++          ssSecond << "0" << actualTime->seconds();         
++      else
++          ssSecond << actualTime->seconds();
++
++      if( actualDate->year_month_day().day < 10 )
++          ssDay << "0" << actualDate->year_month_day().day;         
++      else
++          ssDay << actualDate->year_month_day().day;
++
++      if( actualDate->year_month_day().month.as_number()  < 10 )
++          ssMonth << "0" << actualDate->year_month_day().month.as_number() ;         
++      else
++          ssMonth << actualDate->year_month_day().month.as_number() ;
++
++      sStream << ssHour.str() 
++              << ":"
++              << ssMinute.str()
++              << ":"
++              << ssSecond.str()
++              << "-"
++              << ssDay.str()    
++              << "." 
++              << ssMonth.str()   
++              << "." 
++              << actualDate->year_month_day().year;         
++    }
+     else
+-        ssMonth << actualDate.year_month_day().month.as_number() ;
+-
+-    sStream << ssHour.str() 
+-            << ":"
+-            << ssMinute.str()
+-            << ":"
+-            << ssSecond.str()
+-            << "-"
+-            << ssDay.str()    
+-            << "." 
+-            << ssMonth.str()   
+-            << "." 
+-            << actualDate.year_month_day().year;         
+-
++    {
++      TRACE(MajorError_HERE, "ERROR: Could not get actual system date-time");
++    }
++     
+     std::string timeStamp (sStream.str());
+ 
+     return timeStamp;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,114 @@
+From 48048b9fe3d96cfc099a0ef284d75c2a70c22a39 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 28 Aug 2014 15:49:03 +0000
+Subject: [PATCH 0568/1077] MANTIS 0033507 bugfix configuration service not
+ reachable
+
+mcorba.lib
+V1.0.6.21
+
+
+- if available use fqdn instead of hostname in LOCATIONFORWARD
+- test
+  - test FQDN
+    -pre: platform on kiosk with domain, mcc on server, server does not try domain suffix of kiosk for name resolution
+    -action: open in mcc on server configuraton control, system control and appcontrol for the kiosk
+    -post: successfully opened configuraton control, system control and appcontrol
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@712 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/MassaiCorba/inc/massaiCORBA_def.h     | 12 ++++++-
+ .../Massai/cpp/MassaiCorba/src/tools.cpp      | 33 +++++++++++++++++--
+ 2 files changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index e7dbb0cf..cb3f0947 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -4,12 +4,22 @@
+ 
+ \page mcorba.lib Release Notes - mcorba.lib - Massai CORBA library
+ 
+-@version 1.0.6.20
++@version 1.0.6.21
+ 
+ \section changehistory Change history
+ 
+ mcorba.lib
+ 
++\version 1.0.6.21
++\li 28.08.2014
++\li bugfix SteT Mantis 0033507: configuration service not reachable
++- if available use fqdn instead of hostname in LOCATIONFORWARD
++- test
++  - test FQDN
++    -pre: platform on kiosk with domain, mcc on server, server does not try domain suffix of kiosk for name resolution
++    -action: open in mcc on server configuraton control, system control and appcontrol for the kiosk
++    -post: successfully opened configuraton control, system control and appcontrol
++
+ \version 1.0.6.20
+ \li 27.11.2012
+ \li SteT - enhancement, Mantis 0024715: Build: VC10; fix compiler warnings
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
+index 057776e1..25243672 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
+@@ -8,6 +8,35 @@ using massaiCorbaImpl::ParameterList;
+ 
+ namespace
+ {
++   void initAddrInfo(struct addrinfo& info)
++   {
++     memset(&info, 0, sizeof(info));
++     info.ai_family = AF_UNSPEC;
++     info.ai_socktype = SOCK_STREAM;
++     info.ai_flags = AI_CANONNAME;
++   }
++
++   std::string getFQDN(const std::string& hostname)
++   {
++     std::string result = hostname;
++     struct addrinfo hints;
++     initAddrInfo(hints);
++     struct addrinfo* info;
++     if(getaddrinfo(hostname.c_str(), 0, &hints, &info) == 0)
++     {
++       for(struct addrinfo* p = info; p != 0; p = p->ai_next)
++       {
++         if(p->ai_canonname != 0)
++         {
++           result= p->ai_canonname;
++           break;
++         }
++       }
++       freeaddrinfo(info);
++     }
++     return result;
++  }
++
+   bool _getHostname(char* buffer, int size)
+   {
+     bool result = true;
+@@ -40,7 +69,7 @@ namespace massaiCorba
+ 
+   std::string getHostname()
+   {
+-    char hostname[256];
++    char hostname[2000];
+     if(!_getHostname(hostname, sizeof(hostname)))
+     {
+       WSADATA wsaData;
+@@ -48,7 +77,7 @@ namespace massaiCorba
+       WSAStartup(wVersionRequested, &wsaData);
+       _getHostname(hostname, sizeof(hostname));
+     }
+-    return hostname;
++    return getFQDN(hostname);
+   }
+ 
+   std::string getModuleName()
+-- 
+2.41.0.windows.1
+

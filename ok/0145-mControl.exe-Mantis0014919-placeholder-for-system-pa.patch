@@ -1,0 +1,307 @@
+From 53201fcf58efdc6f184bc006dc5b4a3d9d4294ee Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Sep 2011 12:48:04 +0000
+Subject: [PATCH 0145/1076] mControl.exe Mantis0014919: placeholder for system
+ paths in PLATFORM.STARTUP.SystemCommands, PLATFORM.SHUTDOWN.SystemCommands
+ mStarter.exe Mantis0014919: placeholder for system paths in
+ PLATFORM.EXEC.xxxx, PLATFORM.SCHEDULED.SystemCommands
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@181 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  | 11 ++++++-
+ .../Massai/cpp/Controller/inc/mstarter_def.h  | 13 ++++++--
+ .../Massai/cpp/Controller/makefile.mak        |  1 +
+ .../Massai/cpp/Controller/src/main.cpp        |  6 ++++
+ .../Massai/cpp/Controller/src/mctools.cpp     |  8 +++--
+ .../Massai/cpp/Controller/src/scheduler.cpp   |  7 ++++-
+ .../Massai/cpp/Controller/src/starter.cpp     | 30 ++++++++++++-------
+ 7 files changed, 59 insertions(+), 17 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index 34ec384a..fbc3cb37 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -12,10 +12,19 @@
+ 
+ /*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+  *
+- *  @version 1.0.1.5
++ *  @version 1.0.1.6
+  *
+  *  \section change1 Change history
+  *
++ *  \date 14.09.2011 \li V1.0.1.6
++ *                   \li GiT: Mantis0014919: placeholder for system paths in
++ *                   \li      PLATFORM.STARTUP.SystemCommands
++ *                   \li      PLATFORM.SHUTDOWN.SystemCommands
++ *                   \li      The following substitutions are now supported:
++ *                   \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
++ *                   \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
++ *                   \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
++ *
+  *  \date 25.05.2011 \li V1.0.1.5
+  *                   \li GiT: Mantis0019385: MControl - make MCC detection on removable device configurable
+  *                   \li new commandline parameter:
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+index a138391a..8327609c 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -12,10 +12,17 @@
+ 
+ /*! \page massaistarter mStarter - Release Notes
+  *
+- *  @version 1.1.0.6
++ *  @version 1.1.0.7
+  *
+  *  \section change1 Change history
+  *
++ *  \date 12.09.2011 \li V 1.1.0.7
++ *                   \li GiT: Mantis0014919: placeholder for system paths
++ *                   \li      The following substitutions are now supported:
++ *                   \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
++ *                   \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
++ *                   \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
++ *
+  *  \date 25.01.2010 \li V 1.1.0.6
+  *                   \li bufix - Wrong illegal pointer dereference - crash (JK)
+  *
+@@ -78,8 +85,8 @@
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+ 
+-#define FILE_VER_BIN     1,1,0,6
+-#define FILE_VER_STR     "FileVersion", "1.1.0.6\0"
++#define FILE_VER_BIN     1,1,0,7
++#define FILE_VER_STR     "FileVersion", "1.1.0.7\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"mstarter\0"
+ #define INTERNALNAME     "InternalName"     ,"mstarter\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index 9092f519..c126cc73 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -76,6 +76,7 @@ MY_BIN2_OBJS = \
+     $(_OBJ)\starter.obj
+ 
+ MY_BIN2_USER_LIBS = \
++    $(LIB_TEXT) \
+     $(STDUSERLIBS)
+ 
+ MY_BIN2_LINKLIBS = \
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index 1ab547a2..981d1e14 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -32,6 +32,8 @@
+ #include "systools/matDaemon.h"
+ #include "systools/mSysException.hpp"
+ 
++#include "text/cEnvSubst.hpp"
++
+ #include <signal.h>
+ 
+ 
+@@ -45,6 +47,8 @@ static bool      bPortableMCC= false;
+ static HINSTANCE hInstance;
+ static HWND      hwnd= 0;
+ 
++CEnvSubst EnvS;
++
+ extern long setLevel(long level);
+ //---------------------------------------------------------------------------
+ //
+@@ -354,6 +358,8 @@ FILE        *fp;
+ 
+     openTrace("mControl");
+ 
++    EnvS.SetBaseEnvVars();
++
+     try
+     {
+       if(strstr(szCmdLine,"-server") || mDaemon_isService())
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
+index 327db645..710053a3 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
+@@ -24,6 +24,9 @@
+ #include "trc/trace.h"
+ #include "httpDownLoad.h"
+ 
++#include "text/cEnvSubst.hpp"
++extern CEnvSubst EnvS;
++
+ using namespace std;
+ 
+ // constants for this file --------------------------------------------------
+@@ -541,7 +544,8 @@ void execSysCmdsStartup()
+    TRACE( HERE, "execSysCmdsStartup ..." );
+    if (pStartupCommands==NULL)
+       pStartupCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
+-   list<string> cmdlist = pStartupCommands->get();
++   list<string> cmdlist = EnvS.substEnvList(pStartupCommands->get());
++
+    for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+    {
+       long const rc = mSystem((*i).c_str());
+@@ -567,7 +571,7 @@ void execSysCmdsShutdown()
+    TRACE( HERE, "execSysCmdsShutdown ..." );
+    if (pShutDownCommands==NULL)
+       pShutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
+-   list<string> cmdlist = pShutDownCommands->get();
++   list<string> cmdlist = EnvS.substEnvList(pShutDownCommands->get());
+    for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++ )
+    {
+       long const rc = mSystem((*i).c_str());
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
+index 0a09fdd7..47947dad 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
+@@ -27,8 +27,13 @@
+ #include "mctools.h"
+ #include "scheduler.h"
+ 
++#include "text/cEnvSubst.hpp"
++
+ #define RESTART "restart massai"
+ 
++#include "text/cEnvSubst.hpp"
++extern CEnvSubst EnvS;
++
+ using namespace std;
+ 
+ // function prototypes -------------------------------------------------------
+@@ -411,7 +416,7 @@ long    lHour,
+ 
+     // just create this config entry
+ 
+-    list<string> cmdlist = pSysCmdList->get();
++    list<string> cmdlist = EnvS.substEnvList(pSysCmdList->get());
+ 
+     for(i = cmdlist.begin(); i != cmdlist.end(); i++)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+index d46e2b84..bc20922c 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+@@ -32,6 +32,8 @@
+ 
+ #include "massaidll/BASE_OS.h"
+ 
++#include "text/cEnvSubst.hpp"
++
+ #ifndef _lint
+ #include "boost/regex.hpp"
+ using boost::cmatch;
+@@ -68,7 +70,9 @@ std::string const DefaultExplanation =
+                "cwd = \"current working directory\" - sets the current working directory for the created process.\n"
+                "wait = [milliseconds | terminate] - MILLISECONDS specifies a pause"
+                " after creating the process, TERMINATE waits until the process terminates.\n"
+-               "show = [yes | no | hide | minimized] - specifies how the process window is shown";
++               "show = [yes | no | hide | minimized] - specifies how the process window is shown"
++               "The following substitution environment variables are supported:"
++               "$PROGRAMFILES, $SYSTEMROOT, $SYSTEMDRIVE";
+ 
+ 
+ 
+@@ -327,6 +331,7 @@ public:
+    }
+ };
+ 
++CEnvSubst EnvS;
+ 
+ cfgHwList      *pHardwareList = NULL;
+ cfgSwList      *pSoftwareList = NULL;
+@@ -347,7 +352,6 @@ cfgBool        ListenOnChange
+ 
+ nConfig::basicTextList TextListItem ("MSTARTER");
+ 
+-
+ std::list<std::string> platformExecGet( std::string const & Itm )
+ {
+    std::list<std::string> StringList;
+@@ -865,7 +869,7 @@ long startProgs()
+   if (pSoftwareList)
+         swlist = pSoftwareList->get();
+ 
+-  std::list<std::string> ExecProcsPlatform = execList.get();
++  std::list<std::string> ExecProcsPlatform = EnvS.substEnvList(execList.get());
+ 
+   TRACE(HERE_9,">> startProgs");
+ 
+@@ -873,7 +877,7 @@ long startProgs()
+   // first start all software components ('PLATFORM.SOFTWARE.Services')
+   for(i = swlist.begin(); i != swlist.end(); ++i)
+   {
+-    std::list<std::string> ExecSwServices = platformExecGet( *i );
++    std::list<std::string> ExecSwServices = EnvS.substEnvList(platformExecGet( *i ));
+     for(j = ExecSwServices.begin(); j != ExecSwServices.end(); ++j)
+     {
+       if(startProgs(*i, *j, nProcIdx)) nProcIdx++;
+@@ -887,7 +891,7 @@ long startProgs()
+   // at last start all the hardware devices ('PLATFORM.HARDWARE.Devices')
+   for(i = hwlist.begin(); i != hwlist.end(); ++i)
+   {
+-    std::list<std::string> ExecHwDevices = platformExecGet( *i );
++    std::list<std::string> ExecHwDevices = EnvS.substEnvList(platformExecGet( *i ));
+     for(j = ExecHwDevices.begin(); j != ExecHwDevices.end(); ++j)
+     {
+       if(startProgs(*i, *j, nProcIdx)) nProcIdx++;
+@@ -1041,7 +1045,7 @@ void checkListAndLoad()
+   if (pSoftwareList)
+         swlist = pSoftwareList->get();
+ 
+-  std::list<std::string> ExecProcsPlatform = execList.get();
++  std::list<std::string> ExecProcsPlatform = EnvS.substEnvList(execList.get());
+   std::list<std::string> fullExlist;
+ 
+   cfgChange = false;//reset
+@@ -1049,7 +1053,7 @@ void checkListAndLoad()
+   // first check all software components ('PLATFORM.SOFTWARE.Services')
+   for(i = swlist.begin(); i != swlist.end(); ++i)
+   {
+-    std::list<std::string> ExecSwServices = platformExecGet( *i );
++    std::list<std::string> ExecSwServices = EnvS.substEnvList(platformExecGet( *i ));
+     for(j = ExecSwServices.begin(); j != ExecSwServices.end(); ++j)
+     {
+       TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+@@ -1065,13 +1069,13 @@ void checkListAndLoad()
+   {
+       //if(startProgs("PLATFORM.EXEC.Platform", *i, nProcIdx)) nProcIdx++;
+       TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+-      fullExlist.merge(ExecProcsPlatform);//merge deletes ExecProcsPlatform, so do this after using it.
+   }
++  fullExlist.merge(ExecProcsPlatform);//merge deletes ExecProcsPlatform, so do this after using it.
+ 
+   // at last check all the hardware devices ('PLATFORM.HARDWARE.Devices')
+   for(i = hwlist.begin(); i != hwlist.end(); ++i)
+   {
+-    std::list<std::string> ExecHwDevices = platformExecGet( *i );
++    std::list<std::string> ExecHwDevices = EnvS.substEnvList(platformExecGet( *i ));
+     for(j = ExecHwDevices.begin(); j != ExecHwDevices.end(); ++j)
+     {
+       TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+@@ -1247,6 +1251,9 @@ void main(int argc, char **argv)
+ 
+    try
+    {
++
++      EnvS.SetBaseEnvVars();
++
+ #define USESEM
+ 
+ #ifdef USESEM
+@@ -1289,7 +1296,10 @@ void main(int argc, char **argv)
+             }
+          }
+ #ifdef USESEM
+-         StartSemaphore = Args.argument( 1 );
++         if( Args.argument( 1 ) )
++          StartSemaphore = Args.argument( 1 );
++         else
++          StartSemaphore = "";
+ #endif
+       }
+ #ifdef USESEM
+-- 
+2.41.0.windows.1
+

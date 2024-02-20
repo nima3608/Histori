@@ -1,0 +1,74 @@
+From 06efa80f3313b51901b493b01b1e502bcdd46c04 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 8 Aug 2012 14:44:39 +0000
+Subject: [PATCH 0314/1077] MANTIS0024146: SelfServiceCommon text: HexDump2Bin
+ fails on dumps greater than 65k
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@379 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Text/src/HexDump2Bin.cpp       | 41 +++++++++++--------
+ 1 file changed, 25 insertions(+), 16 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/HexDump2Bin.cpp b/SelfServiceCommon/Massai/cpp/Text/src/HexDump2Bin.cpp
+index 79f75dac..35e441cc 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/HexDump2Bin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/HexDump2Bin.cpp
+@@ -11,11 +11,12 @@
+  *
+  *
+  * The assumption is, the input file contains hexdump lines like this:
+- *
++ * 
+  * [01d0,0464] 31 46 23 42 36 33 36 46 - 33 37 46 23 42 37 33 36 1F#B63 ...
+- *             |                                                 |
+- *             |                           Length = 50 ----------+
+- *             +-- Line offset 12
++ * |         | |                                                 |
++ * |         | |                           Length = n+50 --------+
++ * |         | +-- Line offset n
++ * match [...]
+  *
+  **************************************************************************
+ **/
+@@ -58,18 +59,26 @@ int main( int argc, char ** argv )
+    unsigned Offset = 0;
+    while( Offset < Size )
+    {
+-      // Scan to first hex byte
+-      Offset += 12;
+-      // Get substring with hex values
+-      string const HexIn = Cont.substr( Offset, 50 );
+-      // Convert it to binary
+-      string const Outstring = Converter.toBin( HexIn );
+-      // And write it
+-      Output.write
+-         (
+-            Outstring.c_str(),
+-            static_cast<int>( Outstring.size() )
+-         );
++      if( Cont[Offset] == '[' ) 
++      {
++          while( ( Offset < Size ) && ( Cont[Offset] != '\n' )  && ( Cont[Offset] != ']' ) )
++             ++Offset;
++          if(  Cont[Offset] == ']' )
++          {          
++              // Scan to first hex byte
++              Offset += 2;
++              // Get substring with hex values
++              string const HexIn = Cont.substr( Offset, 50 );
++              // Convert it to binary
++              string const Outstring = Converter.toBin( HexIn );
++              // And write it
++              Output.write
++                 (
++                    Outstring.c_str(),
++                    static_cast<int>( Outstring.size() )
++                 );
++          }
++      }
+       // Scan to end-of-line
+       while( ( Offset < Size ) && ( Cont[Offset] != '\n' ) )
+          ++Offset;
+-- 
+2.41.0.windows.1
+

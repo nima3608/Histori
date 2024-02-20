@@ -1,0 +1,78 @@
+From 18fe72ee1b05259359a8859ca6df939d38446250 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 10 Jul 2015 12:13:45 +0000
+Subject: [PATCH 183/462] MANTIS0037021: Build: email; add errors of unit
+ tests, warnings of compile and link
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@275 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/checkForErrors.pl           | 29 +++++++------------
+ 1 file changed, 10 insertions(+), 19 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/checkForErrors.pl b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+index ce894ad..a4f2da6 100644
+--- a/SelfServiceBuild/Build/scripts/checkForErrors.pl
++++ b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+@@ -2,7 +2,7 @@
+ #
+ 
+ use strict;
+-our $VERSION="0.0.0.2";
++our $VERSION="0.0.0.3";
+ 
+ use File::Copy;
+ use Getopt::Long;
+@@ -58,13 +58,11 @@ my @search_jutests_str = (
+ 
+ my($lfilename, $ldirs, $lsuffix) = fileparse($logfile,qr/\.[^.]*/);
+ my $tlogfile = $logfile;
+-if(lc $lsuffix ne lc $def_log_extension && lc $lsuffix ne ".txt")
+-{
+-  $tlogfile = $ldirs.$lfilename;
+-}
++$tlogfile = $ldirs.$lfilename if(lc $lsuffix eq ".zip");
+ 
++unlink($logfile) if(lc $lsuffix eq ".zip");
++local_zip($tlogfile) if(lc $lsuffix eq ".zip" && !-e $logfile);
+ (-e $logfile) or die "failed to open logfile: $logfile ($!)";
+-local_unzip($logfile,$def_log_extension) if(lc $lsuffix eq ".zip");
+ 
+ open LOG_FILE, $tlogfile or die "failed to open logfile: tlogfile ($!)";
+ my @lf = <LOG_FILE>;
+@@ -89,19 +87,12 @@ send_info_mail($subject,join("",@summary),$logfile,$mimetype,$recipients);
+ 
+ exit(0);
+ 
+-sub local_unzip
++sub local_zip
+ {
+-  my $zipfilename = shift;
+-  my $mask = shift;
+-  my $zip = Archive::Zip->new($zipfilename);
+-  foreach my $member ($zip->members)
+-  {
+-      next if $member->isDirectory;
+-      my $blub=$member->fileName;
+-      (my $extractName = $member->fileName) =~ s{.*/}{};
+-      next if $extractName !~ /$mask$/g;
+-      $member->extractToFileNamed("$ldirs"."$extractName");
+-  } 
++  my $filename = shift;
++  my $zip = Archive::Zip->new();
++  $zip->addFile( $filename ) or die 'unable to add file to archive';
++  $zip->writeToFileNamed($filename.".zip");
+ }
+ 
+ sub get_subject
+@@ -193,7 +184,7 @@ sub print_jutestresult
+   my $text = shift;
+   my @summary;
+   
+-  push @summary,"Executed $found useless $text\n";
++  push @summary,"Executed $found $text\n";
+   if( $failures == 0)
+   {
+     push @summary, "No $text failures\n";
+-- 
+2.41.0.windows.1
+

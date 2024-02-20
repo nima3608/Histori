@@ -1,0 +1,713 @@
+From 63cb7942f4c7f63958715d632910f5ca0fb774da Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 31 May 2016 11:06:00 +0000
+Subject: [PATCH 0755/1077] MANTIS 0041253 [SetKioskData]:  - Add logoutput to
+ cmd scripts
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1024 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.iss | 212 +++++++++++++-----
+ .../setup/SetKioskData/configApplication.cmd  |  19 +-
+ .../setup/SetKioskData/configConveyor.cmd     |  33 +--
+ .../setup/SetKioskData/configEnvironment.cmd  |  23 +-
+ .../setup/SetKioskData/configHostname.cmd     |  10 +-
+ .../setup/SetKioskData/configNetwork.cmd      |  45 ++--
+ .../Build/setup/SetKioskData/joinDom.cmd      |   4 +-
+ 7 files changed, 247 insertions(+), 99 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 24a183f7..cf5b2514 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -1,5 +1,5 @@
+ [Setup]
+-WizardImageFile=D:\dev\MIPS\MIPS\MIPS-Platform\SelfServiceCommon\trunk\Build\setup\SetKioskData\SetupImage.bmp
++WizardImageFile=SetupImage.bmp
+ WindowVisible=True
+ FlatComponentsList=False
+ AlwaysShowComponentsList=False
+@@ -37,12 +37,12 @@ AlwaysRestart=True
+ 
+ [Files]
+ Source: "{code:GetMIPSUserDir}\Start MIPS.lnk"; DestDir: "{userstartup}"; Flags: external skipifsourcedoesntexist
+-Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: ProcessInterfaces(ExpandConstant('{tmp}\configNetwork.cmd'), ExpandConstant('{tmp}'))
+-Source: "configEnvironment.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall
+-Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall
+-Source: "configConveyor.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall
+-Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall
+-Source: "configApplication.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: ProcessApplications(ExpandConstant('{tmp}\configApplication.cmd'), ExpandConstant('{tmp}'))
++Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigNetwork()
++Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigHostname(); Check: RunSetHostname()
++Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunJoinDomain(); Check: RunAddDomain()
++Source: "configEnvironment.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigEnvironment(); 
++Source: "configConveyor.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigConveyor(); Check: RunConveyor()
++Source: "configApplication.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigApplication()
+ 
+ [Messages]
+ ButtonInstall=&Update
+@@ -57,12 +57,6 @@ ReadyLabel2a=Click Update to continue with the update, or click Back if you want
+ [InstallDelete]
+ Name: {userstartup}\SetKioskData.lnk; Type: files
+ 
+-[Run]
+-Filename: "{tmp}\configEnvironment.cmd"; Parameters: """{code:GetAirport}"" ""{code:GetArea}"" ""{code:GetTerminal}"" ""{code:GetKioskName}"""; WorkingDir: "{tmp}"
+-Filename: "{tmp}\configHostname.cmd"; Parameters: """{code:GetKioskName}"""; WorkingDir: "{tmp}"; Check: RunSetHostname
+-Filename: "{tmp}\configConveyor.cmd"; Parameters: """{code:GetConvName}"" ""{code:GetBHSHost}"" ""{code:GetBHSPort}"" ""{code:GetSICKHost}"" ""{code:GetSICKPort}"""; WorkingDir: "{tmp}"; Check: RunConveyor
+-Filename: "{tmp}\joinDom.cmd"; Parameters: """{log}"" ""{code:GetDomainName}"" ""{code:GetKioskName}"" ""{code:GetDomainUser}"" ""{code:GetOperationUnit}"" ""{code:GetLogonDomain}"" ""{code:GetLogonUser}"" ""{code:GetLogonPassword}"""; WorkingDir: "{tmp}"; Flags: waituntilterminated; Check: RunAddDomain
+-
+ [Code]
+ var
+     IniFilename   : String;
+@@ -76,7 +70,7 @@ var
+     MIPSIndexes   : Array of Integer;
+     AppIDs        : Array of String;
+     LANInterfaces : Array of String;
+-    
++    CancelWoP     : Boolean;
+ { ----------------------------------------------------------------------------------------------- }
+ { Function section }
+ 
+@@ -90,11 +84,11 @@ begin
+ 	while Pos(',', List)<>0 do
+ 	begin
+ 		SetArrayLength(ArrayList, i + 1);
+-		LOG('[ExplodeCSList]: Copy from 0 to ' + IntToStr(Pos(',', List) - 1) + ' in list ' + List);
++		//LOG('[ExplodeCSList]: Copy from 0 to ' + IntToStr(Pos(',', List) - 1) + ' in list ' + List);
+         ArrayList[i] := Trim(Copy(List, 0, Pos(',', List) - 1));
+-        LOG('[ExplodeCSList]: Create New list from ' + IntToStr(Pos(',', List)) + ' to ' + IntToStr(Length(List) - Pos(',', List)) + ' in list ' + List);
++        //LOG('[ExplodeCSList]: Create New list from ' + IntToStr(Pos(',', List)) + ' to ' + IntToStr(Length(List) - Pos(',', List)) + ' in list ' + List);
+         List := Copy(List, Pos(',', List) + 1, Length(List) - Pos(',', List));
+-        LOG('[ExplodeCSList]: Process array list item: ' + ArrayList[i] + '; remaining: ' + List);
++        //LOG('[ExplodeCSList]: Process array list item: ' + ArrayList[i] + '; remaining: ' + List);
+ 		i := i + 1;
+ 	end;
+     
+@@ -133,7 +127,7 @@ begin
+         end;
+     end;
+     
+-    LOG('Return ' + IntToStr(Result));
++    //LOG('Return ' + IntToStr(Result));
+ end;
+ 
+ function GetDataIndex(PageID: Integer; Prompt: String): Integer;
+@@ -171,31 +165,31 @@ begin
+     end;
+ end;
+ 
+-function GetKioskName(Param:String) : String;
++function GetKioskName() : String;
+ begin
+     Result := GetPageData('KIOSK_DATA', 'Kiosk Name:');
+     LOG('GetKioskName: ' + Result);
+ end;
+ 
+-function GetAirport(Param:String) : String;
++function GetAirport() : String;
+ begin
+     Result := GetPageData('KIOSK_DATA', 'Airport: (3L Code)');
+     LOG('GetAirport: ' + Result);
+ end;
+ 
+-function GetArea(Param:String) : String;
++function GetArea() : String;
+ begin
+     Result := GetPageData('KIOSK_DATA', 'Area: (Area in Terminal)');
+     LOG('GetArea: ' + Result);
+ end;
+ 
+-function GetTerminal(Param:String) : String;
++function GetTerminal() : String;
+ begin
+     Result := GetPageData('KIOSK_DATA', 'Terminal:');
+     LOG('GetTerminal: ' + Result);
+ end;
+ 
+-function GetMassaiDir(Param:String): String;
++function GetMassaiDir(): String;
+ begin
+     Result := MassaiDir;
+ end;
+@@ -205,7 +199,7 @@ begin
+     Result := MIPSUserDir;
+ end;
+ 
+-function GetBHSHost(Param:String): String;
++function GetBHSHost(): String;
+ begin
+     if (Pos('true', ChangeBHS) = 1) then
+     begin
+@@ -214,7 +208,7 @@ begin
+     end;
+ end;
+ 
+-function GetBHSPort(Param:String): String;
++function GetBHSPort(): String;
+ begin
+     if (Pos('true', ChangeBHS) = 1) then
+     begin
+@@ -223,7 +217,7 @@ begin
+     end;
+ end;
+ 
+-function GetSICKHost(Param:String): String;
++function GetSICKHost(): String;
+ begin
+     if (Pos('true', ChangeSICK) = 1) then
+     begin
+@@ -232,7 +226,7 @@ begin
+     end;
+ end;
+ 
+-function GetSICKPort(Param:String): String;
++function GetSICKPort(): String;
+ begin
+     if (Pos('true', ChangeSICK) = 1) then
+     begin
+@@ -241,7 +235,7 @@ begin
+     end;
+ end;
+ 
+-function GetConvName(Param:String): String;
++function GetConvName(): String;
+ begin
+     Result := ConvName;
+     LOG('Conveyor Name: ' + Result);
+@@ -257,7 +251,7 @@ begin
+     end;
+ end;
+ 
+-function GetDomainName(Param:String): String;
++function GetDomainName(): String;
+ begin
+     if (Pos('true', AddToDomain) = 1) then
+     begin
+@@ -266,7 +260,7 @@ begin
+     end;
+ end;
+ 
+-function GetDomainUser(Param:String): String;
++function GetDomainUser(): String;
+ begin
+     if (Pos('true', AddToDomain) = 1) then
+     begin
+@@ -275,7 +269,7 @@ begin
+     end;
+ end;
+ 
+-function GetOperationUnit(Param:String): String;
++function GetOperationUnit(): String;
+ begin
+     if (Pos('true', AddToDomain) = 1) then
+     begin
+@@ -284,19 +278,19 @@ begin
+     end;
+ end;
+ 
+-function GetLogonDomain(Param:String): String;
++function GetLogonDomain(): String;
+ begin
+-    Result := GetPageData('AUTOLOGON', 'Domain (NETBIOS) Name (if any):');
++    Result := GetPageData('AUTOLOGON', 'Domain (NETBIOS) Name:');
+     LOG('Domain (NETBIOS) Name: ' + Result);
+ end;
+ 
+-function GetLogonUser(Param:String): String;
++function GetLogonUser(): String;
+ begin
+     Result := GetPageData('AUTOLOGON', 'Windows logon User:');
+     LOG('Windows logon User: ' + Result);
+ end;
+ 
+-function GetLogonPassword(Param:String): String;
++function GetLogonPassword(): String;
+ begin
+     Result := GetPageData('AUTOLOGON', 'Logon Password:');
+     LOG('Logon Password: xxx');
+@@ -325,16 +319,43 @@ end;
+ procedure RunCommand(cmd: String; params: String; WorkingDir: String);
+ var
+     ResultCode : Integer;
++    ExecRun : Boolean;
+ begin
+-    Exec(
++    cmd := ExpandConstant(cmd);
++    WorkingDir := ExpandConstant(WorkingDir);
++    ExecRun := Exec(
+         cmd, 
+         params, 
+         WorkingDir, 
+-        SW_SHOW, 
++        SW_HIDE, 
+         ewWaitUntilTerminated, 
+-        ResultCode
++        ResultCode    
+     );
+     LOG('Run command "' + cmd + '" (' + params + ') rc:' + IntToStr(ResultCode));
++    
++    if ExecRun then 
++    begin
++        if not (ResultCode = 0) then
++        begin
++            MsgBox(
++                'Fail to run ' + cmd + '! ResultCode is ' + IntToStr(ResultCode), 
++                mbCriticalError,
++                MB_OK
++            );
++            CancelWoP := true;
++            WizardForm.Close;
++        end;
++    end else
++    begin
++        MsgBox(
++            'Executing command ' + cmd + ' failed! Error : ' + SysErrorMessage(ResultCode), 
++            mbCriticalError,
++            MB_OK
++        );
++        CancelWoP := true;
++        WizardForm.Close;
++    end;
++    
+ end;
+ 
+ procedure ProcessApplications(cmd: String; WorkingDir: String);
+@@ -353,7 +374,11 @@ begin
+         begin
+             AppCMD := GetPageData('APPLICATION_' + AppIDs[i], AppIDs[i] + ' application CMD:');
+             StringChangeEx(AppCMD, '"', '/#', False);
+-            params := AppIDs[i] + ' "' + AppCMD + '"';
++            
++            params := '';
++            params := params + '"' + ExpandConstant('{log}') + '" ';
++            params := params + '"' + AppIDs[i] + '" ';
++            params := params + '"' + AppCMD + '" ';
+             RunCommand(cmd, params, WorkingDir);
+         end;
+     end;
+@@ -361,10 +386,6 @@ end;
+ 
+ procedure ProcessInterfaces(cmd: String; WorkingDir: String);
+ var
+-    IPAdress   : String;
+-    Subnet     : String;
+-    Gateway    : String;
+-    DNS1       : String;
+     i          : Integer;
+     l          : Integer;
+     ResultCode : Integer;
+@@ -376,25 +397,106 @@ begin
+         l := l - 1;
+         for i := 0 to l do
+         begin
+-            IPAdress := GetPageData('IPV4_' + LANInterfaces[i], 'IPv4 Address:');
+-            Subnet := GetPageData('IPV4_' + LANInterfaces[i], 'Subnet:');
+-            Gateway := GetPageData('IPV4_' + LANInterfaces[i], 'Gateway:');
+-            DNS1 := GetPageData('IPV4_' + LANInterfaces[i], 'DNS1:');
+-            params := '"' + LANInterfaces[i] + '" "' + IPAdress + '" "' + Subnet + '" "' + Gateway + '" "' + DNS1 + '"';
++            params := '';
++            params := params + '"' + ExpandConstant('{log}') + '" ';
++            params := params + '"' + LANInterfaces[i] + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4 Address:') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'Subnet:') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'Gateway:') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'DNS1:') + '" ';
+             RunCommand(cmd, params, WorkingDir);
+         end;
+     end;
+ end;
+ 
++{ ----------------------------------------------------------------------------------------------- }
++{ Run script section }
++
++procedure RunConfigNetwork();
++begin
++    ProcessInterfaces('{tmp}\configNetwork.cmd', '{tmp}');
++end;
++
++procedure RunConfigHostname();
++var
++    params : String;
++begin
++    params := '';
++    
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + GetKioskName() + '"';
++    
++    RunCommand('{tmp}\configHostname.cmd', params, '{tmp}');
++end;
++
++procedure RunJoinDomain();
++var
++    params : String;
++begin
++    params := '';
++    
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + GetDomainName() + '" ';
++    params := params + '"' + GetKioskName() + '" ';
++    params := params + '"' + GetDomainUser() + '" ';
++    params := params + '"' + GetOperationUnit() + '" ';
++    params := params + '"' + GetLogonDomain() + '" ';
++    params := params + '"' + GetLogonUser() + '" ';
++    params := params + '"' + GetLogonPassword() + '"';
++    
++    RunCommand('{tmp}\joinDom.cmd', params, '{tmp}');
++end;
++
++procedure RunConfigEnvironment();
++var
++    params : String;
++begin
++    params := '';
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + GetAirport() + '" ';
++    params := params + '"' + GetArea() + '" ';
++    params := params + '"' + GetTerminal() + '" ';
++    params := params + '"' + GetKioskName() + '"';
++    
++    RunCommand('{tmp}\configEnvironment.cmd', params, '{tmp}');
++end;
++
++procedure RunConfigConveyor();
++var
++    params : String;
++begin
++    params := '';
++    
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + GetConvName() + '" ';
++    params := params + '"' + GetBHSHost() + '" ';
++    params := params + '"' + GetBHSPort() + '" ';
++    params := params + '"' + GetSICKHost() + '" ';
++    params := params + '"' + GetSICKPort() + '" ';
++    
++    RunCommand('{tmp}\configConveyor.cmd', params, '{tmp}');
++end;
++
++procedure RunConfigApplication();
++begin
++    ProcessApplications('{tmp}\configApplication.cmd', '{tmp}');
++end;
++
+ { ----------------------------------------------------------------------------------------------- }
+ { Wizard function section }
+ 
++procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
++begin
++  if CurPageID=wpInstalling then
++    Confirm := not CancelWoP;
++end;
++
+ function InitializeSetup(): Boolean;
+ var
+     resultStr : String;
+     i         : Integer;
+ begin
+-    IniFilename:= ExpandConstant('{src}') + '\SetKioskData.ini';
++    IniFilename := ExpandConstant('{src}') + '\SetKioskData.ini';
+     
+     for i:=1 To (ParamCount) do 
+     begin
+@@ -478,10 +580,10 @@ begin
+     Index := Page.Add('Terminal:', False);
+     Index := Page.Add('Area: (Area in Terminal)', False);
+     
+-    Page.Values[0] := GetIniString('KIOSKDATA', 'KioskName', GetComputerNameString, IniFilename);
+-    Page.Values[1] := GetIniString('KIOSKDATA', 'Airport',   'DTM',                 IniFilename);
+-    Page.Values[2] := GetIniString('KIOSKDATA', 'Terminal',  'A',                   IniFilename);
+-    Page.Values[3] := GetIniString('KIOSKDATA', 'Area',      'Check-In',            IniFilename);
++    Page.Values[0] := GetIniString('KIOSKDATA', 'KioskName', GetComputerNameString(), IniFilename);
++    Page.Values[1] := GetIniString('KIOSKDATA', 'Airport',   'DTM',                   IniFilename);
++    Page.Values[2] := GetIniString('KIOSKDATA', 'Terminal',  'A',                     IniFilename);
++    Page.Values[3] := GetIniString('KIOSKDATA', 'Area',      'Check-In',              IniFilename);
+     
+     SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+     SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+@@ -628,7 +730,7 @@ begin
+     { Init domain config page }
+     LOG('[InitializeWizard]: DOMAIN');
+     
+-    AddToDomain := GetIniString('HOSTDATA', 'AddToDomain',  'false', IniFilename);
++    AddToDomain := GetIniString('HOSTDATA', 'AddToDomain', 'false', IniFilename);
+     { normalize string }
+     AddToDomain := Trim(Lowercase(AddToDomain));
+     
+@@ -667,7 +769,7 @@ begin
+         Page.Name := 'AUTOLOGON';
+         LOG('[InitializeWizard]: Add page ' + Page.Name);
+ 
+-        Index := Page.Add('Domain (NETBIOS) Name (if any):', False);
++        Index := Page.Add('Domain (NETBIOS) Name:', False);
+         Index := Page.Add('Windows logon User:',   False);
+         Index := Page.Add('Logon Password:',       False);
+         
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
+index d3e28d8a..45888e86 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
+@@ -2,12 +2,19 @@
+ 
+ setlocal ENABLEDELAYEDEXPANSION
+ 
+-set AppID=%~1
+-set CommandLine=%~2
++set LOG=%~1
++set AppID=%~2
++set CommandLine=%~3
+ rem correct quota handling
+ set CommandLine=%CommandLine:/#=/"%
+ 
+-echo Configure Kiosk application: %AppID%
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configApplication.log
++)
++
++echo Configure Kiosk application: %AppID% >> "%LOG%"
+ 
+ if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+ 	set REG_MIPS=HKLM\SOFTWARE\Wow6432Node\Materna\MIPS
+@@ -18,13 +25,13 @@ call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+ call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+ 
+ if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! 
+-    echo Maybe the platform is not installed on this system. Abort.
++    echo Fail to find MIPS Platform installation path! >> "%LOG%"
++    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+     exit /b 1
+ )
+ 
+ if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort.
++    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+     exit /b 1
+ )
+ 
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+index 1a69f992..bf48a71f 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+@@ -2,19 +2,26 @@
+ 
+ setlocal ENABLEDELAYEDEXPANSION
+ 
+-set NAME=%~1
+-set BHSHost=%~2
+-set BHSPort=%~3
+-set SICKHost=%~4
+-set SICKPort=%~5
++set LOG=%~1
++set NAME=%~2
++set BHSHost=%~3
++set BHSPort=%~4
++set SICKHost=%~5
++set SICKPort=%~6
++
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configConveyor.log
++)   
+ 
+ if "%NAME%" == "" set NAME=ConveyorDev
+ 
+-echo Configure Kiosk Conveyor %NAME%:
+-echo BHSHost: %BHSHost%
+-echo BHSPort: %BHSPort%
+-echo SICKHost: %SICKHost%
+-echo SICKPort: %SICKPort%
++echo Configure Kiosk Conveyor %NAME%: >> "%LOG%"
++echo BHSHost: %BHSHost% >> "%LOG%"
++echo BHSPort: %BHSPort% >> "%LOG%"
++echo SICKHost: %SICKHost% >> "%LOG%"
++echo SICKPort: %SICKPort% >> "%LOG%"
+ 
+ 
+ if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+@@ -26,13 +33,13 @@ call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+ call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+ 
+ if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! 
+-    echo Maybe the platform is not installed on this system. Abort.
++    echo Fail to find MIPS Platform installation path! >> "%LOG%"
++    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+     exit /b 1
+ )
+ 
+ if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort.
++    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+     exit /b 1
+ )
+ 
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
+index 891e5633..12b938ce 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
+@@ -2,12 +2,19 @@
+ 
+ setlocal ENABLEDELAYEDEXPANSION
+ 
+-set AIRPORT=%~1
+-set AREA=%~2
+-set TERMINAL=%~3
+-set KIOSKNAME=%~4
++set LOG=%~1
++set AIRPORT=%~2
++set AREA=%~3
++set TERMINAL=%~4
++set KIOSKNAME=%~5
+ 
+-echo Configure Kiosk environment: %AIRPORT%.%AREA%.%TERMINAL%.%KIOSKNAME%
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configEnvironment.log
++)
++
++echo Configure Kiosk environment: %AIRPORT%.%AREA%.%TERMINAL%.%KIOSKNAME% >> "%LOG%"
+ 
+ if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+ 	set REG_MIPS=HKLM\SOFTWARE\Wow6432Node\Materna\MIPS
+@@ -18,13 +25,13 @@ call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+ call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+ 
+ if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! 
+-    echo Maybe the platform is not installed on this system. Abort.
++    echo Fail to find MIPS Platform installation path! >> "%LOG%"
++    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+     exit /b 1
+ )
+ 
+ if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort.
++    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+     exit /b 1
+ )
+  
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configHostname.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configHostname.cmd
+index b27df6c4..16b038c0 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configHostname.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configHostname.cmd
+@@ -1,7 +1,15 @@
+ @echo off
+ 
+-set HOSTNAME=%~1
++set LOG=%~1
++set HOSTNAME=%~2
+ 
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configHostname.log
++)
++
++echo Set Hostname %HOSTNAME% in registry. Changes take affect after reboot >> "%LOG%"
+ 
+ reg add HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName /f /v ComputerName /t REG_SZ /d "%HOSTNAME%"
+ reg add HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters /f /v "NV Hostname" /t REG_SZ /d "%HOSTNAME%"
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
+index 3dfbb1d0..b93dab11 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configNetwork.cmd
+@@ -4,30 +4,49 @@ rem Attention: This script works only with an english windows 7
+ 
+ setlocal enableextensions enabledelayedexpansion
+ 
+-set ADDRESS=%~2
+-set SUBNET=%~3
+-set GATEWAY=%~4
+-set DNS1=%~5
++set LOG=%~1
++set INTERFACE=%~2
++set ADDRESS=%~3
++set SUBNET=%~4
++set GATEWAY=%~5
++set DNS1=%~6
+ set NETSH=%SystemRoot%\system32\netsh.exe
+ 
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configNetwork.log
++)
++
+ rem set ui-language for wmic format
+ FOR /F tokens^=2^ delims^=^" %%a IN ('wmic os get MUILanguages /Value') DO set LANG=%%a
+ 
+-call :get_iface_name IFACE "%~1"
++call :get_iface_name IFACE "%INTERFACE%"
+ if "%IFACE%" == "" (
+-    pause
++    echo Fail to get interface from given interface name: %INTERFACE%. Abort! >> "%LOG%"
+     exit /B 1
+ )
+ 
+ if "%DNS1%" == "" set DNS1=none
+ 
+-echo Configure Network interface %IFACE% with
+-echo IPv4 ADDRESS = %ADDRESS%
+-echo Subnet       = %SUBNET%
+-echo Gateway      = %GATEWAY%
++echo Configure Network interface %IFACE% with >> "%LOG%"
++echo IPv4 ADDRESS = %ADDRESS% >> "%LOG%"
++echo Subnet       = %SUBNET% >> "%LOG%"
++echo Gateway      = %GATEWAY% >> "%LOG%"
++echo DNS          = %DNS1% >> "%LOG%"
++
++%NETSH% interface ip set address name="%IFACE%" source=static address=%ADDRESS% mask=%SUBNET% gateway=%GATEWAY% gwmetric=0 >> "%LOG%" 2>&1
++if not "%errorlevel%" == "0" (
++    echo Fail to set IPv4 Address on interface %IFACE%! Abort. >> "%LOG%"
++    exit /B 1
++)
++
++%NETSH% interface ip set dns     name="%IFACE%" source=static address=%DNS1% >> "%LOG%" 2>&1
++if not "%errorlevel%" == "0" (
++    echo Fail to set DNS server on interface %IFACE%! Abort. >> "%LOG%"
++    exit /B 1
++)
+ 
+-%NETSH% interface ip set address name="%IFACE%" source=static address=%ADDRESS% mask=%SUBNET% gateway=%GATEWAY% gwmetric=0 > nul 2>&1
+-%NETSH% interface ip set dns     name="%IFACE%" source=static address=%DNS1% > nul 2>&1
+ 
+ goto :eof
+ rem get interface name from network card
+@@ -42,7 +61,7 @@ rem get interface name from network card
+     
+     ipconfig | find "Ethernet" | find "%_iface%" > nul
+     if not "%errorlevel%" == "0" (
+-        echo Fail to find correct LAN interface for %_iface%
++        echo Fail to find correct LAN interface for %_iface%! Abort. >> "%LOG%"
+         exit /B 1
+     )
+     
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+index 99c2558a..8fd62336 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+@@ -1,8 +1,6 @@
+ @echo off
+ setlocal
+ 
+-set VERSION=2.1.0
+-
+ set LOG=%~1
+ set DOMAIN=%~2
+ set NAME=%~3
+@@ -19,7 +17,7 @@ if "%LOG%" == "" (
+     set LOG=%LOG%.joinDom.log
+ )
+ 
+-echo Run %~dp0 %VERSION% >> "%LOG%"
++echo Run %0 >> "%LOG%"
+ echo Given properties: >> "%LOG%"
+ echo DOMAIN=%DOMAIN% >> "%LOG%"
+ echo NAME=%NAME% >> "%LOG%"
+-- 
+2.41.0.windows.1
+

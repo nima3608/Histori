@@ -1,0 +1,1010 @@
+From d804a61e83da1c33f2da863a7ed51e4f8bf4b3b6 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 13 Apr 2012 15:44:59 +0000
+Subject: [PATCH 0267/1077] Mantis 22956
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@320 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  24 ++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp     |   1 +
+ .../Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp       |  19 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp |  23 ++-
+ .../cpp/CfgXMgrB/inc/cfgMetaSelection.hpp     |   8 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp   |  19 +-
+ .../cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp      |  19 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  23 ++-
+ .../cpp/CfgXMgrB/src/cfgCorba_Number.cpp      |   2 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Selection.cpp   |   4 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp |   4 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp    |   8 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     |  33 +++-
+ .../Massai/cpp/CfgXMgrB/src/cfgMeta.cpp       | 175 +++++++++++-------
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp |  55 +++++-
+ .../cpp/CfgXMgrB/src/cfgMetaSelection.cpp     |   6 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |  45 ++++-
+ .../cpp/CfgXMgrB/src/cfgMetaTextlist.cpp      |  56 +++++-
+ 18 files changed, 403 insertions(+), 121 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index e0ddf1ad..7a8c1049 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -296,7 +296,8 @@
+ //! @date    15.11.2011
+ //! @author  GiT
+ //! @par     Change:
+-//! - Mantis  0021521: SelfServiceCommon CfgXMgrB changes for VC10 compatibilty
++//! - Mantis  0021521: SelfServiceCommon CfgXMgrB changes for VC10
++//!   compatibilty
+ // #define FILE_VER_BIN 1,2,1,0
+ // #define FILE_VER_DTS "1.2.1.0"
+ //
+@@ -312,10 +313,23 @@
+ //! @date    13.02.2011
+ //! @author  GiT
+ //! @par     Change:
+-//! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional "-xmldbpath:<file>" parameter.
+-
+-#define FILE_VER_BIN 1,2,3,0
+-#define FILE_VER_DTS "1.2.3.0"
++//! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional
++//!   "-xmldbpath:<file>" parameter.
++// #define FILE_VER_BIN 1,2,3,0
++// #define FILE_VER_DTS "1.2.3.0"
++//
++//! @version 1.2.4
++//! @date    13.04.2011
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 22956
++//!   - Implement automatic range extender, enabled by macro
++//!     SETINITIAL_EXTENDS_RANGE.
++//!   - Changed access rights for "setInitial"-ed values. Previously
++//!     the had just "c", now it is "c,<authorization>:clr"
++//!     <authorization> usually would be "CfgValues.exe"
++#define FILE_VER_BIN 1,2,4,0
++#define FILE_VER_DTS "1.2.4.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+index 314d75ea..f7230a36 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+@@ -382,6 +382,7 @@ public:
+       PURP_0,           //< Not used.
+       PURP_CREATE,      //< Create an item.
+       PURP_DIRGET,      //< Get a directory.
++      PURP_METASET,     //< Change the metadata of an item.
+       PURP_RIGHTSGET,   //< Get the rights.
+       PURP_RIGHTSSET,   //< Set the rights.
+       PURP_TYPEGET,     //< Get the type of an item.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+index 8211ff13..78f93b93 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2004 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -27,8 +27,6 @@
+ 
+ 
+ 
+-#define CFG_RIGHTS_STRING_C     "c"
+-
+ #define CFG_RIGHTS_TOKEN_C      'c'
+ #define CFG_RIGHTS_TOKEN_L      'l'
+ #define CFG_RIGHTS_TOKEN_R      'r'
+@@ -69,10 +67,10 @@ public:
+ 
+    /**
+     *
+-    * Default constructor.
++    * Constructor.
+     *
+    **/
+-   cfgMeta();
++   explicit cfgMeta( char const * Auth );
+ 
+    /**
+     *
+@@ -213,6 +211,17 @@ public:
+    **/
+    void setRights( char const * Auth, std::string const & NewRights );
+ 
++   /**
++    *
++    * Adapt restrictions to allow the value.
++    *
++    * @param Value:     The value to allow now.
++    *
++    * @return:          Success?
++    *
++   **/
++   virtual bool valueAllow( cfgValue const & Value );
++
+    /**
+     *
+     * Is the value allowed for the restrictions here?
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
+index 1d6645f3..a19749a1 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
+@@ -3,6 +3,10 @@
+  *
+  * @file cfgMetaNumber.hpp
+  *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
++ *
+  **************************************************************************
+ **/
+ #ifndef CFGMETANUMBER_HPP
+@@ -43,10 +47,10 @@ public:
+ 
+    /**
+     *
+-    * Default constructor.
++    * Constructor.
+     *
+    **/
+-   cfgMetaNumber();
++   cfgMetaNumber( char const * Auth );
+ 
+    /**
+     *
+@@ -137,12 +141,25 @@ public:
+       std::string const &       Indent
+    ) const;
+ 
++   /**
++    *
++    * Adapt restrictions to allow the value.
++    *
++    * @param Value:     The value to allow now.
++    *
++    * @return:          Success?
++    *
++   **/
++   bool valueAllow( cfgValue const & Value );
++
+    /**
+     *
+     * Is the value a number between minvalue and maxvalue?
+     *
++    * @param Value:     The value to allow now.
++    *
+    **/
+-   bool valueAllowed( cfgValue const & ) const;
++   bool valueAllowed( cfgValue const & Value ) const;
+ 
+    /**
+     *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaSelection.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaSelection.hpp
+index a25a410f..8478e92d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaSelection.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaSelection.hpp
+@@ -3,6 +3,10 @@
+  *
+  * @file cfgMetaSelection.hpp
+  *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
++ *
+  **************************************************************************
+ **/
+ #ifndef CFGMETASELECTION_HPP
+@@ -172,10 +176,10 @@ public:
+ 
+    /**
+     *
+-    * Default constructor.
++    * Constructor.
+     *
+    **/
+-   cfgMetaSelection();
++   cfgMetaSelection( char const * Auth );
+ 
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
+index add2482b..9cf1447c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
+@@ -3,6 +3,10 @@
+  *
+  * @file cfgMetaText.hpp
+  *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
++ *
+  **************************************************************************
+ **/
+ #ifndef CFGMETATEXT_HPP
+@@ -33,10 +37,10 @@ public:
+ 
+    /**
+     *
+-    * Default constructor.
++    * Constructor.
+     *
+    **/
+-   cfgMetaText();
++   explicit cfgMetaText( char const * Auth );
+ 
+    /**
+     *
+@@ -117,6 +121,17 @@ public:
+       std::string const &       Indent
+    ) const;
+ 
++   /**
++    *
++    * Adapt restrictions to allow the value.
++    *
++    * @param Value:     The value to allow now.
++    *
++    * @return:          Success?
++    *
++   **/
++   bool valueAllow( cfgValue const & Value );
++
+    /**
+     *
+     * Is the value a valid text?
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+index ac3dfea8..25961e39 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+@@ -3,6 +3,10 @@
+  *
+  * @file cfgMetaTextlist.hpp
+  *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
++ *
+  **************************************************************************
+ **/
+ #ifndef CFGMETATEXTLIST_HPP
+@@ -35,10 +39,10 @@ public:
+ 
+    /**
+     *
+-    * Default constructor.
++    * Constructor.
+     *
+    **/
+-   cfgMetaTextlist();
++   explicit cfgMetaTextlist( char const * Auth );
+ 
+    /**
+     *
+@@ -119,6 +123,17 @@ public:
+       std::string const &       Indent
+    ) const;
+ 
++   /**
++    *
++    * Adapt restrictions to allow the value.
++    *
++    * @param Value:     The value to allow now.
++    *
++    * @return:          Success?
++    *
++   **/
++   bool valueAllow( cfgValue const & Value );
++
+    /**
+     *
+     * Is the value a valid textlist?
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index d14592d7..3d6cb32a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -287,7 +287,8 @@
+ //! @date    15.11.2011
+ //! @author  GiT
+ //! @par     Change:
+-//! - Mantis  0021521: SelfServiceCommon CfgXMgrB changes for VC10 compatibilty
++//! - Mantis  0021521: SelfServiceCommon CfgXMgrB changes for VC10
++//!   compatibilty
+ // #define FILE_VER_BIN 1,2,1,0
+ // #define FILE_VER_DTS "1.2.1.0"
+ //
+@@ -303,9 +304,23 @@
+ //! @date    13.02.2011
+ //! @author  GiT
+ //! @par     Change:
+-//! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional "-xmldbpath:<file>" parameter.
+-#define FILE_VER_BIN 1,2,3,0
+-#define FILE_VER_DTS "1.2.3.0"
++//! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional
++//!   "-xmldbpath:<file>" parameter.
++// #define FILE_VER_BIN 1,2,3,0
++// #define FILE_VER_DTS "1.2.3.0"
++//
++//! @version 1.2.4
++//! @date    13.04.2011
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 22956
++//!   - Implement automatic range extender, enabled by macro
++//!     SETINITIAL_EXTENDS_RANGE.
++//!   - Changed access rights for "setInitial"-ed values. Previously
++//!     the had just "c", now it is "c,<authorization>:clr"
++//!     <authorization> usually would be "CfgValues.exe"
++#define FILE_VER_BIN 1,2,4,0
++#define FILE_VER_DTS "1.2.4.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+index 68c3070e..0f9e7c82 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+@@ -302,7 +302,7 @@ class serviceCfgNumber :
+       );
+       try
+       {
+-         cfgMetaNumber Obj;
++         cfgMetaNumber Obj( Acc.Authorization );
+          M_ConfigEntity->itemCreate
+                         (
+                            Obj, Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+index addf1037..add72216 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -526,7 +526,7 @@ class serviceCfgSelection :
+       );
+       try
+       {
+-         cfgMetaSelection Obj;
++         cfgMetaSelection Obj( Acc.Authorization );
+          M_ConfigEntity->itemCreate
+                         (
+                            Obj, Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index f3fc116c..cceaf901 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -281,7 +281,7 @@ class serviceCfgText :
+       );
+       try
+       {
+-         cfgMetaText Obj;
++         cfgMetaText Obj( Acc.Authorization );
+          M_ConfigEntity->itemCreate
+                         (
+                            Obj, Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+index 2c19ea6f..c105a412 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -263,7 +263,7 @@ class serviceCfgTextlist :
+             NewStringsI = OldStringsI;
+          }
+          NewStringsI.push_back( std::string( String ) );
+-         cfgMetaTextlist Obj;
++         cfgMetaTextlist Obj( Acc.Authorization );
+          M_ConfigEntity->itemCreate
+                         (
+                            Obj, Acc.Item,
+@@ -337,7 +337,7 @@ class serviceCfgTextlist :
+             )
+          {
+            NewStringsI.push_back( std::string( String ) );
+-           cfgMetaTextlist Obj;
++           cfgMetaTextlist Obj( Acc.Authorization );
+            M_ConfigEntity->itemCreate
+                           (
+                              Obj, Acc.Item,
+@@ -661,7 +661,7 @@ class serviceCfgTextlist :
+             Values.push_back( std::string( Texts[LNumber] ) );
+             ++LNumber;
+          }
+-         cfgMetaTextlist Obj;
++         cfgMetaTextlist Obj( Acc.Authorization );
+          M_ConfigEntity->itemCreate
+                         (
+                            Obj, Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index 05f5c48d..6873b5ff 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -61,6 +61,9 @@
+ //! Configuration macro
+ #define DELAYED_SAVE
+ 
++//! Configuration macro
++#define SETINITIAL_EXTENDS_RANGE
++
+ 
+ 
+ /**
+@@ -106,7 +109,7 @@ public:
+     * Retrieve a meta entry for a reference.
+     *
+    **/
+-   cfgMeta const * cemFromRef
++   cfgMeta * cemFromRef
+    (
+       char const *              Auth,
+       cfgEntity::purpose        Purp,
+@@ -144,7 +147,7 @@ cfgEntityMeta::~cfgEntityMeta()
+ 
+ 
+ 
+-cfgMeta const * cfgEntityMeta::cemFromRef
++cfgMeta * cfgEntityMeta::cemFromRef
+ (
+    char const *              Auth,
+    cfgEntity::purpose        Purp,
+@@ -159,7 +162,7 @@ cfgMeta const * cfgEntityMeta::cemFromRef
+    if( ( Ref != 0 ) && ( M_Map.size() > (Ref - 1) ) )
+    {
+       // Assume M_Map[X-1] has ref X!
+-      cfgMeta const * const Meta = M_Map[Ref-1];
++      cfgMeta * const Meta = M_Map[Ref-1];
+       if( Meta )
+       {
+          // Check access
+@@ -192,6 +195,7 @@ cfgMeta const * cfgEntityMeta::cemFromRef
+             F = R.find( CFG_RIGHTS_TOKEN_W );
+             break;
+          case cfgEntity::PURP_DIRGET:
++         case cfgEntity::PURP_METASET:
+          case cfgEntity::PURP_RIGHTSGET:
+          case cfgEntity::PURP_TYPEGET:
+             // No rights check
+@@ -1973,9 +1977,26 @@ void cfgEntity::itemCreate
+             //
+             if( !MetaData.valueAllowed( *RawValue ) && CheckVal )
+             {
+-               //-std::cout << "cfgEntity::itemCreate - X:IllegalValue"
+-               //-          << std::endl;
+-               throw cfgEntity_IllegalValue();
++#ifdef SETINITIAL_EXTENDS_RANGE
++               cfgMeta * const Meta = M_Meta->cemFromRef
++                                         (
++                                            "<create>",
++                                             cfgEntity::PURP_METASET,
++                                             RefNew
++                                         );
++               if( !Meta )
++               {
++                  //-std::cout << "cfgEntity::itemSet - X:NotFound (no meta)"
++                  //-          << std::endl;
++                  throw cfgEntity_NotFound();
++               }
++               if( !Meta->valueAllow( *RawValue ) )
++#endif
++               {
++                  //-std::cout << "cfgEntity::itemCreate - X:IllegalValue"
++                  //-          << std::endl;
++                  throw cfgEntity_IllegalValue();
++               }
+             }
+             M_Value->cevUpdate( Item, RefNew );
+          }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+index eec7dbd4..703c6f8f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -24,81 +24,99 @@ namespace
+ 
+ 
+ 
+-/**
+- *
+- * Extract a rights substring from a rights string.
+- * This is practically all characters up to the end of
+- * the string or up to ','.
+- *
+-**/
+-std::string const cfgAuthRights_FillString( char const * Src )
+-{
+-   std::string Result;
+-   bool More = true;
+-   while( More )
++   char const C_RightsGrpSep = ',';
++   char const C_RightsValSep = ':';
++
++
++   /**
++    *
++    * Extract a rights substring from a rights string.
++    * This is practically all characters up to the end of
++    * the string or up to ','.
++    *
++   **/
++   std::string const cfgAuthRights_FillString( char const * Src )
+    {
+-      if( *Src && ( *Src != ',' ) )
+-         Result += *Src++;
+-      else
+-         More = false;
++      std::string Result;
++      bool More = true;
++      while( More )
++      {
++         if( *Src && ( *Src != C_RightsGrpSep ) )
++            Result += *Src++;
++         else
++            More = false;
++      }
++      return Result;
+    }
+-   return Result;
+-}
+ 
+ 
++   /**
++    *
++    * Extract the "common" rights from a rights string.
++    * This is practically the first (unnamed) rights substring.
++    *
++   **/
++   std::string const cfgAuthRights_GetDefault
++   (
++      std::string const & Rights
++   )
++   {
++      std::string Default;
++      char const * const P = Rights.c_str();
++      return cfgAuthRights_FillString( P );
++   }
+ 
+-/**
+- *
+- * Extract the "common" rights from a rights string.
+- * This is practically the first (unnamed) rights substring.
+- *
+-**/
+-std::string const cfgAuthRights_GetDefault
+-(
+-   std::string const & Rights
+-)
+-{
+-   std::string Default;
+-   char const * const P = Rights.c_str();
+-   return cfgAuthRights_FillString( P );
+-}
+ 
++   /**
++    *
++    * Extract the "authored" rights from a rights string.
++    * A name is always encapsulated between ',' and ':'
++    * and is immediately followed by the rights substring.
++    *
++   **/
++   std::string const cfgAuthRights_GetNamed
++   (
++      std::string const &  Rights,
++      char const *         Auth
++   )
++   {
++      // Prepare search pattern
++      unsigned const PattLen = strlen( Auth );
++      char * Patt = new char[ PattLen + 3 ];
++      Patt[0] = C_RightsGrpSep;
++      strcpy( Patt + 1, Auth );
++      Patt[PattLen + 1] = C_RightsValSep;
++      Patt[PattLen + 2] = 0;
++      // Search
++      char const * const R = Rights.c_str();
++      char const * FPtr = strstr( R, Patt );
++      delete [] Patt;
++      if( FPtr )
++      {
++         // Found, scan to the char after ':'
++         FPtr += PattLen + 2;
++         return cfgAuthRights_FillString( FPtr );
++      }
++      else
++        return std::string();
++   }
+ 
+ 
+-/**
+- *
+- * Extract the "authored" rights from a rights string.
+- * A name is always encapsulated between ',' and ':'
+- * and is immediately followed by the rights substring.
+- *
+-**/
+-std::string const cfgAuthRights_GetNamed
+-(
+-   std::string const &  Rights,
+-   char const *         Auth
+-)
+-{
+-   // Prepare search pattern
+-   unsigned const PattLen = strlen( Auth );
+-   char * Patt = new char[ PattLen + 3 ];
+-   Patt[0] = ',';
+-   strcpy( Patt + 1, Auth );
+-   Patt[PattLen + 1] = ':';
+-   Patt[PattLen + 2] = 0;
+-   // Search
+-   char const * const R = Rights.c_str();
+-   char const * FPtr = strstr( R, Patt );
+-   delete [] Patt;
+-   if( FPtr )
++   std::string cfgAuthRights_Create( char const * Auth )
+    {
+-      // Found, scan to the char after ':'
+-      FPtr += PattLen + 2;
+-      return cfgAuthRights_FillString( FPtr );
++      std::string R;
++      R += CFG_RIGHTS_TOKEN_C;
++      if( Auth )
++      {
++         R += C_RightsGrpSep;
++         R += Auth;
++         R += C_RightsValSep;
++         R += CFG_RIGHTS_TOKEN_C;
++         R += CFG_RIGHTS_TOKEN_L;
++         R += CFG_RIGHTS_TOKEN_R;
++      }
++      return R;
+    }
+-   else
+-     return std::string();
+-}
+-
+ 
+ 
+ } // namespace
+@@ -110,10 +128,10 @@ std::string const cfgAuthRights_GetNamed
+  * Method implementation - see cfgMeta.hpp.
+  *
+ **/
+-cfgMeta::cfgMeta() :
++cfgMeta::cfgMeta( char const * Auth ) :
+    M_Default( true ),
+    M_Explanation(),
+-   M_Rights( CFG_RIGHTS_STRING_C )
++   M_Rights( cfgAuthRights_Create( Auth ) )
+ {
+ }
+ 
+@@ -139,7 +157,13 @@ cfgMeta::cfgMeta( cfgMeta const & Src ) :
+  *
+ **/
+ cfgMeta::cfgMeta( std::string const & R, std::string const & X ) :
+-   M_Default( ( R == CFG_RIGHTS_STRING_C ) ? true : false ),
++   M_Default
++      (
++         ( R.size() &&
++         ( R[0] == CFG_RIGHTS_TOKEN_C ) ) ?
++         true :
++         false
++      ),
+    M_Explanation( X ),
+    M_Rights( R )
+ {
+@@ -257,6 +281,19 @@ void cfgMeta::setRights( char const *, std::string const & NewRights )
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMeta.hpp.
++ *
++**/
++bool cfgMeta::valueAllow( cfgValue const & )
++{
++   // Not overloaded -> fail.
++   return false;
++}
++
++
++
+ /**
+  **************************************************************************
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+index c606b6f5..47728fe7 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -26,8 +26,8 @@
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-cfgMetaNumber::cfgMetaNumber() :
+-   cfgMeta(),
++cfgMetaNumber::cfgMetaNumber( char const * Auth ) :
++   cfgMeta( Auth ),
+    M_MinValue( 0 ), M_MaxValue( 0 )
+ {
+ }
+@@ -133,6 +133,55 @@ void cfgMetaNumber::save
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMetaNumber.hpp.
++ *
++**/
++bool cfgMetaNumber::valueAllow( cfgValue const & Value )
++{
++   cfgValueNumber const * const Val =
++      dynamic_cast<cfgValueNumber const *>( &Value );
++   if( !Val )
++   {
++      writeTrace
++         (
++            MajorError_HERE,
++            "cfgMetaNumber::valueAllow=false"
++         );
++      return false;
++   }
++   cfgType_Number const V = Val->scalar();
++   if( V > M_MaxValue )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaNumber::valueAllow - max: %d -> %d",
++            M_MaxValue, V
++         );
++      M_MaxValue = V;
++   }
++   if( V < M_MinValue )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaNumber::valueAllow - min: %d -> %d",
++            M_MinValue, V
++         );
++      M_MinValue = V;
++   }
++   writeTrace
++      (
++         MajorWarning_HERE,
++         "cfgMetaNumber::valueAllow=true"
++      );
++   return true;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMetaNumber.hpp.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+index 087c6d24..e9c3e5cd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -376,8 +376,8 @@ void cfgMetaSelection::select::setExplanation( std::string const & Src )
+  * Method implementation - see cfgMetaSelection.hpp.
+  *
+ **/
+-cfgMetaSelection::cfgMetaSelection() :
+-   cfgMeta(),
++cfgMetaSelection::cfgMetaSelection( char const * Auth ) :
++   cfgMeta( Auth ),
+    M_Values()
+ {
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index dc63cef8..e518e08a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -27,8 +27,8 @@
+  * Method implementation - see cfgMetaText.hpp.
+  *
+ **/
+-cfgMetaText::cfgMetaText() :
+-   cfgMeta(),
++cfgMetaText::cfgMetaText( char const * Auth ) :
++   cfgMeta( Auth ),
+    M_MaxLength( 0 )
+ {
+ }
+@@ -129,6 +129,45 @@ void cfgMetaText::save
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMetaNumber.hpp.
++ *
++**/
++bool cfgMetaText::valueAllow( cfgValue const & Value )
++{
++   cfgValueText const * const Val =
++      dynamic_cast<cfgValueText const *>( &Value );
++   if( !Val )
++   {
++      writeTrace
++         (
++            MajorError_HERE,
++            "cfgMetaText::valueAllowed=false"
++         );
++      return false;
++   }
++   unsigned const Len = Val->length();
++   if( Len > M_MaxLength )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaText::valueAllow - max: %d -> %d",
++            M_MaxLength, Len
++         );
++      M_MaxLength = Len;
++   }
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::valueAllow=true"
++      );
++   return true;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMetaNumber.hpp.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index d416c3a3..d6075296 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -32,10 +32,8 @@
+  * Method implementation - see cfgMetaTextlist.hpp.
+  *
+ **/
+-cfgMetaTextlist::cfgMetaTextlist
+-(
+-) :
+-   cfgMeta(),
++cfgMetaTextlist::cfgMetaTextlist( char const * Auth ) :
++   cfgMeta( Auth ),
+    M_MaxLength( 0 )
+ {
+ }
+@@ -136,6 +134,54 @@ void cfgMetaTextlist::save
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMetaNumber.hpp.
++ *
++**/
++bool cfgMetaTextlist::valueAllow( cfgValue const & Value )
++{
++   cfgValueTextlist const * const Val =
++      dynamic_cast<cfgValueTextlist const *>( &Value );
++   if( !Val )
++   {
++      writeTrace
++         (
++            MajorError_HERE,
++            "cfgMetaTextlist::valueAllow=false"
++         );
++      return false;
++   }
++   typedef std::list<std::string> txtList;
++   txtList const List = Val->textlist();
++   txtList::const_iterator It = List.begin();
++   unsigned Longest = 0;
++   while( It != List.end() )
++   {
++      if( Longest < It->size() )
++         Longest = It->size();
++      ++It;
++   }
++   if( Longest > M_MaxLength )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaTextlist::valueAllow - max: %d -> %d",
++            M_MaxLength, Longest
++         );
++      M_MaxLength = Longest;
++   }
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaTextlist::valueAllow=true"
++      );
++   return true;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMetaNumber.hpp.
+-- 
+2.41.0.windows.1
+

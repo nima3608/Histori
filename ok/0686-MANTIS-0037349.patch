@@ -1,0 +1,94 @@
+From ecc583fdd3d595ed1b94dd090f88a066787a0a89 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Sat, 3 Oct 2015 13:36:21 +0000
+Subject: [PATCH 0686/1077] MANTIS 0037349 bugfix: integration of ingenico
+ payment device for KIS kiosk
+
+matAsync
+if open fails the internal state is SESSION_STATUS_OPENING
+allow to close with internal state SESSION_STATUS_OPENING to recover from this state
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@906 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/SerialCon/src/matAsyncW32.c        |  3 ++-
+ .../Massai/cpp/SerialCon/src/phoenixtest.cpp      | 15 +++++++--------
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+index 4a624fb5..e24ec7d3 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+@@ -836,7 +836,8 @@ static void closeHandle( HANDLE * handle )
+ MATRC matAsyncClose ( mtHdl H )
+ {
+    TRACE1( "close" )
+-   if( H->SessionStatus != SESSION_STATUS_OPENED )
++   if(H->SessionStatus != SESSION_STATUS_OPENED
++     && H->SessionStatus != SESSION_STATUS_OPENING)
+    {
+       return MATRC_IGNORED;
+    }
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
+index f1f61c50..a42ee730 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
+@@ -40,12 +40,11 @@ int main( int argc, char** argv )
+     std::string strComPort = argc > 1 ? argv[ 1 ] : "COM3";
+ 	std::string strTrcFile = argc > 2 ? argv[ 2 ] : "vcom.log";
+ 	trcFd = _open( strTrcFile.c_str(), O_CREAT|O_TRUNC|O_RDWR );
+-	char szMsg[ 4096 ];
+ 	if( trcFd < 0 )
+ 	{
+ 		trcFd = 0;// use cout;
+ 	}
+-	
++
+     mrc = pmta->set( MATKEY_PORT, strComPort.c_str() );
+     if( mrc != MATRC_OK )
+     {
+@@ -89,15 +88,15 @@ int main( int argc, char** argv )
+ 	char outMsg[ 256 ];
+     mtLen mtlen;
+ 	time_t	t0, t1, t2;
+-	
++
+ 	for( unsigned long i = 0;; ++i)
+ 	{
+ 		t0 = time( NULL );
+ 		mtlen = sizeof( inMsg );
+-		TRACE( "%d)before write()\n", i ); 
++		TRACE( "%d)before write()\n", i );
+         mrc = pmta->write( (mtDta*)inMsg, mtlen );
+ 		t1 = time( NULL );
+-		
++
+ 		if( mrc == MATRC_OK )
+ 		{
+ 			TRACE( "\twrite() OK; elapsed %d seconds\n", t1 - t0 );
+@@ -106,7 +105,7 @@ int main( int argc, char** argv )
+ 			if( mrc == MATRC_OK )
+ 			{
+ 				mtlen = sizeof( outMsg );
+-				mrc = pmta->read( (mtDta*)outMsg, mtlen );			
++				mrc = pmta->read( (mtDta*)outMsg, mtlen );
+ 				TRACE( "\t read OK %s; elapsed %d seconds \n", outMsg, t2 - t1  );
+ 			}
+ 			else
+@@ -124,9 +123,9 @@ int main( int argc, char** argv )
+ 			delete pmta;
+ 			break;
+ 		}
+-		
++
+ 		Sleep( 100 );
+ 	}
+-	
++
+ 	return 0;
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

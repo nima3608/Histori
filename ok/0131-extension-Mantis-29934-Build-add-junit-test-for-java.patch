@@ -1,0 +1,147 @@
+From 5be8a830e604614921bbaa54192146525564cfb7 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 22 Nov 2013 18:09:02 +0000
+Subject: [PATCH 131/462] extension, Mantis 29934: Build: add junit test for
+ java
+
+Build.xml
+V1.2.0
+
+added properties: TestResultDir, ProjTestResultDir, TestClassDir, TestDir, JarJunit
+added targets: compile-test-src, unit-tests
+define ProcessUnitTests to enable jUnit Tests
+
+
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@193 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/java/AntBuild.ReleaseNotes.json     | 18 +++++++
+ SelfServiceBuild/Build/java/AntProperties.xml |  5 ++
+ SelfServiceBuild/Build/java/AntTargets.xml    | 52 ++++++++++++++++++-
+ 3 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceBuild/Build/java/AntBuild.ReleaseNotes.json b/SelfServiceBuild/Build/java/AntBuild.ReleaseNotes.json
+index 9d6d3a0..0ab7475 100644
+--- a/SelfServiceBuild/Build/java/AntBuild.ReleaseNotes.json
++++ b/SelfServiceBuild/Build/java/AntBuild.ReleaseNotes.json
+@@ -16,6 +16,24 @@
+    "Change": [
+     {"Comment": "AntProperties: use new IDL directory in SelfServicePlatform for IDL compiler"}
+    ]
++  },
++  {
++   "Version": "1.2.1",
++   "Date": "2013-11-22",
++   "Author": "SteT",
++   "Ticket": [
++    {
++     "System": "MantisIntern",
++     "Ticket": 29934,
++     "Type": "Extension",
++     "Abstract": "Build: add junit test for java"
++    }
++   ],
++   "Change": [
++    {"Comment": "added properties: TestResultDir, ProjTestResultDir, TestClassDir, TestDir, JarJunit"},
++    {"Comment": "added targets: compile-test-src, unit-tests"},
++    {"Comment": "define ProcessUnitTests to enable jUnit Tests"}
++   ]
+   }
+  ]
+ }
+diff --git a/SelfServiceBuild/Build/java/AntProperties.xml b/SelfServiceBuild/Build/java/AntProperties.xml
+index 368187c..6e240fb 100644
+--- a/SelfServiceBuild/Build/java/AntProperties.xml
++++ b/SelfServiceBuild/Build/java/AntProperties.xml
+@@ -77,6 +77,8 @@
+ <property name="JarDir"                     value="${BUILDROOT}/Build/output/jar"/>
+ <property name="JavaDocDir"                 value="${BUILDROOT}/Build/output/javadoc"/>
+ <property name="ProjJavaDocDir"             value="${JavaDocDir}/${ant.project.name}/html"/>
++<property name="TestResultDir"              value="${BUILDROOT}/Build/output/test"/>
++<property name="ProjTestResultDir"          value="${TestResultDir}/${ant.project.name}"/>
+ <!-- Verzeichnisse mit Java-Komponenten -->
+ <property name="AppJavaDir"                 value="${APPROOT}/Massai/java"/>
+ 
+@@ -85,6 +87,8 @@
+ <property name="ResourceDir"                value="resources"/>
+ <property name="GenSrcDir"                  value="sources.generated"/>
+ <property name="ClassDir"                   value="ant_classes"/>
++<property name="TestClassDir"               value="ant_junit_classes"/>
++<property name="TestDir"                    value="test-sources"/>
+ 
+ <!-- ThirdParty-Software ========================================= -->
+ 
+@@ -172,6 +176,7 @@
+ <property name="JarVelocity"                value="${DIR_GLOBALS}/ThirdParty/velocity/1.7/velocity-1.7.jar"/>
+ <property name="JarVelocityTools"           value="${DIR_GLOBALS}/ThirdParty/velocity-tools/2.0/lib/velocity-tools-generic-2.0.jar"/>
+ <property name="JarApacheCollections"       value="${DIR_GLOBALS}/ThirdParty/velocity/1.7/lib/commons-collections-3.2.1.jar"/>
++<property name="JarJunit"                   value="${DIR_GLOBALS}/ThirdParty/junit/4.10/junit-4.10.jar"/>
+ 
+ 
+ <!-- JRE -->
+diff --git a/SelfServiceBuild/Build/java/AntTargets.xml b/SelfServiceBuild/Build/java/AntTargets.xml
+index 81313fb..bd406f2 100644
+--- a/SelfServiceBuild/Build/java/AntTargets.xml
++++ b/SelfServiceBuild/Build/java/AntTargets.xml
+@@ -290,7 +290,57 @@
+ 
+ </target>
+ 
++
++<!-- junit -->
++
++<target name="compile-test-src" if="ProcessUnitTests">
++
++    <!-- Die benoetigten Unterverzeichnisse werden erstellt. -->
++    <mkdir dir="${TestClassDir}"/>
++
++    <!-- Alle Java-Dateien werden compiliert. -->
++    <javac destdir="${TestClassDir}"
++           deprecation="${javac.deprecation}"
++           debug="${javac.debug}"
++           verbose="${javac.verbose}"
++           target="1.5">
++        <classpath>
++          <pathelement path="${project.classpath}"/>
++          <pathelement location="${JarName}"/>
++          <pathelement location="${JarJunit}"/>
++        </classpath>           
++        <src path="${TestDir}"/>
++    </javac>
++
++</target>
++
++<target name="unit-tests" depends="jar, compile-test-src" if="ProcessUnitTests">
++    <mkdir dir="${ProjTestResultDir}"/>
++
++    <echo message="Test Result: ${ProjTestResultDir}"/>
++
++    <junit printsummary="yes" haltonfailure="yes">
++      <classpath>
++        <pathelement path="${project.classpath}"/>
++        <pathelement location="${TestClassDir}"/>        
++        <pathelement location="${JarName}"/>
++        <pathelement location="${JarJunit}"/>        
++      </classpath>
++
++
++      <formatter type="plain"/>
++      <formatter type="xml"/>
++
++      <batchtest fork="yes" todir="${ProjTestResultDir}">
++        <fileset dir="${TestDir}">
++          <include name="**/*.java"/>
++        </fileset>
++      </batchtest>
++
++    </junit>
++</target>
++
+ <!-- all ========================================================= -->
+ 
+-<target name="all" depends="clean, jar">
++<target name="all" depends="clean, jar, unit-tests">
+ </target>
+-- 
+2.41.0.windows.1
+

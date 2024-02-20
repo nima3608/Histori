@@ -1,0 +1,836 @@
+From 391a96fd4715e70ce3cfe446c68e91ffb5463da6 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 16 Nov 2015 11:11:29 +0000
+Subject: [PATCH 0697/1077] MANTIS 39137 Config service 1.6.0 - MANTIS 39137:
+ Platform CfgXMgrB: Introduce new command to set meta information for existing
+ configuration values. - new method setMeta() for text, text-list, number, and
+ selection.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@924 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  18 ++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp     |  17 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  18 ++-
+ .../cpp/CfgXMgrB/src/cfgCorba_Number.cpp      |  78 +++++++++-
+ .../cpp/CfgXMgrB/src/cfgCorba_Selection.cpp   | 147 ++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp |  79 +++++++++-
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp    |  77 ++++++++-
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     | 144 ++++++++++++++++-
+ .../Massai/idl/Massai/cfgmgr.idl              |  58 ++++++-
+ 9 files changed, 624 insertions(+), 12 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index f3c960cf..093400bc 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -382,7 +382,8 @@
+ //! @date    01.12.2014
+ //! @author  GiT
+ //! @par     Change:
+-//! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++//! - MANTIS 0034821: CfgXMgrB: directory listener function extension
++//!   report child changes.
+ // #define FILE_VER_BIN 1,4,0,0
+ // #define FILE_VER_DTS "1.4.0.0"
+ //
+@@ -445,8 +446,19 @@
+ //! @par     Change:
+ //! - MANTIS 37906: Configuration of passwords
+ //! - Re-allow 'c' rights with pre-configured value.
+-#define FILE_VER_BIN 1,5,1,0
+-#define FILE_VER_DTS "1.5.1.0"
++// #define FILE_VER_BIN 1,5,1,0
++// #define FILE_VER_DTS "1.5.1.0"
++//
++//! @version 1.6.0
++//! @date    16.11.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 39137: Platform CfgXMgrB: Introduce new command to set
++//!   meta information for existing configuration values.
++//! - new method setMeta() for text, text-list, number, and selection.
++#define FILE_VER_BIN 1,6,0,0
++#define FILE_VER_DTS "1.6.0.0"
++//
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+index f7230a36..a31a9707 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -579,6 +579,21 @@ public:
+       cfgValue * Value
+    ) throw( cfgEntity_IllegalValue, cfgEntity_NotFound );
+ 
++   /**
++    *
++    * CHange the meta-data of a configuration item.
++    *
++    * @param MetaDate:  The meta data for the item.
++    *
++    * @param Item:      The item name.
++    *
++   **/
++   void itemSetMeta
++   (
++      cfgMeta const &   MetaDate,
++      char const *      Item
++   );
++
+    /**
+     *
+     * Get the rights of an item.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 510371c1..d6594971 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -373,7 +373,8 @@
+ //! @date    01.12.2014
+ //! @author  GiT
+ //! @par     Change:
+-//! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++//! - MANTIS 0034821: CfgXMgrB: directory listener function extension
++//!   report child changes.
+ // #define FILE_VER_BIN 1,4,0,0
+ // #define FILE_VER_DTS "1.4.0.0"
+ //
+@@ -436,8 +437,19 @@
+ //! @par     Change:
+ //! - MANTIS 37906: Configuration of passwords
+ //! - Re-allow 'c' rights with pre-configured value.
+-#define FILE_VER_BIN 1,5,1,0
+-#define FILE_VER_DTS "1.5.1.0"
++// #define FILE_VER_BIN 1,5,1,0
++// #define FILE_VER_DTS "1.5.1.0"
++//
++//! @version 1.6.0
++//! @date    16.11.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 39137: Platform CfgXMgrB: Introduce new command to set
++//!   meta information for existing configuration values.
++//! - new method setMeta() for text, text-list, number, and selection.
++#define FILE_VER_BIN 1,6,0,0
++#define FILE_VER_DTS "1.6.0.0"
++//
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+index 0f9e7c82..a88aca57 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2011 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -339,6 +339,82 @@ class serviceCfgNumber :
+       writeTrace( SecondaryRuntime_HERE, SCN "setInitial." );
+    }
+ 
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       Min,
++           CORBA::Long                       Max
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCN "setMeta(%s) rights:%s ...",
++         access2Str(Acc).c_str(), Desc.Rights
++      );
++      try
++      {
++         cfgMetaNumber  Obj
++                        (
++                           std::string(Desc.Rights),
++                           std::string(Desc.Explanation),
++                           Min, Max
++                        );
++         M_ConfigEntity->itemSetMeta
++         (
++            Obj, Acc.Item
++         );
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCN "setMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCN "setMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCN "setMeta - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCN "setMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCN "setMeta(%s).",
++         access2Str(Acc).c_str()
++      );
++   }
++
+ public:
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+index add72216..2e80d93c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+@@ -563,6 +563,153 @@ class serviceCfgSelection :
+       writeTrace( SecondaryRuntime_HERE, SCS "setInitialString." );
+    }
+ 
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &                Acc,
++           Config::description const &           Desc,
++           Config::Selection::selectList const & Range
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCS "setMeta(%s) rights:%s",
++         access2Str(Acc).c_str(), Desc.Rights
++      );
++      try
++      {
++         cfgMetaSelection::cfgType_Selection_List Values;
++
++         unsigned RanNumber = 0;
++         unsigned const RanLen = Range.length();
++         while( RanNumber < RanLen )
++         {
++            writeTrace
++            (
++               SecondaryRuntime_HERE, SCS "setMeta - selection %d=%s",
++               Range[RanNumber].selLong,
++               Range[RanNumber].selString.in()
++            );
++            cfgMetaSelection::select
++               Select
++               (
++                  Range[RanNumber].selLong,
++                  Range[RanNumber].selString.in(),
++                  Range[RanNumber].selExplanation.in()
++               );
++            Values.push_back( Select );
++            ++RanNumber;
++         }
++         cfgMetaSelection SelMeta
++                     (
++                        std::string(Desc.Rights),
++                        std::string(Desc.Explanation),
++                        Values
++                     );
++         //
++         // The previous value?
++         //
++         try
++         {
++            cfgValue const * const cfg_value
++               = M_ConfigEntity->getRaw( Acc.Item );
++            if( cfg_value )
++            {
++               cfgValueSelection const * const sel_value =
++                  dynamic_cast<cfgValueSelection const *>( cfg_value );
++               if( sel_value )
++               {
++                  //
++                  // Configured selection value found.
++                  //
++                  // Replace the given default
++                  writeTrace
++                  (
++                     SecondaryRuntime_HERE, SCS "setMeta - replace ..."
++                  );
++                  M_ConfigEntity->itemDelete
++                                 (
++                                    Acc.Authorization, Acc.Item
++                                 );
++                  writeTrace
++                  (
++                     SecondaryRuntime_HERE, SCS "setMeta - replace."
++                  );
++                  M_ConfigEntity->itemCreate
++                                 (
++                                    SelMeta, Acc.Item,
++                                    new cfgValueSelection
++                                       (
++                                          sel_value->scalar()
++                                       )
++                                 );
++               }
++            }
++         }
++         catch( cfgEntity_WrongParameter & )
++         {
++            // The initial string does not match any selection item
++            writeTrace
++            (
++               SecondaryRuntime_HERE,
++               SCS "setMeta - ignore wrong initial string"
++            );
++         }
++         catch( cfgEntity_NotFound & )
++         {
++            // Ok - not yet established.
++         }
++         //
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCS "setMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCS "setMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCS "setMeta - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCS "setMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCS "setMeta(%s).",
++         access2Str(Acc).c_str()
++      );
++   } // void setMeta()
++
+ public:
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index 09163cd0..44a64b0f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -334,6 +334,83 @@ class serviceCfgText :
+       writeTrace( SecondaryRuntime_HERE, SCT "setInitial." );
+    }
+ 
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       MaxLength
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT "setMeta(%s) rights:%s",
++         access2Str(Acc).c_str(), Desc.Rights
++      );
++      try
++      {
++         std::string const rights( Desc.Rights );
++         std::string const explanation( Desc.Explanation );
++         cfgMetaText Obj
++                     (
++                        rights,
++                        explanation,
++                        static_cast<unsigned>( MaxLength )
++                     );
++         M_ConfigEntity->itemSetMeta
++         (
++            Obj, Acc.Item
++         );
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT "setMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT "setMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT "setMeta - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT "setMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT "setMeta(%s).",
++         access2Str(Acc).c_str()
++      );
++   } // void setMeta()
++
+ public:
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+index c105a412..7d3c0a19 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -698,6 +698,81 @@ class serviceCfgTextlist :
+       writeTrace( SecondaryRuntime_HERE, SCTL "setInitial." );
+    }
+ 
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       MaxLength
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL "setMeta(%s) rights:%s",
++         access2Str(Acc).c_str(), Desc.Rights
++      );
++      try
++      {
++         cfgMetaTextlist   Obj
++                           (
++                              std::string(Desc.Rights),
++                              std::string(Desc.Explanation),
++                              static_cast<unsigned>( MaxLength )
++                           );
++         M_ConfigEntity->itemSetMeta
++         (
++            Obj, Acc.Item
++         );
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL "setMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL "setMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL "setMeta - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL "setMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL "setMeta(%s).",
++         access2Str(Acc).c_str()
++      );
++   }
++
+ public:
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index 28dab8f4..c66f34e8 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -2131,7 +2131,6 @@ void cfgEntity::itemCreate
+ 
+ 
+ 
+-
+ /**
+  *
+  * Method implementation - see cfgEntity.hpp.
+@@ -2255,6 +2254,149 @@ void cfgEntity::itemSet
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgEntity.hpp.
++ *
++**/
++void cfgEntity::itemSetMeta
++(
++   cfgMeta const &      MetaData,
++   char const *         Item
++)
++{
++   if( !M_Meta || !M_Value )
++   {
++      return;
++   }
++   //-std::cout << "cfgEntity::itemSetMeta ..." << std::endl;
++   if( Item )
++   {
++      // Item name given, check if a valid one
++      itemNameValid( Item );
++      // Check for already known data
++      try
++      {
++         // Might throw cfgEntity_NotFound
++         cfgValue const * RawValue = M_Value->cevGetRaw( Item );
++         // No exception - value already set.
++         reference const RefOrig = M_Value->cevGetRef( Item );
++#if 0
++         TODO: Copy from create - necessary?
++         if( RefOrig )
++         {
++            // Try to get metadata for creation - perhaps throwing?
++            (void)M_Meta->cemFromRef
++               (
++                  "", cfgEntity::PURP_CREATE, RefOrig
++               );
++         }
++         // No meta found, value probably from setInitial()
++#endif
++         // Create the meta data for this item.
++         //-std::cout << "cfgEntity::itemSetMeta - 1" << std::endl;
++         reference const RefNew = M_Meta->cemFromMeta( MetaData );
++         //-std::cout << "cfgEntity::itemSetMeta - 2" << std::endl;
++#if 0
++         TODO: Copy from create - necessary?
++         if( MetaData.isDefault() )
++         {
++            //
++            // This is again a call by setInitial().
++            // Accept a new value to overwrite the old one.
++            //
++            M_Value->cevUpdate( Item, RefNew, ValDef );
++         }
++         else
++         {
++            //
++            // This is a call by create().
++            // Do NOT set a new value, since we want to take the value
++            // from setInitial().
++            //
++            if( !MetaData.valueAllowed( *RawValue ) && CheckVal )
++            {
++#ifdef SETINITIAL_EXTENDS_RANGE
++               cfgMeta * const Meta = M_Meta->cemFromRef
++                                         (
++                                            "<create>",
++                                             cfgEntity::PURP_METASET,
++                                             RefNew
++                                         );
++               if( !Meta )
++               {
++                  //-std::cout << "cfgEntity::itemSet - "
++                  //-          "X:NotFound (no meta)" << std::endl;
++                  throw cfgEntity_NotFound();
++               }
++               if( !Meta->valueAllow( *RawValue ) )
++#endif
++               {
++                  //-std::cout << "cfgEntity::itemSetMeta - X:IllegalValue"
++                  //-          << std::endl;
++                  throw cfgEntity_IllegalValue();
++               }
++            }
++            M_Value->cevUpdate( Item, RefNew );
++         }
++#else
++         M_Value->cevUpdate( Item, RefNew );
++#endif
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         // Error: Meta already there, do not overwrite it.
++         //-std::cout << "cfgEntity::itemSetMeta - X:AlreadyExists."
++         //-          << std::endl;
++         throw cfgEntity_AlreadyExists();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++#if 0
++         TODO: Copy from create - necessary?
++         // Value not set, check meta and value.
++         if (
++               !MetaData.isDefault() &&
++               !MetaData.valueAllowed( *ValDef ) &&
++               CheckVal
++            )
++         {
++            //-std::cout << "cfgEntity::itemSetMeta - X:IllegalValue"
++            //-          << std::endl;
++            throw cfgEntity_IllegalValue();
++         }
++#endif
++         // Create meta and item data.
++         reference const Ref = M_Meta->cemFromMeta( MetaData );
++         //-std::cout << "cfgEntity::itemSetMeta - update" << std::endl;
++         changeInfo * const Info = new changeInfo( M_IListeners, Item );
++         if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
++         {
++            // Queue full will lead to a client
++            // not getting the change info.
++            writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  CENT "itemSetMeta error:"
++                  " could not queue change indication!"
++               );
++         }
++#if 0
++         M_Value->cevUpdate( Item, Ref, ValDef );
++#endif
++      }
++   }
++   else
++   {
++      // Item name not given, just create meta data.
++      (void)M_Meta->cemFromMeta( MetaData );
++   }
++   allSaveEntity();
++   //-std::cout << "cfgEntity::itemSetMeta." << std::endl;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgEntity.hpp.
+diff --git a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+index 0b254d81..1ba1d8fb 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+@@ -24,7 +24,7 @@
+ 
+ /** This module provides interfaces for client-application acces to the
+  *  configuration servant.
+- *  @version 1.0
++ *  @version 2.0
+  *  @author Carsten Metzler - Materna Information & Communications
+  */
+ module Config
+@@ -239,6 +239,20 @@ module Config
+         void setInitial( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param Desc         - The description.
++         *  @param MaxLength    - The maximum string length.
++         */
++        void setMeta
++            (
++                in access Acc, in description Desc,
++                in long MaxLength
++            )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+     };
+ 
+ 
+@@ -327,6 +341,20 @@ module Config
+         void setInitial( in access Acc, in strings Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param Desc         - The description.
++         *  @param MaxLength    - The maximum string length.
++         */
++        void setMeta
++            (
++                in access Acc, in description Desc,
++                in long MaxLength
++            )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+     };
+ 
+ 
+@@ -396,6 +424,20 @@ module Config
+         void setInitial( in access Acc, in long Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param Desc         - The description.
++         *  @param MinValue     - The minimum value.
++         *  @param MaxValue     - The maximum value.
++         */
++        void setMeta
++            (
++                in access Acc, in description Desc,
++                in long MinValue, in long MaxValue
++            )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
+     };
+ 
+ 
+@@ -482,6 +524,20 @@ module Config
+         void setInitialString( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param Desc         - The description.
++         *  @param Values       - The list of possible values.
++         */
++        void setMeta
++            (
++                in access Acc, in description Desc,
++                in selectList Values
++            )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+     };
+ 
+ 
+-- 
+2.41.0.windows.1
+

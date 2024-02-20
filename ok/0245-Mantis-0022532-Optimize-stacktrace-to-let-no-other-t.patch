@@ -1,0 +1,106 @@
+From 20fe4cf60e641175b17da7a17112d96f6a3afae2 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 23 Feb 2012 16:14:26 +0000
+Subject: [PATCH 0245/1077] - Mantis 0022532: Optimize stacktrace to let no
+ other trace come between title and stack
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@297 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/fsm/mStateMachineQueue.hpp   | 13 ++++++-------
+ .../Interfaces/inc/systools/mSysThread.hpp          |  4 +++-
+ .../Massai/cpp/Systools/src/mSysThreadW32.cpp       | 12 +++++++-----
+ 3 files changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
+index 6590e5a9..8d270c0c 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineQueue.hpp
+@@ -13,7 +13,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2011 MATERNA Information & Communications
++ * Copyright (c) 2001-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -410,14 +410,13 @@ namespace StateMachine
+       **/
+       virtual void workerStackTrace()
+       {
+-         logging
+-            (
+-               Log_MajorWarning,
+-               "Callstack of queuedWalker worker thread:"
+-            );
+          traceWrite<EVT> Trace( this );
+          setTrace( &Trace );
+-         stackTrace();
++         stackTrace
++            (
++               "Callstack of possibly blocked "
++               "queuedWalker worker thread"
++            );
+          setTrace( 0 );
+       }
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysThread.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysThread.hpp
+index c7d39419..ff7be7c2 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysThread.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysThread.hpp
+@@ -214,8 +214,10 @@ namespace mSysThread
+        * constructor (trace constructor) is used to dump the thread
+        * status.
+        *
++       * @param Title:          Explain the reason for the stack-trace.
++       *
+       **/
+-      void stackTrace();
++      void stackTrace( char const * Title = 0 );
+ 
+       /**
+        *
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+index c7063754..c0baef70 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+@@ -515,7 +515,7 @@ public:
+     * Trace thread's call stack.
+     *
+    **/
+-   void stackTrace()
++   void stackTrace( char const * Title )
+    {
+       if( MH_TraceWriter )
+       {
+@@ -530,6 +530,10 @@ public:
+             // We do not want to use the tracer directly, while the
+             // target thread is suspended -> use temporary string-stream.
+             std::ostringstream StOut;
++            if( Title )
++            {
++               StOut << "\n   " << Title << "\n";
++            }
+             if( SuspendThread( MH_Handle ) == (DWORD)-1 )
+             {
+                StOut << "stackTrace() - SuspendThread failed"
+@@ -552,14 +556,12 @@ public:
+                      "   Address   "
+                      "   Module                  "
+                      "   Symbol                                          "
+-                     "   Source"
+-                     << std::endl;
++                     "   Source\n";
+                StOut <<
+                      "   ----------"
+                      "   ------------------------"
+                      "   ------------------------------------------------"
+-                     "   ------"
+-                     << std::endl;
++                     "   ------\n";
+                while( Item )
+                {
+                   char Buf[512];
+-- 
+2.41.0.windows.1
+

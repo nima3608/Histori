@@ -1,0 +1,184 @@
+From 4db324034eb15e15ea2a323a74fed23f45ae5dbc Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Thu, 10 Oct 2013 13:21:56 +0000
+Subject: [PATCH 120/462] MANTIS	0022072: Build: automatic one click build
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@178 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/revision_tag.pl             | 164 ++++++++++++++++++
+ 1 file changed, 164 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/revision_tag.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/revision_tag.pl b/SelfServiceBuild/Build/scripts/revision_tag.pl
+new file mode 100644
+index 0000000..902d67d
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/revision_tag.pl
+@@ -0,0 +1,164 @@
++#!/usr/bin/perl -w
++#
++use strict;
++our $VERSION="0.0.0.2";
++
++use File::Copy;
++use Getopt::Long;
++
++my $reposPath = "";
++my $RVersion = "";
++my $SVN_COMMAND = "svn.exe";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("repo=s"   => \$reposPath,
++            "version=s"   => \$RVersion,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count != 2 or $help )
++{
++  print STDERR "usage: $0 --repo=\"PATH\" --version=0.0.0.0\n" ;
++  exit 0;
++}
++die "No build version set. Pre build functions not activated. Skipping\n" if (not $RVersion  or ! defined($RVersion));
++die "No Repository path set. Pre build functions not activated. Skipping\n" if (not $reposPath  or ! defined($reposPath)) ;
++die "SVN exe not found. Pre build functions not activated. Skipping\n" if (! &check_svn($SVN_COMMAND)) ;
++
++my $REVISION = join(".",((split(/\./,$RVersion))[0..2])).".".&get_revision($SVN_COMMAND,$reposPath);
++
++my %subst_params = (
++  qq{#define\\s+PRODUCT\\s+\"ProductName\",\\s*\"MASSAI-Platform} => qq{#define PRODUCT         "ProductName", "MASSAI-Platform $REVISION"\n},
++  qq{#define\\s+PROD_VERSIONSTR\\s+\".*\"} => qq{#define PROD_VERSIONSTR "$REVISION\\0"\n},
++  qq{#define\\s+PROD_VERSION_NO} => qq{#define PROD_VERSION_NO }.&get_ver_part($REVISION,0)."\n",
++  qq{#define\\s+PROD_RELEASE_NO} => qq{#define PROD_RELEASE_NO }.&get_ver_part($REVISION,1)."\n",
++  qq{#define\\s+PROD_LEVEL_NO} => qq{#define PROD_LEVEL_NO }.&get_ver_part($REVISION,2)."\n",
++  qq{#define\\s+PROD_PATCH_NO} => qq{#define PROD_PATCH_NO }.&get_ver_part($REVISION,3)."\n"
++  );
++if ( -e $reposPath."\\Interfaces\\inc\\Global_def.h")
++{
++    &change_in_file($reposPath."\\Interfaces\\inc\\Global_def.h",%subst_params);
++}
++if ( -e $reposPath."\\SelfServicePlatform\\Interfaces\\inc\\Global_def.h")
++{
++    &change_in_file($reposPath."\\SelfServicePlatform\\Interfaces\\inc\\Global_def.h",%subst_params);
++}
++if ( -e $reposPath."\\SelfServiceCommon\\Interfaces\\inc\\Global_def.h")
++{
++    &change_in_file($reposPath."\\SelfServiceCommon\\Interfaces\\inc\\Global_def.h",%subst_params);
++}
++
++%subst_params = (
++  qq{ProductVersion\\s*=\\s*} => qq{ProductVersion = $REVISION\n},
++  qq{ProductName\\s*=\\s*MASSAI-Platform} => qq{ProductName    = MASSAI-Platform $REVISION\n}
++  );
++if ( -e $reposPath."\\Build\\java\\project.properties")
++{
++    &change_in_file($reposPath."\\Build\\java\\project.properties",%subst_params);
++}
++if ( -e $reposPath."\\SelfServicePlatform\\Build\\java\\project.properties")
++{
++    &change_in_file($reposPath."\\SelfServicePlatform\\Build\\java\\project.properties",%subst_params);
++}
++if ( -e $reposPath."\\SelfServiceCommon\\Build\\java\\project.properties")
++{
++    &change_in_file($reposPath."\\SelfServiceCommon\\Build\\java\\project.properties",%subst_params);
++}
++
++my $formatted_update_str = sprintf("%d%02d%02d%05d", &get_ver_part($REVISION,0),&get_ver_part($REVISION,1),&get_ver_part($REVISION,2),&get_ver_part($REVISION,3));
++%subst_params = (
++  qq{<[?]define\\s*MajorVersion=\".*\"\\s*} => qq{<?define MajorVersion="}.&get_ver_part($REVISION,0).qq{" ?>\n},
++  qq{<[?]define\\s*MinorVersion=\".*\"\\s*} => qq{<?define MinorVersion="}.&get_ver_part($REVISION,1).qq{" ?>\n},
++  qq{<[?]define\\s*BuildVersion=\".*\"\\s*} => qq{<?define BuildVersion="}.&get_ver_part($REVISION,2).qq{" ?>\n},
++  qq{<[?]define\\s*Revision=\".*\"\\s*} => qq{<?define Revision="}.&get_ver_part($REVISION,3).qq{" ?>\n},
++  qq{<[?]define\\s*MASSAI_UPDATE_VER=\".*\"\\s*} => qq{<?define MASSAI_UPDATE_VER="$formatted_update_str" ?>\n},
++  qq{<[?]define\\s*DevelopmentStr=\"Development\\s*Build\(.*\)\"\\s*} => qq{<?define DevelopmentStr="" ?>\n}
++  );
++if ( -e $reposPath."\\Build\\installer\\release_def.wxi")
++{
++    &change_in_file($reposPath."\\Build\\installer\\release_def.wxi",%subst_params);
++}
++if ( -e $reposPath."\\SelfServicePlatform\\Build\\installer\\release_def.wxi")
++{
++    &change_in_file($reposPath."\\SelfServicePlatform\\Build\\installer\\release_def.wxi",%subst_params);
++}
++
++%subst_params = (
++  qq{<[?]define\\s*Revision=\\s*\"} => qq{<?define Revision="}.&get_ver_part($REVISION,3).qq{" ?>\n},
++  );
++if ( -e $reposPath."\\Build\\installer\\cla_release_def.wxi")
++{
++    &change_in_file($reposPath."\\Build\\installer\\cla_release_def.wxi",%subst_params);
++}
++if ( -e $reposPath."\\SelfServicePlatform\\Build\\installer\\cla_release_def.wxi")
++{
++    &change_in_file($reposPath."\\SelfServicePlatform\\Build\\installer\\cla_release_def.wxi",%subst_params);
++}
++
++exit 0;
++
++sub change_in_file
++{
++  my $filename = shift;
++  my %substlist = (@_);
++  
++  my @changed_file;
++  my $akt_line;
++  
++  if ( -e $filename.".orig" )
++  {
++    copy( $filename.".orig", $filename ) or die "change_in_file: $!";
++  } else
++  {
++    copy( $filename, $filename.".orig" ) or die "change_in_file: $!";
++  }
++  open CHANGE_FILE, $filename or die "change_in_file: $!";
++  my @cf = <CHANGE_FILE>;
++  close CHANGE_FILE;
++  
++  foreach(@cf)
++  {
++    $akt_line = $_;
++    for  my $key ( keys %subst_params)
++    {
++      if ($akt_line =~ /$key/g)
++      {
++        $akt_line = $subst_params{$key};
++      }
++    }
++    push @changed_file,$akt_line;
++  }
++  open NEW_FILE, ">".$filename or die "change_in_file: $!";
++  print NEW_FILE @changed_file;
++  close NEW_FILE;
++}
++
++sub get_ver_part
++{
++  my $res = (split(/\./,$_[0]))[$_[1]];
++  return "$res";
++}
++
++sub get_revision
++{
++  my ($svn_cmd,$repo_path) = @_;
++  
++  my $exec = $svn_cmd."  info ".$repo_path;
++  my @result = `$exec`;
++
++  my @revision_arr = grep (s/^Revision:\s+(\d+)\s*$/$1/,@result);
++  my $revision = 0;
++  $revision = $revision_arr[0] if (@revision_arr > 0);  
++}
++
++sub check_svn
++{
++  my ($svn_cmd) = @_;
++  
++  my $exec = $svn_cmd." --version --quiet";
++  my @result = `$exec`;
++
++  return ( $result[0] =~ /\d+\.\d+\.\d+/g );
++}
+-- 
+2.41.0.windows.1
+

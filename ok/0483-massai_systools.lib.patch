@@ -1,0 +1,657 @@
+From 76048116d05e82171e91886594ba2bff5e3ec9d4 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 7 Oct 2013 19:44:31 +0000
+Subject: [PATCH 0483/1077] massai_systools.lib V1.0.0.13
+
+Mantis 0028892: PLF: SAM-Hotkey not working
+mSysHotKey: listen on windows hot keys
+mSysThreadPool: process jobs in a pool of threads
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@595 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysHotKey.h      |   1 -
+ .../Interfaces/inc/systools/mSysThreadPool.h  |  46 +++
+ .../Massai/cpp/Systools/makefile.mak          |  11 +
+ .../cpp/Systools/src/TestSysThreadPool.cpp    |  96 +++++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   2 +-
+ .../Massai/cpp/Systools/src/mSysHotKeyW32.cpp |  40 +-
+ .../cpp/Systools/src/mSysThreadPoolW32.cpp    | 359 ++++++++++++++++++
+ 7 files changed, 533 insertions(+), 22 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysThreadPool.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysThreadPool.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h b/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
+index 4e26504f..0666fe0f 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
+@@ -6,7 +6,6 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-#include "tools/TraceInterface.h"
+ #include <set>
+ #include <iostream>
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysThreadPool.h b/SelfServiceCommon/Interfaces/inc/systools/mSysThreadPool.h
+new file mode 100644
+index 00000000..e0245662
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysThreadPool.h
+@@ -0,0 +1,46 @@
++// process jobs in a pool of threads
++
++#ifndef MSYSTHREADPOOL_H_INCLUDED
++#define MSYSTHREADPOOL_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "tools/TraceInterface.h"
++#include "systools/mSysThread.hpp"
++
++namespace mSysThread
++{
++  class Job
++  {
++    public:
++      Job();
++      Job(int priority);
++
++      virtual ~Job();
++      virtual void execute(const thread& currentThread);
++      int getPriority() const;
++
++    private:
++      int m_priority;
++  };
++
++  class ThreadPool
++  {
++    public:
++      virtual ~ThreadPool();
++      virtual void call(Job* pJob) = 0;
++      virtual void terminate() = 0;
++  };
++
++
++  ThreadPool* createThreadPool
++  (
++    size_t threadCount,
++    MASSAI::trace::TraceInterface& trc,
++    const threadException* exceptionHandler = 0,
++    long  stacksize = 0
++  );
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index ebaca941..3a214c8e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -50,6 +50,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysUSBPrinterW32.obj \
+                         $(_OBJ)\mSysUSBDeviceW32.obj \
+                         $(_OBJ)\mSysUSBHIDW32.obj \
++                        $(_OBJ)\mSysThreadPoolW32.obj \
+ 
+ 
+ ######################################################################
+@@ -133,5 +134,15 @@ MY_BIN9_LINKLIBS =      User32.lib
+ 
+ MY_BIN9_OBJS =          $(_OBJ)\TestSysHotKey.obj
+ 
++#######################################################################
++
++MY_BIN10 =              $(_BIN)\TestSysThreadPool.exe
++
++MY_BIN10_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS)
++
++MY_BIN10_LINKLIBS =     User32.lib
++
++MY_BIN10_OBJS =         $(_OBJ)\TestSysThreadPool.obj
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThreadPool.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThreadPool.cpp
+new file mode 100644
+index 00000000..779d2bf8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysThreadPool.cpp
+@@ -0,0 +1,96 @@
++// Test mSysThreadPool
++
++#include "systools/mSysThreadPool.h"
++#include "tools/TraceLocal.h"
++#include "tools/TraceSync.h"
++#include "systools/mEventSem.hpp"
++#include "systools/mSysException.hpp"
++#include "systools/mSysProcessTerminate.h"
++#include <iostream>
++
++
++using namespace mSysThread;
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceSync;
++using MASSAI::trace::TraceInterface;
++using mSysException::standardException;
++using Materna::MSSD::eventSemaphore;
++using Materna::MSSD::eventSemaphore_Exception;
++
++namespace
++{
++  class DecreaseJob: public Job
++  {
++    public:
++      DecreaseJob(int& counter, TraceInterface& trc):
++        Job(1),
++        m_counter(counter),
++        m_trc(trc)
++      {}
++
++      virtual void execute(const thread& currentThread)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "counter (%d)", m_counter--);
++      }
++    private:
++      int& m_counter;
++      TraceInterface& m_trc;
++  };
++
++  class IncreaseJob: public Job
++  {
++    public:
++      IncreaseJob(int& counter, TraceInterface& trc):
++        Job(2),
++        m_counter(counter),
++        m_trc(trc)
++      {}
++
++      virtual void execute(const thread& currentThread)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "counter (%d)", m_counter++);
++      }
++    private:
++      int& m_counter;
++      TraceInterface& m_trc;
++  };
++}
++
++int main(int argc, char **argv)
++{
++  eventSemaphore terminate;
++  TraceLocal ltrc("TestSysThreadPool");
++  TraceSync trc(ltrc);
++  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_LATE, &terminate, &trc);
++  standardException guard;
++  try
++  {
++    int counter = 0;
++    ThreadPool* threadPool = createThreadPool(4, trc, 0, 0);
++    for(int i = 0; i < 10; i++)
++    {
++      threadPool->call(new DecreaseJob(counter, trc));
++    }
++    for(int i = 0; i < 10; i++)
++    {
++      threadPool->call(new IncreaseJob(counter, trc));
++    }
++    terminate.wait();
++    trc.writeTrace(BasicRuntime_HERE, "counter (%d)", counter);
++    delete threadPool;
++  }
++  catch(const eventSemaphore_Exception&)
++  {
++    trc.writeTrace(MajorError_HERE, "open semaphore failed");
++  }
++  catch(const std::exception& x)
++  {
++    trc.writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  mSysProcessTerminate::resetShutdownHook();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 7612f1ad..4195541e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -11,7 +11,7 @@ massai_systools.lib
+ \li V1.0.0.13
+ \li Mantis 0028892: PLF: SAM-Hotkey not working
+ mSysHotKey: listen on windows hot keys
+-
++mSysThreadPool: process jobs in a pool of threads
+ 
+ \date 19.09.2013
+ \li V1.0.0.12
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
+index c08fda8c..0cb492df 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
+@@ -657,23 +657,23 @@ namespace mSysHotKey
+       case KEY_F10:      return "F10";
+       case KEY_F11:      return "F11";
+       case KEY_F12:      return "F12";
+-      case KEY_ESCAPE:   return "ESCAPE";
+-      case KEY_TAB:      return "TAB";
+-      case KEY_SPACE:    return "SPACE";
+-      case KEY_BACK:     return "BACK";
+-      case KEY_RETURN:   return "RETURN";
+-      case KEY_PRINT:    return "PRINT";
+-      case KEY_INSERT:   return "INSERT";
+-      case KEY_DELETE:   return "DELETE";
+-      case KEY_PAUSE:    return "PAUSE";
+-      case KEY_PAGEUP:   return "PAGEUP";
+-      case KEY_PAGEDOWN: return "PAGEDOWN";
+-      case KEY_HOME:     return "HOME";
+-      case KEY_END:      return "END";
+-      case KEY_LEFT:     return "LEFT";
+-      case KEY_RIGHT:    return "RIGHT";
+-      case KEY_UP:       return "UP";
+-      case KEY_DOWN:     return "DOWN";
++      case KEY_ESCAPE:   return "escape";
++      case KEY_TAB:      return "tabulator";
++      case KEY_SPACE:    return "space";
++      case KEY_BACK:     return "back";
++      case KEY_RETURN:   return "return";
++      case KEY_PRINT:    return "print";
++      case KEY_INSERT:   return "insert";
++      case KEY_DELETE:   return "delete";
++      case KEY_PAUSE:    return "pause";
++      case KEY_PAGEUP:   return "page up";
++      case KEY_PAGEDOWN: return "page down";
++      case KEY_HOME:     return "home";
++      case KEY_END:      return "end";
++      case KEY_LEFT:     return "left";
++      case KEY_RIGHT:    return "right";
++      case KEY_UP:       return "up";
++      case KEY_DOWN:     return "down";
+       default:           return "unknown";
+     }
+   }
+@@ -682,9 +682,9 @@ namespace mSysHotKey
+   {
+     switch(data)
+     {
+-      case MMOD_CONTROL: return "CONTROL";
+-      case MMOD_SHIFT:   return "SHIFT";
+-      case MMOD_ALT:     return "ALT";
++      case MMOD_CONTROL: return "control";
++      case MMOD_SHIFT:   return "shift";
++      case MMOD_ALT:     return "alt";
+       default:           return "unknown";
+     }
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
+new file mode 100644
+index 00000000..4f5c6348
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
+@@ -0,0 +1,359 @@
++// process jobs in a pool of threads
++
++#include "sysTools/mSysThreadPool.h"
++#include "systools/mEventSem.hpp"
++#include "systools/mMutexCS.h"
++#include "systools/mAutoMutexCS.h"
++#include "systools/mSysTime.h"
++#include "tools/tracesToTraceInterface.h"
++#include <queue>
++#include <set>
++#include <vector>
++#include <functional>
++
++using MASSAI::trace::TraceInterface;
++using Materna::MSSD::eventSemaphore;
++using Materna::MSSD::AutoMutexCS;
++using Materna::MSSD::Mutex;
++using tracesToTraceInterface::writer;
++
++
++using namespace mSysThread;
++
++namespace
++{
++  enum Constants
++  {
++    TERMINATE_WAIT_TIME_IN_MS = 500,
++  };
++
++  typedef std::auto_ptr<Job> JobPtr;
++
++  class JobCompare
++  {
++    public:
++      bool operator()(const JobPtr& cmp1, const JobPtr& cmp2) const;
++  };
++
++  typedef std::priority_queue<JobPtr, std::vector<JobPtr>,  JobCompare> JobQueue;
++
++  class ThreadPoolImpl;
++
++  class Thread: public thread
++  {
++    public:
++      Thread
++      (
++        ThreadPoolImpl* pOwner,
++        const threadException* exceptionHandler,
++        traces::writer* traceWriter,
++        long stacksize
++      );
++      ~Thread();
++      bool call(Job* pJob);
++      void terminate();
++
++    private:
++      // thread
++      virtual void function();
++
++      JobPtr m_pJob;
++      Mutex m_mutex;
++      eventSemaphore m_notify;
++      bool m_terminate;
++      ThreadPoolImpl* m_pOwner;
++  };
++
++  typedef std::set<Thread*> Threads;
++
++  class ThreadPoolImpl: public ThreadPool
++  {
++    public:
++      ThreadPoolImpl
++      (
++        size_t threadCount,
++        TraceInterface& trc,
++        const threadException* exceptionHandler,
++        long  stacksize
++      );
++
++      ~ThreadPoolImpl();
++      void call(Job* pJob);
++      void idle(Thread* pThread);
++      void terminate();
++      TraceInterface& trc();
++
++    private:
++      void terminate(Threads& threads);
++      void kill(Threads& threads);
++      void wait(unsigned long start, Threads& threads);
++
++      JobQueue m_jobs;
++      Threads m_idle;
++      Threads m_active;
++      Mutex m_mutex;
++      size_t m_threadcount;
++      writer m_traceWriter;
++      TraceInterface& m_trc;
++      const threadException* m_exceptionHandler;
++      long m_stacksize;
++  };
++}
++
++namespace
++{
++  bool JobCompare::operator()(const JobPtr& cmp1, const JobPtr& cmp2) const
++  {
++    return cmp1.get()->getPriority() < cmp2.get()->getPriority();
++  }
++
++  Thread::Thread
++  (
++    ThreadPoolImpl* pOwner,
++    const threadException* exceptionHandler,
++    traces::writer* traceWriter,
++    long stacksize
++  ):
++    thread(exceptionHandler, traceWriter, 0, stacksize),
++    m_terminate(false),
++    m_pOwner(pOwner),
++    m_pJob(0)
++  {
++    m_pOwner->trc().writeTrace(BasicRuntime_HERE, "Thread created (%p)", this);
++  }
++
++  Thread::~Thread()
++  {}
++
++  bool Thread::call(Job* pJob)
++  {
++    bool result= false;
++    AutoMutexCS mx(m_mutex);
++    m_pOwner->trc().writeTrace(BasicRuntime_HERE, "Thread call (%p)", this);
++    if(!m_pJob.get())
++    {
++      m_pJob= JobPtr(pJob);
++      result= true;
++      m_notify.post();
++    }
++    return result;
++  }
++
++  void Thread::function()
++  {
++    while(!m_terminate)
++    {
++      JobPtr pJob;
++      {
++        AutoMutexCS mx(m_mutex);
++        m_notify.reset();
++        if(m_pJob.get())
++        {
++          pJob= m_pJob;
++          m_pJob= JobPtr(0);
++        }
++      }
++      if(pJob.get() && !m_terminate)
++      {
++        try
++        {
++          m_pOwner->trc().writeTrace(BasicRuntime_HERE, "Thread execute job (%p)", this);
++          pJob->execute(*this);
++        }
++        catch(...)
++        {
++          m_pOwner->trc().writeTrace(MajorError_HERE, "Unexpected exception (%p)", this);
++        }
++      }
++      else
++      {
++        m_pOwner->trc().writeTrace(BasicRuntime_HERE, "Thread idle (%p)", this);
++        m_pOwner->idle(this);
++        m_notify.wait();
++      }
++    }
++  }
++
++  void Thread::terminate()
++  {
++    m_terminate= true;
++    m_notify.post();
++  }
++
++  ThreadPoolImpl::ThreadPoolImpl
++  (
++    size_t threadCount,
++    MASSAI::trace::TraceInterface& trc,
++    const threadException* exceptionHandler,
++    long  stacksize
++  ):
++    m_jobs(),
++    m_idle(),
++    m_active(),
++    m_mutex(),
++    m_threadcount(threadCount),
++    m_traceWriter(trc),
++    m_trc(trc),
++    m_exceptionHandler(exceptionHandler),
++    m_stacksize(stacksize)
++  {}
++
++  ThreadPoolImpl::~ThreadPoolImpl()
++  {
++    terminate(m_active);
++    terminate(m_idle);
++    unsigned long start = mSysTime::getUpTime();
++    wait(start, m_active);
++    wait(start, m_idle);
++    kill(m_active);
++    kill(m_idle);
++  }
++
++  void ThreadPoolImpl::terminate()
++  {
++    terminate(m_active);
++    terminate(m_idle);
++  }
++
++  void ThreadPoolImpl::wait(unsigned long start, Threads& threads)
++  {
++    Threads::iterator it= threads.begin();
++    Threads::iterator end= threads.end();
++    for(; it != end; ++it)
++    {
++      unsigned long now = mSysTime::getUpTime();
++      if(now - start < TERMINATE_WAIT_TIME_IN_MS)
++      {
++        (*it)->waitTerminated(TERMINATE_WAIT_TIME_IN_MS - (now - start));
++      }
++    }
++  }
++
++  void ThreadPoolImpl::terminate(Threads& threads)
++  {
++    Threads::iterator it= threads.begin();
++    Threads::iterator end= threads.end();
++    for(; it != end; ++it)
++    {
++      (*it)->terminate();
++    }
++  }
++
++  void ThreadPoolImpl::kill(Threads& threads)
++  {
++    Threads::iterator it= threads.begin();
++    Threads::iterator end= threads.end();
++    for(; it != end; ++it)
++    {
++      (*it)->kill();
++      delete *it;
++    }
++  }
++
++  TraceInterface& ThreadPoolImpl::trc()
++  {
++    return m_trc;
++  }
++
++  void ThreadPoolImpl::call(Job* pJob)
++  {
++    AutoMutexCS mx(m_mutex);
++    m_jobs.push(JobPtr(pJob));
++    Job* pExecute;
++    if(m_jobs.size() > 0)
++    {
++      pExecute= m_jobs.top().get();
++      Thread* pThread= 0;
++      if(m_idle.size() > 0)
++      {
++        pThread= *(m_idle.begin());
++      }
++      else
++      {
++        if((m_threadcount < 0) || (m_active.size() < m_threadcount))
++        {
++          try
++          {
++            m_trc.writeTrace(BasicRuntime_HERE, "create new thread");
++            pThread= new Thread(this, m_exceptionHandler, &m_traceWriter, m_stacksize);
++            pThread->start();
++          }
++          catch(...)
++          {}
++          m_idle.insert(pThread);
++        }
++      }
++      if(pThread && pThread->call(pExecute))
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "Thread called (%p)", pThread);
++        m_jobs.top().release();
++        m_jobs.pop();
++        m_idle.erase(pThread);
++        m_active.insert(pThread);
++      }
++    }
++  }
++
++  void ThreadPoolImpl::idle(Thread* pThread)
++  {
++    AutoMutexCS mx(m_mutex);
++    m_trc.writeTrace(BasicRuntime_HERE, "idle: (%p)", pThread);
++    if(m_jobs.size() > 0)
++    {
++      Job* pJob= m_jobs.top().get();
++      if(pThread->call(pJob))
++      {
++        m_jobs.top().release();
++        m_jobs.pop();
++        m_trc.writeTrace(BasicRuntime_HERE, "Thread called (%p)", pThread);
++      }
++      else
++      {
++        m_active.erase(pThread);
++        m_idle.insert(pThread);
++      }
++    }
++    else
++    {
++      m_active.erase(pThread);
++      m_idle.insert(pThread);
++    }
++  }
++}
++
++namespace mSysThread
++{
++  Job::Job():
++    m_priority(-1)
++  {}
++
++  Job::Job(int priority):
++    m_priority(priority)
++  {}
++
++  Job::~Job()
++  {}
++
++  void Job::execute(const thread& currentThread)
++  {}
++
++  int Job::getPriority() const
++  {
++    return m_priority;
++  }
++
++  ThreadPool::~ThreadPool()
++  {}
++
++  ThreadPool* createThreadPool
++  (
++    size_t threadCount,
++    MASSAI::trace::TraceInterface& trc,
++    const threadException* exceptionHandler,
++    long  stacksize
++  )
++  {
++    ThreadPoolImpl* result = new ThreadPoolImpl(threadCount, trc, exceptionHandler, stacksize);
++    return result;
++  }
++}
+-- 
+2.41.0.windows.1
+

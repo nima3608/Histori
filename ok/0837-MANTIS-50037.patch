@@ -1,0 +1,1122 @@
+From 0e319775cc61e58815338e53b7d4381a6fa78b04 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 17 May 2018 15:04:34 +0000
+Subject: [PATCH 0837/1000] MANTIS 50037 massaiCfgXMgrB.exe, CfgXMgrB.exe
+ version 2.3.0 - MANTIS 50037: Changes to the payment configuration for ZVT
+ ... - Changes in meta-data during create() are now immediately exercising the
+ cryptification of text values. No restart necessary. - Creating crypto items
+ now can be setInitial'ed in both crypted or in plain form.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1349 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  16 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgValue.hpp      |  27 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp  |  55 ++--
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  16 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   |   4 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp | 118 +++++----
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       |  32 +--
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     |   7 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |  47 +++-
+ .../Massai/cpp/CfgXMgrB/src/cfgValueText.cpp  | 243 +++++++++++++-----
+ 10 files changed, 370 insertions(+), 195 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 23e0ef10..1069376c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -550,8 +550,20 @@
+ //! @par     Change:
+ //! - MANTIS 49760: MAC: new getMeta() method to get metadata from platform
+ //! - Implement getMeta() methods
+-#define FILE_VER_BIN 2,2,0,0
+-#define FILE_VER_DTS "2.2.0.0"
++// #define FILE_VER_BIN 2,2,0,0
++// #define FILE_VER_DTS "2.2.0.0"
++//
++//! @version 2.3.0
++//! @date    17.05.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 50037: Changes to the payment configuration for ZVT ...
++//! - Changes in meta-data during create() are now immediately exercising
++//!   the cryptification of text values. No restart necessary.
++//! - Creating crypto items now can be setInitial'ed in both 
++//!   crypted or in plain form.
++#define FILE_VER_BIN 2,3,0,0
++#define FILE_VER_DTS "2.3.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValue.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValue.hpp
+index 5c0cf7da..f153657f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValue.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValue.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2018 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -20,7 +20,6 @@
+ #include <iostream>
+ 
+ 
+-
+ /**
+  *
+  * Configuration value base class.
+@@ -56,14 +55,33 @@ public:
+    **/
+    virtual cfgValue & operator=( cfgValue const & ) = 0;
+ 
++   /**
++    *
++    * Get current encryption details.
++    *
++   **/
++   virtual std::string encryptionGet() const
++   {
++      return std::string();
++   }
++
++   /**
++    *
++    * Set encryption details.
++    *
++   **/
++   virtual void encryptionSet( std::string const & )
++   {
++   }
++
+    /**
+     *
+     * Save the object to an ostream.
+     *
+-    * @param Dst:       The stream to write the object to.
++    * @param dst:       The stream to write the object to.
+     *
+    **/
+-   virtual bool save( std::ostream & Dst ) const = 0;
++   virtual bool save( std::ostream & dst ) const = 0;
+ 
+ private:
+ 
+@@ -77,7 +95,6 @@ private:
+ };
+ 
+ 
+-
+ #endif
+ /**
+  **************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+index 8e389e1c..5f73bb7c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 Materna Information & Communications
++ * Copyright (c) 2002-2018 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -21,7 +21,6 @@
+ #include "cfgFlatZ.hpp"
+ 
+ 
+-
+ /**
+  *
+  * Configuration value of "text" type.
+@@ -48,14 +47,14 @@ class cfgValueText :
+     * Encryption phrase.
+     *
+    **/
+-   std::string const            m_phrase;
++   std::string                  m_phrase;
+ 
+    /**
+     *
+-    * The text value.
++    * The text value - as in the config file.
+     *
+    **/
+-   std::string                  m_value;
++   std::string                  m_value_file;
+ 
+ public:
+ 
+@@ -70,58 +69,42 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param encrypt:   SHall the vale be encrypted on disk?
+-    *
+-    * @param phrase:    Encryption phrase.
+-    *
+     * @param value:     The initial value.
+     *
+    **/
+-   cfgValueText
+-      (
+-         bool encrypt, std::string const & phrase,
+-         char const * value
+-      );
++   explicit cfgValueText( char const * value );
+ 
+    /**
+     *
+-    * Constructor.
+-    *
+-    * @param value:     The initial value.
++    * Destructor.
+     *
+    **/
+-   explicit cfgValueText( char const * value );
++   virtual ~cfgValueText();
+ 
+    /**
+     *
+-    * Constructor.
+-    *
+-    * @param encrypt:   SHall the vale be encrypted on disk?
+-    *
+-    * @param phrase:    Encryption phrase.
+-    *
+-    * @param value:     The initial value.
++    * Assignment.
+     *
+    **/
+-   cfgValueText
+-      (
+-         bool encrypt, std::string const & phrase,
+-         cfgFlatZ const & value
+-      );
++   cfgValue & operator=( cfgValue const & );
+ 
+    /**
+     *
+-    * Destructor.
++    * Get current encryption details.
++    *
++    * @return:          Encryption phrase.
+     *
+    **/
+-   virtual ~cfgValueText();
++   std::string encryptionGet() const;
+ 
+    /**
+     *
+-    * Assignment.
++    * Set encryption details.
++    *
++    * @param phrase:    Encryption phrase.
+     *
+    **/
+-   cfgValue & operator=( cfgValue const & );
++   void encryptionSet( std::string const & phrase );
+ 
+    /**
+     *
+@@ -139,7 +122,8 @@ public:
+     * @return The value.
+     *
+    **/
+-   char const * c_str() const;
++   //char const * c_str() const;
++   std::string valueString() const;
+ 
+    /**
+     *
+@@ -161,7 +145,6 @@ private:
+ };
+ 
+ 
+-
+ #endif
+ /**
+  **************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index ef5ac343..00896f38 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -544,8 +544,20 @@
+ //! @par     Change:
+ //! - MANTIS 49760: MAC: new getMeta() method to get metadata from platform
+ //! - Implement getMeta() methods
+-#define FILE_VER_BIN 2,2,0,0
+-#define FILE_VER_DTS "2.2.0.0"
++// #define FILE_VER_BIN 2,2,0,0
++// #define FILE_VER_DTS "2.2.0.0"
++//
++//! @version 2.3.0
++//! @date    17.05.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 50037: Changes to the payment configuration for ZVT ...
++//! - Changes in meta-data during create() are now immediately exercising
++//!   the cryptification of text values. No restart necessary.
++//! - Creating crypto items now can be setInitial'ed in both 
++//!   crypted or in plain form.
++#define FILE_VER_BIN 2,3,0,0
++#define FILE_VER_DTS "2.3.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index d024e2ba..b7dc81fc 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -366,7 +366,7 @@ public:
+                      {
+                         pItem->Value.textValue
+                         (
+-                           CORBA::string_dup( Text->c_str() )
++                           CORBA::string_dup( Text->valueString().c_str() )
+                         );
+                      }
+                      else
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index 5ee1f276..945ee673 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -53,46 +53,42 @@
+  */
+ void cfgCorba_ServiceText::create
+      (
+-        Config::access const &            Acc,
+-        Config::description const &       Desc,
+-        char const *                      D,
+-        CORBA::Long                       MaxLength
++        Config::access const &            acc,
++        Config::description const &       desc,
++        char const *                      def,
++        CORBA::Long                       max_length
+      )
+ {
+    writeTrace
+    (
+       BasicRuntime_HERE,
+-      SCT "create(%s) rights:%s",
+-      access2Str(Acc).c_str(), Desc.Rights
++      SCT "create(%s) Rights:\"%s\" Expl:\"%s\""
++      " MaxLength:%d",
++      access2Str(acc).c_str(),
++      desc.Rights,
++      desc.Explanation,
++      max_length
+    );
+    try
+    {
+-      std::string const rights( Desc.Rights );
+-      std::string const explanation( Desc.Explanation );
+-      cfgMetaText Obj
++      std::string const rights( desc.Rights );
++      std::string const explanation( desc.Explanation );
++      cfgMetaText obj
+                   (
+                      rights,
+                      explanation,
+-                     static_cast<unsigned>( MaxLength )
++                     static_cast<unsigned>( max_length )
+                   );
+-      if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
++      cfgValueText * nt = new cfgValueText( def );
++      if( !cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+       {
+-         // Read access -> plain text in file.
+-         M_ConfigEntity->itemCreate
+-         (
+-            Obj, Acc.Item,
+-            new cfgValueText( false, explanation, D )
+-         );
+-      }
+-      else
+-      {
+-         //No read access -> encrypt in file.
+-         M_ConfigEntity->itemCreate
+-         (
+-            Obj, Acc.Item,
+-            new cfgValueText( true, explanation, D )
+-         );
++         // Use the "explanation" as encryption prase.
++         nt->encryptionSet( explanation );
+       }
++      M_ConfigEntity->itemCreate
++      (
++         obj, acc.Item, nt
++      );
+    }
+    catch( cfgEntity_AlreadyExists & )
+    {
+@@ -134,7 +130,7 @@ void cfgCorba_ServiceText::create
+    (
+       BasicRuntime_HERE,
+       SCT "create(%s).",
+-      access2Str(Acc).c_str()
++      access2Str(acc).c_str()
+    );
+ }
+ 
+@@ -145,13 +141,13 @@ void cfgCorba_ServiceText::create
+  * Method implementation, see "cfgCorba_ServiceText.hpp".
+  *
+  */
+-char * cfgCorba_ServiceText::get( Config::access const & Acc )
++char * cfgCorba_ServiceText::get( Config::access const & acc )
+ {
+-   verifyAccess( SCT "get", Acc );
++   verifyAccess( SCT "get", acc );
+    writeTrace
+    (
+       SecondaryRuntime_HERE, SCT "get(%s) ...",
+-      access2Str(Acc).c_str()
++      access2Str(acc).c_str()
+    );
+    try
+    {
+@@ -159,17 +155,17 @@ char * cfgCorba_ServiceText::get( Config::access const & Acc )
+       cfgValueText const * const valref =
+          dynamic_cast<cfgValueText const *>
+          (
+-            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
++            M_ConfigEntity->itemGetValue( acc.Authorization, acc.Item )
+          );
+       if( valref )
+       {
+-         char const * const Val = valref->c_str();
++         std::string const val = valref->valueString();
+          writeTrace
+          (
+             SecondaryRuntime_HERE, SCT "get = [%s].",
+-            Val
++            val.c_str()
+          );
+-         return CORBA::string_dup( Val );
++         return CORBA::string_dup( val.c_str() );
+       }
+       else
+       {
+@@ -221,21 +217,25 @@ char * cfgCorba_ServiceText::get( Config::access const & Acc )
+  * Method implementation, see "cfgCorba_ServiceText.hpp".
+  *
+  */
+-void cfgCorba_ServiceText::set( Config::access const & Acc, char const * Val )
++void cfgCorba_ServiceText::set
++   (
++      Config::access const & acc,
++      char const * val
++   )
+ {
+-   verifyAccess( SCT "set", Acc );
++   verifyAccess( SCT "set", acc );
+    writeTrace
+    (
+       SecondaryRuntime_HERE, SCT "set(%s) = [%s] ...",
+-      access2Str(Acc).c_str(), Val
++      access2Str(acc).c_str(), val
+    );
+    try
+    {
+       M_ConfigEntity->itemSetValue
+                      (
+-                        Acc.Authorization,
+-                        Acc.Item,
+-                        new cfgValueText( Val )
++                        acc.Authorization,
++                        acc.Item,
++                        new cfgValueText( val )
+                      );
+    }
+    catch( cfgEntity_IllegalValue & )
+@@ -284,21 +284,25 @@ void cfgCorba_ServiceText::set( Config::access const & Acc, char const * Val )
+  * Method implementation, see "cfgCorba_ServiceText.hpp".
+  *
+  */
+-void cfgCorba_ServiceText::setInitial( Config::access const & Acc, char const * Val )
++void cfgCorba_ServiceText::setInitial
++   (
++      Config::access const & acc,
++      char const * val
++   )
+ {
+-   verifyAccess( SCT "setInitial", Acc );
++   verifyAccess( SCT "setInitial", acc );
+    writeTrace
+    (
+       SecondaryRuntime_HERE, SCT "setInitial(%s) = [%s] ...",
+-      access2Str(Acc).c_str(), Val
++      access2Str(acc).c_str(), val
+    );
+    try
+    {
+-      cfgMetaText Obj( Acc.Authorization );
++      cfgMetaText obj( acc.Authorization );
+       M_ConfigEntity->itemCreate
+                      (
+-                        Obj, Acc.Item,
+-                        new cfgValueText( Val )
++                        obj, acc.Item,
++                        new cfgValueText( val )
+                      );
+    }
+    catch( cfgEntity_AlreadyExists & )
+@@ -340,30 +344,30 @@ void cfgCorba_ServiceText::setInitial( Config::access const & Acc, char const *
+  */
+ void cfgCorba_ServiceText::setMeta
+      (
+-        Config::access const &            Acc,
+-        Config::description const &       Desc,
+-        CORBA::Long                       MaxLength
++        Config::access const &            acc,
++        Config::description const &       desc,
++        CORBA::Long                       max_length
+      )
+ {
+    writeTrace
+    (
+       BasicRuntime_HERE,
+       SCT "setMeta(%s) rights:%s",
+-      access2Str(Acc).c_str(), Desc.Rights
++      access2Str(acc).c_str(), desc.Rights
+    );
+    try
+    {
+-      std::string const rights( Desc.Rights );
+-      std::string const explanation( Desc.Explanation );
+-      cfgMetaText Obj
++      std::string const rights( desc.Rights );
++      std::string const explanation( desc.Explanation );
++      cfgMetaText obj
+                   (
+                      rights,
+                      explanation,
+-                     static_cast<unsigned>( MaxLength )
++                     static_cast<unsigned>( max_length )
+                   );
+       M_ConfigEntity->itemSetMeta
+       (
+-         Obj, Acc.Item
++         obj, acc.Item
+       );
+    }
+    catch( cfgEntity_NotAuthorized & )
+@@ -406,7 +410,7 @@ void cfgCorba_ServiceText::setMeta
+    (
+       BasicRuntime_HERE,
+       SCT "setMeta(%s).",
+-      access2Str(Acc).c_str()
++      access2Str(acc).c_str()
+    );
+ } // void setMeta()
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+index 503e45a1..9a3ce9b0 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2017 MATERNA Information & Communications
++ * Copyright (c) 2017-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -98,24 +98,16 @@ class cfgCorba_ServiceText2 :
+                         regex,
+                         static_cast<unsigned>( meta_data.Semantic )
+                      );
+-         if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
++         cfgValueText * nt = new cfgValueText( default_value );
++         if( !cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+          {
+-            // Read access -> plain text in file.
+-            M_ConfigEntity->itemCreate
+-            (
+-               cfg_meta_text, acc.Item,
+-               new cfgValueText( false, explanation, default_value )
+-            );
+-         }
+-         else
+-         {
+-            //No read access -> encrypt in file.
+-            M_ConfigEntity->itemCreate
+-            (
+-               cfg_meta_text, acc.Item,
+-               new cfgValueText( true, explanation, default_value )
+-            );
++            // Use the "explanation" as encryption prase.
++            nt->encryptionSet( explanation );
+          }
++         M_ConfigEntity->itemCreate
++         (
++            cfg_meta_text, acc.Item, nt
++         );
+       }
+       catch( cfgEntity_AlreadyExists & )
+       {
+@@ -264,13 +256,13 @@ class cfgCorba_ServiceText2 :
+             );
+          if( valref )
+          {
+-            char const * const Val = valref->c_str();
++            std::string const val = valref->valueString();
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCT2 "getWithMeta = [%s].",
+-               Val
++               val.c_str()
+             );
+-            return CORBA::string_dup( Val );
++            return CORBA::string_dup( val.c_str() );
+          }
+          else
+          {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index 84cd0d63..daec917d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2017 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -2085,6 +2085,11 @@ void cfgEntity::itemCreate
+                }
+             }
+             M_Value->cevUpdate( Item, RefNew );
++
++            // Oioioi!
++            cfgValue * non_const = const_cast<cfgValue *>( RawValue );
++            non_const->encryptionSet( ValDef->encryptionGet() );
++            //
+          }
+       }
+       catch( cfgEntity_NotAuthorized & )
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index aaed980b..375ff57b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2013 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -42,6 +42,11 @@ cfgMetaText::cfgMetaText( char const * auth ) :
+    m_regex(),
+    m_semantic( 0 )
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::cfgMetaText( A )"
++      );
+ }
+ 
+ 
+@@ -62,6 +67,11 @@ cfgMetaText::cfgMetaText
+    m_regex(),
+    m_semantic( 0 )
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::cfgMetaText( REL )"
++      );
+ }
+ 
+ 
+@@ -84,6 +94,11 @@ cfgMetaText::cfgMetaText
+    m_regex( regex ),
+    m_semantic( semantic )
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::cfgMetaText( RELLRS )"
++      );
+ }
+ 
+ 
+@@ -100,6 +115,11 @@ cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
+    m_regex( src.m_regex ),
+    m_semantic( src.m_semantic )
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::cfgMetaText( cfgMetaText )"
++      );
+ }
+ 
+ 
+@@ -111,6 +131,11 @@ cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
+ **/
+ cfgMetaText::~cfgMetaText()
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::~cfgMetaText()"
++      );
+ }
+ 
+ 
+@@ -165,6 +190,11 @@ void cfgMetaText::save
+    std::string const &          Indent
+ ) const
+ {
++   writeTrace
++      (
++         SecondaryRuntime_HERE,
++         "cfgMetaText::save"
++      );
+    Dst << Indent << "<" CFGTOKEN_META;
+    cfgMeta::saveCommon( Dst, Ref );
+    Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length << "\"";
+@@ -242,7 +272,7 @@ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+          );
+       return false;
+    }
+-   if( xmlForbidden( Val->c_str() ) )
++   if( xmlForbidden( Val->valueString() ) )
+    {
+       writeTrace
+          (
+@@ -293,20 +323,17 @@ cfgValue * cfgMetaText::valueFactory
+ ) const
+ {
+    std::string const dr = cfgRightsMan::getDefault( getRights() );
++   cfgValueText * ret = new cfgValueText( src.c_str() );
+    if (
+-         cfgRightsMan::mayRead( dr ) ||
+-         cfgRightsMan::mayCreate( dr )
++         !cfgRightsMan::mayRead( dr ) &&
++         !cfgRightsMan::mayCreate( dr )
+       )
+-   {
+-      // Normal processing
+-      return new cfgValueText( false, "", src );
+-   }
+-   else
+    {
+       // Default rights is no-read
+       // -> Crypt-extract value.
+-      return new cfgValueText( true, getExplanation(), src );
++      ret->encryptionSet( getExplanation() );
+    }
++   return ret;
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+index bf723c44..04b4ddd5 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 Materna Information & Communications
++ * Copyright (c) 2002-2018 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -18,21 +18,34 @@
+ // Local
+ #include "cfgToXML.hpp"
+ 
+-#ifdef USE_OWN_BAS64
+-// SelfServiceCommon tools
+-#include "tools/simpleBase64.hpp"
+-#else
+ // Poco
+ #include "Poco/Base64Decoder.h"
+ #include "Poco/Base64Encoder.h"
+-#endif
+ 
+ // Compiler lib
+ #include <iostream>
+ #include <algorithm>    // std::transform
+-#ifdef USE_OWN_BAS64
+-#else
+ #include <sstream>
++
++
++
++#if 0
++// Console debugging
++
++#define DBUGOUT( X )            std::cout << "cfgValueText: " \
++                                 << X << std::endl
++
++#define DBUGOUT_THIS( X )       std::cout << "cfgValueText<" \
++                                 << (unsigned)this << ">::" \
++                                 << X << std::endl
++
++#else
++// No writing to console
++
++#define DBUGOUT( X )
++
++#define DBUGOUT_THIS( X )
++
+ #endif
+ 
+ 
+@@ -86,7 +99,11 @@ namespace
+ 
+    /**
+     *
+-    * Encryption and decryption.
++    * Encryption and decryption algorithm.
++    *
++    * @param phrase:            Passphrase.
++    *
++    * @param in:                The input string.
+     *
+    **/
+    std::string textXor
+@@ -95,13 +112,55 @@ namespace
+          std::string const & in
+       )
+    {
+-      std::string ret = in; // For size
++      std::string ret = in;     // For size
+       xOrer x_converter( phrase );
+       std::transform( in.begin(), in.end(), ret.begin(), x_converter );
+       return ret;
+    }
+ 
+ 
++   /**
++    *
++    * Is the value encrypted?
++    *
++    * @param phrase:            Passphrase.
++    *
++    * @param check_in:          The value to check.
++    *
++    * @return:                  Yes?
++    *
++   **/
++   bool cryptCheck
++      (
++         std::string const & phrase,
++         std::string const & check_in
++      )
++   {
++      try
++      {
++         std::istringstream istr( check_in );
++         Poco::Base64Decoder decoder( istr );
++         decoder.unsetf(std::ios_base::skipws);
++         std::ostringstream ostr;
++         copy
++            (
++               std::istreambuf_iterator<char>( decoder ),
++               std::istreambuf_iterator<char>(),
++               std::ostreambuf_iterator<char>( ostr )
++            );
++         std::string x_or = ostr.str();
++         std::string const r = textXor( phrase, x_or );
++         DBUGOUT( "cryptCheck = true" );
++         return true;
++      }
++      catch( ... )
++      {
++         DBUGOUT( "cryptCheck() = false" );
++         return false;
++      }
++   }
++
++
+    /**
+     *
+     * Encryption.
+@@ -120,15 +179,14 @@ namespace
+       )
+    {
+       std::string const x_or = textXor( phrase, plain_in );
+-#ifdef USE_OWN_BAS64
+-      return simpleBase64::encode( x_or );
+-#else
+       std::ostringstream ostr;
+       Poco::Base64Encoder encoder( ostr );
+       encoder << x_or;
+       encoder.close();
+-      return ostr.str();
+-#endif
++      std::string const r = ostr.str();
++      DBUGOUT( "cryptWrite( \"" << phrase << "\", \""
++         << plain_in << "\" ) = \"" << r << "\"." );
++      return r;
+    }
+ 
+ 
+@@ -149,9 +207,6 @@ namespace
+          std::string const & coded_in
+       )
+    {
+-#ifdef USE_OWN_BAS64
+-      std::string x_or = simpleBase64::decode( coded_in );
+-#else
+       std::istringstream istr( coded_in );
+       Poco::Base64Decoder decoder( istr );
+       decoder.unsetf(std::ios_base::skipws);
+@@ -163,8 +218,10 @@ namespace
+             std::ostreambuf_iterator<char>( ostr )
+          );
+       std::string x_or = ostr.str();
+-#endif
+-      return textXor( phrase, x_or );
++      std::string const r = textXor( phrase, x_or );
++      DBUGOUT( "cryptRead( \"" << phrase << "\", \""
++         << coded_in << "\" ) = \"" << r << "\"." );
++      return r;
+    }
+ 
+ 
+@@ -177,16 +234,12 @@ namespace
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText
+-   (
+-      bool encrypt, std::string const & phrase,
+-      char const * value
+-   ) :
++cfgValueText::cfgValueText( char const * value ) :
+    cfgValue(),
+-   m_coding( encrypt ? code_encrypt : code_plain ),
+-   m_phrase( phrase ),
+-   m_value( value )
++   m_coding( code_unknown ),
++   m_value_file( value )
+ {
++   DBUGOUT_THIS( "cfgValueText - simple value \"" << value << "\"" );
+ }
+ 
+ 
+@@ -196,11 +249,18 @@ cfgValueText::cfgValueText
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText( char const * value ) :
+-   cfgValue(),
+-   m_coding( code_unknown ),
+-   m_value( value )
++std::string cfgValueText::encryptionGet() const
+ {
++   if( m_coding == code_encrypt )
++   {
++      DBUGOUT_THIS( "encryptionGet() = (crypt)" );
++      return m_phrase;
++   }
++   else
++   {
++      DBUGOUT_THIS( "encryptionGet() = (plain)" );
++      return std::string();
++   }
+ }
+ 
+ 
+@@ -210,21 +270,48 @@ cfgValueText::cfgValueText( char const * value ) :
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText
+-   (
+-      bool encrypt, std::string const & phrase,
+-      cfgFlatZ const & value
+-   ) :
+-   cfgValue(),
+-   m_coding( encrypt ? code_encrypt : code_plain ),
+-   m_phrase( phrase ),
+-   m_value
+-      (
+-         encrypt ?
+-         cryptRead( m_phrase, value.c_str() ) :
+-         value.c_str()
+-      )
++void cfgValueText::encryptionSet( std::string const & phrase )
+ {
++   switch( m_coding )
++   {
++   case code_encrypt:
++      DBUGOUT_THIS( "encryptionSet CODE_ENCRYPT" );
++      break;
++   case code_plain:
++      DBUGOUT_THIS( "encryptionSet CODE_PLAIN" );
++      break;
++   default:
++      if( cryptCheck( phrase, m_value_file ) )
++      {
++         DBUGOUT_THIS( "encryptionSet assume CODE_ENCRYPT" );
++         m_coding = code_encrypt;
++      }
++      else
++      {
++         DBUGOUT_THIS( "encryptionSet assume CODE_PLAIN" );
++         m_coding = code_plain;
++      }
++   }
++   if( m_coding != code_encrypt )
++   {
++      if( !phrase.empty() )
++      {
++         std::string const orig = m_value_file;
++         m_coding = code_encrypt;
++         m_phrase = phrase;
++         m_value_file = cryptWrite( phrase, m_value_file );
++         DBUGOUT_THIS( "encryptionSet \"" << orig
++            << "\" -> \"" << m_value_file << "\"" );
++      }
++      else
++      {
++         DBUGOUT_THIS( "encryptionSet (plain) unchanged" );
++      }
++   }
++   else
++   {
++      DBUGOUT_THIS( "encryptionSet (crypt) unchanged" );
++   }
+ }
+ 
+ 
+@@ -236,6 +323,7 @@ cfgValueText::cfgValueText
+ **/
+ cfgValueText::~cfgValueText()
+ {
++   DBUGOUT_THIS( "~cfgValueText" );
+ }
+ 
+ 
+@@ -247,9 +335,29 @@ cfgValueText::~cfgValueText()
+ **/
+ cfgValue & cfgValueText::operator=( cfgValue const & src )
+ {
+-   cfgValueText const & SrcOk =
+-      dynamic_cast<cfgValueText const &>( src );
+-   m_value = SrcOk.m_value;
++   if( &src != this )
++   {
++      cfgValueText const & SrcOk =
++         dynamic_cast<cfgValueText const &>( src );
++      //
++      // Just change the value, not the encryption style
++      //
++      if( m_coding == code_encrypt )
++      {
++         std::string const new_value =
++            cryptWrite( m_phrase, SrcOk.m_value_file );
++         DBUGOUT_THIS( "operator=( \"" << m_value_file
++            << "\" -> \"" << SrcOk.m_value_file << "\" -(crypt)-> \""
++            << new_value << "\" )" );
++         m_value_file = new_value;
++      }
++      else
++      {
++         DBUGOUT_THIS( "operator=( \"" << m_value_file
++            << "\" -> \"" << SrcOk.m_value_file << "\" )" );
++         m_value_file = SrcOk.m_value_file;
++      }
++   }
+    return *this;
+ }
+ 
+@@ -265,14 +373,8 @@ bool cfgValueText::save
+    std::ostream & os
+ ) const
+ {
+-   if( m_coding == code_encrypt )
+-   {
+-      cfgToXML( cryptWrite( m_phrase, m_value ) ).copy( os );
+-   }
+-   else
+-   {
+-      cfgToXML( m_value ).copy( os );
+-   }
++   DBUGOUT_THIS( "save()" );
++   cfgToXML( m_value_file ).copy( os );
+    return true;
+ }
+ 
+@@ -283,9 +385,21 @@ bool cfgValueText::save
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-char const * cfgValueText::c_str() const
++std::string cfgValueText::valueString() const
+ {
+-   return m_value.c_str();
++   if( m_coding == code_encrypt )
++   {
++      std::string r;
++      r = cryptRead( m_phrase, m_value_file );
++      DBUGOUT_THIS( "c_str() = \"" << m_value_file
++         << "\" -(plain)-> \"" << r << "\"" );
++      return r;
++   }
++   else
++   {
++      DBUGOUT_THIS( "::c_str() = \"" << m_value_file << "\"" );
++      return m_value_file;
++   }
+ }
+ 
+ 
+@@ -297,7 +411,16 @@ char const * cfgValueText::c_str() const
+ **/
+ unsigned cfgValueText::length() const
+ {
+-   return m_value.length();
++   if( m_coding == code_encrypt )
++   {
++      DBUGOUT_THIS( "length() (crypt)" );
++      return cryptRead( m_phrase, m_value_file ).length();
++   }
++   else
++   {
++      DBUGOUT_THIS( "length()" );
++      return m_value_file.length();
++   }
+ }
+ 
+ 
+-- 
+2.41.0.windows.1
+

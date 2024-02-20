@@ -1,0 +1,1372 @@
+From 5f3bfda92f3d5a9d9fe659698cca0852860494bd Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 1 Sep 2015 11:36:54 +0000
+Subject: [PATCH 0677/1076] MANTIS 37906 CfgXMgrB*.exe 1.5.0 massaiCfgXB*.exe
+ 1.5.0 - MANTIS 37906: Configuration of passwords - In order to hide password
+ details, they are no longer stored in plain text in the configuration file.
+ This affects all items, which have the "read right" not set in the common
+ (not user-specific) rights string. - Rights string management is now in
+ "cfgRightsMan.cpp".
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@887 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  17 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp       |  18 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgRightsMan.hpp  | 123 ++++++++++
+ .../Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp  |  64 +++++-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  17 +-
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |   3 +
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   |   8 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp |  30 ++-
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     |  64 +++---
+ .../Massai/cpp/CfgXMgrB/src/cfgMeta.cpp       | 129 +----------
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |  26 ++-
+ .../Massai/cpp/CfgXMgrB/src/cfgRightsMan.cpp  | 214 ++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/src/cfgValueText.cpp  | 178 ++++++++++++++-
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |   3 +
+ 14 files changed, 695 insertions(+), 199 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgRightsMan.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgRightsMan.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index c4628d5c..ecde1897 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -423,8 +423,21 @@
+ //!   Reason is the assumption, that the nested CORBA calls create
+ //!   problems with normally mutex-protected objects.
+ //! - Simplify trace control as a first step to allow dynamic changes.
+-#define FILE_VER_BIN 1,4,4,0
+-#define FILE_VER_DTS "1.4.4.0"
++// #define FILE_VER_BIN 1,4,4,0
++// #define FILE_VER_DTS "1.4.4.0"
++//
++//! @version 1.5.0
++//! @date    01.09.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 37906: Configuration of passwords
++//! - In order to hide password details, they are no longer stored in
++//!   plain text in the configuration file. This affects all items,
++//!   which have the "read right" not set in the common (not user-specific)
++//!   rights string.
++//! - Rights string management is now in "cfgRightsMan.cpp".
++#define FILE_VER_BIN 1,5,0,0
++#define FILE_VER_DTS "1.5.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+index 78f93b93..15008304 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -18,7 +18,6 @@
+ #endif
+ 
+ 
+-
+ #include "cfgEntity.hpp"
+ #include "cfgFlatZ.hpp"
+ 
+@@ -26,14 +25,6 @@
+ #include <iostream>
+ 
+ 
+-
+-#define CFG_RIGHTS_TOKEN_C      'c'
+-#define CFG_RIGHTS_TOKEN_L      'l'
+-#define CFG_RIGHTS_TOKEN_R      'r'
+-#define CFG_RIGHTS_TOKEN_W      'w'
+-
+-
+-
+ /**
+  *
+  * Meta-configuration base class.
+@@ -124,10 +115,10 @@ public:
+     *
+     * Return "rights" attribute.
+     *
+-    * @param Dst:       Where to put the rights string.
++    * @return:          The rights string.
+     *
+    **/
+-   std::string const & getRights() const;
++   std::string getRights() const;
+ 
+    /**
+     *
+@@ -147,7 +138,7 @@ public:
+     * @return The attribute string
+     *
+    **/
+-   std::string const & getExplanation() const;
++   std::string getExplanation() const;
+ 
+    /**
+     *
+@@ -246,7 +237,6 @@ public:
+ };
+ 
+ 
+-
+ #endif
+ /**
+  **************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgRightsMan.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgRightsMan.hpp
+new file mode 100644
+index 00000000..568482d2
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgRightsMan.hpp
+@@ -0,0 +1,123 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgRightsMan.hpp
++ *
++ * Righhts-string management.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGRIGHTSMAN_HPP
++#define CFGRIGHTSMAN_HPP
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++
++
++#include <string>
++
++
++namespace cfgRightsMan
++{
++
++   /**
++    *
++    * Create a rights string.
++    *
++    * @param auth:              The "authorization".
++    *
++    * @return:                  The initial rights string.
++    *
++   **/
++   std::string create( char const * auth );
++
++   /**
++    *
++    * Extract the "default" rights (rights not specified for a user)
++    * from a rights string.
++    *
++    * @param rights:            The complete rights string.
++    *
++    * @return:                  The default rights string.
++    *
++   **/
++   std::string const getDefault( std::string const & rights );
++
++   /**
++    *
++    * Extract the "authorized" rights from a rights string.
++    * A name is always encapsulated between ',' and ':'
++    * and is immediately followed by the rights substring.
++    *
++    * @param rights:            The complete rights string.
++    *
++    * @param auth:              The "authorization".
++    *
++    * @return:                  The default rights string.
++    *
++   **/
++   std::string const getNamed
++      (
++         std::string const &  rights,
++         char const *         auth
++      );
++
++   /**
++    *
++    * Does the string contain the "create" token?
++    *
++    * @param rights:            The rights string.
++    *
++    * @return:                  Create allowed?
++    *
++   **/
++   bool mayCreate( std::string const &  rights );
++
++   /**
++    *
++    * Does the string contain the "list access" token?
++    *
++    * @param rights:            The rights string.
++    *
++    * @return:                  List allowed?
++    *
++   **/
++   bool mayList( std::string const &  rights );
++
++   /**
++    *
++    * Does the string contain the "read access" token?
++    *
++    * @param rights:            The rights string.
++    *
++    * @return:                  Read allowed?
++    *
++   **/
++   bool mayRead( std::string const &  rights );
++
++   /**
++    *
++    * Does the string contain the "write access" token?
++    *
++    * @param rights:            The rights string.
++    *
++    * @return:                  Write allowed?
++    *
++   **/
++   bool mayWrite( std::string const &  rights );
++
++} // namespace cfgRightsMan
++
++
++#endif // #ifndef CFGRIGHTSMAN_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+index e10e1aaa..8e389e1c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2015 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -31,12 +31,31 @@ class cfgValueText :
+    public cfgValue
+ {
+ 
++   /**
++    *
++    * Encrypt in configuration data?
++    *
++   **/
++   enum
++   {
++
++      code_unknown, code_plain, code_encrypt
++
++   }                            m_coding;
++
++   /**
++    *
++    * Encryption phrase.
++    *
++   **/
++   std::string const            m_phrase;
++
+    /**
+     *
+     * The text value.
+     *
+    **/
+-   std::string M_Value;
++   std::string                  m_value;
+ 
+ public:
+ 
+@@ -51,19 +70,44 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param Value:     The initial value.
++    * @param encrypt:   SHall the vale be encrypted on disk?
++    *
++    * @param phrase:    Encryption phrase.
++    *
++    * @param value:     The initial value.
+     *
+    **/
+-   explicit cfgValueText( char const * Value );
++   cfgValueText
++      (
++         bool encrypt, std::string const & phrase,
++         char const * value
++      );
+ 
+    /**
+     *
+     * Constructor.
+     *
+-    * @param Value:     The initial value.
++    * @param value:     The initial value.
++    *
++   **/
++   explicit cfgValueText( char const * value );
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param encrypt:   SHall the vale be encrypted on disk?
++    *
++    * @param phrase:    Encryption phrase.
++    *
++    * @param value:     The initial value.
+     *
+    **/
+-   explicit cfgValueText( cfgFlatZ const & Value );
++   cfgValueText
++      (
++         bool encrypt, std::string const & phrase,
++         cfgFlatZ const & value
++      );
+ 
+    /**
+     *
+@@ -83,10 +127,10 @@ public:
+     *
+     * Save the object to an ostream.
+     *
+-    * @param Dst:       The stream to write the object to.
++    * @param dst:       The stream to write the object to.
+     *
+    **/
+-   bool save( std::ostream & Dst ) const;
++   bool save( std::ostream & dst ) const;
+ 
+    /**
+     *
+@@ -109,10 +153,10 @@ public:
+ private:
+ 
+    //! Copy constructor - intentionally not implemented.
+-   cfgValueText( cfgValueText const & Src );
++   cfgValueText( cfgValueText const & src );
+ 
+    //! Assignment - intentionally not implemented.
+-   cfgValueText & operator=( cfgValueText const & Src );
++   cfgValueText & operator=( cfgValueText const & src );
+ 
+ };
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 3589aeda..ea18f178 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -414,8 +414,21 @@
+ //!   Reason is the assumption, that the nested CORBA calls create
+ //!   problems with normally mutex-protected objects.
+ //! - Simplify trace control as a first step to allow dynamic changes.
+-#define FILE_VER_BIN 1,4,4,0
+-#define FILE_VER_DTS "1.4.4.0"
++// #define FILE_VER_BIN 1,4,4,0
++// #define FILE_VER_DTS "1.4.4.0"
++//
++//! @version 1.5.0
++//! @date    01.09.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 37906: Configuration of passwords
++//! - In order to hide password details, they are no longer stored in
++//!   plain text in the configuration file. This affects all items,
++//!   which have the "read right" not set in the common (not user-specific)
++//!   rights string.
++//! - Rights string management is now in "cfgRightsMan.cpp".
++#define FILE_VER_BIN 1,5,0,0
++#define FILE_VER_DTS "1.5.0.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 738f51dd..da361b5f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -19,6 +19,7 @@ MY_CFLAGS = \
+     -DUSE_STRINGMAX \
+     -GR \
+     $(INC_ACETAO) \
++    $(INC_POCO) \
+     $(INC_XERCES) \
+     -I$(_GEN) \
+     $(INC_INTERFACES)
+@@ -42,6 +43,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgMetaSelection.obj \
+     $(_OBJ)\cfgMetaText.obj \
+     $(_OBJ)\cfgMetaTextlist.obj \
++    $(_OBJ)\cfgRightsMan.obj \
+     $(_OBJ)\cfgToXML.obj \
+     $(_OBJ)\cfgValueDirectory.obj \
+     $(_OBJ)\cfgValueNode.obj \
+@@ -54,6 +56,7 @@ CORE_OBJS = \
+     $(_OBJ)\xmlForbidden.obj
+ 
+ STDUSERLIBS = \
++    $(LIB_POCO) \
+     $(LIB_XERCES) \
+     $(LIB_MASSAI) \
+     $(LIB_MCORBA) \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index 310dedaa..47145623 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -31,8 +31,8 @@
+ #endif
+ 
+ #include "cfgValueDirectory.hpp"
+-#include "cfgMeta.hpp"
+ #include "cfgMetaSelection.hpp"
++#include "cfgRightsMan.hpp"
+ #include "cfgValueNode.hpp"
+ #include "cfgValueNumber.hpp"
+ #include "cfgValueSelection.hpp"
+@@ -189,14 +189,14 @@ public:
+                   std::string Rights;
+                   Meta->getRights( Acc.Authorization, Rights );
+                   char const * const XRights = Rights.c_str();
+-                  if( !strchr( XRights, CFG_RIGHTS_TOKEN_L ) )
++                  if( !cfgRightsMan::mayList( Rights ) )
+                   {
+                      // Not found -> listing access denied.
+                      listing_allowed = false;
+                   }
+-                  if( !strchr( XRights, CFG_RIGHTS_TOKEN_R ) )
++                  if( !cfgRightsMan::mayRead( Rights ) )
+                   {
+-                     // Not found -> reading access denied.
++                     //Reading access denied.
+                      reading_allowed = false;
+                   }
+                   pItem->Desc.Rights = CORBA::string_dup( XRights );
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index cceaf901..09163cd0 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -15,6 +15,7 @@
+ #include "cfgCorba_Text.hpp"
+ #include "cfgCorba_Node.hpp"
+ #include "cfgCorba_Template.hpp"
++#include "cfgRightsMan.hpp"
+ 
+ #include "cfgclnt/CfgMgrIPC.h"
+ 
+@@ -76,17 +77,32 @@ class serviceCfgText :
+       );
+       try
+       {
++         std::string const rights( Desc.Rights );
++         std::string const explanation( Desc.Explanation );
+          cfgMetaText Obj
+                      (
+-                        std::string(Desc.Rights),
+-                        std::string(Desc.Explanation),
++                        rights,
++                        explanation,
+                         static_cast<unsigned>( MaxLength )
+                      );
+-         M_ConfigEntity->itemCreate
+-         (
+-            Obj, Acc.Item,
+-            new cfgValueText( D )
+-         );
++         if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
++         {
++            // Read access -> plain text in file.
++            M_ConfigEntity->itemCreate
++            (
++               Obj, Acc.Item,
++               new cfgValueText( false, explanation, D )
++            );
++         }
++         else
++         {
++            //No read access -> encrypt in file.
++            M_ConfigEntity->itemCreate
++            (
++               Obj, Acc.Item,
++               new cfgValueText( true, explanation, D )
++            );
++         }
+       }
+       catch( cfgEntity_AlreadyExists & )
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index 30595055..28dab8f4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -27,6 +27,7 @@
+ #include "cfgValueDirectory.hpp"
+ #include "cfgValueNode.hpp"
+ #include "cfgMeta.hpp"
++#include "cfgRightsMan.hpp"
+ 
+ #include "fsm/mfMTQueue.hpp"
+ #include "Tools/mInFile.hpp"
+@@ -181,19 +182,23 @@ cfgMeta * cfgEntityMeta::cemFromRef
+          // Check access
+          std::string R;
+          Meta->getRights( Auth, R );
+-         std::string::size_type F;
+          switch( Purp )
+          {
+          case cfgEntity::PURP_CREATE:
+-            F = R.find( CFG_RIGHTS_TOKEN_C );
++            if( !cfgRightsMan::mayCreate( R ) )
++            {
++               // Create access denied.
++               //-std::cout << "cfgEntityMeta::cemFromRef."
++               //-          << " R=[" << R << "] - DENIED."
++               //-          << std::endl;
++               throw cfgEntity_NotAuthorized();
++            }
+             break;
+          case cfgEntity::PURP_VALUEGET:
+-            F = R.find( CFG_RIGHTS_TOKEN_R );
+-            if( F == std::string::npos )
++            if( !cfgRightsMan::mayRead( R ) )
+             {
+                // Try for the setInitial case.
+-               F = R.find( CFG_RIGHTS_TOKEN_C );
+-               if( F != std::string::npos )
++               if( cfgRightsMan::mayCreate( R ) )
+                {
+                   // Return not-found, to provoke a subsequent create.
+                   //-std::cout << "cfgEntityMeta::cemFromRef."
+@@ -201,39 +206,44 @@ cfgMeta * cfgEntityMeta::cemFromRef
+                   //-          << std::endl;
+                   throw cfgEntity_NotFound();
+                }
++               else
++               {
++                  // Read access denied.
++                  //-std::cout << "cfgEntityMeta::cemFromRef."
++                  //-          << " R=[" << R << "] - DENIED."
++                  //-          << std::endl;
++                  throw cfgEntity_NotAuthorized();
++               }
+             }
+             break;
+          case cfgEntity::PURP_VALUESET:
+          case cfgEntity::PURP_RIGHTSSET:
+-            F = R.find( CFG_RIGHTS_TOKEN_W );
++            if( !cfgRightsMan::mayWrite( R ) )
++            {
++               // Write access denied.
++               //-std::cout << "cfgEntityMeta::cemFromRef."
++               //-          << " R=[" << R << "] - DENIED."
++               //-          << std::endl;
++               throw cfgEntity_NotAuthorized();
++            }
+             break;
+          case cfgEntity::PURP_DIRGET:
+          case cfgEntity::PURP_METASET:
+          case cfgEntity::PURP_RIGHTSGET:
+          case cfgEntity::PURP_TYPEGET:
+-            // No rights check
+-            F = 0;
+             break;
+          default:
+             // Should not occur.
+-            F = std::string::npos;
+-         }
+-         if( F == std::string::npos )
+-         {
+-            // Access right denied.
+             //-std::cout << "cfgEntityMeta::cemFromRef."
+             //-          << " R=[" << R << "] - DENIED."
+             //-          << std::endl;
+             throw cfgEntity_NotAuthorized();
+          }
+-         else
+-         {
+-            // Access right granted.
+-            //-std::cout << "cfgEntityMeta::cemFromRef."
+-            //-          << " R=[" << R << "] - OK."
+-            //-          << std::endl;
+-            return Meta;
+-         }
++         // Access right granted.
++         //-std::cout << "cfgEntityMeta::cemFromRef."
++         //-          << " R=[" << R << "] - OK."
++         //-          << std::endl;
++         return Meta;
+       }
+    }
+    //-std::cout << "cfgEntityMeta::cemFromRef - no meta for ref."
+@@ -2098,13 +2108,15 @@ void cfgEntity::itemCreate
+          changeInfo * const Info = new changeInfo( M_IListeners, Item );
+          if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
+          {
+-            // Queue full would lead to a client not getting the change info.
++            // Queue full will lead to a client
++            // not getting the change info.
+             writeTrace
+                (
+                   SecondaryRuntime_HERE,
+-                  CENT "itemCreate error: could not queue change indication!"
++                  CENT "itemCreate error:"
++                  " could not queue change indication!"
+                );
+-         }         
++         }
+          M_Value->cevUpdate( Item, Ref, ValDef );
+       }
+    }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+index a4198f76..0421594a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+@@ -13,125 +13,13 @@
+ **/
+ 
+ #include "cfgMeta.hpp"
++#include "cfgRightsMan.hpp"
+ #include "cfgToken.h"
+ #include "cfgToXML.hpp"
+ #include <iostream>
+ 
+ 
+ 
+-namespace
+-{
+-
+-
+-
+-   char const C_RightsGrpSep = ',';
+-   char const C_RightsValSep = ':';
+-
+-
+-   /**
+-    *
+-    * Extract a rights substring from a rights string.
+-    * This is practically all characters up to the end of
+-    * the string or up to ','.
+-    *
+-   **/
+-   std::string const cfgAuthRights_FillString( char const * Src )
+-   {
+-      std::string Result;
+-      bool More = true;
+-      while( More )
+-      {
+-         if( *Src && ( *Src != C_RightsGrpSep ) )
+-            Result += *Src++;
+-         else
+-            More = false;
+-      }
+-      return Result;
+-   }
+-
+-
+-   /**
+-    *
+-    * Extract the "common" rights from a rights string.
+-    * This is practically the first (unnamed) rights substring.
+-    *
+-   **/
+-   std::string const cfgAuthRights_GetDefault
+-   (
+-      std::string const & Rights
+-   )
+-   {
+-      std::string Default;
+-      char const * const P = Rights.c_str();
+-      return cfgAuthRights_FillString( P );
+-   }
+-
+-
+-   /**
+-    *
+-    * Extract the "authored" rights from a rights string.
+-    * A name is always encapsulated between ',' and ':'
+-    * and is immediately followed by the rights substring.
+-    *
+-   **/
+-   std::string const cfgAuthRights_GetNamed
+-   (
+-      std::string const &  Rights,
+-      char const *         Auth
+-   )
+-   {
+-      // Prepare search pattern
+-      unsigned const PattLen = strlen( Auth );
+-      char * Patt = new char[ PattLen + 3 ];
+-      Patt[0] = C_RightsGrpSep;
+-      strcpy( Patt + 1, Auth );
+-      Patt[PattLen + 1] = C_RightsValSep;
+-      Patt[PattLen + 2] = 0;
+-      // Search
+-      char const * const R = Rights.c_str();
+-      char const * FPtr = strstr( R, Patt );
+-      delete [] Patt;
+-      if( FPtr )
+-      {
+-         // Found, scan to the char after ':'
+-         FPtr += PattLen + 2;
+-         return cfgAuthRights_FillString( FPtr );
+-      }
+-      else
+-        return std::string();
+-   }
+-
+-
+-   std::string cfgAuthRights_Create( char const * Auth )
+-   {
+-      std::string R;
+-      // Everybody has the right to create
+-      R += CFG_RIGHTS_TOKEN_C;
+-      if( Auth )
+-      {
+-         // The setInitial originator (Cfgvalues) has all rights
+-         R += C_RightsGrpSep;
+-         R += Auth;
+-         R += C_RightsValSep;
+-         R += CFG_RIGHTS_TOKEN_C;
+-         R += CFG_RIGHTS_TOKEN_L;
+-         R += CFG_RIGHTS_TOKEN_R;
+-      }
+-      // MStarter may list too (but not read)
+-      R += C_RightsGrpSep;
+-      R += "mstarter";
+-      R += C_RightsValSep;
+-      R += CFG_RIGHTS_TOKEN_C;
+-      R += CFG_RIGHTS_TOKEN_L;
+-      //
+-      return R;
+-   }
+-
+-
+-} // namespace
+-
+-
+-
+ /**
+  *
+  * Method implementation - see cfgMeta.hpp.
+@@ -140,7 +28,7 @@ namespace
+ cfgMeta::cfgMeta( char const * Auth ) :
+    M_Default( true ),
+    M_Explanation(),
+-   M_Rights( cfgAuthRights_Create( Auth ) )
++   M_Rights( cfgRightsMan::create( Auth ) )
+ {
+ }
+ 
+@@ -168,8 +56,7 @@ cfgMeta::cfgMeta( cfgMeta const & Src ) :
+ cfgMeta::cfgMeta( std::string const & R, std::string const & X ) :
+    M_Default
+       (
+-         ( R.size() &&
+-         ( R[0] == CFG_RIGHTS_TOKEN_C ) ) ?
++         cfgRightsMan::mayCreate( R ) ?
+          true :
+          false
+       ),
+@@ -212,7 +99,7 @@ bool cfgMeta::operator==( cfgMeta const & Other ) const
+  * Method implementation - see cfgMeta.hpp.
+  *
+ **/
+-std::string const & cfgMeta::getExplanation() const
++std::string cfgMeta::getExplanation() const
+ {
+    return M_Explanation;
+ }
+@@ -224,7 +111,7 @@ std::string const & cfgMeta::getExplanation() const
+  * Method implementation - see cfgMeta.hpp.
+  *
+ **/
+-std::string const & cfgMeta::getRights() const
++std::string cfgMeta::getRights() const
+ {
+    return M_Rights;
+ }
+@@ -238,9 +125,11 @@ std::string const & cfgMeta::getRights() const
+ **/
+ void cfgMeta::getRights( char const * Auth, std::string & Dst ) const
+ {
+-   Dst = cfgAuthRights_GetNamed( M_Rights, Auth );
++   Dst = cfgRightsMan::getNamed( M_Rights, Auth );
+    if( Dst.size() == 0 )
+-      Dst = cfgAuthRights_GetDefault( M_Rights );
++   {
++      Dst = cfgRightsMan::getDefault( M_Rights );
++   }
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index eb443483..ec172687 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -13,12 +13,19 @@
+  **************************************************************************
+ **/
+ 
+-#include "cfgToken.h"
++// Exported
+ #include "cfgMetaText.hpp"
++
++// Local
++#include "cfgToken.h"
+ #include "cfgValueText.hpp"
++#include "cfgRightsMan.hpp"
++
++// SelfServiceCommon
+ #include "trc/TraceClt.h"
+ #include "xmlForbidden.hpp"
+ 
++// Compiler lib
+ #include <iostream>
+ 
+ 
+@@ -228,7 +235,22 @@ cfgValue * cfgMetaText::valueFactory
+    cfgFlatZ const & Src
+ ) const
+ {
+-   return new cfgValueText( Src );
++   if (
++         cfgRightsMan::mayRead
++            (
++               cfgRightsMan::getDefault
++                  (
++                     getRights()
++                  )
++            )
++      )
++   {
++      return new cfgValueText( false, "", Src );
++   }
++   else
++   {
++      return new cfgValueText( true, getExplanation(), Src );
++   }
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgRightsMan.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgRightsMan.cpp
+new file mode 100644
+index 00000000..8b01f475
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgRightsMan.cpp
+@@ -0,0 +1,214 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgRightsMan.cpp
++ *
++ * Rights string management.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "cfgRightsMan.hpp"
++#include "cfgToken.h"
++
++
++
++//! May create an item (setup meta information).
++#define CFG_RIGHTS_TOKEN_C      'c'
++
++//! May list an item (not hidden in directory).
++#define CFG_RIGHTS_TOKEN_L      'l'
++
++//! May read the iten's value.
++#define CFG_RIGHTS_TOKEN_R      'r'
++
++//! May write (change) the itme's value.
++#define CFG_RIGHTS_TOKEN_W      'w'
++
++
++
++namespace
++{
++
++
++   char const c_rights_grp_sep = ',';
++
++
++   char const c_rights_val_sep = ':';
++
++
++   /**
++    *
++    * Extract a rights substring from a rights string.
++    * This is practically all characters up to the end of
++    * the string or up to ','.
++    *
++    * @param src:               The rest of thr rights string.
++    *
++    * @return:                  The special rights string.
++    *
++   **/
++   std::string const fillString( char const * src )
++   {
++      std::string Result;
++      bool More = true;
++      while( More )
++      {
++         if( *src && ( *src != c_rights_grp_sep ) )
++            Result += *src++;
++         else
++            More = false;
++      }
++      return Result;
++   }
++
++
++} // namespace
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++std::string cfgRightsMan::create( char const * auth )
++{
++   std::string R;
++   // Everybody has the right to create
++   R += CFG_RIGHTS_TOKEN_C;
++   if( auth )
++   {
++      // The setInitial originator (Cfgvalues) has all rights
++      R += c_rights_grp_sep;
++      R += auth;
++      R += c_rights_val_sep;
++      R += CFG_RIGHTS_TOKEN_C;
++      R += CFG_RIGHTS_TOKEN_L;
++      R += CFG_RIGHTS_TOKEN_R;
++   }
++   // MStarter may list too (but not read)
++   R += c_rights_grp_sep;
++   R += "mstarter";
++   R += c_rights_val_sep;
++   R += CFG_RIGHTS_TOKEN_C;
++   R += CFG_RIGHTS_TOKEN_L;
++   //
++   return R;
++}
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++std::string const cfgRightsMan::getDefault( std::string const & rights )
++{
++   std::string Default;
++   char const * const P = rights.c_str();
++   return fillString( P );
++}
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++std::string const cfgRightsMan::getNamed
++   (
++      std::string const &  rights,
++      char const *         auth
++   )
++{
++   // Prepare search pattern
++   unsigned const PattLen = strlen( auth );
++   char * Patt = new char[ PattLen + 3 ];
++   Patt[0] = c_rights_grp_sep;
++   strcpy( Patt + 1, auth );
++   Patt[PattLen + 1] = c_rights_val_sep;
++   Patt[PattLen + 2] = 0;
++   // Search
++   char const * const R = rights.c_str();
++   char const * FPtr = strstr( R, Patt );
++   delete [] Patt;
++   if( FPtr )
++   {
++      // Found, scan to the char after ':'
++      FPtr += PattLen + 2;
++      return fillString( FPtr );
++   }
++   else
++     return std::string();
++}
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++bool cfgRightsMan::mayCreate( std::string const & rights )
++{
++   std::string::size_type const pos =
++      rights.find( CFG_RIGHTS_TOKEN_C );
++   return( pos != std::string::npos );
++}
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++bool cfgRightsMan::mayList( std::string const & rights )
++{
++   std::string::size_type const pos =
++      rights.find( CFG_RIGHTS_TOKEN_L );
++   return( pos != std::string::npos );
++}
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++bool cfgRightsMan::mayRead( std::string const & rights )
++{
++   std::string::size_type const pos =
++      rights.find( CFG_RIGHTS_TOKEN_R );
++   return( pos != std::string::npos );
++}
++
++
++
++/*
++ *
++ * Public function - see "cfgRightsMan.hpp".
++ *
++ */
++bool cfgRightsMan::mayWrite( std::string const & rights )
++{
++   std::string::size_type const pos =
++      rights.find( CFG_RIGHTS_TOKEN_W );
++   return( pos != std::string::npos );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+index 4bb8fd5b..d25ab2c6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2015 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,7 +15,142 @@
+ #include "cfgValueText.hpp"
+ 
+ #include "cfgToXML.hpp"
++
++#ifdef USE_OWN_BAS64
++// SelfServiceCommon tools
++#include "tools/base64.h"
++#else
++#include "Poco/Base64Decoder.h"
++#include "Poco/Base64Encoder.h"
++#endif
++
++// Compiler lib
+ #include <iostream>
++#include <algorithm>    // std::transform
++
++#ifdef USE_OWN_BAS64
++#else
++#include <sstream>
++#endif
++
++
++class xOrer
++{
++
++   std::string const    m_buffer;
++
++   unsigned             m_offset;
++
++   unsigned const       m_size;
++
++public:
++
++   xOrer( std::string const & phrase ) :
++      m_buffer( phrase ),
++      m_offset( 0 ),
++      m_size( phrase.size() )
++   {
++   }
++
++   char operator()( char src )
++   {
++      char ret( src );
++      if( m_size )
++      {
++         // Non-empty phrase
++         ret = m_buffer[m_offset] ^ src;
++         m_offset = ( m_offset  + 1 ) % m_size;
++      }
++      return ret;
++   }
++
++private:
++
++   xOrer& operator=( xOrer const & src );
++
++}; // class xOrer
++
++
++
++namespace
++{
++
++
++   std::string textXor
++      (
++         std::string const & phrase,
++         std::string const & in
++      )
++   {
++      std::string ret = in; // For size
++      xOrer x_converter( phrase );
++      std::transform( in.begin(), in.end(), ret.begin(), x_converter );
++      return ret;
++   }
++
++
++   std::string cryptWrite
++      (
++         std::string const & phrase,
++         std::string const & plain_in
++      )
++   {
++      std::string const x_or = textXor( phrase, plain_in );
++#ifdef USE_OWN_BAS64
++      return MASSAI::base64::encode( x_or );
++#else
++      std::ostringstream ostr;
++      Poco::Base64Encoder encoder( ostr );
++      encoder << x_or;
++      return ostr.str();
++#endif
++   }
++
++
++   std::string cryptRead
++      (
++         std::string const & phrase,
++         std::string const & coded_in
++      )
++   {
++#ifdef USE_OWN_BAS64
++      std::string x_or = MASSAI::base64::decode( coded_in );
++#else
++      std::istringstream istr( coded_in );
++      Poco::Base64Decoder decoder( istr );
++      std::ostringstream ostr;
++      copy
++         (
++            std::istreambuf_iterator<char>( decoder ),
++            std::istreambuf_iterator<char>(),
++            std::ostreambuf_iterator<char>( ostr )
++         );
++      std::string x_or = ostr.str();
++#endif
++      return textXor( phrase, x_or );
++   }
++
++
++} // namespace
++
++
++
++/**
++ *
++ * Method implementation - see cfgValueText.hpp.
++ *
++**/
++cfgValueText::cfgValueText
++   (
++      bool encrypt, std::string const & phrase,
++      char const * value
++   ) :
++   cfgValue(),
++   m_coding( encrypt ? code_encrypt : code_plain ),
++   m_phrase( phrase ),
++   m_value( value )
++{
++}
+ 
+ 
+ 
+@@ -24,9 +159,10 @@
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText( char const * Value ) :
++cfgValueText::cfgValueText( char const * value ) :
+    cfgValue(),
+-   M_Value( Value )
++   m_coding( code_unknown ),
++   m_value( value )
+ {
+ }
+ 
+@@ -37,9 +173,20 @@ cfgValueText::cfgValueText( char const * Value ) :
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText( cfgFlatZ const & Value ) :
++cfgValueText::cfgValueText
++   (
++      bool encrypt, std::string const & phrase,
++      cfgFlatZ const & value
++   ) :
+    cfgValue(),
+-   M_Value( Value.c_str() )
++   m_coding( encrypt ? code_encrypt : code_plain ),
++   m_phrase( phrase ),
++   m_value
++      (
++         encrypt ?
++         cryptRead( m_phrase, value.c_str() ) :
++         value.c_str()
++      )
+ {
+ }
+ 
+@@ -61,11 +208,11 @@ cfgValueText::~cfgValueText()
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValue & cfgValueText::operator=( cfgValue const & Src )
++cfgValue & cfgValueText::operator=( cfgValue const & src )
+ {
+    cfgValueText const & SrcOk =
+-      dynamic_cast<cfgValueText const &>( Src );
+-   M_Value = SrcOk.M_Value;
++      dynamic_cast<cfgValueText const &>( src );
++   m_value = SrcOk.m_value;
+    return *this;
+ }
+ 
+@@ -78,10 +225,17 @@ cfgValue & cfgValueText::operator=( cfgValue const & Src )
+ **/
+ bool cfgValueText::save
+ (
+-   std::ostream & OS
++   std::ostream & os
+ ) const
+ {
+-   cfgToXML( M_Value ).copy( OS );
++   if( m_coding == code_encrypt )
++   {
++      cfgToXML( cryptWrite( m_phrase, m_value ) ).copy( os );
++   }
++   else
++   {
++      cfgToXML( m_value ).copy( os );
++   }
+    return true;
+ }
+ 
+@@ -94,7 +248,7 @@ bool cfgValueText::save
+ **/
+ char const * cfgValueText::c_str() const
+ {
+-   return M_Value.c_str();
++   return m_value.c_str();
+ }
+ 
+ 
+@@ -106,7 +260,7 @@ char const * cfgValueText::c_str() const
+ **/
+ unsigned cfgValueText::length() const
+ {
+-   return M_Value.length();
++   return m_value.length();
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index 3375093e..de991b05 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -21,6 +21,7 @@ MY_CFLAGS = \
+     -DTAO_AS_STATIC_LIBS -DACE_AS_STATIC_LIBS \
+     -I$(P_INC) \
+     $(INC_ACETAO) \
++    $(INC_POCO) \
+     $(INC_XERCES) \
+     -I$(_GEN) \
+     $(INC_INTERFACES)
+@@ -48,6 +49,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgMetaSelection.obj \
+     $(_OBJ)\cfgMetaText.obj \
+     $(_OBJ)\cfgMetaTextlist.obj \
++    $(_OBJ)\cfgRightsMan.obj \
+     $(_OBJ)\cfgToXML.obj \
+     $(_OBJ)\cfgValueDirectory.obj \
+     $(_OBJ)\cfgValueNode.obj \
+@@ -61,6 +63,7 @@ CORE_OBJS = \
+ 
+ 
+ STDUSERLIBS = \
++    $(LIB_POCO) \
+     $(LIB_XERCESS) \
+     $(LIB_MASSAIS) \
+     $(LIB_MCORBAS) \
+-- 
+2.41.0.windows.1
+

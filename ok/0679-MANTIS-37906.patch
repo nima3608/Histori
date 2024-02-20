@@ -1,0 +1,134 @@
+From a356a160c35eaf17802b9e3ea3abd283af39d863 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 1 Sep 2015 13:44:14 +0000
+Subject: [PATCH 0679/1077] MANTIS 37906 CfgXMgrB*.exe 1.5.0 massaiCfgXB*.exe
+ 1.5.0 - MANTIS 37906: Configuration of passwords - In order to hide password
+ details, they are no longer stored in plain text in the configuration file.
+ This affects all items, which have the "read right" not set in the common
+ (not user-specific) rights string. - Rights string management is now in
+ "cfgRightsMan.cpp".
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@888 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/src/cfgValueText.cpp  | 45 +++++++++++++++++--
+ 1 file changed, 41 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+index d25ab2c6..bf723c44 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+@@ -12,14 +12,17 @@
+  **************************************************************************
+ **/
+ 
++// Exported
+ #include "cfgValueText.hpp"
+ 
++// Local
+ #include "cfgToXML.hpp"
+ 
+ #ifdef USE_OWN_BAS64
+ // SelfServiceCommon tools
+-#include "tools/base64.h"
++#include "tools/simpleBase64.hpp"
+ #else
++// Poco
+ #include "Poco/Base64Decoder.h"
+ #include "Poco/Base64Encoder.h"
+ #endif
+@@ -27,13 +30,18 @@
+ // Compiler lib
+ #include <iostream>
+ #include <algorithm>    // std::transform
+-
+ #ifdef USE_OWN_BAS64
+ #else
+ #include <sstream>
+ #endif
+ 
+ 
++
++/**
++ *
++ * Encryption and decryption.
++ *
++**/
+ class xOrer
+ {
+ 
+@@ -76,6 +84,11 @@ namespace
+ {
+ 
+ 
++   /**
++    *
++    * Encryption and decryption.
++    *
++   **/
+    std::string textXor
+       (
+          std::string const & phrase,
+@@ -89,6 +102,17 @@ namespace
+    }
+ 
+ 
++   /**
++    *
++    * Encryption.
++    *
++    * @param phrase:            Passphrase.
++    *
++    * @param plain_in:          What to encrypt.
++    *
++    * @return:                  Encrypted result.
++    *
++   **/
+    std::string cryptWrite
+       (
+          std::string const & phrase,
+@@ -97,16 +121,28 @@ namespace
+    {
+       std::string const x_or = textXor( phrase, plain_in );
+ #ifdef USE_OWN_BAS64
+-      return MASSAI::base64::encode( x_or );
++      return simpleBase64::encode( x_or );
+ #else
+       std::ostringstream ostr;
+       Poco::Base64Encoder encoder( ostr );
+       encoder << x_or;
++      encoder.close();
+       return ostr.str();
+ #endif
+    }
+ 
+ 
++   /**
++    *
++    * Decryption.
++    *
++    * @param phrase:            Passphrase.
++    *
++    * @param coded_in:          What to decrypt.
++    *
++    * @return:                  Plain result.
++    *
++   **/
+    std::string cryptRead
+       (
+          std::string const & phrase,
+@@ -114,10 +150,11 @@ namespace
+       )
+    {
+ #ifdef USE_OWN_BAS64
+-      std::string x_or = MASSAI::base64::decode( coded_in );
++      std::string x_or = simpleBase64::decode( coded_in );
+ #else
+       std::istringstream istr( coded_in );
+       Poco::Base64Decoder decoder( istr );
++      decoder.unsetf(std::ios_base::skipws);
+       std::ostringstream ostr;
+       copy
+          (
+-- 
+2.41.0.windows.1
+

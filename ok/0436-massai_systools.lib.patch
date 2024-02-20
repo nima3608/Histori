@@ -1,0 +1,772 @@
+From f210474b40d4e61e57c85670d8c99cf02393648d Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 9 Jul 2013 17:00:07 +0000
+Subject: [PATCH 0436/1077] massai_systools.lib V1.0.0.6 Mantis 0027919:
+ appControl: desktop can not be closed; ctfmon.exe must be terminated;
+ mSysProcess::child added method to get parent process id: std::string
+ getParentProcessId() const; mSysProcessTree::ProcessNode added method to get
+ parent process id: std::string getParentProcessId() const; mSysWindow::Window
+ added method to get owner process id: std::string getProcessId();            
+        added method to check if the window is closed: bool isClosed();
+ mSysProcessList::ProcessProperties added list of window ids for termination 
+ use CLOSE_WND = "title" CLOSE_WNDCLASS = "class" in option list
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@531 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |   7 +-
+ .../Interfaces/inc/systools/mSysProcessList.h |  18 +-
+ .../Interfaces/inc/systools/mSysProcessTree.h |   3 +-
+ .../Interfaces/inc/systools/mSysWindow.h      |   4 +-
+ .../Massai/cpp/Systools/src/local_def.cpp     |  15 +-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 198 +++++++++++++++---
+ .../cpp/Systools/src/mSysProcessTreeW32.cpp   |  41 ++--
+ .../cpp/Systools/src/mSysProcessW32.cpp       |  22 +-
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  26 ++-
+ 9 files changed, 268 insertions(+), 66 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index dd40b2e6..8429848d 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -165,9 +165,9 @@ namespace mSysProcess
+ 
+       /**
+        *
+-       * get process information (status, process id, ...)
++       * get process id
+        *
+-       * @return                formatted process information.
++       * @return                process id
+        *
+       **/
+       virtual std::string getProcessId() const = 0;
+@@ -223,6 +223,9 @@ namespace mSysProcess
+ 
+       // get creation time of process
+       virtual mSysTime::Timestamp getCreationTime() const = 0;
++
++      // get parent process id
++      virtual std::string getParentProcessId() const = 0;
+    };
+ 
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index a3cc6f1b..988a24a0 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -32,20 +32,34 @@ namespace mSysProcess
+     PT_EXTRA_TIME      // for special processes like appControl, which wait for other processes
+   };
+ 
++  class WindowId
++  {
++    public:
++      WindowId();
++      WindowId(const std::string& wndTitle, const std::string& wndClass);
++      bool operator<(const WindowId& cmp) const;
++      bool operator==(const WindowId& cmp) const;
++      std::string wndTitle;
++      std::string wndClass;
++  };
++
++  typedef std::list<WindowId> WindowIdList;
++
+   // settings for a process
+   class ProcessProperties
+   {
+     public:
+       ProcessProperties();
+       bool operator<(const ProcessProperties& cmp) const;
++      bool operator==(const ProcessProperties& cmp) const;
+       void parse(const std::string& options);
+ 
+       std::string group;
+       std::string commandLine;
+       std::string workingDir;
+-      std::string windowTitle;
+-      std::string windowClass;
+       std::string desktop;
++      WindowId mainWindow;
++      WindowIdList terminateWindow;
+       Show show;
+       long timeout;
+       Termination termination;
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
+index 30d21e37..a96cdb32 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
+@@ -26,8 +26,9 @@ namespace mSysProcess
+       virtual const ProcessNode* parent() const = 0;
+       virtual ProcessNodeList childs() const = 0;
+       virtual child* getProcess(const callBack* logging) const = 0;
+-      virtual mSysTime::Timestamp getCreation() const = 0;
++      virtual mSysTime::Timestamp getCreationTime() const = 0;
+       virtual std::string getId() const = 0;
++      virtual std::string getParentProcessId() const = 0;
+   };
+ 
+   // create-hierarchy of processes
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index a9e4b545..9a35463c 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -30,7 +30,9 @@ namespace mSysWindow
+       virtual std::string getTitle()= 0;
+       virtual std::string getClass()= 0;
+       virtual bool isActive()= 0;
+-  };
++      virtual std::string getProcessId()= 0;
++      virtual bool isClosed()= 0;
++};
+ 
+   //  process (window owner)
+   class Process
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 852bf302..52794f5a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,10 +1,23 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 5);
++VERSION_ID_DT(systools, 1, 0, 0, 6);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
++\date 09.07..2013
++\li V1.0.0.6
++\li Mantis 0027919: appControl: desktop can not be closed; ctfmon.exe must be terminated;
++mSysProcess::child added method to get parent process id: std::string getParentProcessId() const;
++mSysProcessTree::ProcessNode added method to get parent process id: std::string getParentProcessId() const;
++mSysWindow::Window added method to get owner process id: std::string getProcessId();
++                   added method to check if the window is closed: bool isClosed();
++
++mSysProcessList::ProcessProperties added list of window ids for termination
++ use CLOSE_WND = "title" CLOSE_WNDCLASS = "class" in option list
++
++
++
+ \date 27.06.2013
+ \li V1.0.0.5
+ \li Mantis 0026902: Internet Explorer Process doesn't close
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 74a75d1c..de74a533 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -63,7 +63,9 @@ namespace
+     "|(?:SHOW *= *(YES)|(NO)|(HIDE)|(MINIMIZED))"
+     "|(?:WAIT *= *([0-9]+)|(terminate))"
+     "|(SHOW)"
+-    "|(EXTRA_TERMINATION_TIME)",
++    "|(EXTRA_TERMINATION_TIME)"
++    "|CLOSE_WND *= *\"([^\"]+)\""
++    "|CLOSE_WNDCLASS *= *\"([^\"]+)\"",
+     regbase::normal | regbase::icase
+   );
+ 
+@@ -81,6 +83,8 @@ namespace
+     OPT_TERMINATE,
+     OPT_SHOW_SHOW,
+     OPT_EXTRA_TIME,
++    OPT_CLOSE_TITLE,
++    OPT_CLOSE_CLASS,
+   };
+ 
+   enum ChildProcess
+@@ -98,6 +102,7 @@ namespace
+ 
+   enum WindowSearchType
+   {
++    WND_TITLE_CLASS_LIST,
+     WND_TITLE_CLASS,
+     WND_VISIBLE,
+     WND_ALL,
+@@ -196,6 +201,11 @@ namespace
+       virtual void lineOut(const char* line) const;
+       void refreshProcessList(const ProcessNode& node);
+ 
++      bool matchClass(const WindowId& id, Window& window);
++      bool matchTitle(const WindowId& id, Window& window);
++      bool match(const WindowId& id, Window& window);
++      bool match(const WindowIdList& ids, Window& window);
++
+       ProcessHolder* m_pFirst;
+       ProcessHolderPtrList m_childs;
+       TraceInterface& m_trc;
+@@ -311,6 +321,9 @@ namespace
+     }
+   }
+ 
++  std::string getClass(const WindowIdList& ids);
++  std::string getTitle(const WindowIdList& ids);
++
+   ProcessCallback::~ProcessCallback()
+   {}
+ 
+@@ -551,6 +564,88 @@ namespace
+     return result;
+   }
+ 
++  bool ProcessStart::matchClass(const WindowId& id, Window& window)
++  {
++    return stoupper(window.getClass()) == stoupper(id.wndClass);
++  }
++
++  bool ProcessStart::matchTitle(const WindowId& id, Window& window)
++  {
++    std::string title = window.getTitle();
++    return stoupper(title).find(stoupper(id.wndTitle))
++               != std::string::npos;
++  }
++
++  bool ProcessStart::match(const WindowId& id, Window& window)
++  {
++    bool result = false;
++    if(id.wndClass.size() > 0)
++    {
++      if(matchClass(id, window))
++      {
++        if(id.wndTitle.size() > 0)
++        {
++          result = matchTitle(id, window);
++        }
++        else
++        {
++          result = true;
++        }
++      }
++    }
++    else if(id.wndTitle.size() > 0)
++    {
++      result = matchTitle(id, window);
++    }
++    return result;
++  }
++
++  bool ProcessStart::match(const WindowIdList& ids, Window& window)
++  {
++    bool result = false;
++    WindowIdList::const_iterator it = ids.begin();
++    WindowIdList::const_iterator end = ids.end();
++    for(; it != end; it++)
++    {
++      if(match(*it, window))
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
++  std::string getClass(const WindowIdList& ids)
++  {
++    std::string result;
++    WindowIdList::const_iterator it = ids.begin();
++    WindowIdList::const_iterator end = ids.end();
++    for(; it != end; it++)
++    {
++      if(it->wndClass.size() > 0)
++      {
++        result += it->wndClass + "; ";
++      }
++    }
++    return result;
++  }
++
++  std::string getTitle(const WindowIdList& ids)
++  {
++    std::string result;
++    WindowIdList::const_iterator it = ids.begin();
++    WindowIdList::const_iterator end = ids.end();
++    for(; it != end; it++)
++    {
++      if(it->wndTitle.size() > 0)
++      {
++        result += it->wndTitle + "; ";
++      }
++    }
++    return result;
++  }
++
+   bool ProcessStart::match(ProcessHolder& process, Window& window)
+   {
+     bool result = false;
+@@ -558,31 +653,23 @@ namespace
+     {
+       switch(m_search)
+       {
+-        case WND_TITLE_CLASS:
++        case WND_TITLE_CLASS_LIST:
+         {
+-          if(m_properties.windowClass.size() > 0)
++          if(match(m_properties.mainWindow, window))
+           {
+-            if(stoupper(window.getClass()) == stoupper(m_properties.windowClass))
+-            {
+-              if(m_properties.windowTitle.size() > 0)
+-              {
+-                std::string title = window.getTitle();
+-                result = stoupper(title).find(stoupper(m_properties.windowTitle))
+-                           != std::string::npos;
+-              }
+-              else
+-              {
+-                result = true;
+-              }
+-            }
++            result = true;
+           }
+-          else if(m_properties.windowTitle.size() > 0)
++          else
+           {
+-            std::string title = window.getTitle();
+-            result = stoupper(title).find(stoupper(m_properties.windowTitle)) != std::string::npos;
++            result = match(m_properties.terminateWindow, window);
+           }
+           break;
+         }
++        case WND_TITLE_CLASS:
++        {
++          result = match(m_properties.mainWindow, window);
++          break;
++        }
+         case WND_VISIBLE:
+         {
+           result = window.isVisible();
+@@ -651,16 +738,20 @@ namespace
+       "CWD(%s)\n"
+       "SHOW(%d)(%s)\n"
+       "WAIT(%d)\n"
++      "CLOSEWND(%s)\n"
++      "CLOSEWNDCLASS(%s)\n"
+       "*********************",
+       m_pFirst->getProcessId().c_str(),
+       m_properties.group.c_str(),
+       m_properties.commandLine.c_str(),
+       m_properties.desktop.c_str(),
+-      m_properties.windowTitle.c_str(),
+-      m_properties.windowClass.c_str(),
++      m_properties.mainWindow.wndTitle.c_str(),
++      m_properties.mainWindow.wndClass.c_str(),
+       m_properties.workingDir.c_str(),
+       m_properties.show, showText(m_properties.show).c_str(),
+-      m_properties.timeout
++      m_properties.timeout,
++      getTitle(m_properties.terminateWindow).c_str(),
++      getClass(m_properties.terminateWindow).c_str()
+     );
+   }
+ 
+@@ -1234,7 +1325,7 @@ namespace
+ 
+     ProcessHolderSet remain;
+     getProcessList(processSet, remain);
+-    closeWindows(searchWindows(WND_TITLE_CLASS, processSet, remain, CP_ALL));
++    closeWindows(searchWindows(WND_TITLE_CLASS_LIST, processSet, remain, CP_ALL));
+     sendBreak(remain, CP_MAIN_ONLY);
+     closeWindows(searchWindows(WND_VISIBLE, processSet, remain, CP_MAIN_ONLY));
+     closeWindows(searchWindows(WND_ALL, processSet, remain, CP_MAIN_ONLY));
+@@ -1562,19 +1653,43 @@ namespace mSysProcess
+     return search->getList();
+   }
+ 
++  WindowId::WindowId():
++    wndTitle(),
++    wndClass()
++  {}
++
++  WindowId::WindowId(const std::string& wndTitle, const std::string& wndClass):
++    wndTitle(wndTitle),
++    wndClass(wndClass)
++  {}
++
++  bool WindowId::operator<(const WindowId& cmp) const
++  {
++    return wndClass < cmp.wndClass
++       || (wndClass == cmp.wndClass
++       && (wndClass < cmp.wndClass));
++  }
++
++  bool WindowId::operator==(const WindowId& cmp) const
++  {
++    return wndClass == cmp.wndClass
++        && wndClass == cmp.wndClass;
++  }
++
+   // settings for a process
+   ProcessProperties::ProcessProperties():
+     group(),
+     commandLine(),
+     workingDir(),
+-    windowTitle(),
+-    windowClass(),
+     desktop(),
++    mainWindow(),
++    terminateWindow(),
+     show(HIDE),
+     timeout(0),
+     termination(PT_NORMAL)
+   {}
+ 
++
+   bool ProcessProperties::operator<(const ProcessProperties& cmp) const
+   {
+     return group < cmp.group
+@@ -1583,15 +1698,26 @@ namespace mSysProcess
+        || (commandLine == cmp.commandLine
+        && (workingDir < cmp.workingDir
+        || (workingDir == cmp.workingDir
+-       && (windowTitle < cmp.windowTitle
+-       || (windowTitle == cmp.windowTitle
+-       && (windowClass < cmp.windowClass
+-       || (windowClass == cmp.windowClass
++       && (mainWindow < cmp.mainWindow
++       || (mainWindow == cmp.mainWindow
++       && (terminateWindow < cmp.terminateWindow
++       || (terminateWindow == cmp.terminateWindow
+        && (desktop < cmp.desktop
+        || (desktop == cmp.desktop
+        && (show < cmp.show))))))))))));
+   }
+ 
++  bool ProcessProperties::operator==(const ProcessProperties& cmp) const
++  {
++    return group == cmp.group
++        && commandLine == cmp.commandLine
++        && workingDir == cmp.workingDir
++        && mainWindow == cmp.mainWindow
++        && terminateWindow == cmp.terminateWindow
++        && desktop == cmp.desktop
++        && show == cmp.show;
++  }
++
+   void ProcessProperties::parse(const std::string& options)
+   {
+     if(options.size() > 0)
+@@ -1603,15 +1729,15 @@ namespace mSysProcess
+       {
+         if(parsed[OPT_TITLE].matched)                // WND=([^" ]+)
+         {
+-          windowTitle = parsed[OPT_TITLE];
++          mainWindow.wndTitle = parsed[OPT_TITLE];
+         }
+         else if(parsed[OPT_TITLE_].matched)          // WND=([^"]+)
+         {
+-          windowTitle = parsed[OPT_TITLE_];
++          mainWindow.wndTitle = parsed[OPT_TITLE_];
+         }
+         else if(parsed[OPT_CLASS].matched)           // WNDCLASS="([^"]+)"
+         {
+-          windowClass= parsed[OPT_CLASS];
++          mainWindow.wndClass= parsed[OPT_CLASS];
+         }
+         else if(parsed[OPT_WORKING_DIR].matched)     // CWD="([^"]+)"
+         {
+@@ -1643,6 +1769,14 @@ namespace mSysProcess
+         {
+           termination = PT_EXTRA_TIME;
+         }
++        else if(parsed[OPT_CLOSE_TITLE].matched)    // CLOSE_WNDTITLE="([^"]+)"
++        {
++          terminateWindow.push_back(WindowId(parsed[OPT_CLOSE_TITLE], ""));
++        }
++        else if(parsed[OPT_CLOSE_CLASS].matched)    // CLOSE_WNDCLASS="([^"]+)"
++        {
++          terminateWindow.push_back(WindowId("", parsed[OPT_CLOSE_CLASS]));
++        }
+         position= parsed[0].second;
+       }
+     }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
+index 28bd6cee..b1777002 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
+@@ -2,6 +2,7 @@
+ 
+ #pragma warning (disable: 4786)
+ 
++#include "boost/shared_ptr.hpp"
+ #include "systools/mSysProcessTree.h"
+ #include "mSysTimeW32.h"
+ #include "mSysErrorW32.h"
+@@ -23,7 +24,7 @@ namespace
+   typedef DWORD PID;
+ 
+   typedef std::list<const ProcessNodeImpl*> ProcessNodeImplList;
+-  typedef std::tr1::shared_ptr<ProcessNodeImpl> ProcessNodePtr;
++  typedef boost::shared_ptr<ProcessNodeImpl> ProcessNodePtr;
+   typedef std::map<PID, ProcessNodePtr> ProcessNodeImplMap;
+ 
+   // single process
+@@ -40,8 +41,9 @@ namespace
+       void addChild(const ProcessNodeImpl* child);
+       PID getPID() const;
+       PID getPPID() const;
+-      Timestamp getCreation() const;
++      virtual Timestamp getCreationTime() const;
+       virtual std::string getId() const;
++      virtual std::string getParentProcessId() const;
+ 
+     private:
+       void init();
+@@ -50,6 +52,7 @@ namespace
+       ProcessNodeImplList m_child;
+       const ProcessNodeImpl* m_parent;
+       std::string m_id;
++      std::string m_parentId;
+       PID m_pid;
+       PID m_ppid;
+       std::string m_module;
+@@ -79,6 +82,7 @@ namespace
+     m_child(),
+     m_parent(0),
+     m_id(),
++    m_parentId(),
+     m_pid(pid),
+     m_ppid(ppid),
+     m_module(module),
+@@ -86,17 +90,12 @@ namespace
+     m_trc(trc)
+   {
+     init();
+-    std::ostringstream format;
+-    format << m_pid << ", "
+-           << m_ppid << "; "
+-           << m_creation.year << "-"
+-           << m_creation.month << "-"
+-           << m_creation.day << " "
+-           << m_creation.hour << ":"
+-           << m_creation.minute << ":"
+-           << m_creation.second << "."
+-           << m_creation.milliseconds;
+-    m_id = format.str();
++    std::ostringstream format_pid;
++    format_pid << m_pid;
++    m_id = format_pid.str();
++    std::ostringstream format_ppid;
++    format_ppid << m_ppid;
++    m_parentId = format_ppid.str();
+   }
+ 
+   void ProcessNodeImpl::init()
+@@ -181,7 +180,7 @@ namespace
+     return m_ppid;
+   }
+ 
+-  Timestamp ProcessNodeImpl::getCreation() const
++  Timestamp ProcessNodeImpl::getCreationTime() const
+   {
+     return m_creation;
+   }
+@@ -191,6 +190,12 @@ namespace
+     return m_id;
+   }
+ 
++  std::string ProcessNodeImpl::getParentProcessId() const
++  {
++    return m_parentId;
++  }
++
++
+   ProcessTreeImpl::ProcessTreeImpl(TraceInterface& trc):
+     m_trc(trc)
+   {}
+@@ -227,7 +232,7 @@ namespace
+       for(; it != end; it++)
+       {
+         const ProcessNodeImpl* child = it->second.get();
+-        if(child && child->getPPID() == ppid && creation <= child->getCreation())
++        if(child && child->getPPID() == ppid && creation <= child->getCreationTime())
+         {
+           result.push_back(child);
+         }
+@@ -293,7 +298,7 @@ namespace
+           if(pChild->getPPID() != pChild->getPID())
+           {
+             ProcessNodeImpl* pParent = getNode(pChild->getPPID());
+-            if(pParent && pParent->getCreation() <= pChild->getCreation())
++            if(pParent && pParent->getCreationTime() <= pChild->getCreationTime())
+             {
+               pChild->setParent(pParent);
+               pParent->addChild(pChild);
+@@ -323,7 +328,7 @@ namespace mSysProcess
+ 
+   bool operator==(const ProcessNode& left, const ProcessNode& right)
+   {
+-    return left.getId() == right.getId() && left.getCreation() == right.getCreation();
++    return left.getId() == right.getId() && left.getCreationTime() == right.getCreationTime();
+   }
+ 
+   bool operator!=(const ProcessNode& left, const ProcessNode& right)
+@@ -335,7 +340,7 @@ namespace mSysProcess
+   {
+     return left.getId() < right.getId()
+        || (left.getId() == right.getId()
+-       && (left.getCreation() < right.getCreation()));
++       && (left.getCreationTime() < right.getCreationTime()));
+   }
+ 
+   bool operator>(const ProcessNode& left, const ProcessNode& right)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 714f8caa..93a42b2c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -337,6 +337,7 @@ namespace
+ 
+       std::string getProcessInformation() const;
+       std::string getProcessId() const;
++      std::string getParentProcessId() const;
+       std::string getProgram() const;
+       mSysTime::Timestamp getCreationTime() const;
+ 
+@@ -377,7 +378,6 @@ namespace
+   };
+ 
+ 
+-
+   /**
+    * class myChild
+    * control child process, implementation of mSysProcess::child
+@@ -892,7 +892,7 @@ namespace
+ 
+   /**
+    *
+-   * write the process information to ostream
++   * get the process information
+    *
+   **/
+   std::string myChild::getProcessInformation() const
+@@ -913,17 +913,29 @@ namespace
+ 
+   /**
+    *
+-   * write the process id to ostream
++   * get the process id to ostream
+    *
+   **/
+   std::string myChild::getProcessId() const
+   {
+-    mSysProcess::status state= getStatus();
+     std::ostringstream out;
+-    out << "Process\t" << M_ProcessId << "\tParent\t" << M_Parent << "\t" << getStatusText(state).c_str() << "\t" << state;
++    out << M_ProcessId;
++    return out.str();
++  }
++
++  /**
++   *
++   * get the process id to ostream
++   *
++  **/
++  std::string myChild::getParentProcessId() const
++  {
++    std::ostringstream out;
++    out << M_Parent;
+     return out.str();
+   }
+ 
++
+   // get module name of process
+   std::string myChild::getProgram() const
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index d7b97e19..61b0189c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -8,11 +8,13 @@
+ #include "tools/StringBuffer.h"
+ #include <windows.h>
+ #include <map>
++#include <sstream>
+ 
+ using namespace mSysWindow;
+ using MASSAI::trace::TraceInterface;
+ using mSysProcess::child;
+ using MASSAI::text::StringBuffer;
++
+ namespace
+ {
+    // control a window
+@@ -29,8 +31,10 @@ namespace
+       virtual bool isActive();
+       virtual std::string getTitle();
+       virtual std::string getClass();
++      virtual std::string getProcessId();
++      virtual bool isClosed();
+ 
+-      DWORD getProcessId() const;
++      DWORD getPID() const;
+     private:
+       void readTitle();
+       void readProcessId();
+@@ -57,6 +61,7 @@ namespace
+       std::string m_title;
+       std::string m_desktop;
+       TraceInterface& m_trc;
++      std::string m_process;
+   };
+ 
+   enum CONSTS
+@@ -93,7 +98,7 @@ namespace
+   )
+   {
+     m_trc.writeTrace(lTraceLevel, pszFile, sLine, pszFunction,
+-      "(%.200s) failed: handle(%d) (%d), (%.1000s)",
++      "(%.200s) failed: handle(%d) error (%d), (%.1000s)",
+       where, m_hwnd, errorCode, mSysError::getErrorText(errorCode).c_str());
+   }
+ 
+@@ -156,6 +161,11 @@ namespace
+     return result;
+   }
+ 
++  bool WindowW32::isClosed()
++  {
++     return !IsWindow(m_hwnd);
++  }
++
+   void WindowW32::simulateInput()
+   {
+     const KEYBDINPUT pressShift   = {VK_SHIFT, 0,               0, 0, 0};
+@@ -217,11 +227,16 @@ namespace
+     }
+   }
+ 
+-  DWORD WindowW32::getProcessId() const
++  DWORD WindowW32::getPID() const
+   {
+     return m_processId;
+   }
+ 
++  std::string WindowW32::getProcessId()
++  {
++    return m_process;
++  }
++
+   bool WindowW32::isVisible()
+   {
+     return IsWindowVisible(m_hwnd) != 0;
+@@ -290,6 +305,9 @@ namespace
+   void WindowW32::readProcessId()
+   {
+     m_threadId = GetWindowThreadProcessId(m_hwnd, &m_processId);
++    std::ostringstream format;
++    format << m_processId;
++    m_process = format.str();
+   }
+ }
+ 
+@@ -539,7 +557,7 @@ namespace mSysWindow
+     WindowW32& win = getWindow(hwnd);
+     if(m_data.useProcessId)
+     {
+-      ProcessMap::const_iterator it= m_processes.find(win.getProcessId());
++      ProcessMap::const_iterator it= m_processes.find(win.getPID());
+       if(it == m_processes.end())
+       {
+         found(hwnd, win, 0, 0);
+-- 
+2.41.0.windows.1
+

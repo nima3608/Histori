@@ -1,0 +1,136 @@
+From d58aa2a77097e7e097bb960884f5f65ed3d517ac Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 11 Sep 2013 11:59:40 +0000
+Subject: [PATCH 0396/1000] Mantis 24145: "Remove CORBA.SERVANTS configuration"
+ - MStarter is now allowed to read initialized items
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@578 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++++++--
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 +++++++++--
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   | 22 ++++++++++++++-----
+ .../Massai/cpp/CfgXMgrB/src/cfgMeta.cpp       | 10 +++++++++
+ 4 files changed, 49 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 0d2288e6..68154c27 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -353,8 +353,17 @@
+ //! @par     Change:
+ //! - MANTIS 25989, binary in string values cannot be read.
+ //!   Disallow to enter characters 0x00 .. 0x1F except 0x09, 0x0A, 0x0D.
+-#define FILE_VER_BIN 1,2,7,0
+-#define FILE_VER_DTS "1.2.7.0"
++// #define FILE_VER_BIN 1,2,7,0
++// #define FILE_VER_DTS "1.2.7.0"
++//
++//! @version 1.2.8
++//! @date    11.Sep.2013
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 24145: Remove CORBA.SERVANTS configuration
++//!   MStarter must be able to read just-initialized values
++#define FILE_VER_BIN 1,2,8,0
++#define FILE_VER_DTS "1.2.8.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 1ae1d145..c3cd8251 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -344,8 +344,17 @@
+ //! @par     Change:
+ //! - MANTIS 25989, binary in string values cannot be read.
+ //!   Disallow to enter characters 0x00 .. 0x1F except 0x09, 0x0A, 0x0D.
+-#define FILE_VER_BIN 1,2,7,0
+-#define FILE_VER_DTS "1.2.7.0"
++// #define FILE_VER_BIN 1,2,7,0
++// #define FILE_VER_DTS "1.2.7.0"
++//
++//! @version 1.2.8
++//! @date    11.Sep.2013
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 24145: Remove CORBA.SERVANTS configuration
++//!   MStarter must be able to read just-initialized values
++#define FILE_VER_BIN 1,2,8,0
++#define FILE_VER_DTS "1.2.8.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index 71652b2e..b8c9fac6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -390,7 +390,7 @@ public:
+                         ::const_iterator Iter( Src.begin() );
+                      while( Iter != Src.end() )
+                      {
+-/*					 
++/*
+                         // Introduce an explicit temporary "Tmp"
+                         // to avoid Lint warning
+                         TAO_SeqElem_String_Manager Tmp = SList[Idx];
+@@ -416,10 +416,22 @@ public:
+                }
+                else
+                {
+-                  writeTrace
+-                     (
+-                        SecondaryRuntime_HERE, SCD "get -  Ignored"
+-                     );
++                  if( !AccessAllowed )
++                  {
++                     writeTrace
++                        (
++                           SecondaryRuntime_HERE,
++                           SCD "get -  Access not allowed - Ignored"
++                        );
++                  }
++                  if( !Identified )
++                  {
++                     writeTrace
++                        (
++                           SecondaryRuntime_HERE,
++                           SCD "get -  Not identified - Ignored"
++                        );
++                  }
+                }
+             }
+             pRet->length( Ndx );
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+index 703c6f8f..78cbaf1e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+@@ -105,9 +105,11 @@ namespace
+    std::string cfgAuthRights_Create( char const * Auth )
+    {
+       std::string R;
++      // Everybody has the right to create
+       R += CFG_RIGHTS_TOKEN_C;
+       if( Auth )
+       {
++         // The setInitial originator (Cfgvalues) has all rights
+          R += C_RightsGrpSep;
+          R += Auth;
+          R += C_RightsValSep;
+@@ -115,6 +117,14 @@ namespace
+          R += CFG_RIGHTS_TOKEN_L;
+          R += CFG_RIGHTS_TOKEN_R;
+       }
++      // MStarter too
++      R += C_RightsGrpSep;
++      R += "mstarter";
++      R += C_RightsValSep;
++      R += CFG_RIGHTS_TOKEN_C;
++      R += CFG_RIGHTS_TOKEN_L;
++      R += CFG_RIGHTS_TOKEN_R;
++      //
+       return R;
+    }
+ 
+-- 
+2.41.0.windows.1
+

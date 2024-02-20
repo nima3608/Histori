@@ -1,0 +1,122 @@
+From 20a0b5d1535a721273098b2f697427dac0e114e6 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 2 Dec 2015 10:32:49 +0000
+Subject: [PATCH 0707/1077] MANTIS 0032431 implementation of
+ getProcessPagefileUsage() and getProcessDirectory()
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@934 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 69 ++++++++++++++++++-
+ 1 file changed, 68 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 39fac2a5..eecb6e8f 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -26,6 +26,7 @@
+ #include "systools/mSysThread.hpp"
+ #include "systools/software_error.h"
+ #include "tools\StringBuffer.h"
++#include "text/textTools.h"
+ 
+ // Windows
+ #include "psapi.h"
+@@ -499,6 +500,7 @@ namespace
+       std::string getProcessId() const;
+       std::string getParentProcessId() const;
+       std::string getProgram() const;
++      std::string getProcessDirectory() const;
+       mSysTime::Timestamp getCreationTime() const;
+ 
+       const mSysSynchronize::Internal& getInternal() const;
+@@ -514,6 +516,7 @@ namespace
+       unsigned long getProcessIoUsage() const;
+       unsigned long getProcessTimeUsage() const;
+       unsigned long getProcessMemoryUsage() const;
++      unsigned long getProcessPagefileUsage() const;
+ 	  
+ 	    bool canTerminate() const;
+       bool canQuery() const;
+@@ -637,7 +640,7 @@ namespace
+     if( !OpenProcess(SYNCHRONIZE, false, M_ProcessId))
+     {
+         errorString += " [SYNCHRONIZE]";
+-        M_CanSynchronize = false;;
++        M_CanSynchronize = false;
+     }
+ 
+     DWORD dwDesiredAccess = 0;
+@@ -1948,6 +1951,70 @@ namespace
+       
+     return result;
+   }
++
++  unsigned long myChild::getProcessPagefileUsage() const
++  {
++    PROCESS_MEMORY_COUNTERS memoryCounters;
++    unsigned long result = 0;
++
++    if( canQuery() )
++    {
++      if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++      {
++        result = memoryCounters.PagefileUsage;
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessMemoryInfo");
++      }
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getProcessPagefileUsage - query not allowed" );
++      } 
++    }
++
++    return result;
++  }
++
++  std::string myChild::getProcessDirectory() const 
++  {
++    std::string result("");
++    DWORD size = 250;
++    TCHAR filename[250];
++    
++
++    if( canQuery() )
++    {
++      if(QueryFullProcessImageName(M_HandleProcess, NULL, filename, &size)) 
++      {
++        #ifdef UNICODE
++          result = MASSAI::text::ToNarrow(filename);
++        #else
++          result = (string)(filename);
++        #endif
++
++        unsigned found = result.find_last_of("\\");
++
++        result = result.substr(0,found+1); 
++      } 
++      else 
++      {
++        logLastError(M_Logging, "GetModuleFileNameEx");
++      }
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getProcessDirectory - query not allowed" );
++      } 
++    }
++
++    return result;
++  }
+ } // namespace
+ 
+ 
+-- 
+2.41.0.windows.1
+

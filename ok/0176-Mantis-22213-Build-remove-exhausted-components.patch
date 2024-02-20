@@ -1,0 +1,3255 @@
+From 2bf9fd7b8de68dfe2a5de30ffe0dc403b9307352 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 15 Mar 2012 13:50:28 +0000
+Subject: [PATCH 0176/1000] Mantis 22213: Build: remove exhausted components
+ removed exhausted function for tracing: wrtTrace wrtTraceForTopic cryptTrace
+ cryptTraceForTopic traceTrack traceTrackForTopic
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@305 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/localtrace.h         |   4 +-
+ .../Interfaces/inc/asso/traceMap.h            |  10 +-
+ .../Interfaces/inc/text/textTools.h           |   4 +
+ .../Interfaces/inc/trc/TraceClt.h             | 393 ++++------------
+ .../Interfaces/inc/trc/TraceSettings.h        |  31 +-
+ .../Interfaces/inc/trc/TrcHdlClt.h            | 422 +++++-------------
+ .../Interfaces/inc/trc/tracedef.h             |  22 +-
+ .../Massai/cpp/Graphic/src/TestBarcode128.cpp |   2 +-
+ .../Massai/cpp/Graphic/src/TestBarcode39.cpp  |   2 +-
+ .../Graphic/src/TestBarcodeIndustrial2of5.cpp |   2 +-
+ .../src/TestBarcodeInterleaved2of5.cpp        |   2 +-
+ .../cpp/Graphic/src/TestBarcodePDF417.cpp     |   2 +-
+ .../Massai/cpp/LogService/src/traceMap.cpp    |  20 +-
+ .../cpp/SerialCon/src/TestSerialCon.cpp       |  12 +-
+ .../Massai/cpp/Text/src/textTools.cpp         |  14 +
+ .../Massai/cpp/Tools/src/TestBitArray.cpp     |   8 +-
+ .../Massai/cpp/Tools/src/TraceHandle.cpp      |   2 +-
+ .../Massai/cpp/Tools/src/TrcStr.cpp           |   2 +-
+ .../Massai/cpp/Tools/src/localtrace.cpp       |   8 +-
+ .../Massai/cpp/Tools/src/tracesToTrc.cpp      |   2 +-
+ .../Massai/cpp/Trace/DLLConfig/makefile.mak   |   2 +-
+ .../Massai/cpp/Trace/DLLNoConfig/makefile.mak |   2 +-
+ .../Massai/cpp/Trace/LIBConfig/makefile.mak   |  15 +-
+ .../Massai/cpp/Trace/LIBNoConfig/makefile.mak |  15 +-
+ .../Massai/cpp/Trace/src/TestTraceHdlLib.cpp  |   4 +-
+ .../Massai/cpp/Trace/src/TraceClt.cpp         |  58 +--
+ .../Massai/cpp/Trace/src/TrcHdlClt.cpp        |  79 +---
+ .../cpp/Trace/trace.makefile.common.mak       |  40 +-
+ .../Services/cpp/TrcServ/inc/TrcExp.h         | 104 +----
+ .../Services/cpp/TrcServ/inc/TrcHdlExp.h      | 112 +----
+ .../Services/cpp/TrcServ/makefile.mak         |  28 +-
+ .../Services/cpp/TrcServ/src/Tracedll.cpp     | 287 +-----------
+ .../Services/cpp/TrcServ/src/TrcClt.cpp       |   3 +-
+ .../Services/cpp/TrcServ/src/TrcHdlClt.cpp    | 260 +----------
+ .../Services/cpp/TrcServ/src/tracetest.cpp    |  14 +-
+ .../cpp/TrcServ/src/trcstreamtest.cpp         |   2 +-
+ 36 files changed, 338 insertions(+), 1651 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/localtrace.h b/SelfServiceCommon/Interfaces/inc/Tools/localtrace.h
+index 558e9439..90ad7143 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/localtrace.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/localtrace.h
+@@ -12,10 +12,10 @@ namespace MASSAI
+   {
+     void openTrace(const char* pszApplication);
+     void writeTraceText(long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszText);
+-    void wrtTrace (long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...);
++    void writeTrace (long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...);
+     void dumpTrace(long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, long lDumpSize, const char* pDump);
+     void writeTraceTextForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, const char* pszText);
+-    void wrtTraceForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...);
++    void writeTraceForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...);
+     void dumpTraceForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, long lDumpSize, const char* pDump);
+     void closeTrace();
+   }
+diff --git a/SelfServiceCommon/Interfaces/inc/asso/traceMap.h b/SelfServiceCommon/Interfaces/inc/asso/traceMap.h
+index 1b1e43aa..8c58e8de 100644
+--- a/SelfServiceCommon/Interfaces/inc/asso/traceMap.h
++++ b/SelfServiceCommon/Interfaces/inc/asso/traceMap.h
+@@ -26,19 +26,19 @@
+  * trace map with trace level
+ **/
+ void traceMap(long lTraceLevel,
+-              CX_CONSTSTR pszFile,
++              const char* pszFile,
+               short  sLine,
+-              CX_CONSTSTR pszFunction,
++              const char* pszFunction,
+               const aMap& map,
+               const char* pszHeader = "");
+ 
+ /**
+  * trace map with trace topic
+ **/
+-void traceMap(CX_CONSTSTR pszTopic,
+-              CX_CONSTSTR pszFile,
++void traceMap(const char* pszTopic,
++              const char* pszFile,
+               short  sLine,
+-              CX_CONSTSTR pszFunction,
++              const char* pszFunction,
+               const aMap& map,
+               const char* pszHeader = "");
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/text/textTools.h b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+index d5e7dae7..9dc835b5 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/textTools.h
++++ b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+@@ -33,6 +33,10 @@ namespace MASSAI
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList);
+ 
+     std::string fromHex(const std::string& hexdata);
++
++    bool startsWith(const std::string& text, const std::string& prefix);
++
++    std::string toLower(const std::string& text);
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/TraceClt.h b/SelfServiceCommon/Interfaces/inc/trc/TraceClt.h
+index ac5ec300..81a27974 100644
+--- a/SelfServiceCommon/Interfaces/inc/trc/TraceClt.h
++++ b/SelfServiceCommon/Interfaces/inc/trc/TraceClt.h
+@@ -1,4 +1,3 @@
+-
+ /****************************************************************************
+ 
+  FILE:      TraceClt.h
+@@ -7,7 +6,7 @@
+ 
+  DATE:      20.09.99
+ 
+- AUTHOR:    Dr. Materna GmbH   (TS)
++ AUTHOR:    MATERNA Information & Communications
+ 
+ ****************************************************************************/
+ 
+@@ -17,313 +16,111 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-
+-/***************************************************************************
+-
+-  Defines
+-
+-***************************************************************************/
+-
+-
+-
+-
+-#ifdef __cplusplus
+-#define CX_CONSTSTR const char *
+-extern "C"
+-{
+-#else
+-#define CX_CONSTSTR char *
+-#endif
+-
+-/*
+-   Returncodes
+-*/
+-#define TRC_OK                    0
+-#define TRC_ERROR                 1
+-
+ #include "trc/tracedef.h"
+ 
+ /*
+-   For pszTopic do not use:
+-
+-        "AppendTrace"
+-        "Extended"
+-        "Generations"
+-        "MaxFileSize"
+-        "MaxLineSize"
+-        "TraceFile"
+-        "TraceLevel"
+-*/
+-
+-
+-
+-/***************************************************************************
+-
+   Exported Functions
+-
+-***************************************************************************/
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   init Trace
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   openTrace
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   init Trace
+-
+-   for processes with short life time
+----------------------------------------------------------------------------
+ */
+-void _stdcall   openTraceSLT
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+-
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   cleanup Trace
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   closeTrace();
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceText
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszText
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+-   deprecated (wrong calling convention) use wrtTrace
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   writeTrace(
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   wrtTrace(
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Dump
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   dumpTrace
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-  Start new files
++#ifdef __cplusplus
++extern "C"
++{
++#endif
+ 
+----------------------------------------------------------------------------
+-*/
++// init Trace
++void _stdcall openTrace
++(
++  const char* pszApplication
++);
++
++// cleanup Trace
++void _stdcall closeTrace();
++
++// Trace Text
++void _stdcall writeTraceText
++(
++  long lTraceLevel,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  const char* pszText
++);
++
++// Trace Text
++// resulting string must be smaller than 4096 byte
++void _cdecl writeTrace
++(
++  long lTraceLevel,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  const char* pszFormat,
++  ...
++);
++
++// Trace Dump
++void _stdcall dumpTrace
++(
++  long lTraceLevel,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  long lDumpSize,
++  const char* pDump
++);
++
++// Start new files
+ void _stdcall startNewTraceFile(long lTraceLevel);
+ 
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceTextForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszText
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+-   deprecated (wrong calling convention) use wrtTraceForTopic
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   writeTraceForTopic(
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl    wrtTraceForTopic(
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Dump
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   dumpTraceForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-  Start new files
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall startNewTraceFileForTopic(CX_CONSTSTR pszTopic);
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   cryptTrace
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   cryptTraceForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   move file
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   moveTrace
+-                (
+-                   CX_CONSTSTR pszPath
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   traceTrack
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   traceTrackForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   write prepared trace (do not format, do not filter)
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceCooked
+-                (
+-                   CX_CONSTSTR pszText
+-                );
+-
++// Trace Text
++void _stdcall writeTraceTextForTopic
++(
++  const char* pszTopic,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  const char* pszText
++);
++
++// Trace Text
++//   resulting string must be smaller than 4096 byte
++void _cdecl writeTraceForTopic
++(
++  const char* pszTopic,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  const char* pszFormat,
++  ...
++);
++
++// Trace Dump
++void _stdcall dumpTraceForTopic
++(
++  const char* pszTopic,
++  const char* pszFile,
++  short sLine,
++  const char* pszFunction,
++  long lDumpSize,
++  const char* pDump
++);
++
++//  Start new files
++void _stdcall startNewTraceFileForTopic(const char* pszTopic);
++
++// move file
++void _stdcall moveTrace
++(
++  const char* pszPath
++);
++
++// write prepared trace (do not format, do not filter)
++void _stdcall writeTraceCooked
++(
++  const char* pszText
++);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+-
+ #endif
+-/*************************************************************************************************
+-      End Of File  TraceClt.h
+-************************************************************************************************/
+-
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/TraceSettings.h b/SelfServiceCommon/Interfaces/inc/trc/TraceSettings.h
+index 77d90770..d110d649 100644
+--- a/SelfServiceCommon/Interfaces/inc/trc/TraceSettings.h
++++ b/SelfServiceCommon/Interfaces/inc/trc/TraceSettings.h
+@@ -1,4 +1,3 @@
+-
+ /****************************************************************************
+ 
+  FILE:      TraceSettings.h
+@@ -15,14 +14,6 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-
+-/***************************************************************************
+-
+-  Defines
+-
+-***************************************************************************/
+-
+-
+ #ifdef __cplusplus
+ extern "C"
+ {
+@@ -30,33 +21,13 @@ extern "C"
+ 
+ typedef int trcHandle;
+ 
+-
+-/***************************************************************************
+-
+-  Exported Functions
+-
+-***************************************************************************/
+-
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   init Trace
+-
+----------------------------------------------------------------------------
+-*/
++//  Exported Functions
+ void _stdcall setTraceDirectory(const char* pszPath);
+ void _stdcall setTraceLevel(trcHandle hdl, long lTraceLevel);
+ void _stdcall setTraceTopic(trcHandle hdl, const char* pszTopic, int active);
+ 
+-
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+-
+ #endif
+-/*************************************************************************************************
+-      End Of File  TraceSettings.h
+-************************************************************************************************/
+-
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/TrcHdlClt.h b/SelfServiceCommon/Interfaces/inc/trc/TrcHdlClt.h
+index 7d9d0a8f..d0504a5f 100644
+--- a/SelfServiceCommon/Interfaces/inc/trc/TrcHdlClt.h
++++ b/SelfServiceCommon/Interfaces/inc/trc/TrcHdlClt.h
+@@ -1,4 +1,3 @@
+-
+ /****************************************************************************
+ 
+  FILE:      TrcHdlClt.h
+@@ -7,7 +6,7 @@
+ 
+  DATE:      20.09.99
+ 
+- AUTHOR:    Dr. Materna GmbH   (TS)
++ AUTHOR:    MATERNA Information & Communications
+ 
+ ****************************************************************************/
+ 
+@@ -17,339 +16,122 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-
+-/***************************************************************************
+-
+-  Defines
+-
+-***************************************************************************/
+-
+-
+-
++#include "trc/tracedef.h"
+ 
+ #ifdef __cplusplus
+-#define CX_CONSTSTR const char *
+ extern "C"
+ {
+-#else
+-#define CX_CONSTSTR char *
+ #endif
+ 
+-#include "trc/tracedef.h"
+-
+-/*
+-   Returncodes
+-*/
+-#define TRC_OK                    0
+-#define TRC_ERROR                 1
+-
+-
+ #define INVALIDHANDLE_INIT -1
+ #define INVALIDHANDLE_FULL -2
+ typedef int trcHandle;
+ 
+-
+-
+-/*
+-   For pszTopic do not use:
+-
+-        "AppendTrace"
+-        "Extended"
+-        "Generations"
+-        "MaxFileSize"
+-        "MaxLineSize"
+-        "TraceFile"
+-        "TraceLevel"
+-*/
+-
+-
+-
+-/***************************************************************************
+-
+-  Exported Functions
+-
+-***************************************************************************/
+-
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   init Trace
+-
+----------------------------------------------------------------------------
+-*/
+-trcHandle _stdcall   openTrace
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   init Trace
+-
+-   for processes with short life time
+----------------------------------------------------------------------------
+-*/
+-trcHandle _stdcall   openTraceSLT
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   cleanup Trace
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   closeTrace(trcHandle hdl);
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceText
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszText
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+-   deprecated (wrong calling convention) use wrtTrace
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   writeTrace(
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   wrtTrace(
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Dump
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   dumpTrace
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-  Start new files
+-
+----------------------------------------------------------------------------
+-*/
++// Exported Functions
++
++// init Trace
++trcHandle _stdcall openTraceHandle
++(
++  const char* pszApplication
++);
++
++// cleanup Trace
++void _stdcall closeTrace(trcHandle hdl);
++
++// Trace Text
++void _stdcall writeTraceText
++(
++  trcHandle hdl,
++  long lTraceLevel,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  const char* pszText
++);
++
++// Trace Text
++// resulting string must be smaller than 4096 byte
++void _cdecl writeTrace
++(
++  trcHandle hdl,
++  long lTraceLevel,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  const char* pszFormat,
++  ...
++);
++
++// Trace Dump
++void _stdcall dumpTrace
++(
++  trcHandle hdl,
++  long lTraceLevel,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  long lDumpSize,
++  const char* pDump
++);
++
++// Start new files
+ void _stdcall startNewTraceFile(trcHandle hdl, long lTraceLevel);
+ 
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceTextForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszText
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+-   deprecated (wrong calling convention) use wrtTrace
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   writeTraceForTopic(
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl   wrtTraceForTopic(
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace Dump
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   dumpTraceForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-/*
+----------------------------------------------------------------------------
+-  Start new files
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall startNewTraceFileForTopic(trcHandle hdl, CX_CONSTSTR pszTopic);
+-
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   cryptTrace
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   cryptTraceForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   move file
+----------------------------------------------------------------------------
+-*/
+-
+-void _stdcall   moveTrace
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszPath
+-                );
+-
+-
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   traceTrack
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   traceTrackForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   write prepared trace (do not format, do not filter)
+----------------------------------------------------------------------------
+-*/
+-void _stdcall   writeTraceCooked
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszText
+-                );
++// Trace Text
++void _stdcall writeTraceTextForTopic
++(
++  trcHandle hdl,
++  const char* pszTopic,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  const char* pszText
++);
++
++// Trace Text
++// resulting string must be smaller than 4096 byte
++void _cdecl writeTraceForTopic
++(
++  trcHandle hdl,
++  const char* pszTopic,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  const char* pszFormat,
++  ...
++);
++
++// Trace Dump
++void _stdcall dumpTraceForTopic
++(
++  trcHandle hdl,
++  const char* pszTopic,
++  const char* pszFile,
++  short  sLine,
++  const char* pszFunction,
++  long lDumpSize,
++  const char* pDump
++);
++
++// Start new files
++void _stdcall startNewTraceFileForTopic(trcHandle hdl, const char* pszTopic);
++
++// move file
++void _stdcall moveTrace
++(
++  trcHandle hdl,
++  const char* pszPath
++);
++
++//  write prepared trace (do not format, do not filter)
++void _stdcall writeTraceCooked
++(
++  trcHandle hdl,
++  const char* pszText
++);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+-
+ #endif
+-/*************************************************************************************************
+-      End Of File  TraceClt.h
+-************************************************************************************************/
+-
+diff --git a/SelfServiceCommon/Interfaces/inc/trc/tracedef.h b/SelfServiceCommon/Interfaces/inc/trc/tracedef.h
+index a129056b..3c5f6146 100644
+--- a/SelfServiceCommon/Interfaces/inc/trc/tracedef.h
++++ b/SelfServiceCommon/Interfaces/inc/trc/tracedef.h
+@@ -4,7 +4,6 @@
+ 
+  PURPOSE:   Class definition.
+ 
+-
+ ---------------------------------------------------------------------------*/
+ 
+ #ifndef TRACEDEF_H
+@@ -13,16 +12,16 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-#define      No_TRC               0
+-#define      MajorError           1
+-#define      MinorError           2
+-#define      MajorWarning         3
+-#define      MinorWarning         4
+-#define      BasicRuntime         5
+-#define      BasicProcess         6
+-#define      SecondaryRuntime     7
+-#define      SecondaryFrequent    8
+-#define      All_TRC              9
++#define No_TRC               0
++#define MajorError           1
++#define MinorError           2
++#define MajorWarning         3
++#define MinorWarning         4
++#define BasicRuntime         5
++#define BasicProcess         6
++#define SecondaryRuntime     7
++#define SecondaryFrequent    8
++#define All_TRC              9
+ 
+ #ifndef __FUNCTION__      // __FUNCTION__ is not available on all compilers
+ #define __FUNCTION__ ""
+@@ -39,4 +38,3 @@
+ #define SecondaryFrequent_HERE  8,__FILE__,__LINE__,__FUNCTION__
+ 
+ #endif // TRACEDEF_H
+-
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode128.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode128.cpp
+index b4a214d8..8d6f0211 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode128.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode128.cpp
+@@ -101,7 +101,7 @@ int main(int argc, char** argv)
+   }
+   catch(std::exception ex)
+   {
+-    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++    writeTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
+   catch(...)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode39.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode39.cpp
+index 3cd233e6..10be8602 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode39.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcode39.cpp
+@@ -79,7 +79,7 @@ int main(int argc, char** argv)
+   }
+   catch(std::exception ex)
+   {
+-    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++    writeTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
+   catch(...)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeIndustrial2of5.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeIndustrial2of5.cpp
+index 692f99d4..bb6eb79d 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeIndustrial2of5.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeIndustrial2of5.cpp
+@@ -78,7 +78,7 @@ int main(int argc, char** argv)
+   }
+   catch(std::exception ex)
+   {
+-    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++    writeTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
+   catch(...)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeInterleaved2of5.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeInterleaved2of5.cpp
+index 70a3841d..0a999ad6 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeInterleaved2of5.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodeInterleaved2of5.cpp
+@@ -76,7 +76,7 @@ int main(int argc, char** argv)
+   }
+   catch(std::exception ex)
+   {
+-    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++    writeTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
+   catch(...)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodePDF417.cpp b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodePDF417.cpp
+index 1976994f..084795b9 100644
+--- a/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodePDF417.cpp
++++ b/SelfServiceCommon/Massai/cpp/Graphic/src/TestBarcodePDF417.cpp
+@@ -93,7 +93,7 @@ int main(int argc, char** argv)
+   }
+   catch(std::exception ex)
+   {
+-    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++    writeTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
+   catch(...)
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/traceMap.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/traceMap.cpp
+index ec0c40e7..57c04ec8 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/traceMap.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/traceMap.cpp
+@@ -1,14 +1,14 @@
+ /**
+  **************************************************************************
+- * 
++ *
+  * @file traceMap.cpp
+  *
+- * trace map structure 
+- * 
++ * trace map structure
++ *
+  * @author MaK
+- * 
++ *
+  * Copyright (c) 2001 MATERNA Information & Communications
+- * 
++ *
+  **************************************************************************
+ **/
+ #include <string>
+@@ -27,9 +27,9 @@ mutexSemaphore mxTopic;
+  * trace map with trace level
+ **/
+ void traceMap(long lTraceLevel,
+-              CX_CONSTSTR pszFile,
++              const char* pszFile,
+               short  sLine,
+-              CX_CONSTSTR pszFunction,
++              const char* pszFunction,
+               const aMap& map,
+               const char* pszHeader)
+ {
+@@ -43,10 +43,10 @@ void traceMap(long lTraceLevel,
+ /**
+  * trace map with trace topic
+ **/
+-void traceMap(CX_CONSTSTR pszTopic,
+-              CX_CONSTSTR pszFile,
++void traceMap(const char* pszTopic,
++              const char* pszFile,
+               short  sLine,
+-              CX_CONSTSTR pszFunction,
++              const char* pszFunction,
+               const aMap& map,
+               const char* pszHeader)
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
+index dd0d58d4..856f8631 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
+@@ -59,17 +59,17 @@ namespace
+   {
+     if(result == MATRC_OK)
+     {
+-      wrtTrace(BasicRuntime_HERE, "COM-PORT (%.500s) success", command.c_str());
++      writeTrace(BasicRuntime_HERE, "COM-PORT (%.500s) success", command.c_str());
+     }
+     else if(result == MATRC_ERROR)
+     {
+       char errorBuffer[ERROR_BUFFER_SIZE];
+       comport.get(MATKEY_ERROR_LAST, errorBuffer, sizeof(errorBuffer));
+-      wrtTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)(%.500s)", command.c_str(), matRCToText(result).c_str(), result, errorBuffer);
++      writeTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)(%.500s)", command.c_str(), matRCToText(result).c_str(), result, errorBuffer);
+     }
+     else
+     {
+-      wrtTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)", command.c_str(), matRCToText(result).c_str(), result);
++      writeTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)", command.c_str(), matRCToText(result).c_str(), result);
+     }
+   }
+   class Listener: public mSysThread::thread, public Console::SelectionCommandBase
+@@ -237,7 +237,7 @@ namespace
+         traceComportResult(matrc, "readStatus");
+         if(matrc == MATRC_OK)
+         {
+-          wrtTrace(MajorError_HERE, "Status(x%x)", status);
++          writeTrace(MajorError_HERE, "Status(x%x)", status);
+         }
+         return Console::RC_SUCCESS;
+       }
+@@ -249,7 +249,7 @@ namespace
+         traceComportResult(matrc, "get");
+         if(matrc == MATRC_OK)
+         {
+-          wrtTrace(BasicRuntime_HERE, "(%s): (%s)", key, buffer);
++          writeTrace(BasicRuntime_HERE, "(%s): (%s)", key, buffer);
+         }
+       }
+   };
+@@ -275,7 +275,7 @@ namespace
+     private:
+       void readStatus(ConfigKey key)
+       {
+-        wrtTrace(BasicRuntime_HERE, "(%s): (%s)", configKey(key), configMap[key].c_str());
++        writeTrace(BasicRuntime_HERE, "(%s): (%s)", configKey(key), configMap[key].c_str());
+       }
+   };
+   void ignoredOptions(const char * option)
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+index fbdd3c18..5ea901f7 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+@@ -13,6 +13,7 @@
+ #include <string>
+ #include <list>
+ #include <stddef.h>
++#include <algorithm>
+ 
+ 
+ namespace
+@@ -153,6 +154,19 @@ namespace MASSAI
+       }
+       return result;
+     }
++
++    bool startsWith(const std::string& text, const std::string& prefix)
++    {
++      return text.compare(0, prefix.size(), prefix) == 0;
++    }
++
++    std::string toLower(const std::string& text)
++    {
++      std::string result = text;
++      std::transform(result.begin(), result.end(), result.begin(), ::tolower);
++      return result;
++    }
++
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TestBitArray.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TestBitArray.cpp
+index 01a55644..ef06607a 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TestBitArray.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TestBitArray.cpp
+@@ -31,7 +31,7 @@ int main(int argc, char** argv)
+       test.set(i, 1, 3);
+       if(memcmp(set[j], test.data(), 3) != 0)
+       {
+-        wrtTrace(MajorError_HERE, "mismatch in test set index (%d), testset (%d)", i, j);
++        writeTrace(MajorError_HERE, "mismatch in test set index (%d), testset (%d)", i, j);
+         dumpTrace(BasicRuntime_HERE, test.buffer_size(), reinterpret_cast<char*>(test.data()));
+         dumpTrace(BasicRuntime_HERE, 3, reinterpret_cast<char*>(set[j]));
+       }
+@@ -43,7 +43,7 @@ int main(int argc, char** argv)
+       test.reset(i, 3);
+       if(memcmp(reset[j], test.data(), 3) != 0)
+       {
+-        wrtTrace(MajorError_HERE, "mismatch in test reset index (%d), testset (%d)", i, j);
++        writeTrace(MajorError_HERE, "mismatch in test reset index (%d), testset (%d)", i, j);
+         dumpTrace(BasicRuntime_HERE, test.buffer_size(), reinterpret_cast<char*>(test.data()));
+         dumpTrace(BasicRuntime_HERE, 3, reinterpret_cast<char*>(reset[j]));
+       }
+@@ -55,7 +55,7 @@ int main(int argc, char** argv)
+       test.flip(i, 3);
+       if(memcmp(set[j], test.data(), 3) != 0)
+       {
+-        wrtTrace(MajorError_HERE, "mismatch in test flip(set) index (%d), testset (%d)", i, j);
++        writeTrace(MajorError_HERE, "mismatch in test flip(set) index (%d), testset (%d)", i, j);
+         dumpTrace(BasicRuntime_HERE, test.buffer_size(), reinterpret_cast<char*>(test.data()));
+         dumpTrace(BasicRuntime_HERE, 3, reinterpret_cast<char*>(set[j]));
+       }
+@@ -67,7 +67,7 @@ int main(int argc, char** argv)
+       test.flip(i, 3);
+       if(memcmp(reset[j], test.data(), 3) != 0)
+       {
+-        wrtTrace(MajorError_HERE, "mismatch in test flip(reset) index (%d), testset (%d)", i, j);
++        writeTrace(MajorError_HERE, "mismatch in test flip(reset) index (%d), testset (%d)", i, j);
+         dumpTrace(BasicRuntime_HERE, test.buffer_size(), reinterpret_cast<char*>(test.data()));
+         dumpTrace(BasicRuntime_HERE, 3, reinterpret_cast<char*>(reset[j]));
+       }
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
+index cca97369..7a434c19 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
+@@ -26,7 +26,7 @@ namespace MASSAI
+     TraceHandle::TraceHandle(const char* pszApplication):
+       m_close(true)
+     {
+-      m_handle= ::openTrace(pszApplication);
++      m_handle= ::openTraceHandle(pszApplication);
+     }
+     TraceHandle::~TraceHandle()
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TrcStr.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TrcStr.cpp
+index ddd3e466..708e71db 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TrcStr.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TrcStr.cpp
+@@ -100,7 +100,7 @@ long trcstream::move( const string& path )
+ */
+ trcstream::trcstream( const std::string& application )
+ {
+-    m_handle = openTrace( application.c_str() );
++    m_handle = openTraceHandle( application.c_str() );
+     setLvl( 0, "", 0, "", 0 );
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/localtrace.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/localtrace.cpp
+index 6fe7d4a5..adedb803 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/localtrace.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/localtrace.cpp
+@@ -33,18 +33,18 @@ namespace MASSAI
+   {
+     void openTrace(const char* pszApplication)
+     {
+-      wrtTrace(MajorError_HERE, "--- Trace Init --- (%s)", pszApplication);
++      writeTrace(MajorError_HERE, "--- Trace Init --- (%s)", pszApplication);
+     }
+     void closeTrace()
+     {
+-      wrtTrace(MajorError_HERE, "--- Trace Close ---");
++      writeTrace(MajorError_HERE, "--- Trace Close ---");
+     }
+     void writeTraceText(long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszText)
+     {
+       format.text(lTraceLevel, 0, pszFile, sLine, pszFunction, "");
+       printf("%s\n", pszText);
+     }
+-    void wrtTrace(long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...)
++    void writeTrace(long lTraceLevel, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...)
+     {
+       va_list arg_ptr;
+       va_start(arg_ptr, pszFormat);
+@@ -62,7 +62,7 @@ namespace MASSAI
+       format.text(-1, pszTopic, pszFile, sLine, pszFunction, "");
+       printf("%s\n", pszText);
+     }
+-    void wrtTraceForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...)
++    void writeTraceForTopic(const char* pszTopic, const char* pszFile, short sLine, const char* pszFunction, const char* pszFormat, ...)
+     {
+       va_list arg_ptr;
+       va_start(arg_ptr, pszFormat);
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+index 69720304..f04b1b7d 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+@@ -377,7 +377,7 @@ public:
+       M_TraceMaxFilesize( Name, M_APrefix + "File size maximum" ),
+       M_TracePath( Name, M_APrefix + "File path" ),
+       M_TraceToConsole( Name, M_APrefix + "To console" ),
+-      M_TrcHdl( openTrace( Name ) )
++      M_TrcHdl( openTraceHandle( Name ) )
+    {
+       if( !L_TraceHandle )
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/DLLConfig/makefile.mak b/SelfServiceCommon/Massai/cpp/Trace/DLLConfig/makefile.mak
+index 83260f9c..a88eed14 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/DLLConfig/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/DLLConfig/makefile.mak
+@@ -38,7 +38,7 @@ MY_DLL2_USER_LIBS =      $(COMMON_USER_LIBS) \
+ 
+ MY_DLL2_LINKLIBS=        $(CONFIG_LINKLIBS)
+ 
+-MY_DLL2_LDFLAGS =        $(DLL_LDFLAGS)
++MY_DLL2_LDFLAGS =        $(HDLDLL_LDFLAGS)
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak b/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
+index e804558e..b7c8616f 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
+@@ -38,7 +38,7 @@ MY_DLL2_USER_LIBS =      $(COMMON_USER_LIBS) \
+ 
+ MY_DLL2_LINKLIBS=        $(NOCONFIG_LINKLIBS)
+ 
+-MY_DLL2_LDFLAGS =        $(DLL_LDFLAGS)
++MY_DLL2_LDFLAGS =        $(HDLDLL_LDFLAGS)
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/LIBConfig/makefile.mak b/SelfServiceCommon/Massai/cpp/Trace/LIBConfig/makefile.mak
+index 3d5c9b8d..008198d0 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/LIBConfig/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/LIBConfig/makefile.mak
+@@ -8,31 +8,20 @@
+ 
+ ######################################################################
+ 
+-MY_LIB1 =                $(_LIB)\traces.lib
++MY_LIB1 =                $(LIB_DST_TRACES)
+ 
+ MY_LIB1_OBJS =           $(COMMON_OBJS) \
+                          $(NOHANDLE_OBJS) \
+                          $(CONFIG_OBJS)
+ 
+-MY_LIB1_USER_LIBS =      $(S_COMMON_USER_LIBS) \
+-                         $(S_CONFIG_USER_LIBS)
+-
+-MY_LIB1_LIBS=            $(S_CONFIG_LINKLIBS)
+-
+-
+ ######################################################################
+ 
+-MY_LIB2 =                $(_LIB)\tracehdls.lib
++MY_LIB2 =                $(LIB_DST_TRACEHDLS)
+ 
+ MY_LIB2_OBJS =           $(COMMON_OBJS) \
+                          $(HANDLE_OBJS) \
+                          $(CONFIG_OBJS)
+ 
+-MY_LIB2_USER_LIBS =      $(S_COMMON_USER_LIBS) \
+-                         $(S_CONFIG_USER_LIBS)
+-
+-MY_LIB2_LIBS=            $(S_CONFIG_LINKLIBS)
+-
+ ######################################################################
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/LIBNoConfig/makefile.mak b/SelfServiceCommon/Massai/cpp/Trace/LIBNoConfig/makefile.mak
+index 054fd9f7..8943ac2e 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/LIBNoConfig/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/LIBNoConfig/makefile.mak
+@@ -8,31 +8,20 @@
+ 
+ ######################################################################
+ 
+-MY_LIB1 =                $(_LIB)\traceNoConfigs.lib
++MY_LIB1 =                $(LIB_DST_TRACENOCONFIGS)
+ 
+ MY_LIB1_OBJS =           $(COMMON_OBJS) \
+                          $(NOHANDLE_OBJS) \
+                          $(NOCONFIG_OBJS)
+ 
+-MY_LIB1_USER_LIBS =      $(S_COMMON_USER_LIBS) \
+-                         $(S_NOCONFIG_USER_LIBS)
+-
+-MY_LIB1_LIBS=            $(S_NOCONFIG_LINKLIBS)
+-
+-
+ ######################################################################
+ 
+-MY_LIB2 =                $(_LIB)\tracehdlNoConfigs.lib
++MY_LIB2 =                $(LIB_DST_TRACEHDLNOCONFIGS)
+ 
+ MY_LIB2_OBJS =           $(COMMON_OBJS) \
+                          $(HANDLE_OBJS) \
+                          $(NOCONFIG_OBJS)
+ 
+-MY_LIB2_USER_LIBS =      $(S_COMMON_USER_LIBS) \
+-                         $(S_NOCONFIG_USER_LIBS)
+-
+-MY_LIB2_LIBS=            $(S_NOCONFIG_LINKLIBS)
+-
+ ######################################################################
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+index d875e98a..aec33fba 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+@@ -22,8 +22,8 @@ int main(int argc, char** argv)
+   MASSAI::localtrace::openTrace("TestTrace");
+   try
+   {
+-    int t1= openTrace("TestTrace");
+-    int t2= openTrace("TestTrace");
++    int t1= openTraceHandle("TestTrace");
++    int t2= openTraceHandle("TestTrace");
+     char buffer[300];
+     for(int i= 0; i < sizeof(buffer); i++)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
+index f78b3396..9a6b406c 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceClt.cpp
+@@ -4,7 +4,6 @@
+ 
+ ****************************************************************************/
+ 
+-
+ #include "trc/TraceClt.h"
+ #include "TraceCmd.h"
+ #include "TraceMgr.h"
+@@ -16,7 +15,6 @@ using namespace MASSAI::trace;
+ /*
+ ---------------------------------------------------------------------------
+    init Trace
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall openTrace(const char* pszApplication)
+@@ -24,11 +22,9 @@ void _stdcall openTrace(const char* pszApplication)
+   getTrace().init(pszApplication);
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    cleanup Trace
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall closeTrace()
+@@ -39,7 +35,6 @@ void _stdcall closeTrace()
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall writeTraceText(long lTraceLevel, const char* pszFile, short  sLine, const char* pszFunction, const char* pszText)
+@@ -47,7 +42,6 @@ void _stdcall writeTraceText(long lTraceLevel, const char* pszFile, short  sLine
+   getTrace().send(new TraceCmd(TRC_TEXT, 0, lTraceLevel, 0, pszFile, sLine, pszFunction, pszText, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+@@ -66,24 +60,6 @@ void _cdecl writeTrace(long lTraceLevel, const char* pszFile, short  sLine, cons
+   getTrace().send(new TraceCmd(TRC_TEXT, 0, lTraceLevel, 0, pszFile, sLine, pszFunction, buffer, -1));
+ }
+ 
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl wrtTrace(long lTraceLevel, const char* pszFile, short  sLine, const char* pszFunction, const char* pszFormat, ...)
+-{
+-  va_list arg_ptr;
+-  char buffer[4096];
+-  va_start(arg_ptr, pszFormat);
+-  _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-  buffer[sizeof(buffer)-1]= 0;
+-  va_end(arg_ptr);
+-
+-  getTrace().send(new TraceCmd(TRC_TEXT, 0, lTraceLevel, 0, pszFile, sLine, pszFunction, buffer, -1));
+-}
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Dump
+@@ -97,7 +73,6 @@ void _stdcall dumpTrace(long lTraceLevel, const char* pszFile, short  sLine, con
+ /*
+ ---------------------------------------------------------------------------
+   Start new files
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall startNewTraceFile(long lTraceLevel)
+@@ -105,11 +80,9 @@ void _stdcall startNewTraceFile(long lTraceLevel)
+   getTrace().send(new TraceCmd(TRC_NEWFILE, 0, lTraceLevel, 0));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall writeTraceTextForTopic(const char* pszTopic, const char* pszFile, short  sLine, const char* pszFunction, const char* pszText)
+@@ -117,7 +90,6 @@ void _stdcall writeTraceTextForTopic(const char* pszTopic, const char* pszFile,
+   getTrace().send(new TraceCmd(TRC_TEXT, 0, -1, pszTopic, pszFile, sLine, pszFunction, pszText, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+@@ -135,6 +107,7 @@ void _cdecl writeTraceForTopic(const char* pszTopic, const char* pszFile, short
+ 
+   getTrace().send(new TraceCmd(TRC_TEXT, 0, -1, pszTopic, pszFile, sLine, pszFunction, buffer, -1));
+ }
++
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+@@ -152,6 +125,7 @@ void _cdecl wrtTraceForTopic(const char* pszTopic, const char* pszFile, short  s
+ 
+   getTrace().send(new TraceCmd(TRC_TEXT, 0, -1, pszTopic, pszFile, sLine, pszFunction, buffer, -1));
+ }
++
+ /*
+ ---------------------------------------------------------------------------
+    Trace Dump
+@@ -165,7 +139,6 @@ void _stdcall dumpTraceForTopic(const char* pszTopic, const char* pszFile, short
+ /*
+ ---------------------------------------------------------------------------
+   Start new files
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall startNewTraceFileForTopic(const char* pszTopic)
+@@ -173,8 +146,6 @@ void _stdcall startNewTraceFileForTopic(const char* pszTopic)
+   getTrace().send(new TraceCmd(TRC_NEWFILE, 0, -1, pszTopic));
+ }
+ 
+-
+-
+ /*
+ ---------------------------------------------------------------------------
+    move file
+@@ -185,7 +156,6 @@ void _stdcall moveTrace(const char* pszPath)
+   getTrace().send(new TraceCmd(TRC_MOVE, 0, pszPath, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    write prepared trace (do not format, do not filter)
+@@ -195,27 +165,3 @@ void _stdcall writeTraceCooked(const char* pszText)
+ {
+   getTrace().send(new TraceCmd(TRC_COOKED, 0, pszText, -1));
+ }
+-
+-
+-
+-/*
+- deprecated methods
+-*/
+-void _stdcall openTraceSLT(const char* pszApplication)
+-{}
+-void _stdcall cryptTrace(long lTraceLevel, const char* pszFile,
+-  short sLine, const char* pszFunction, long lDumpSize, const char* pDump)
+-{}
+-void _stdcall cryptTraceForTopic(const char* pszTopic,
+-  const char* pszFile, short sLine, const char* pszFunction, long lDumpSize,
+-  const char* pDump)
+-{}
+-void _stdcall traceTrack(long lTraceLevel, const char* pszFile,
+-  short sLine, const char* pszFunction, long trackid, const char* pszTrack)
+-{}
+-void _stdcall traceTrackForTopic(const char* pszTopic,
+-  const char* pszFile, short sLine, const char* pszFunction, long trackid,
+-  const char* pszTrack)
+-{}
+-
+-
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
+index a4580c9e..35f27806 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TrcHdlClt.cpp
+@@ -4,7 +4,6 @@
+ 
+ ****************************************************************************/
+ 
+-
+ #include "trc/TrcHdlClt.h"
+ #include "TraceCmd.h"
+ #include "TraceMgr.h"
+@@ -18,23 +17,19 @@
+ 
+ using namespace MASSAI::trace;
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    init Trace
+-
+ ---------------------------------------------------------------------------
+ */
+-trcHandle _stdcall openTrace(const char* pszApplication)
++trcHandle _stdcall openTraceHandle(const char* pszApplication)
+ {
+   return getTrace().open(pszApplication);
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    cleanup Trace
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall closeTrace(trcHandle hdl)
+@@ -45,7 +40,6 @@ void _stdcall closeTrace(trcHandle hdl)
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall writeTraceText(trcHandle hdl, long lTraceLevel,
+@@ -55,7 +49,6 @@ void _stdcall writeTraceText(trcHandle hdl, long lTraceLevel,
+   getTrace().send(new TraceCmd(TRC_TEXT, hdl, lTraceLevel, 0, pszFile, sLine, pszFunction, pszText, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+@@ -76,26 +69,6 @@ void _cdecl writeTrace(trcHandle hdl, long lTraceLevel,
+   getTrace().send(new TraceCmd(TRC_TEXT, hdl, lTraceLevel, 0, pszFile,
+     sLine, pszFunction, buffer, -1));
+ }
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-void _cdecl wrtTrace(trcHandle hdl, long lTraceLevel,
+-  const char* pszFile, short sLine, const char* pszFunction,
+-  const char* pszFormat, ...)
+-{
+-  va_list arg_ptr;
+-  char buffer[4096];
+-  va_start(arg_ptr, pszFormat);
+-  _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-  buffer[sizeof(buffer)-1]= 0;
+-  va_end(arg_ptr);
+-
+-  getTrace().send(new TraceCmd(TRC_TEXT, hdl, lTraceLevel, 0, pszFile,
+-    sLine, pszFunction, buffer, -1));
+-}
+ 
+ /*
+ ---------------------------------------------------------------------------
+@@ -113,7 +86,6 @@ void _stdcall dumpTrace(trcHandle hdl, long lTraceLevel,
+ /*
+ ---------------------------------------------------------------------------
+   Start new files
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall startNewTraceFile(trcHandle hdl, long lTraceLevel)
+@@ -121,11 +93,9 @@ void _stdcall startNewTraceFile(trcHandle hdl, long lTraceLevel)
+   getTrace().send(new TraceCmd(TRC_NEWFILE, hdl, lTraceLevel, 0));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall writeTraceTextForTopic(trcHandle hdl, const char* pszTopic,
+@@ -135,27 +105,12 @@ void _stdcall writeTraceTextForTopic(trcHandle hdl, const char* pszTopic,
+     pszFunction, pszText, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    Trace Text
+    resulting string must be smaller than 4096 byte
+ ---------------------------------------------------------------------------
+ */
+-void _cdecl wrtTraceForTopic(trcHandle hdl, const char* pszTopic,
+-  const char* pszFile, short sLine, const char* pszFunction,
+-  const char* pszFormat, ...)
+-{
+-  va_list arg_ptr;
+-  char buffer[4096];
+-  va_start(arg_ptr, pszFormat);
+-  _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-  buffer[sizeof(buffer)-1]= 0;
+-  va_end(arg_ptr);
+-
+-  getTrace().send(new TraceCmd(TRC_TEXT, hdl, -1, pszTopic, pszFile, sLine,
+-    pszFunction, buffer, -1));
+-}
+ void _cdecl writeTraceForTopic(trcHandle hdl, const char* pszTopic,
+   const char* pszFile, short sLine, const char* pszFunction,
+   const char* pszFormat, ...)
+@@ -187,7 +142,6 @@ void _stdcall dumpTraceForTopic(trcHandle hdl, const char* pszTopic,
+ /*
+ ---------------------------------------------------------------------------
+   Start new files
+-
+ ---------------------------------------------------------------------------
+ */
+ void _stdcall startNewTraceFileForTopic(trcHandle hdl, const char* pszTopic)
+@@ -195,20 +149,16 @@ void _stdcall startNewTraceFileForTopic(trcHandle hdl, const char* pszTopic)
+   getTrace().send(new TraceCmd(TRC_NEWFILE, hdl, -1, pszTopic));
+ }
+ 
+-
+-
+ /*
+ ---------------------------------------------------------------------------
+    move file
+ ---------------------------------------------------------------------------
+ */
+-
+ void _stdcall moveTrace(trcHandle hdl, const char* pszPath)
+ {
+   getTrace().send(new TraceCmd(TRC_MOVE, hdl, pszPath, -1));
+ }
+ 
+-
+ /*
+ ---------------------------------------------------------------------------
+    write prepared trace (do not format, do not filter)
+@@ -218,30 +168,3 @@ void _stdcall writeTraceCooked(trcHandle hdl, const char* pszText)
+ {
+   getTrace().send(new TraceCmd(TRC_COOKED, hdl, pszText, -1));
+ }
+-
+-
+-
+-
+-
+-/*
+- deprecated methods
+-*/
+-trcHandle _stdcall openTraceSLT(const char* pszApplication)
+-{
+-  return 0;
+-}
+-void _stdcall cryptTrace(trcHandle hdl, long lTraceLevel, const char* pszFile,
+-  short sLine, const char* pszFunction, long lDumpSize, const char* pDump)
+-{}
+-void _stdcall cryptTraceForTopic(trcHandle hdl, const char* pszTopic,
+-  const char* pszFile, short sLine, const char* pszFunction, long lDumpSize,
+-  const char* pDump)
+-{}
+-void _stdcall traceTrack(trcHandle hdl, long lTraceLevel, const char* pszFile,
+-  short sLine, const char* pszFunction, long trackid, const char* pszTrack)
+-{}
+-void _stdcall traceTrackForTopic(trcHandle hdl, const char* pszTopic,
+-  const char* pszFile, short sLine, const char* pszFunction, long trackid,
+-  const char* pszTrack)
+-{}
+-
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak b/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
+index 3241909a..a52d1777 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/trace.makefile.common.mak
+@@ -9,20 +9,30 @@ DLL_LDFLAGS = \
+     /EXPORT:dumpTrace \
+     /EXPORT:dumpTraceForTopic \
+     /EXPORT:openTrace \
+-    /EXPORT:openTraceSLT \
+     /EXPORT:startNewTraceFile \
+     /EXPORT:startNewTraceFileForTopic \
+     /EXPORT:writeTrace \
+     /EXPORT:writeTraceForTopic \
+     /EXPORT:writeTraceText \
+     /EXPORT:writeTraceTextForTopic \
+-    /EXPORT:wrtTrace \
+-    /EXPORT:wrtTraceForTopic \
+-    /EXPORT:cryptTrace \
+-    /EXPORT:cryptTraceForTopic \
+     /EXPORT:moveTrace \
+-    /EXPORT:traceTrack \
+-    /EXPORT:traceTrackForTopic \
++    /EXPORT:writeTraceCooked \
++    /EXPORT:setTraceDirectory \
++    /EXPORT:setTraceLevel \
++    /EXPORT:setTraceTopic
++
++HDLDLL_LDFLAGS = \
++    /EXPORT:closeTrace \
++    /EXPORT:dumpTrace \
++    /EXPORT:dumpTraceForTopic \
++    /EXPORT:openTraceHandle \
++    /EXPORT:startNewTraceFile \
++    /EXPORT:startNewTraceFileForTopic \
++    /EXPORT:writeTrace \
++    /EXPORT:writeTraceForTopic \
++    /EXPORT:writeTraceText \
++    /EXPORT:writeTraceTextForTopic \
++    /EXPORT:moveTrace \
+     /EXPORT:writeTraceCooked \
+     /EXPORT:setTraceDirectory \
+     /EXPORT:setTraceLevel \
+@@ -54,36 +64,20 @@ CONFIG_OBJS= \
+ NOCONFIG_OBJS= \
+   $(_OBJ)\TraceSrvConfig_Dummy.obj
+ 
+-
+-S_COMMON_USER_LIBS =
+-
+ COMMON_USER_LIBS =
+ 
+-S_CONFIG_USER_LIBS = \
+-  $(LIB_MCFGCLNTS) \
+-  $(LIB_MCORBAS) \
+-  $(LIB_MASSAIS)
+-  
+ CONFIG_USER_LIBS = \
+   $(LIB_MCFGCLNT) \
+   $(LIB_MCORBA) \
+   $(LIB_MASSAI)
+   
+-S_NOCONFIG_USER_LIBS = \
+-  $(LIB_MSYSTOOLS)
+-
+ NOCONFIG_USER_LIBS = \
+   $(LIB_MSYSTOOLS) \
+   $(LIB_BOOST) 
+ 
+-S_CONFIG_LINKLIBS = \
+- $(SYS_ACETAO_S)
+-
+ CONFIG_LINKLIBS = \
+  $(SYS_ACETAO)
+ 
+-S_NOCONFIG_LINKLIBS =
+-
+ NOCONFIG_LINKLIBS =
+ 
+ 
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcExp.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcExp.h
+index 377263c0..16e8eefe 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcExp.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcExp.h
+@@ -87,16 +87,10 @@ DllExport void _stdcall   openTrace
+                 );
+ /*
+ ---------------------------------------------------------------------------
+-   init Trace
++   cleanup
+ 
+-   for processes with short life time
+ ---------------------------------------------------------------------------
+ */
+-DllExport void _stdcall   openTraceSLT
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+ DllExport void _stdcall   closeTrace
+                 (
+                 );
+@@ -123,26 +117,14 @@ DllExport void _stdcall   writeTraceText
+    resulting string must be smaller than 4096 byte
+ ---------------------------------------------------------------------------
+ */
+-DllExport void _stdcall   writeTrace(
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-DllExport void _cdecl   wrtTrace(
++DllExport void _cdecl   writeTrace(
+                    long lTraceLevel,
+                    CX_CONSTSTR pszFile,
+                    short  sLine,
+                    CX_CONSTSTR pszFunction,
+                    CX_CONSTSTR pszFormat,
+                    ...);
++
+ /*
+ ---------------------------------------------------------------------------
+    Trace Dump
+@@ -188,26 +170,14 @@ DllExport void _stdcall   writeTraceTextForTopic
+    resulting string must be smaller than 4096 byte
+ ---------------------------------------------------------------------------
+ */
+-DllExport void _stdcall   writeTraceForTopic(
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-DllExport void _cdecl   wrtTraceForTopic(
++DllExport void _cdecl   writeTraceForTopic(
+                    CX_CONSTSTR pszTopic,
+                    CX_CONSTSTR pszFile,
+                    short  sLine,
+                    CX_CONSTSTR pszFunction,
+                    CX_CONSTSTR pszFormat,
+                    ...);
++
+ /*
+ ---------------------------------------------------------------------------
+    Trace Dump
+@@ -232,38 +202,6 @@ DllExport void _stdcall dumpTraceForTopic
+ DllExport void _stdcall startNewTraceFileForTopic(CX_CONSTSTR pszTopic);
+ 
+ 
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   cryptTrace
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   cryptTraceForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+ /*
+ ---------------------------------------------------------------------------
+    move file
+@@ -276,38 +214,6 @@ DllExport void _stdcall   moveTrace
+                 );
+ 
+ 
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   traceTrack
+-                (
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   traceTrackForTopic
+-                (
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+ /*
+ ---------------------------------------------------------------------------
+    write prepared trace (do not format, do not filter)
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcHdlExp.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcHdlExp.h
+index 519ae3c4..ca4ec1a0 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcHdlExp.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcHdlExp.h
+@@ -85,24 +85,16 @@ typedef int trcHandle;
+ 
+ ---------------------------------------------------------------------------
+ */
+-DllExport trcHandle _stdcall   openTrace
++DllExport trcHandle _stdcall   openTraceHandle
+                 (
+                    CX_CONSTSTR pszApplication
+                 );
+ 
+ /*
+ ---------------------------------------------------------------------------
+-   init Trace
+-
+-   for processes with short life time
++   cleanup
+ ---------------------------------------------------------------------------
+ */
+-DllExport trcHandle _stdcall   openTraceSLT
+-                (
+-                   CX_CONSTSTR pszApplication
+-                );
+-
+-
+ DllExport void _stdcall   closeTrace
+                 (
+                    trcHandle hdl
+@@ -131,21 +123,7 @@ DllExport void _stdcall   writeTraceText
+    resulting string must be smaller than 4096 byte
+ ---------------------------------------------------------------------------
+ */
+-DllExport void _stdcall   writeTrace(
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-DllExport void _cdecl   wrtTrace(
++DllExport void _cdecl   writeTrace(
+                    trcHandle hdl,
+                    long lTraceLevel,
+                    CX_CONSTSTR pszFile,
+@@ -153,6 +131,7 @@ DllExport void _cdecl   wrtTrace(
+                    CX_CONSTSTR pszFunction,
+                    CX_CONSTSTR pszFormat,
+                    ...);
++
+ /*
+ ---------------------------------------------------------------------------
+    Trace Dump
+@@ -200,21 +179,7 @@ DllExport void _stdcall   writeTraceTextForTopic
+    resulting string must be smaller than 4096 byte
+ ---------------------------------------------------------------------------
+ */
+-DllExport void _stdcall   writeTraceForTopic(
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   CX_CONSTSTR pszFormat,
+-                   ...);
+-/*
+----------------------------------------------------------------------------
+-   Trace Text
+-   resulting string must be smaller than 4096 byte
+----------------------------------------------------------------------------
+-*/
+-DllExport void _cdecl   wrtTraceForTopic(
++DllExport void _cdecl   writeTraceForTopic(
+                    trcHandle hdl,
+                    CX_CONSTSTR pszTopic,
+                    CX_CONSTSTR pszFile,
+@@ -246,38 +211,6 @@ DllExport void _stdcall dumpTraceForTopic
+ */
+ DllExport void _stdcall startNewTraceFileForTopic(trcHandle hdl, CX_CONSTSTR pszTopic);
+ 
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   cryptTrace
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace encypted
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   cryptTraceForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long lDumpSize,
+-                   CX_CONSTSTR pDump
+-                );
+ 
+ 
+ /*
+@@ -292,41 +225,6 @@ DllExport void _stdcall   moveTrace
+                    CX_CONSTSTR pszPath
+                 );
+ 
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   traceTrack
+-                (
+-                   trcHandle hdl,
+-                   long lTraceLevel,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+-/*
+----------------------------------------------------------------------------
+-   Trace credit card track
+----------------------------------------------------------------------------
+-*/
+-DllExport void _stdcall   traceTrackForTopic
+-                (
+-                   trcHandle hdl,
+-                   CX_CONSTSTR pszTopic,
+-                   CX_CONSTSTR pszFile,
+-                   short  sLine,
+-                   CX_CONSTSTR pszFunction,
+-                   long trackid,
+-                   CX_CONSTSTR pszTrack
+-                );
+-
+-
+ /*
+ ---------------------------------------------------------------------------
+    write prepared trace (do not format, do not filter)
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+index 3dbcfbd5..f97f9507 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
++++ b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+@@ -17,20 +17,28 @@ DLL_LDFLAGS = \
+     /EXPORT:dumpTrace \
+     /EXPORT:dumpTraceForTopic \
+     /EXPORT:openTrace \
+-    /EXPORT:openTraceSLT \
+     /EXPORT:startNewTraceFile \
+     /EXPORT:startNewTraceFileForTopic \
+     /EXPORT:writeTrace \
+     /EXPORT:writeTraceForTopic \
+     /EXPORT:writeTraceText \
+     /EXPORT:writeTraceTextForTopic \
+-    /EXPORT:wrtTrace \
+-    /EXPORT:wrtTraceForTopic \
+-    /EXPORT:cryptTrace \
+-    /EXPORT:cryptTraceForTopic \
+     /EXPORT:moveTrace \
+-    /EXPORT:traceTrack \
+-    /EXPORT:traceTrackForTopic \
++    /EXPORT:writeTraceCooked
++
++HDLDLL_LDFLAGS = \
++    /LINK50COMPAT \
++    /EXPORT:closeTrace \
++    /EXPORT:dumpTrace \
++    /EXPORT:dumpTraceForTopic \
++    /EXPORT:openTraceHandle \
++    /EXPORT:startNewTraceFile \
++    /EXPORT:startNewTraceFileForTopic \
++    /EXPORT:writeTrace \
++    /EXPORT:writeTraceForTopic \
++    /EXPORT:writeTraceText \
++    /EXPORT:writeTraceTextForTopic \
++    /EXPORT:moveTrace \
+     /EXPORT:writeTraceCooked
+ 
+ TOOL_OBJS = \
+@@ -78,7 +86,7 @@ MY_DLL2_USER_LIBS = \
+     $(LIB_MSYSTOOLS)
+ 
+ MY_DLL2_LDFLAGS = \
+-    $(DLL_LDFLAGS)
++    $(HDLDLL_LDFLAGS)
+ 
+ ######################################################################
+ 
+@@ -181,7 +189,7 @@ MY_BIN5_OBJS = \
+ MY_BIN5_USER_LIBS = \
+     $(LIB_CXAPI) \
+     $(LIB_MSYSTOOLS) \
+-    $(_LIB)\trace.lib
++    $(LIB_TRACE)
+ 
+ MY_BIN5_LINKLIBS = \
+     $(SYS_ACETAO)
+@@ -201,7 +209,7 @@ MY_BIN6_OBJS = \
+ MY_BIN6_USER_LIBS = \
+     $(LIB_CXAPI) \
+     $(LIB_MSYSTOOLS) \
+-    $(_LIB)\tracehdl.lib
++    $(LIB_TRACEHDL)
+ 
+ MY_BIN6_LINKLIBS = \
+     $(SYS_ACETAO)
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/Tracedll.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/Tracedll.cpp
+index c7fc8698..1aec51db 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/Tracedll.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/Tracedll.cpp
+@@ -85,21 +85,16 @@ VERSION_ID_DT( 02, 01, 17 );
+ 
+   void _stdcall openTrace(CX_CONSTSTR pszApplication);
+ // 22.10.2001 2.1.2 ts added openTraceSLT/Init03 for short life time processes => server sends no message to client
+-  void _stdcall openTraceSLT(CX_CONSTSTR pszApplication);
+   void _stdcall closeTrace();
+-  long _stdcall writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
+-  long _cdecl   wrtTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
++  long _cdecl   writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
+   long _stdcall writeTraceText(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszText);
+   long _stdcall dumpTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall startNewTraceFile(long lTraceLevel);
+   long _stdcall writeTraceTextForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszText);
+-  long _stdcall writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
+-  long _cdecl   wrtTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
++  long _cdecl   writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
+   long _stdcall dumpTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall startNewTraceFileForTopic(CX_CONSTSTR pszTopic);
+ 
+-  long _stdcall cryptTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+-  long _stdcall cryptTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall moveTrace(CX_CONSTSTR pszPath);
+ 
+ 
+@@ -178,46 +173,6 @@ static float float_support= 1.0;  // instruct the linker to load the floating-po
+ 
+ ***************************************************************************/
+ 
+-
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  unsigned long __stdcall _DLL_InitTerm( HINSTANCE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+-
+- COMMENTS:  Init and Deinit lokal variable
+-
+- DATE:      30.09.1999
+-
+- AUTHOR:    Dr. Materna GmbH   (TS)
+-
+----------------------------------------------------------------------------*/
+-/*
+-unsigned long __stdcall _DLL_InitTerm( HINSTANCE hModule,
+-                        DWORD ul_reason_for_call,
+-                        LPVOID lpReserved )
+-{
+-    switch( ul_reason_for_call ) {
+-    case DLL_PROCESS_ATTACH:
+-      if(!TraceO.Trace)
+-        TraceO.open();
+-      break;
+-    case DLL_THREAD_ATTACH:
+-      break;
+-    case DLL_THREAD_DETACH:
+-      break;
+-    case DLL_PROCESS_DETACH:
+-      cout << "Detach ..." << endl;
+-      if(TraceO.Trace)
+-      {
+-        delete TraceO.Trace;
+-        TraceO.Trace = 0;
+-      }
+-      cout << "Detach done" << endl;
+-
+-      break;
+-    }
+-    return TRUE;
+-}
+-*/
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void _Optlink cleanup()
+@@ -245,7 +200,6 @@ void _Optlink cleanup()
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void _stdcall openTrace(CX_CONSTSTR pszApplication)
+ {
+   TraceO.request();
+@@ -261,33 +215,6 @@ void _stdcall openTrace(CX_CONSTSTR pszApplication)
+   TraceO.release();
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+-
+- COMMENTS:  initialize traceclient
+-             short life time processes => server sends no message to client
+-
+- DATE:      22.10.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+----------------------------------------------------------------------------*/
+-
+-void _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+-{
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-  {
+-    if (pszApplication == 0)
+-      TraceO.Trace->openTrace(1);
+-    else
+-      TraceO.Trace->openTrace(pszApplication, 1);
+-  }
+-  TraceO.release();
+-}
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void _stdcall closeTrace()
+@@ -299,7 +226,6 @@ void _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+  AUTHOR:    MATERNA Information & Communications  (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void _stdcall closeTrace()
+ {
+   TraceO.close();
+@@ -327,12 +253,11 @@ void _stdcall writeTraceText(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+ 
+- FUNCTION:  long _stdcall writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++ FUNCTION:  long _cdecl writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ 
+  COMMENTS:  trace text
+ 
+@@ -341,7 +266,7 @@ void _stdcall writeTraceText(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-void _stdcall writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++void _cdecl writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ {
+   long result;
+   va_list   arg_ptr;
+@@ -363,47 +288,6 @@ void _stdcall writeTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-
+-  // return result;
+-
+-}
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _cdecl wrtTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-
+- COMMENTS:  trace text
+-
+- DATE:      11.12.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+-
+----------------------------------------------------------------------------*/
+-void _cdecl wrtTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-{
+-  long result;
+-  va_list   arg_ptr;
+-  char String[4096];
+-
+-  /* get pointer to first argument */
+-  va_start( arg_ptr, pszFormat);
+-
+-  _vsnprintf(String, sizeof(String), pszFormat, arg_ptr);
+-  String[sizeof(String)-1]= 0;
+-
+-  va_end( arg_ptr);
+-
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->writeText( lTraceLevel, pszFile, sLine, pszFunction, String);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -428,8 +312,6 @@ void _stdcall dumpTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -454,7 +336,6 @@ void _stdcall startNewTraceFile(long lTraceLevel)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -479,12 +360,11 @@ void _stdcall writeTraceTextForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile,
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+ 
+- FUNCTION:  long _stdcall writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++ FUNCTION:  long _cdecl writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ 
+  COMMENTS:  trace text
+ 
+@@ -493,7 +373,7 @@ void _stdcall writeTraceTextForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile,
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-void _stdcall writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++void _cdecl writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ {
+   long result;
+   va_list   arg_ptr;
+@@ -515,50 +395,8 @@ void _stdcall writeTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, shor
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-  // return result;
+-
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _cdecl wrtTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-
+- COMMENTS:  trace text
+-
+- DATE:      11.12.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+-
+----------------------------------------------------------------------------*/
+-void _cdecl wrtTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-{
+-  long result;
+-  va_list   arg_ptr;
+-  char String[4096];
+-
+-  /* get pointer to first argument */
+-  va_start( arg_ptr, pszFormat);
+-
+-  _vsnprintf(String, sizeof(String), pszFormat, arg_ptr);
+-  String[sizeof(String)-1]= 0;
+-
+-  va_end( arg_ptr);
+-
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->writeText(pszTopic, pszFile, sLine, pszFunction, String);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-  // return result;
+-
+-}
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  long _stdcall dumpTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+@@ -581,7 +419,6 @@ void _stdcall dumpTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -606,61 +443,8 @@ void _stdcall startNewTraceFileForTopic(CX_CONSTSTR pszTopic)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+-}
+-
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall cryptTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-
+- COMMENTS:  trace encrypted
+-
+- DATE:      19.04.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------*/
+-void _stdcall cryptTrace(long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-{
+-  long result;
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->cryptTrace(lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-  // return result;
+-}
+-
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall cryptTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-
+- COMMENTS:  trace encrypted
+-
+- DATE:      19.04.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------*/
+-void _stdcall cryptTraceForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-{
+-  long result;
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->cryptTrace(pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+ }
+ 
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  long _stdcall move(CX_CONSTSTR pszPath)
+@@ -683,63 +467,6 @@ void _stdcall moveTrace(CX_CONSTSTR pszPath)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+-}
+-
+-
+-/*
+----------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall traceTrack(long lTraceLevel, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-
+- COMMENTS:  trace credit card track
+-
+- DATE:      20.09.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall traceTrack(long lTraceLevel, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-{
+-  long result;
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->traceTrack(lTraceLevel, pszFile, sLine, pszFunction, trackid, pszTrack);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+-}
+-
+-
+-/*
+----------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall traceTrackForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-
+- COMMENTS:  trace credit card track
+-
+- DATE:      20.09.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall traceTrackForTopic(CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-{
+-  long result;
+-  TraceO.request();
+-  if(!TraceO.Trace)
+-    TraceO.open();
+-  if(TraceO.Trace)
+-    result = TraceO.Trace->traceTrack(pszTopic, pszFile, sLine, pszFunction, trackid, pszTrack);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+ }
+ 
+ /*
+@@ -766,10 +493,8 @@ void _stdcall writeTraceCooked(CX_CONSTSTR pszText)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*************************************************************************************************
+       End Of File  Tracedll.cpp
+ ************************************************************************************************/
+-
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
+index 3d96369f..df301003 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
+@@ -60,6 +60,8 @@
+ // #define DEBUGOUT
+ // #define WAITBEFORECXDELETE
+ // #define TRCLIGHT
++#define TRC_OK                    0
++#define TRC_ERROR                 1
+ 
+ 
+ 
+@@ -1567,7 +1569,6 @@ long TraceClient::traceTrack(const char *pszTopic, const char *pszFile, short  s
+ long TraceClient::traceCooked(const char* pszText)
+ {
+   long result, rc;
+-  int iTopicState;
+   #ifndef TRCLIGHT
+   if(!iConnected && !Thread.iThreadRunning)
+     connect();
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcHdlClt.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcHdlClt.cpp
+index 91cbc188..cb52393a 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcHdlClt.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcHdlClt.cpp
+@@ -75,7 +75,6 @@
+ // #define TRCLIGHT
+ 
+ 
+-
+ VERSION_ID_DT( 02, 01, 18 );
+ 
+ 
+@@ -92,21 +91,15 @@ VERSION_ID_DT( 02, 01, 18 );
+ 
+   trcHandle _stdcall openTrace(CX_CONSTSTR pszApplication);
+ // 22.10.2001 2.1.2 ts added openTraceSLT/Init03 for short life time processes => server sends no message to client
+-  trcHandle _stdcall openTraceSLT(CX_CONSTSTR pszApplication);
+   void _stdcall closeTrace(trcHandle hdl);
+-  long _stdcall writeTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
+-  long _cdecl   wrtTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
++  long _cdecl   writeTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...);
+   long _stdcall writeTraceText(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszText);
+   long _stdcall dumpTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall startNewTraceFile(trcHandle hdl, long lTraceLevel);
+   long _stdcall writeTraceTextForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszText);
+-  long _stdcall writeTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
+-  long _cdecl   wrtTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
++  long _cdecl   writeTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat,...);
+   long _stdcall dumpTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall startNewTraceFileForTopic(trcHandle hdl, CX_CONSTSTR pszTopic);
+-
+-  long _stdcall cryptTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+-  long _stdcall cryptTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump);
+   long _stdcall moveTrace(trcHandle hdl, CX_CONSTSTR pszPath);
+ 
+ ***************************************************************************/
+@@ -181,7 +174,6 @@ static __TraceClient TraceO;
+ 
+ ***************************************************************************/
+ 
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void _Optlink cleanup()
+@@ -209,8 +201,7 @@ void _Optlink cleanup()
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+-trcHandle _stdcall openTrace(CX_CONSTSTR pszApplication)
++trcHandle _stdcall openTraceHandle(CX_CONSTSTR pszApplication)
+ {
+   TraceClient* pTrace;
+   trcHandle result;
+@@ -232,41 +223,6 @@ trcHandle _stdcall openTrace(CX_CONSTSTR pszApplication)
+   return result;
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  trcHandle _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+-
+- COMMENTS:  initialize traceclient
+-            short life time processes => server sends no message to client
+-
+- DATE:      22.10.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+-
+----------------------------------------------------------------------------*/
+-trcHandle _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+-{
+-  TraceClient* pTrace;
+-  trcHandle result;
+-  result= INVALIDHANDLE_FULL;
+-
+-  TraceO.request();
+-  pTrace= new TraceClient;
+-  if (pTrace)
+-  {
+-    result= TraceO.TraceList.set(pTrace);
+-    if (result < 0)
+-      delete pTrace;
+-    else if (pszApplication == 0)
+-      pTrace->openTrace(1);
+-    else
+-      pTrace->openTrace(pszApplication, 1);
+-  }
+-  TraceO.release();
+-  return result;
+-}
+-
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  void _stdcall closeTrace(trcHandle hdl )
+@@ -278,7 +234,6 @@ trcHandle _stdcall openTraceSLT(CX_CONSTSTR pszApplication)
+  AUTHOR:    MATERNA Information & Communications  (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-
+ void _stdcall closeTrace(trcHandle hdl )
+ {
+   TraceClient* pTrace;
+@@ -314,7 +269,6 @@ void _stdcall writeTraceText(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFil
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -328,7 +282,7 @@ void _stdcall writeTraceText(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFil
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-void _stdcall writeTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++void _cdecl writeTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ {
+   long result;
+   TraceClient* pTrace;
+@@ -350,49 +304,6 @@ void _stdcall writeTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, s
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-
+-  // return result;
+-
+-}
+-
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _cdecl wrtTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-
+- COMMENTS:  trace text
+-
+- DATE:      11.12.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+-
+----------------------------------------------------------------------------*/
+-void _cdecl wrtTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-{
+-  long result;
+-  TraceClient* pTrace;
+-  va_list   arg_ptr;
+-  char String[4096];
+-
+-  /* get pointer to first argument */
+-  va_start( arg_ptr, pszFormat);
+-
+-  _vsnprintf(String, sizeof(String), pszFormat, arg_ptr);
+-  String[sizeof(String)-1]= 0;
+-
+-  va_end( arg_ptr);
+-
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->writeText( lTraceLevel, pszFile, sLine, pszFunction, String);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-
+-  // return result;
+-
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -417,8 +328,6 @@ void _stdcall dumpTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, sh
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -443,8 +352,8 @@ void _stdcall startNewTraceFile(trcHandle hdl, long lTraceLevel)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
++
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  long _stdcall writeTraceTextForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszText)
+@@ -467,7 +376,6 @@ void _stdcall writeTraceTextForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CON
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -481,7 +389,7 @@ void _stdcall writeTraceTextForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CON
+  AUTHOR:    Dr. Materna GmbH   (TS)
+ 
+ ---------------------------------------------------------------------------*/
+-void _stdcall writeTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
++void _cdecl writeTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+ {
+   long result;
+   va_list   arg_ptr;
+@@ -503,47 +411,8 @@ void _stdcall writeTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTST
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-
+-  // return result;
+-
+ }
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _cdecl wrtTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-
+- COMMENTS:  trace text
+-
+- DATE:      11.12.2001
+-
+- AUTHOR:    MATERNA Information & Communications  (TS)
+-
+----------------------------------------------------------------------------*/
+-void _cdecl wrtTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, CX_CONSTSTR pszFormat, ...)
+-{
+-  long result;
+-  va_list   arg_ptr;
+-  TraceClient* pTrace;
+-  char String[4096];
+-
+-  /* get pointer to first argument */
+-  va_start( arg_ptr, pszFormat);
+ 
+-  _vsnprintf(String, sizeof(String), pszFormat, arg_ptr);
+-  String[sizeof(String)-1]= 0;
+-
+-  va_end( arg_ptr);
+-
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->writeText(pszTopic, pszFile, sLine, pszFunction, String);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-  // return result;
+-
+-}
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  long _stdcall dumpTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+@@ -566,7 +435,6 @@ void _stdcall dumpTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+ /*---------------------------------------------------------------------------
+@@ -591,62 +459,8 @@ void _stdcall startNewTraceFileForTopic(trcHandle hdl, CX_CONSTSTR pszTopic)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+-}
+-
+-
+-
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall cryptTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-
+- COMMENTS:  trace encrypted
+-
+- DATE:      19.04.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------*/
+-void _stdcall cryptTrace(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-{
+-  long result;
+-  TraceClient* pTrace;
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->cryptTrace(lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-
+-  // return result;
+-}
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall cryptTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-
+- COMMENTS:  trace encrypted
+-
+- DATE:      19.04.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------*/
+-void _stdcall cryptTraceForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short  sLine, CX_CONSTSTR pszFunction, long lDumpSize, CX_CONSTSTR pDump)
+-{
+-  long result;
+-  TraceClient* pTrace;
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->cryptTrace(pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+ }
+ 
+-
+ /*---------------------------------------------------------------------------
+ 
+  FUNCTION:  long _stdcall moveTrace(trcHandle hdl, CX_CONSTSTR pszPath)
+@@ -669,62 +483,6 @@ void _stdcall moveTrace(trcHandle hdl, CX_CONSTSTR pszPath)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+-}
+-
+-/*
+----------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall traceTrack(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-
+- COMMENTS:  trace credit card track
+-
+- DATE:      20.09.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall traceTrack(trcHandle hdl, long lTraceLevel, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-{
+-  long result;
+-  TraceClient* pTrace;
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->traceTrack(lTraceLevel, pszFile, sLine, pszFunction, trackid, pszTrack);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+-}
+-
+-
+-/*
+----------------------------------------------------------------------------
+-
+- FUNCTION:  long _stdcall traceTrackForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-
+- COMMENTS:  trace credit card track
+-
+- DATE:      20.09.2007
+-
+- AUTHOR:    MATERNA Information & Communications  (SteT)
+-
+----------------------------------------------------------------------------
+-*/
+-void _stdcall traceTrackForTopic(trcHandle hdl, CX_CONSTSTR pszTopic, CX_CONSTSTR pszFile, short sLine, CX_CONSTSTR pszFunction, long trackid, CX_CONSTSTR pszTrack)
+-{
+-  long result;
+-  TraceClient* pTrace;
+-  TraceO.request();
+-  pTrace= TraceO.TraceList.get(hdl);
+-  if (pTrace)
+-    result = pTrace->traceTrack(pszTopic, pszFile, sLine, pszFunction, trackid, pszTrack);
+-  else
+-    result = TRC_ERROR;
+-  TraceO.release();
+-  // return result;
+ }
+ 
+ /*
+@@ -751,14 +509,8 @@ void _stdcall writeTraceCooked(trcHandle hdl, CX_CONSTSTR pszText)
+   else
+     result = TRC_ERROR;
+   TraceO.release();
+-  // return result;
+ }
+ 
+-
+-
+-
+-
+ /*************************************************************************************************
+       End Of File  TraceClient.cpp
+ ************************************************************************************************/
+-
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+index 4b5fd7ad..6c3bd7c9 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+@@ -25,21 +25,11 @@ void main(int argc, char** argv)
+     int length= strlen(szBuffer);
+     for(int i= 0; i < 100; i++)
+     {
+-      wrtTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, szBuffer);
+-      wrtTrace(1, __FILE__, __LINE__, __FUNCTION__, szBuffer);
++      writeTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, szBuffer);
++      writeTrace(1, __FILE__, __LINE__, __FUNCTION__, szBuffer);
+     }
+-    cryptTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+-    cryptTrace(1, __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+     dumpTrace(1, __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+     dumpTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+-    traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 1, szBuffer);
+-    traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 2, szBuffer);
+-    traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 3, szBuffer);
+-    traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 4, szBuffer);
+-    traceTrackForTopic("Console", __FILE__, __LINE__, __FUNCTION__, 1, szBuffer);
+-    traceTrackForTopic("Console", __FILE__, __LINE__, __FUNCTION__, 2, szBuffer);
+-    traceTrackForTopic("Console", __FILE__, __LINE__, __FUNCTION__, 3, szBuffer);
+-    traceTrackForTopic("Console", __FILE__, __LINE__, __FUNCTION__, 4, szBuffer);
+     writeTraceCooked(szBuffer);
+     if(strcmpi(szBuffer, "newline") == 0)
+       startNewTraceFileForTopic("Console");
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/trcstreamtest.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/trcstreamtest.cpp
+index bbeb97b0..f41118df 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/trcstreamtest.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/trcstreamtest.cpp
+@@ -21,7 +21,7 @@ int main(int argc, char** argv)
+       out << name << ++j;
+       std::string lname= out.str();
+       std::cout << "openTrace..." << std::endl;
+-      int hdl= openTrace(lname.c_str());
++      int hdl= openTraceHandle(lname.c_str());
+       std::cout << "openTrace" << std::endl;
+       for(int k= 0; k < 10; k++)
+       {
+-- 
+2.41.0.windows.1
+

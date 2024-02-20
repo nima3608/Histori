@@ -1,0 +1,163 @@
+From 14c149b0a50b824c44ca7cb3daae955692262b75 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 15 Dec 2014 13:28:26 +0000
+Subject: [PATCH 0552/1000] MANTIS 34968 massaiCfgXB.exe 1.4.1 Mantis 34968:
+ Handle read-access rights If read-access is not given, return "***" for text
+ items.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@797 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 17 +++++++---
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 16 ++++++---
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   | 34 ++++++++++++++-----
+ 3 files changed, 50 insertions(+), 17 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index a1132fe4..19b6a6cc 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -375,17 +375,26 @@
+ //!     indications. Otherwise a change-indication would be sent only
+ //!     when some client calls.
+ //!   - In traces show detailed listener exceptions
+-//#define FILE_VER_BIN 1,3,0,0
+-//#define FILE_VER_DTS "1.3.0.0"
++// #define FILE_VER_BIN 1,3,0,0
++// #define FILE_VER_DTS "1.3.0.0"
+ //
+ //! @version 1.4.0
+ //! @date    01.12.2014
+ //! @author  GiT
+ //! @par     Change:
+ //! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++// #define FILE_VER_BIN 1,4,0,0
++// #define FILE_VER_DTS "1.4.0.0"
+ //
+-#define FILE_VER_BIN 1,4,0,0
+-#define FILE_VER_DTS "1.4.0.0"
++//! @version 1.4.1
++//! @date    15.12.2014
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34968: Handle read-access rights
++//!   If read-access is not given, return "***" for text items.
++#define FILE_VER_BIN 1,4,1,0
++#define FILE_VER_DTS "1.4.1.0"
++
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 93a9c6ce..a6466256 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -366,17 +366,25 @@
+ //!     indications. Otherwise a change-indication would be sent only
+ //!     when some client calls.
+ //!   - In traces show detailed listener exceptions
+-//#define FILE_VER_BIN 1,3,0,0
+-//#define FILE_VER_DTS "1.3.0.0"
++// #define FILE_VER_BIN 1,3,0,0
++// #define FILE_VER_DTS "1.3.0.0"
+ //
+ //! @version 1.4.0
+ //! @date    01.12.2014
+ //! @author  GiT
+ //! @par     Change:
+ //! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++// #define FILE_VER_BIN 1,4,0,0
++// #define FILE_VER_DTS "1.4.0.0"
+ //
+-#define FILE_VER_BIN 1,4,0,0
+-#define FILE_VER_DTS "1.4.0.0"
++//! @version 1.4.1
++//! @date    15.12.2014
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34968: Handle read-access rights
++//!   If read-access is not given, return "***" for text items.
++#define FILE_VER_BIN 1,4,1,0
++#define FILE_VER_DTS "1.4.1.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index b8c9fac6..310dedaa 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -153,7 +153,8 @@ public:
+             unsigned Ndx = 0;
+             while( I != End )
+             {
+-               bool AccessAllowed = true;
++               bool listing_allowed = true;
++               bool reading_allowed = true;
+                bool Identified = false;
+                //
+                Config::Directory::item * const pItem = &(*pRet)[Ndx];
+@@ -191,7 +192,12 @@ public:
+                   if( !strchr( XRights, CFG_RIGHTS_TOKEN_L ) )
+                   {
+                      // Not found -> listing access denied.
+-                     AccessAllowed = false;
++                     listing_allowed = false;
++                  }
++                  if( !strchr( XRights, CFG_RIGHTS_TOKEN_R ) )
++                  {
++                     // Not found -> reading access denied.
++                     reading_allowed = false;
+                   }
+                   pItem->Desc.Rights = CORBA::string_dup( XRights );
+                }
+@@ -355,10 +361,20 @@ public:
+                            SecondaryRuntime_HERE, SCD "get -  Type=TXT"
+                         );
+                      pItem->Type = Config::Directory::CFG_TEXT;
+-                     pItem->Value.textValue
+-                     (
+-                        CORBA::string_dup( Text->c_str() )
+-                     );
++                     if( reading_allowed )
++                     {
++                        pItem->Value.textValue
++                        (
++                           CORBA::string_dup( Text->c_str() )
++                        );
++                     }
++                     else
++                     {
++                        pItem->Value.textValue
++                        (
++                           CORBA::string_dup( "***" )
++                        );
++                     }
+                   }
+                }
+                //
+@@ -408,7 +424,7 @@ public:
+                }
+                //
+                ++I;
+-               if( AccessAllowed && Identified )
++               if( listing_allowed && Identified )
+                {
+                   // Item is to be reported.
+                   // Increment vector index.
+@@ -416,12 +432,12 @@ public:
+                }
+                else
+                {
+-                  if( !AccessAllowed )
++                  if( !listing_allowed )
+                   {
+                      writeTrace
+                         (
+                            SecondaryRuntime_HERE,
+-                           SCD "get -  Access not allowed - Ignored"
++                           SCD "get -  listing not allowed - Ignored"
+                         );
+                   }
+                   if( !Identified )
+-- 
+2.41.0.windows.1
+

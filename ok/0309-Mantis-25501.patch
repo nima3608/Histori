@@ -1,0 +1,1733 @@
+From 62d44efec1e4e7c1aaf8f283fa0f787bfcab1651 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 14 Jan 2013 08:22:28 +0000
+Subject: [PATCH 0309/1000] Mantis 25501
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@461 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/LogService/inc/mlog.h          |   6 +-
+ .../Massai/cpp/LogService/inc/trapListener.h  |   4 +
+ .../Massai/cpp/LogService/makefile.mak        |  76 ++++
+ .../Massai/cpp/LogService/src/mlog.cpp        |  78 +++-
+ .../Massai/cpp/LogService/src/mlogtest.cpp    |  10 +
+ .../Massai/cpp/alert/inc/Deferred.hpp         | 126 +++++++
+ .../Massai/cpp/alert/inc/alertHelper.h        |  39 ++
+ .../Massai/cpp/alert/inc/alerts_def.h         |  25 ++
+ .../Massai/cpp/alert/inc/mdciAlert.h          |  44 +++
+ SelfServiceCommon/Massai/cpp/alert/make.dep   |  47 +++
+ SelfServiceCommon/Massai/cpp/alert/make.files |   4 +
+ .../Massai/cpp/alert/make.ofiles              |  92 +++++
+ .../Massai/cpp/alert/makefile.mak             |  92 +++++
+ .../Massai/cpp/alert/res/alerts.rc            |  49 +++
+ .../Massai/cpp/alert/src/Deferred.cpp         | 189 ++++++++++
+ .../Massai/cpp/alert/src/alert.cpp            | 159 ++++++++
+ .../Massai/cpp/alert/src/mdciAlert.cpp        | 357 ++++++++++++++++++
+ .../Massai/idl/Massai/makefile.mak            |   3 +-
+ 18 files changed, 1387 insertions(+), 13 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/inc/Deferred.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/inc/alertHelper.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/inc/alerts_def.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/inc/mdciAlert.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/make.dep
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/make.files
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/make.ofiles
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/makefile.mak
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/res/alerts.rc
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/src/Deferred.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/src/alert.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/alert/src/mdciAlert.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/mlog.h b/SelfServiceCommon/Massai/cpp/LogService/inc/mlog.h
+index 0d523e21..16564caf 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/mlog.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/mlog.h
+@@ -10,11 +10,13 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#include "trapListener.h"
+ #if defined(SHOW_INCLUDE_FILES)
+ #pragma message("including: " __FILE__)
+ #endif
+ 
++#include "trapListener.h"
++#include "text/mArgScan.hpp"
++
+ // defines for trap handling
+ 
+ //#define ALWAYS_LOG_REMOTE_ALERT
+@@ -23,7 +25,7 @@
+ 
+ namespace mLog
+ {
+-  void runService(bool fSNMPDll);
++  void runService( argScan & args, bool fSNMPDll );
+   void startService();
+   void stopService();
+   void addListener(trapListener* pTl);
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/trapListener.h b/SelfServiceCommon/Massai/cpp/LogService/inc/trapListener.h
+index 137748c3..86145771 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/trapListener.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/trapListener.h
+@@ -34,6 +34,10 @@ public:
+   {
+   };
+ 
++  virtual ~trapListener()
++  {
++  }
++  
+   bool isTarget(configSNMP::TRAPTARGET_ t)
+   {
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+index c8f1e812..c0a1dd55 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+@@ -48,6 +48,18 @@ STDLINKLIBS = \
+     $(SYS_ADVAPI32) \
+     $(SYS_ACETAO)
+ 
++STATUSMONITORXOBJS = \
++    $(_OBJ)\dbCounter.obj \
++    $(_OBJ)\PlatformStatus.obj \
++    $(_OBJ)\PlatformStatus_skel.obj \
++    $(_OBJ)\mStaMIf.obj \
++    $(_OBJ)\mStaMIfCorbaC.obj \
++    $(_OBJ)\mStaMIfDispatch.obj \
++    $(_OBJ)\mStaMIfMLog.obj \
++    $(_OBJ)\mStaMIfCorbaS.obj \
++    $(_OBJ)\sqlite3.obj
++
++
+ ######################################################################
+ 
+ MY_DLL1 = \
+@@ -101,6 +113,7 @@ MY_DLL2_OBJS = \
+     $(_OBJ)\repeatSNMP.obj \
+     $(_OBJ)\ServerLService.obj \
+     $(_OBJ)\ServerLService_skel.obj \
++    $(STATUSMONITORXOBJS) \
+     $(_OBJ)\svclog.obj \
+     $(_OBJ)\traceMap.obj \
+     $(_OBJ)\trapEvent.obj
+@@ -145,6 +158,7 @@ MY_BIN1_OBJS = \
+     $(_OBJ)\repeatSNMP.obj \
+     $(_OBJ)\ServerLService.obj \
+     $(_OBJ)\ServerLService_skel.obj \
++    $(STATUSMONITORXOBJS) \
+     $(_OBJ)\svclog.obj \
+     $(_OBJ)\traceMap.obj \
+     $(_OBJ)\trapEvent.obj
+@@ -311,6 +325,68 @@ MY_BIN8_RES = \
+ 
+ ######################################################################
+ 
++MY_BIN9 = \
++    $(_BIN)\TestStatusMonitorServant.exe
++
++MY_BIN9_OBJS = \
++    $(_OBJ)\PlatformStatus.obj \
++    $(_OBJ)\PlatformStatus_skel.obj \
++    $(_OBJ)\mStaMIf.obj \
++    $(_OBJ)\mStaMIfCorbaS.obj \
++    $(_OBJ)\TestStatusMonitorServant.obj
++
++MY_BIN9_USER_LIBS = \
++    $(STDUSERLIBS) \
++    $(LIB_ALERTS) \
++    $(LIB_ASSO)
++
++MY_BIN9_LINKLIBS = \
++    $(STDLINKLIBS)
++
++######################################################################
++
++MY_BIN10 = \
++    $(_BIN)\TestStatusMonitorClient.exe
++
++MY_BIN10_OBJS = \
++    $(_OBJ)\PlatformStatus.obj \
++    $(_OBJ)\mStaMIf.obj \
++    $(_OBJ)\mStaMIfCorbaC.obj \
++    $(_OBJ)\TestStatusMonitorClient.obj
++
++MY_BIN10_USER_LIBS = \
++    $(STDUSERLIBS) \
++    $(LIB_ALERTS) \
++    $(LIB_ASSO)
++
++MY_BIN10_LINKLIBS = \
++    $(STDLINKLIBS)
++
++MY_BIN10_GEN_DIRS = \
++    $(GEN_MASSAI_COMMON)
++
++######################################################################
++
++MY_BIN11 = \
++    $(_BIN)\SQL.exe
++
++MY_BIN11_OBJS = \
++    $(_OBJ)\shell.obj \
++    $(_OBJ)\sqlite3.obj
++
++MY_BIN11_USER_LIBS = \
++    $(STDUSERLIBS) \
++    $(LIB_ALERTS) \
++    $(LIB_ASSO)
++
++MY_BIN11_LINKLIBS = \
++    $(STDLINKLIBS)
++
++MY_BIN11_GEN_DIRS = \
++    $(GEN_MASSAI_COMMON)
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+ 
+ $(_OBJ)\eventConfiguration.obj: $(_LOCAL_GEN)\eventConfiguration.cpp
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+index c68c54d0..6fa4b39b 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+@@ -12,11 +12,11 @@
+ 
+ #pragma warning(disable: 4786)
+ 
+-
+ #include <fstream>
+ #include <list>
+ #include <queue>
+ 
++
+ #include "massaidll/BASE_OS.h"
+ #include "massaidll/mThread.hpp"
+ 
+@@ -24,7 +24,10 @@
+ #include "mLog.h"
+ 
+ #include "massaiCorba/corbasrvr.h"
++
+ #include "Tools/mListenMDCI.hpp"
++
++
+ #include "logservice.h"
+ #include "logservice_skel.h"
+ #include "alertHelper.h"
+@@ -43,6 +46,7 @@
+ #ifndef __FUNCTION__
+ #define __FUNCTION__  ""
+ #endif
++
+ #include "trc/TraceClt.h"
+ 
+ //#include "proview.h"
+@@ -50,8 +54,10 @@
+ #include "statLog.h"
+ #include "platLog.h"
+ #include "svcLog.h"
++#include "mStaMIfMLog.hpp"
+ #include "repeatSNMP.h"
+ 
++
+ #include "Tools/VERSION.H"
+ 
+ #include "logging/alertDef.h"
+@@ -61,6 +67,7 @@
+ #include "tools/TraceClient.h"
+ #include "systools/mSysException.hpp"
+ 
++#include <iostream>
+ 
+ VERSION_ID_DT( 01, 01, 01 );
+ // history:
+@@ -96,7 +103,8 @@ class serviceThread : public mThread
+ private:
+   long function()
+   {
+-    mLog::runService(true);
++    argScan args( 0, static_cast<char **>( 0 ) );
++    mLog::runService( args, true );
+     return (-1);
+   }
+ 
+@@ -210,9 +218,9 @@ private:
+           }
+ 
+ #else
+-		  std::string pRData;
++                  std::string pRData;
+           pCmd->data >>= pRData;
+-			mLog::trapToListener(trapEvent(pRData, receptionTime));
++                        mLog::trapToListener(trapEvent(pRData, receptionTime));
+ #endif
+         }
+         break;
+@@ -349,7 +357,7 @@ public:
+   eventDispatcher():
+     m_stop(false)
+   {
+-    queue.size(100);
++    queue.size(1000);
+     run();
+   }
+ 
+@@ -464,7 +472,7 @@ void mLog::stopService()
+ //
+ //---------------------------------------------------------------------------
+ 
+-void mLog::runService(bool fSNMPDll = false)
++void mLog::runService( argScan & args, bool fSNMPDll = false)
+ {
+   Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
+   try
+@@ -497,7 +505,12 @@ void mLog::runService(bool fSNMPDll = false)
+     hostName[0]=0;
+   }
+ 
++#if 1
++  // Auskommentiert - macht Probleme beim Test
+   statisticsLog* pStatisticsLog = new statisticsLog(hostName);
++#else
++  statisticsLog* pStatisticsLog = 0;
++#endif
+ 
+   SNMPRepeater* pSNMPRepeater = NULL;
+   try
+@@ -512,6 +525,17 @@ void mLog::runService(bool fSNMPDll = false)
+ 
+   svcLog* pServiceAppLog = new svcLog(hostName);
+ 
++  char const * const monitor_servant_ior = args.option( "MONITORSERVANT" );
++  char const * const monitor_target_ior = args.option( "MONITORTARGET" );
++  mStaMIf::dispatch stamif_dispatcher( monitor_servant_ior, monitor_target_ior );
++  trapListener * const pStaMIfLog = monitor_target_ior ?
++                                    mStaMIfMLogCreate
++                                       (
++                                          hostName,
++                                          stamif_dispatcher
++                                       ) :
++                                    0;
++
+   pEventDispatcher = new eventDispatcher();
+ 
+   char szName [128] = "";
+@@ -521,10 +545,30 @@ void mLog::runService(bool fSNMPDll = false)
+     writeTrace(BasicRuntime_HERE, "runService()...");
+ 
+     mLogService srvntClass;
++    corbaServantEx<mLogService> * servant = 0;
++    char const * const servant_port = args.argument( 1 );
++    if( servant_port )
++    {
++       servant = new corbaServantEx<mLogService>
++          (
++            lThreads,
++            srvntClass,
++            "LogService",
++            atoi( servant_port )
++          );
++       writeTrace(BasicRuntime_HERE, "LogService servant (port=%s) created...", servant_port );
++    }
++    else
++    {
++       servant = new corbaServantEx<mLogService>
++          (
++            lThreads,
++            srvntClass,
++            "LogService"
++          );
++       writeTrace(BasicRuntime_HERE, "LogService servant (default port) created...");
++    }
+ 
+-    corbaServantEx<mLogService> srvnt1(lThreads,srvntClass,"LogService");
+-
+-    writeTrace(BasicRuntime_HERE, "LogService servant created...");
+ 
+     mlogServiceInitialized = true;
+ 
+@@ -557,6 +601,7 @@ void mLog::runService(bool fSNMPDll = false)
+ 
+     writeTrace(BasicRuntime_HERE, "runService(), done.");
+     pEventDispatcher->stopDispatching();
++    delete servant;
+   }
+   catch(char *se)
+   {
+@@ -595,6 +640,9 @@ void mLog::runService(bool fSNMPDll = false)
+ 
+   if(pPlatformLog)
+     delete pPlatformLog;
++
++  delete pStaMIfLog;
++
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -611,6 +659,16 @@ void mLog::runService(bool fSNMPDll = false)
+ 
+ int main(int argc, char ** argv)
+ {
++  argScan args( argc, argv );
++  if( args.help() )
++  {
++     std::cout
++         << "logservice [<logservice-port>]"
++            " [-monitorservant:<status-servant-port>/<status-servant-name>]"
++            " [-monitortarget:[<status-target-host>:]<status-target-port>/<status-target-name>]"
++         << std::endl;
++     return 0;
++  }
+   MASSAI::trace::TraceClient trc;
+   openTrace("logging");
+   standardException guard;
+@@ -618,7 +676,7 @@ int main(int argc, char ** argv)
+   {
+     mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_NORMAL, &terminateEvent, &trc);
+ 
+-    mLog::runService();
++    mLog::runService( args );
+ 
+     configSNMP::cleanUp();
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/mlogtest.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/mlogtest.cpp
+index 5f07090f..f6e1f1a5 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/mlogtest.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/mlogtest.cpp
+@@ -280,6 +280,7 @@ int readTrapLog(const std::string fileName)
+ 
+     std::cout << "[" << szLine << "]" << std::endl;
+ 
++#if 0
+     uint_parser<unsigned, 10, 4, 4> year_p;
+     uint_parser<unsigned, 10, 2, 2> twoDigit_p;
+ 
+@@ -329,6 +330,15 @@ int readTrapLog(const std::string fileName)
+ //      std::cin.getline(&dummy, 1);
+     } else
+       std::cout << "NOK" << std::endl;
++#else
++    std::string const line = szLine;
++    std::string::size_type const lastsemi = line.rfind( ';' );
++    if( lastsemi != std::string::npos )
++    {
++      std::string const data = line.substr( lastsemi + 1 );
++      processEvent( data );
++    }
++#endif
+   }
+   return 0;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/alert/inc/Deferred.hpp b/SelfServiceCommon/Massai/cpp/alert/inc/Deferred.hpp
+new file mode 100644
+index 00000000..94fbe3eb
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/inc/Deferred.hpp
+@@ -0,0 +1,126 @@
++/**
++ **************************************************************************
++ *
++ * @file Deferred.hpp
++ *
++ * Defines classes Deferred::item and Deferred::queue.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2007, MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef DEFERRED_HPP
++#define DEFERRED_HPP
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++
++
++namespace Deferred
++{
++
++   /**
++    ***********************************************************************
++    *
++    * Deferred items must be derived from this class. A method/function
++    * call can be coded into an object of that derived class.
++    * With the method queue::call() the object is given to the deferrer,
++    * which in turn will call queue::callNow() in a different thread
++    * to actually execute the call.
++    *
++    ***********************************************************************
++   **/
++   class item
++   {
++   public:
++      item();
++      virtual ~item();
++   };
++
++   /**
++    ***********************************************************************
++    *
++    * Deferrer class.
++    *
++    ***********************************************************************
++   **/
++   class queue
++   {
++
++      //! Implementation class forward declaration.
++      class impl;
++
++      //! Implemenation handle.
++      impl * const M_Impl;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++      **/
++      queue( unsigned Size );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~queue();
++
++      /**
++       *
++       * Queue an item for execution.
++       *
++       * @return: 0     Success.
++       *
++      **/
++      int enter( item * Item );
++
++      /**
++       *
++       * Virtual method, which is to be overloaded to implement the actual
++       * (synchroneous) execution.
++       *
++      **/
++      virtual void execute( item * Item ) const = 0;
++
++   private:
++
++      /**
++       *
++       * Default constructor - intentionally not implemented.
++       *
++      **/
++      queue();
++
++      /**
++       *
++       * Copy constructor - intentionally not implemented.
++       *
++      **/
++      queue( queue const & Src );
++
++      /**
++       *
++       * Assignment - intentionally not implemented.
++       *
++      **/
++      queue & operator=( queue const & Src );
++
++   };
++
++}
++
++
++#endif // #ifndef DEFERRED_HPP
++/**
++ **************************************************************************
++ *
++ * End of file.
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/alert/inc/alertHelper.h b/SelfServiceCommon/Massai/cpp/alert/inc/alertHelper.h
+new file mode 100644
+index 00000000..df46ca08
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/inc/alertHelper.h
+@@ -0,0 +1,39 @@
++/**
++ **************************************************************************
++ *
++ * @file alertHelper.h
++ *
++ * Helper (conversion, etc.) function, operators for alert class
++ *
++ * @author MaK
++ *
++ * Copyright (c) 2003 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#ifndef ALERTHELPER_H_
++#define ALERTHELPER_H_
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++
++/**
++ *************************************************************************
++ * export from dll...
++**/
++#define DLLEXPORT   __declspec( dllexport )
++
++DLLEXPORT
++void operator << (logService::genericAlert& alert, const alert::eventData& ev);
++
++DLLEXPORT
++void operator << (logService::genericAlert& alert, const alert::dataVector& evData);
++
++DLLEXPORT
++void operator >> (const logService::genericAlert& alert, alert::eventData& ev);
++
++DLLEXPORT
++void operator >> (const logService::genericAlert& alert, alert::dataVector& evData);
++
++#endif //ALERTHELPER_H_
+diff --git a/SelfServiceCommon/Massai/cpp/alert/inc/alerts_def.h b/SelfServiceCommon/Massai/cpp/alert/inc/alerts_def.h
+new file mode 100644
+index 00000000..f8c16dc8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/inc/alerts_def.h
+@@ -0,0 +1,25 @@
++//!
++//! @file alerts_def.h
++//!
++//! Alerts DLL definitions.
++//!
++//
++//!
++// #define FILE_VER_BIN     1,0,0,0
++// #define FILE_VER_STR     "FileVersion", "1.0.0.0\0"
++//
++//! @version 1.0.1
++//! @date    16.Apr.2007
++//! @author  JK
++//! @par     Change:
++//! - Guaranteee non-blocking alert send calls
++#define FILE_VER_BIN     1,0,1,0
++#define FILE_VER_STR     "FileVersion", "1.0.1.0\0"
++//
++
++#define FILEDESCRIPTION  "FileDescription"  ,"Alerts dll\0"
++#define INTERNALNAME     "InternalName"     ,"Alerts dll\0"
++#define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
++#define ORIGINALFILENAME "OriginalFilename" ,"alerts.dll\0"
++
++
+diff --git a/SelfServiceCommon/Massai/cpp/alert/inc/mdciAlert.h b/SelfServiceCommon/Massai/cpp/alert/inc/mdciAlert.h
+new file mode 100644
+index 00000000..4d0003f4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/inc/mdciAlert.h
+@@ -0,0 +1,44 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mdciAlert.h
++//
++//  purpose:    MDCI Alert to Logservice implementation
++//
++//  date:       01.04.03
++//
++//  author:     Dr. Materna GmbH (MaK)
++//
++//---------------------------------------------------------------------------
++
++#ifndef MDCIALERT_H_
++#define MDCIALERT_H_
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++
++#include "logservice.h"
++#include "logging/alert.h"
++#include "massaidll/mutex.hpp"
++
++
++class mdciAlert
++{
++  logService::Handler_ptr pHandler;
++  std::string client;
++  std::string moduleID;
++
++  mutexSemaphore mtxs;
++
++  void reconnect();
++
++public:
++
++  mdciAlert(const std::string& Client, const std::string& ModuleID);
++  virtual ~mdciAlert();
++
++  void send(const alert::eventData& ev, const alert::dataVector& evData);
++};
++
++#endif //MDCIALERT_H_
+diff --git a/SelfServiceCommon/Massai/cpp/alert/make.dep b/SelfServiceCommon/Massai/cpp/alert/make.dep
+new file mode 100644
+index 00000000..649ad8fc
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/make.dep
+@@ -0,0 +1,47 @@
++# Do not edit this file! It is automatically generated. Changes will be lost.
++
++out/Deferred.obj: \
++	src/Deferred.cpp \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/fsm/mFMTQueue.hpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/mEventSem.hpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/mMutexSem.hpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/matThread.hpp" \
++	"inc/Deferred.hpp"
++
++out/alert.obj: \
++	src/alert.cpp \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/logservice.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/logservicec.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdci.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdcic.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/alert.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/massaidll/mutex.hpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/string_threadsafe/STRING" \
++	"inc/alertHelper.h" \
++	"inc/mdciAlert.h"
++
++out/mdciAlert.obj: \
++	src/mdciAlert.cpp \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/logservice.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/logservicec.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdci.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdci_skel.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdci_skel_t.cpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdci_skel_t.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdcic.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdcis.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/mdcis_t.i" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/corbaclnt.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/alert.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/massaidll/mutex.hpp" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/string_threadsafe/STRING" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/trace.h" \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/trace.h" \
++	"inc/Deferred.hpp" \
++	"inc/alertHelper.h" \
++	"inc/mdciAlert.h"
++
++out/alerts.res: \
++	res/alerts.rc \
++	"C:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/Global_def.h" \
++	"inc/alerts_def.h"
+diff --git a/SelfServiceCommon/Massai/cpp/alert/make.files b/SelfServiceCommon/Massai/cpp/alert/make.files
+new file mode 100644
+index 00000000..d7a3fa21
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/make.files
+@@ -0,0 +1,4 @@
++res/alerts.rc
++src/Deferred.cpp
++src/alert.cpp
++src/mdciAlert.cpp
+diff --git a/SelfServiceCommon/Massai/cpp/alert/make.ofiles b/SelfServiceCommon/Massai/cpp/alert/make.ofiles
+new file mode 100644
+index 00000000..47942b29
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/make.ofiles
+@@ -0,0 +1,92 @@
++# Do not edit this file! It is automatically generated. Changes will be lost.
++
++OBJECTS = \
++	out/Deferred.obj \
++	out/alert.obj \
++	out/mdciAlert.obj
++
++RESOURCES = \
++	out/alerts.res
++
++LINTS = \
++	out/Deferred.lint \
++	out/alert.lint \
++	out/mdciAlert.lint
++
++INCLUDEPATH = \
++	-I \
++	"-Ires/" \
++	"-Isrc/" \
++	"-Iinc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/CussIF/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/initIDL/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/textIDL/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCUSS/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/DevicesCommon/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/DeviceSimulation/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServicePlatform/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/string_threadsafe/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/AEAParser/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/asso/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/billing/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/cardScanner/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/cfgclnt/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/cuss/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/cxComm/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/Device/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/graphic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/logging/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/mail/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/massaiCorba/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/massaidll/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/massaiTools/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/mcrypt/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/serialCon/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/statistics/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/string_threadsafe/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/systools/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/text/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/Tools/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/trc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/XmlWriter/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/inc/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/asso/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/fsm/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/massaiCorba/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/massaidll/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceCommon/Interfaces/generic/tools/" \
++	"-IC:/Users/jkreierh/Dev/Svn/SelfServicePlatform/trunk_VC6/SelfServiceBuild/Build/output/idl/"
+diff --git a/SelfServiceCommon/Massai/cpp/alert/makefile.mak b/SelfServiceCommon/Massai/cpp/alert/makefile.mak
+new file mode 100644
+index 00000000..bf7aa0c0
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/makefile.mak
+@@ -0,0 +1,92 @@
++######################################################################
++#
++# /vob/SelfServiceCommon/Massai/cpp/LogServiceEx/makefile.mak
++#
++######################################################################
++
++!include $(BUILDROOT)\Build\cpp\makefile.common.mak
++
++MY_CFLAGS = \
++    -Zm200 \
++    -D_ALERTS_DLL_CREATION_ \
++    $(INC_ACETAO) \
++    $(INC_MFC)    \
++    $(INC_SPIRIT) \
++    $(INC_BOOST) \
++    $(INC_CURL) \
++    $(INC_LIBXSLT) \
++    $(INC_LIBXML) \
++    $(INC_ICONV) \
++    $(INC_INTERFACES) \
++    -I$(_GEN)
++
++MY_LDFLAGS = \
++    -nod:libcmt
++
++STATLOG_OBJS = \
++    $(_OBJ)\component.obj \
++    $(_OBJ)\componentList.obj \
++    $(_OBJ)\componentTable.obj \
++    $(_OBJ)\compStateLog.obj \
++    $(_OBJ)\statLog.obj \
++    $(_OBJ)\distributor.obj \
++    $(_OBJ)\tcpcomm.obj \
++    $(_OBJ)\statusCriteria.obj \
++    $(_OBJ)\eventConfiguration.obj
++
++STDUSERLIBS= \
++    $(LIB_MASSAI) \
++    $(LIB_MCORBA) \
++    $(LIB_MCFGCLNT) \
++    $(LIB_CURL) \
++    $(LIB_LIBXSLT) \
++    $(LIB_LIBXML) \
++    $(LIB_ICONV) \
++    $(LIB_TRACE)
++
++STDLINKLIBS = \
++    $(SYS_ADVAPI32) \
++    $(SYS_ACETAO)
++
++######################################################################
++
++MY_DLL1 = \
++    $(DLL_ALERTS)
++
++MY_DLL1_OBJS = \
++    $(_OBJ)\alert.obj \
++    $(_OBJ)\Deferred.obj \
++    $(_OBJ)\logservice.obj \
++    $(_OBJ)\logservice_skel.obj \
++    $(_OBJ)\mdci.obj \
++    $(_OBJ)\mdci_skel.obj \
++    $(_OBJ)\mdciAlert.obj
++
++MY_DLL1_USER_LIBS = \
++    $(STDUSERLIBS) \
++    $(LIB_SYSTOOLS)
++
++MY_DLL1_LINKLIBS = \
++    $(STDLINKLIBS) 
++
++MY_DLL1_RES = \
++    $(_OBJ)\alerts.res
++
++MY_DLL1_GEN_DIRS = \
++    $(GEN_MASSAI_COMMON)
++
++######################################################################
++
++!include $(BUILDROOT)\Build\cpp\makefile.rules.mak
++
++$(_OBJ)\eventConfiguration.obj: $(_LOCAL_GEN)\eventConfiguration.cpp
++
++.SUFFIXES : .txt
++
++# txt => cpp
++{.}.txt{$(_LOCAL_GEN)}.cpp:
++    -mkdir $(_LOCAL_GEN)
++    echo #include "eventConfiguration.h" > $(_LOCAL_GEN)\$(@B).cpp 
++    echo void initializeEventConfiguration(EventDefinition^& def) { >> $(_LOCAL_GEN)\$(@B).cpp 
++    sed -f $(_SRC)\convert.sed $< >> $(_LOCAL_GEN)\$(@B).cpp 
++    echo } >> $(_LOCAL_GEN)\$(@B).cpp
+diff --git a/SelfServiceCommon/Massai/cpp/alert/res/alerts.rc b/SelfServiceCommon/Massai/cpp/alert/res/alerts.rc
+new file mode 100644
+index 00000000..2d54422a
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/res/alerts.rc
+@@ -0,0 +1,49 @@
++//
++// alerts.rc
++//
++#include "Global_def.h"
++#include "alerts_def.h"
++
++#include "winver.h"
++
++
++
++VS_VERSION_INFO VERSIONINFO
++ FILEVERSION FILE_VER_BIN
++ PRODUCTVERSION PRODUCT_VER_BIN
++ FILEFLAGSMASK 0x3fL
++#ifdef _DEBUG
++ FILEFLAGS 0x1L
++#else
++ FILEFLAGS 0x0L
++#endif
++ FILEOS 0x40004L
++ FILETYPE 0x2L
++ FILESUBTYPE 0x0L
++BEGIN
++    BLOCK "StringFileInfo"
++    BEGIN
++        BLOCK "040704b0"
++        BEGIN
++            VALUE COMPANY
++            VALUE FILEDESCRIPTION
++            VALUE FILE_VER_STR
++            VALUE INTERNALNAME
++            VALUE COPYRIGHT
++            VALUE LEGALTRADEMARKS
++            VALUE ORIGINALFILENAME
++            VALUE PRODUCT
++            VALUE PRODUCT_VER_STR
++        END
++    END
++    BLOCK "VarFileInfo"
++    BEGIN
++        VALUE "Translation", 0x407, 1200
++    END
++END
++
++
++
++//
++// End of file
++//
+diff --git a/SelfServiceCommon/Massai/cpp/alert/src/Deferred.cpp b/SelfServiceCommon/Massai/cpp/alert/src/Deferred.cpp
+new file mode 100644
+index 00000000..43a65b5f
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/src/Deferred.cpp
+@@ -0,0 +1,189 @@
++/**
++ **************************************************************************
++ *
++ * @file Deferred.cpp
++ *
++ * Contains classes Deferred::item and Deferred::queue
++ * implementations.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2007 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "Deferred.hpp"
++
++#include "systools/matThread.hpp"
++#include "fsm/mfMTQueue.hpp"
++
++
++
++/**
++ **************************************************************************
++ *
++ * Method implementation, see "Deferred.hpp".
++ *
++ **************************************************************************
++**/
++Deferred::item::item()
++{
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * Method implementation, see "Deferred.hpp".
++ *
++ **************************************************************************
++**/
++Deferred::item::~item()
++{
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * Implementation class.
++ *
++ **************************************************************************
++**/
++class Deferred::queue::impl :
++   public matThread
++{
++
++   //! Deferrer queue.
++   Materna::MSSD::fmtQueue<item *>              M_Q;
++
++   //! A link to the root class.
++   Deferred::queue const *                      M_Root;
++
++   //! Thread function.
++   void function()
++   {
++      // Eternally ...
++      for(;;)
++      {
++         item * RItem = 0;
++         // ... read the queue
++         M_Q.read( RItem );
++         if( RItem )
++         {
++            try
++            {
++               // ... and try to call the deferred method.
++               M_Root->execute( RItem );
++            }
++            catch( ... )
++            {
++            }
++         }
++      }
++   }
++
++public:
++
++   /**
++    *
++    * Default constructor.
++    *
++   **/
++   impl( unsigned Size ) :
++      matThread(),
++      M_Q( Size ),
++      M_Root( 0 )
++   {
++      // Start the thread.
++      start();
++   }
++
++   /**
++    *
++    * Implements the Deferred::queue::enter() method.
++    *
++   **/
++   int enter( item * Item )
++   {
++      switch( M_Q.write( Item ) )
++      {
++      case Materna::MSSD::FMTQ_OK:
++         return 0;
++      default:
++         return 1;
++      }
++   }
++
++   /**
++    *
++    * Setup the link the root class.
++    *
++   **/
++   void setRoot( Deferred::queue const * Root )
++   {
++      M_Root = Root;
++   }
++
++};
++
++
++
++/**
++ **************************************************************************
++ *
++ * Method implementation, see "Deferred.hpp".
++ *
++ **************************************************************************
++**/
++Deferred::queue::queue( unsigned Size ) :
++   M_Impl( new impl( Size ) )
++{
++   M_Impl->setRoot( this );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * Method implementation, see "Deferred.hpp".
++ *
++ **************************************************************************
++**/
++Deferred::queue::~queue()
++{
++   try
++   {
++      delete M_Impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * Method implementation, see "Deferred.hpp".
++ *
++ **************************************************************************
++**/
++int Deferred::queue::enter( item * Item )
++{
++   return M_Impl->enter( Item );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/alert/src/alert.cpp b/SelfServiceCommon/Massai/cpp/alert/src/alert.cpp
+new file mode 100644
+index 00000000..a528095e
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/src/alert.cpp
+@@ -0,0 +1,159 @@
++/**
++ **************************************************************************
++ *
++ * @file alert.cpp
++ *
++ *
++ *
++ * @author MaK
++ *
++ * Copyright (c) 2003 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// should be changed to trace ....
++#ifndef NO_COUT_MESSAGES
++#define NO_COUT_MESSAGES
++#endif
++
++#ifndef NO_COUT_MESSAGES
++#include <iostream>
++#endif
++
++#include "logging/alert.h"
++#include "mdciAlert.h"
++#include "alertHelper.h"
++
++
++// changed git 20.5.03
++/*
++class exceptionData
++{
++  std::string* pSData;
++public:
++  exceptionData(const std::string& d)
++  {
++	  pSData = new std::string(d);
++  }
++
++  ~exceptionData()
++  {
++	  if(pSData)
++	  {
++		  delete pSData;
++  	  }
++  }
++
++  const std::string& toString()
++  {
++    return *pSData;
++  }
++};
++*/
++
++DLLEXPORT
++alertException::alertException(const std::string& s)
++{
++  // changed git 20.5.03
++  //pData = new exceptionData(s);
++  sData = s;
++}
++
++DLLEXPORT
++alertException::~alertException()
++{
++// changed git 20.5.03
++/*  if(pData)
++  {
++    delete pData;
++    pData = 0;
++  }
++*/
++}
++
++DLLEXPORT
++const std::string& alertException::toString() const
++{
++  //return pData->toString();
++  return sData;
++}
++
++alert::alert(const std::string& moduleID)
++ : pMdciAlert(0)
++{
++  try
++  {
++    pMdciAlert = new mdciAlert("LogService", moduleID);
++#ifndef NO_COUT_MESSAGES
++    std::cout << "Created alert [" << moduleID << "]" << std::endl;
++#endif
++  } catch(char *pszException)
++  {
++#ifndef NO_COUT_MESSAGES
++    std::cout << "Error creating alert [" << pszException << "]" << std::endl;
++#endif
++    throw alertException(pszException);
++  }
++  catch (std::exception e)
++  {
++#ifndef NO_COUT_MESSAGES
++     std::cout << "Error creating alert [" << e.ToString().c_str() << "]" << std::endl;
++#endif
++    throw alertException("No corba connection to logservice");
++  }
++}
++
++
++void alert::send(const eventData& e)
++{
++  dataVector dv;
++  send(e, dv);
++}
++
++void alert::send(const eventData& e, const dataVector& eData)
++{
++#ifndef NO_COUT_MESSAGES
++  std::cout << "Send " << ((e.getType()==alert::eventData::T_LONG)?"numeric":"string") << " Alert [";
++
++  if(e.getType()==alert::eventData::T_LONG)
++    std::cout << e.getLValue();
++  else
++    std::cout << e.getSValue();
++
++  std::cout << "]..." << std::endl;
++
++  if(eData.size() == 0)
++    std::cout << "Alert data: none" << std::endl;
++  else
++    for(dataVector::const_iterator it = eData.begin(); it != eData.end(); ++it)
++    {
++      std::cout << "Alert data: (" << ((it->getType()==alert::eventData::T_LONG)?"numeric":"string") << ") [";
++      if(it->getType()==alert::eventData::T_LONG)
++        std::cout << it->getLValue();
++      else
++        std::cout << it->getSValue();
++      std::cout << "]" << std::endl;
++    }
++#endif
++
++  try
++  {
++    pMdciAlert->send(e, eData);
++#ifndef NO_COUT_MESSAGES
++    std::cout << "send done." << std::endl;
++#endif
++  } catch(char *pszException)
++  {
++#ifndef NO_COUT_MESSAGES
++    std::cout << "send error [" << pszException << "]" << std::endl;
++#endif
++    throw alertException(pszException);
++  } catch(const alertException& e)
++  {
++#ifndef NO_COUT_MESSAGES
++    std::cout << "send error [" << e.toString() << "]" << std::endl;
++#endif
++    throw e;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/alert/src/mdciAlert.cpp b/SelfServiceCommon/Massai/cpp/alert/src/mdciAlert.cpp
+new file mode 100644
+index 00000000..be3e0d10
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/alert/src/mdciAlert.cpp
+@@ -0,0 +1,357 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mdciAlert.cpp
++//
++//  purpose:    MDCI Alert to Logservice implementation
++//
++//  date:       01.04.03
++//
++//  author:     Dr. Materna GmbH (MaK)
++//
++//---------------------------------------------------------------------------
++
++
++// Undefine this to go back to non-deferrred alert calls.
++#define DEFERRED_SEND
++
++
++#ifdef DEFERRED_SEND
++#include "Deferred.hpp"
++#endif
++
++#include <sstream>
++
++#include "massaiCorba/corbaclnt.h"
++
++#include "mdci_skel.h"
++#include "mdciAlert.h"
++#include "logging/alert.h"
++#include "alertHelper.h"
++#include "trace.h"
++
++#define LAST_E_INTERVAL (5*1024)
++
++static corbaClient <logService::Handler> * pCorbaClient = NULL;
++static long lRefCnt = 0;
++static long lRequestID = 0;
++
++static long lastErrorTime;
++
++
++#ifdef DEFERRED_SEND
++
++class deferred_Item :
++   public Deferred::item
++{
++
++   logService::Handler_ptr      M_Handler;
++
++   CORBA::Any                   M_Command;
++
++public:
++
++   deferred_Item( logService::Handler_ptr Handler, CORBA::Any const & Command ) :
++      Deferred::item(),
++      M_Handler( Handler->_duplicate( Handler ) ),
++      M_Command( Command )
++   {
++   }
++
++   void exec() const
++   {
++      M_Handler->exec( M_Command );
++   }
++
++private:
++
++   deferred_Item();
++
++};
++
++class deferred_Queue :
++   public Deferred::queue
++{
++
++public:
++
++   deferred_Queue() :
++      Deferred::queue( 10 )
++   {
++   }
++
++   void execute( Deferred::item * Item ) const
++   {
++      try
++      {
++         deferred_Item * Item2 =
++            dynamic_cast<deferred_Item *>( Item );
++         if( Item2 )
++         {
++            Item2->exec();
++            delete Item2;
++         }
++      }
++      catch( ... )
++      {
++         writeTrace(MajorError_HERE, "mdciAlert::send - deferred exception");
++      }
++   }
++
++};
++
++namespace
++{
++   deferred_Queue * DeferredQ = 0;
++}
++
++#endif // #ifdef DEFERRED_SEND
++
++
++class simpleMutexObject
++{
++    mutexSemaphore* pMtx;
++public:
++    simpleMutexObject(mutexSemaphore& mtx) { pMtx = &mtx; if(pMtx) pMtx->request(); };
++    ~simpleMutexObject() { if(pMtx) pMtx->release(); };
++};
++
++void mdciAlert::reconnect()
++{
++    if((!pHandler) && (GetTickCount()-lastErrorTime > LAST_E_INTERVAL) )
++    {
++        try
++        {
++            writeTrace(MajorError_HERE,"mdciAlert::reconnect - start create new corbaClient");
++            simpleMutexObject mtxo(mtxs);
++
++            if(pCorbaClient)
++            {
++              try
++              {
++                writeTrace(MajorError_HERE,"mdciAlert::reconnect - delete(pCorbaClient)");
++                delete(pCorbaClient);
++              }
++              catch(...)
++              {
++                lastErrorTime = GetTickCount();
++              }
++            }
++
++            writeTrace(MajorError_HERE,"mdciAlert::reconnect - new corbaClient");
++            pCorbaClient = new corbaClient<logService::Handler>(client.c_str());
++            pHandler = pCorbaClient->proxy();
++            writeTrace(MajorError_HERE,"mdciAlert::reconnect - pCorbaClient = %x, pHandler = %x",pCorbaClient,pHandler);
++            if(!pHandler) lastErrorTime = GetTickCount();
++        }
++        catch(...)
++        {
++            lastErrorTime = GetTickCount();
++            throw alertException("Exception: no CorbaClient after creating new one");
++        }
++    } else writeTrace(MajorError_HERE,"mdciAlert::reconnect - reconnect() ignored");
++}
++
++mdciAlert::mdciAlert(const std::string& Client, const std::string& ModuleID)
++ : pHandler(0),
++   client(Client),
++   moduleID(ModuleID)
++{
++
++  if(pCorbaClient == 0)
++  {
++    pCorbaClient = new corbaClient<logService::Handler>(client.c_str());
++    lastErrorTime = GetTickCount();
++  } else
++  {
++  }
++  ++lRefCnt;
++
++  pHandler = pCorbaClient->proxy();
++  writeTrace(MajorError_HERE,"mdciAlert::mdciAlert pHandler=%x",pHandler);
++  if(!pHandler) reconnect();
++}
++
++mdciAlert::~mdciAlert()
++{
++  if(--lRefCnt == 0)
++  {
++    delete pCorbaClient;
++    pCorbaClient = 0;
++  }
++}
++
++void mdciAlert::send(const alert::eventData& ev, const alert::dataVector& evData)
++{
++  try
++  {
++    //std::cout << "mdciAlert::send" ;
++    writeTrace(MajorError_HERE,"mdciAlert::send - pHandler=%x , GetTickCount()-lastErrorTime=%d, lastErrorTime=%d",pHandler,(GetTickCount()-lastErrorTime),lastErrorTime);
++    if(!pHandler) reconnect();
++    if(!pHandler)
++    {
++        throw alertException("Exception: no CorbaClient");
++    }
++
++    DeviceComponents::command cmd;
++    cmd.requestID = lRequestID++;
++    cmd.type <<= logService::CMD_ALERT;
++
++    logService::genericAlert alert;
++    alert.moduleID = CORBA::string_dup(moduleID.c_str());
++    alert << ev;
++    alert << evData;
++
++    cmd.data <<= alert;
++
++    CORBA::Any Command;
++    Command <<= cmd;
++
++#ifdef DEFERRED_SEND
++    deferred_Item * const Item = new deferred_Item( pHandler, Command );
++    if( !DeferredQ )
++    {
++      DeferredQ =  new deferred_Queue;
++    }
++    if( DeferredQ->enter(Item) )
++    {
++      writeTrace(MajorError_HERE, "mdciAlert::send - deferred queue full" );
++    }
++#else
++    pHandler->exec(Command);
++#endif
++
++  }
++  catch(const CORBA::Exception & X )
++  {
++    std::stringstream e;
++    e << "CORBA Exception " << X;
++    throw alertException(e.str());
++  } catch(char *pszException)
++  {
++    //std::cout << "Error sending alert [" << pszException << "]";
++    throw alertException(pszException);
++  }
++  catch( alertException a )
++  {
++    throw a;
++  }
++  catch( ... )
++  {
++    throw alertException("Exception");
++  }
++}
++
++DLLEXPORT
++void operator << (logService::genericAlert& alert, const alert::eventData& ev)
++{
++  // create first sequence entry (for eventID)
++  logService::alertDataEntry dEntry;
++  dEntry.key = CORBA::string_dup(ev.getKey().c_str());
++  if(ev.getType() == alert::eventData::T_LONG)
++  {
++    dEntry.sValue = (char*)0;
++    dEntry.lValue = ev.getLValue();
++    dEntry.type   = logService::T_LONG;
++  } else if(ev.getType() == alert::eventData::T_STRING)
++  {
++    dEntry.sValue = CORBA::string_dup(ev.getSValue().c_str());
++    dEntry.lValue = 0;
++    dEntry.type   = logService::T_STRING;
++  } else
++  {
++    char e[128];
++    sprintf(e, "unknown alertDataEntry type <%d>", ev.getType());
++    throw alertException(e);
++  }
++  // reserve enough space for intitial entry
++  alert.alertData.length(1);
++  alert.alertData[0] = dEntry;
++}
++
++DLLEXPORT
++void operator << (logService::genericAlert& alert, const alert::dataVector& evData)
++{
++  // reserve enough space for intitial AND following entries
++  alert.alertData.length(evData.size() + 1);
++
++  // create additional sequence entries
++  int pos = 1;
++  for(alert::dataVector::const_iterator it = evData.begin(); it != evData.end(); ++it)
++  {
++    logService::alertDataEntry seqEntry;
++    seqEntry.key = CORBA::string_dup(it->getKey().c_str());
++    if(it->getType() == alert::eventData::T_LONG)
++    {
++      seqEntry.sValue = (char*)0;
++      seqEntry.lValue = it->getLValue();
++      seqEntry.type   = logService::T_LONG;
++    } else if(it->getType() == alert::eventData::T_STRING)
++    {
++      seqEntry.sValue = CORBA::string_dup(it->getSValue().c_str());
++      seqEntry.lValue = 0;
++      seqEntry.type   = logService::T_STRING;
++    } else
++    {
++      char e[128];
++      sprintf(e, "unknown alertDataEntry type <%d>", it->getType());
++      throw alertException(e);
++    }
++    alert.alertData[pos++] = seqEntry;
++  }
++}
++
++DLLEXPORT
++void operator >> (const logService::genericAlert& alert, alert::eventData& ev)
++{
++  if(alert.alertData.length() > 0)
++  {
++    logService::alertDataEntry ade = alert.alertData[0];
++
++    if(ade.type == logService::T_LONG)
++    {
++      alert::eventData e(ade.lValue);
++      ev = e;
++    } else if(ade.type == logService::T_STRING)
++    {
++      alert::eventData e(std::string(ade.sValue));
++      ev = e;
++    } else
++    {
++      char e[128];
++      sprintf(e, "unknown alertDataEntry type <%d>", ade.type);
++      throw alertException(e);
++    }
++  } else
++  {
++    throw alertException("alertData empty");
++  }
++}
++
++DLLEXPORT
++void operator >> (const logService::genericAlert& alert, alert::dataVector& evData)
++{
++  evData.clear();
++  if(alert.alertData.length() > 1)
++  {
++    for(int i = 1; i < alert.alertData.length(); ++i)
++    {
++      logService::alertDataEntry ade = alert.alertData[i];
++
++      if(ade.type == logService::T_LONG)
++      {
++        alert::eventData e(ade.lValue);
++        evData.insert(evData.end(), e);
++      } else if(ade.type == logService::T_STRING)
++      {
++        alert::eventData e(std::string(ade.sValue));
++        evData.insert(evData.end(), e);
++      } else
++      {
++        char e[128];
++        sprintf(e, "unknown alertDataEntry type <%d>", ade.type);
++        throw alertException(e);
++      }
++    }
++  }
++}
++
+diff --git a/SelfServiceCommon/Massai/idl/Massai/makefile.mak b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+index c8a0d827..399a2eb9 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/makefile.mak
++++ b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+@@ -20,6 +20,7 @@ MY_GEN_CPPS = \
+     $(_GEN)\BillingService.cpp \
+     $(_GEN)\MailService.cpp \
+     $(_GEN)\StatisticsService.cpp \
+-    $(_GEN)\SecureLoggingService.cpp
++    $(_GEN)\SecureLoggingService.cpp \
++    $(_GEN)\PlatformStatus.cpp
+     
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1109 @@
+From 45413efc570ca47c6a6a95d9c56078b620f29816 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 16 Sep 2013 18:58:38 +0000
+Subject: [PATCH 0476/1076] massai_systools.lib V1.0.0.10
+
+Mantis 0028903: MR: MCR Sankyo ICM 350
+  added SystemError for exceptions in mSysErrorW32.h
+  added mSysUSBHID.h for finding hid devices
+  added DeviceSearch for finding all or only present USB devices
+  moved common implementation from mSysUSBPrinter to mSysUSBDevice
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@586 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysUSBDevice.h   |  16 +
+ .../Interfaces/inc/systools/mSysUSBHID.h      |  21 ++
+ .../Interfaces/inc/systools/mSysUSBPrinter.h  |   3 +-
+ .../Massai/cpp/Systools/inc/mSysErrorW32.h    |  25 +-
+ .../cpp/Systools/inc/mSysUSBDeviceW32.h       |  97 ++++++
+ .../Massai/cpp/Systools/makefile.mak          |  12 +
+ .../Massai/cpp/Systools/src/TestSysUSBHID.cpp |  29 ++
+ .../Massai/cpp/Systools/src/local_def.cpp     |  12 +-
+ .../Massai/cpp/Systools/src/mSysErrorW32.cpp  |  40 ++-
+ .../cpp/Systools/src/mSysUSBDeviceW32.cpp     | 288 ++++++++++++++++++
+ .../Massai/cpp/Systools/src/mSysUSBHIDW32.cpp | 110 +++++++
+ .../cpp/Systools/src/mSysUSBPrinterW32.cpp    | 210 ++-----------
+ 12 files changed, 672 insertions(+), 191 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysUSBHID.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
+new file mode 100644
+index 00000000..d2ac69bc
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBDevice.h
+@@ -0,0 +1,16 @@
++#ifndef MSYSUSBDEVICE_H_INCLUDED
++#define MSYSUSBDEVICE_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++namespace mSysUSBDevice
++{
++  enum Search
++  {
++    SEARCH_ALL,
++    SEARCH_PRESENT,
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBHID.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBHID.h
+new file mode 100644
+index 00000000..6db2bda0
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBHID.h
+@@ -0,0 +1,21 @@
++// USB; HID helper functions
++
++#ifndef MSYS_USBHID_H_INCLUDED
++#define MSYS_USBHID_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include "tools/TraceInterface.h"
++#include "systools/mSysUSBDevice.h"
++
++namespace mSysUSBHID
++{
++  // deviceId:   example: "VID_0A81&PID_0205&MI_01&COL01"
++  // instanceId: example: "8&ADB1E3A&0&0000"
++  std::string getUSBHIDDevice(const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
++    mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+index 2a98123f..048cf974 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+@@ -8,10 +8,11 @@
+ 
+ #include <string>
+ #include "tools/TraceInterface.h"
++#include "systools/mSysUSBDevice.h"
+ 
+ namespace mSysUSBPrinter
+ {
+-  std::string getUSBPrinterDevice(const std::string& printerPort, MASSAI::trace::TraceInterface& trc);
++  std::string getUSBPrinterDevice(const std::string& printerPort, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysErrorW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysErrorW32.h
+index bd5db119..7c1b6a17 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysErrorW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysErrorW32.h
+@@ -9,16 +9,33 @@
+ #endif
+ 
+ #include <string>
++#include <stdexcept>
+ #include "tools/TraceInterface.h"
+ 
+ namespace mSysError
+ {
+-  unsigned long getErrorCode();
+-  std::string getErrorText(unsigned long errorCode);
+-  bool isSystemError(unsigned long errorCode);
++  typedef unsigned long SystemErrorCode;
++  SystemErrorCode getErrorCode();
++  std::string getErrorText(SystemErrorCode errorCode);
++  bool isSystemError(SystemErrorCode errorCode);
+   void traceLastError(MASSAI::trace::TraceInterface& trc,
+     long level, const char* file, short line, const char* function,
+-    const char* where, unsigned long errorCode);
++    const char* where, SystemErrorCode errorCode);
++
++  class SystemError: public std::runtime_error
++  {
++    public:
++      SystemError(const std::string& where, const std::string& what, SystemErrorCode errorCode);
++      SystemError(const std::string& where, SystemErrorCode errorCode);
++
++      SystemErrorCode getErrorCode() const;
++      const char* where() const;
++
++    private:
++      SystemErrorCode m_errorCode;
++      std::string m_where;
++  };
++
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
+new file mode 100644
+index 00000000..61c6e7d9
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysUSBDeviceW32.h
+@@ -0,0 +1,97 @@
++#ifndef MSYSUSBDEVICEW32_H_INCLUDED
++#define MSYSUSBDEVICEW32_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "tools/TraceInterface.h"
++#include "systools/mSysUSBDevice.h"
++#include <string>
++#include <windows.h>
++#include <setupapi.h>
++
++
++namespace mSysUSBDeviceW32
++{
++  class DeviceRegistry;
++  class DeviceData;
++  class Devices;
++
++  class ReadRegistry
++  {
++    public:
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      ReadRegistry(HKEY registryHandle, MASSAI::trace::TraceInterface& trc);
++      ~ReadRegistry();
++
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      std::string getText(const std::string& key, unsigned int size);
++      std::string getText(const std::string& key);
++      DWORD getNumber(const std::string& key);
++
++    private:
++      HKEY m_registryHandle;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++
++  class DeviceRegistry: public ReadRegistry
++  {
++    public:
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      DeviceRegistry(DeviceData& deviceData, MASSAI::trace::TraceInterface& trc);
++      ~DeviceRegistry();
++
++    private:
++      static HKEY getDevKey(DeviceData& deviceData, MASSAI::trace::TraceInterface& trc);
++  };
++
++  class DeviceInfo
++  {
++     public:
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      DeviceInfo(Devices& devices, unsigned int index, MASSAI::trace::TraceInterface& trc);
++      ~DeviceInfo();
++
++      std::string getDeviceId();
++      SP_DEVINFO_DATA& getDeviceInfoData();
++      Devices& getDevices();
++
++    private:
++      SP_DEVINFO_DATA m_devData;
++      Devices& m_devices;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++
++  class DeviceData
++  {
++     public:
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      DeviceData(Devices& devices, unsigned int index, const GUID& guid, MASSAI::trace::TraceInterface& trc);
++      ~DeviceData();
++
++      std::string getDeviceName();
++      SP_DEVICE_INTERFACE_DATA& getDeviceInterfaceData();
++      Devices& getDevices();
++
++    private:
++      SP_DEVICE_INTERFACE_DATA m_devData;
++      Devices& m_devices;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++
++  class Devices
++  {
++    public:
++      // throw mSysError::SystemError; see mSysErrorW32.h
++      Devices(const GUID& guid, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++      ~Devices();
++
++      HDEVINFO getDeviceInfoHandle();
++
++    private:
++      HDEVINFO m_devInfo;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index ef5578d6..fc753c16 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -48,6 +48,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+ #                        $(_OBJ)\mSysHotKeyW32.obj \
+                         $(_OBJ)\mSysIOW32.obj \
+                         $(_OBJ)\mSysUSBPrinterW32.obj \
++                        $(_OBJ)\mSysUSBDeviceW32.obj \
++                        $(_OBJ)\mSysUSBHIDW32.obj \
+ 
+ 
+ ######################################################################
+@@ -111,5 +113,15 @@ MY_BIN7_LINKLIBS =      User32.lib
+ 
+ MY_BIN7_OBJS =          $(_OBJ)\TestSysDeviceEvents.obj
+ 
++######################################################################
++
++MY_BIN8 =               $(_BIN)\TestSysUSBHID.exe
++
++MY_BIN8_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++
++MY_BIN8_LINKLIBS =      User32.lib setupapi.lib
++
++MY_BIN8_OBJS =          $(_OBJ)\TestSysUSBHID.obj
++
+ #######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
+new file mode 100644
+index 00000000..3d217241
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysUSBHID.cpp
+@@ -0,0 +1,29 @@
++// Test mSysUSBHID
++
++#include "systools/mSysUSBHID.h"
++#include "tools/TraceLocal.h"
++#include <iostream>
++
++using MASSAI::trace::TraceLocal;
++
++int main(int argc, char **argv)
++{
++  TraceLocal trc("TestSysUSBHID");
++  try
++  {
++    if(argc == 3)
++    {
++      std::cout << mSysUSBHID::getUSBHIDDevice(argv[1], argv[2], mSysUSBDevice::SEARCH_PRESENT, trc);
++    }
++    else
++    {
++      std::cout << "Usage: TestSysUSBHID.exe <deviceIdPrefix> <instanceIdPrefix>" << std::endl;
++      std::cout << "  find device name for USB HID device" << std::endl;
++    }
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 0485b5d0..5d102ee0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,10 +1,20 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 9);
++VERSION_ID_DT(systools, 1, 0, 0, 10);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
++massai_systools.lib
++
++\date 16.09.2013
++\li V1.0.0.10
++\li Mantis 0028903: MR: MCR Sankyo ICM 350
++  added SystemError for exceptions in mSysErrorW32.h
++  added mSysUSBHID.h for finding hid devices
++  added DeviceSearch for finding all or only present USB devices
++  moved common implementation from mSysUSBPrinter to mSysUSBDevice
++
+ \date 04.09.2013
+ \li V1.0.0.9
+ \li Mantis 0028873: GPPDev: Custom KPM150H RFID
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysErrorW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysErrorW32.cpp
+index ee233319..1806b1a9 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysErrorW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysErrorW32.cpp
+@@ -1,16 +1,16 @@
+-/**
+- * windows error codes
+-**/
++// windows error codes
++
+ #include "mSysErrorW32.h"
+ #include <windows.h>
+ 
+ namespace mSysError
+ {
+-  unsigned long getErrorCode()
++  SystemErrorCode getErrorCode()
+   {
+     return GetLastError();
+   }
+-  std::string getErrorText(unsigned long errorCode)
++
++  std::string getErrorText(SystemErrorCode errorCode)
+   {
+     std::string result;
+     if(errorCode != 0)
+@@ -36,7 +36,8 @@ namespace mSysError
+     }
+     return result;
+   }
+-  bool isSystemError(unsigned long errorCode)
++
++  bool isSystemError(SystemErrorCode errorCode)
+   {
+     //   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+     //   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+@@ -59,12 +60,37 @@ namespace mSysError
+     // check if severity code is Error and Customer flag is not set
+     return (errorCode & 0xE0000000) == 0xC0000000;
+   }
++
+   void traceLastError(MASSAI::trace::TraceInterface& trc,
+     long level, const char* file, short line, const char* function,
+-    const char* where, unsigned long errorCode)
++    const char* where, SystemErrorCode errorCode)
+   {
+     trc.writeTrace(level, file, line, function,
+       "(%.200s) failed: (%d), (%.1000s)",
+       where, errorCode, mSysError::getErrorText(errorCode).c_str());
+   }
++
++
++  SystemError::SystemError(const std::string& where, const std::string& what, SystemErrorCode errorCode):
++    std::runtime_error(what),
++    m_errorCode(errorCode),
++    m_where(where)
++  {}
++
++  SystemError::SystemError(const std::string& where, SystemErrorCode errorCode):
++    std::runtime_error(getErrorText(errorCode)),
++    m_errorCode(errorCode),
++    m_where(where)
++  {}
++
++
++  SystemErrorCode SystemError::getErrorCode() const
++  {
++    return m_errorCode;
++  }
++
++  const char* SystemError::where() const
++  {
++    return m_where.c_str();
++  }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+new file mode 100644
+index 00000000..ff21c29b
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+@@ -0,0 +1,288 @@
++// USB; printer helper functions
++
++#include "mSysUSBDeviceW32.h"
++#include "mSysErrorW32.h"
++#include <windows.h>
++#include <setupapi.h>
++
++using MASSAI::trace::TraceInterface;
++using mSysError::SystemError;
++using mSysUSBDevice::Search;
++
++/*
++  BOOL SetupDiEnumDeviceInfo(
++    _In_   HDEVINFO DeviceInfoSet,
++    _In_   DWORD MemberIndex,
++    _Out_  PSP_DEVINFO_DATA DeviceInfoData
++);
++
++  BOOL SetupDiGetDeviceInstanceId(
++    _In_       HDEVINFO DeviceInfoSet,
++    _In_       PSP_DEVINFO_DATA DeviceInfoData,
++    _Out_opt_  PTSTR DeviceInstanceId,
++    _In_       DWORD DeviceInstanceIdSize,
++    _Out_opt_  PDWORD RequiredSize
++);
++SetupDiGetDeviceRegistryProperty( ..., SPDRP_HARDWAREID, ... )
++*/
++
++
++namespace mSysUSBDeviceW32
++{
++  ReadRegistry::ReadRegistry(HKEY registryHandle, MASSAI::trace::TraceInterface& trc):
++    m_registryHandle(registryHandle),
++    m_trc(trc)
++  {}
++
++  ReadRegistry::~ReadRegistry()
++  {
++    if(m_registryHandle != INVALID_HANDLE_VALUE)
++    {
++      LONG errorCode = RegCloseKey(m_registryHandle);
++      if(errorCode != ERROR_SUCCESS)
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "RegCloseKey", errorCode);
++      }
++    }
++  }
++
++  // throw mSysError::SystemError; see mSysErrorW32.h
++  std::string ReadRegistry::getText(const std::string& key, unsigned int size)
++  {
++    std::string result;
++    DWORD bufferSize = size + 1;
++    char* buffer = new char[bufferSize];
++    LONG errorCode = RegQueryValueEx(m_registryHandle, key.c_str(), 0, 0, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
++    if(errorCode != ERROR_SUCCESS)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", errorCode);
++      throw SystemError("RegQueryValueEx", errorCode);
++    }
++    else
++    {
++      result = buffer;
++    }
++    delete[] buffer;
++    return result;
++  }
++
++  std::string ReadRegistry::getText(const std::string& key)
++  {
++    DWORD bufferSize = 0;
++    LONG errorCode = RegQueryValueEx(m_registryHandle, key.c_str(), 0, 0, 0, &bufferSize);
++    if(errorCode != ERROR_SUCCESS)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", errorCode);
++      throw SystemError("RegQueryValueEx", errorCode);
++    }
++    return getText(key, bufferSize);
++  }
++
++  DWORD ReadRegistry::getNumber(const std::string& key)
++  {
++    DWORD result = -1;
++    DWORD bufferSize = sizeof(result);
++    LONG errorCode = RegQueryValueEx(m_registryHandle, key.c_str(), 0, 0, reinterpret_cast<LPBYTE>(&result), &bufferSize);
++    if(errorCode != ERROR_SUCCESS)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", errorCode);
++      throw SystemError("RegQueryValueEx", errorCode);
++    }
++    else if(bufferSize != sizeof(result))
++    {
++      throw SystemError("RegQueryValueEx", "not a number", 0);
++    }
++    return result;
++  }
++
++
++
++  DeviceRegistry::DeviceRegistry(DeviceData& deviceData, TraceInterface& trc):
++    ReadRegistry(getDevKey(deviceData, trc), trc)
++  {}
++
++  DeviceRegistry::~DeviceRegistry()
++  {}
++
++  HKEY DeviceRegistry::getDevKey(DeviceData& deviceData, MASSAI::trace::TraceInterface& trc)
++  {
++    HKEY result = SetupDiOpenDeviceInterfaceRegKey(deviceData.getDevices().getDeviceInfoHandle(), &deviceData.getDeviceInterfaceData(), 0, KEY_QUERY_VALUE);
++    if(result == INVALID_HANDLE_VALUE)
++    {
++      DWORD errorCode = GetLastError();
++      mSysError::traceLastError(trc, MajorError_HERE, "SetupDiOpenRegKey", errorCode);
++      throw SystemError("SetupDiOpenRegKey", errorCode);
++    }
++    return result;
++  }
++
++
++  DeviceInfo::DeviceInfo(Devices& devices, unsigned int index, TraceInterface& trc):
++    m_devData(),
++    m_devices(devices),
++    m_trc(trc)
++  {
++    m_devData.cbSize = sizeof(m_devData);
++    if(!SetupDiEnumDeviceInfo(m_devices.getDeviceInfoHandle(), index, &m_devData))
++    {
++      DWORD errorCode = GetLastError();
++      if(errorCode == ERROR_NO_MORE_ITEMS)
++      {
++        mSysError::traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInfo", errorCode);
++      }
++      else
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInfo", errorCode);
++      }
++      throw SystemError("SetupDiEnumDeviceInterfaces", errorCode);
++    }
++  }
++
++  DeviceInfo::~DeviceInfo()
++  {}
++
++  SP_DEVINFO_DATA& DeviceInfo::getDeviceInfoData()
++  {
++    return m_devData;
++  }
++
++  Devices& DeviceInfo::getDevices()
++  {
++    return m_devices;
++  }
++
++  std::string DeviceInfo::getDeviceId()
++  {
++    std::string result;
++    DWORD deviceInstanceIdSize;
++    SetupDiGetDeviceInstanceId(m_devices.getDeviceInfoHandle(), &m_devData, 0, 0, &deviceInstanceIdSize);
++    DWORD errorCode = GetLastError();
++    if(errorCode != ERROR_INSUFFICIENT_BUFFER)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInstanceId", errorCode);
++    }
++    else if(deviceInstanceIdSize == 0)
++    {
++      m_trc.writeTrace(MajorError_HERE, "SetupDiGetDeviceInstanceId no data");
++    }
++    else
++    {
++      char* buffer = new char[deviceInstanceIdSize];
++      if(!SetupDiGetDeviceInstanceId(m_devices.getDeviceInfoHandle(), &m_devData, buffer, deviceInstanceIdSize, &deviceInstanceIdSize))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
++      }
++      else
++      {
++        result = buffer;
++      }
++      delete[] buffer;
++    }
++    return result;
++  }
++
++
++
++  DeviceData::DeviceData(Devices& devices, unsigned int index, const GUID& guid, TraceInterface& trc):
++    m_devData(),
++    m_devices(devices),
++    m_trc(trc)
++  {
++    m_devData.cbSize = sizeof(m_devData);
++    if(!SetupDiEnumDeviceInterfaces(m_devices.getDeviceInfoHandle(), 0, &guid, index, &m_devData))
++    {
++      DWORD errorCode = GetLastError();
++      if(errorCode == ERROR_NO_MORE_ITEMS)
++      {
++        mSysError::traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", errorCode);
++      }
++      else
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", errorCode);
++      }
++      throw SystemError("SetupDiEnumDeviceInterfaces", errorCode);
++    }
++  }
++
++  DeviceData::~DeviceData()
++  {}
++
++  SP_DEVICE_INTERFACE_DATA& DeviceData::getDeviceInterfaceData()
++  {
++    return m_devData;
++  }
++
++  Devices& DeviceData::getDevices()
++  {
++    return m_devices;
++  }
++
++  std::string DeviceData::getDeviceName()
++  {
++    std::string result;
++    DWORD devDataDetailSize;
++    SetupDiGetDeviceInterfaceDetail(m_devices.getDeviceInfoHandle(), &m_devData, 0, 0, &devDataDetailSize, 0);
++    DWORD errorCode = GetLastError();
++    if(errorCode != ERROR_INSUFFICIENT_BUFFER)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", errorCode);
++    }
++    else if(devDataDetailSize == 0)
++    {
++      m_trc.writeTrace(MajorError_HERE, "SetupDiGetDeviceInterfaceDetail no data");
++    }
++    else
++    {
++      unsigned char* buffer = new unsigned char[devDataDetailSize];
++      SP_DEVICE_INTERFACE_DETAIL_DATA& devDataDetail = *reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA*>(buffer);
++      devDataDetail.cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
++      SP_DEVINFO_DATA devInfoData;
++      devInfoData.cbSize = sizeof(devInfoData);
++      if(!SetupDiGetDeviceInterfaceDetail(m_devices.getDeviceInfoHandle(), &m_devData, &devDataDetail, devDataDetailSize, &devDataDetailSize, &devInfoData))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
++      }
++      else
++      {
++        result = devDataDetail.DevicePath;
++      }
++      delete[] buffer;
++    }
++    return result;
++  }
++
++
++  Devices::Devices(const GUID& guid, Search search, TraceInterface& trc):
++    m_devInfo(INVALID_HANDLE_VALUE),
++    m_trc(trc)
++  {
++    DWORD flags = DIGCF_DEVICEINTERFACE;
++    if(search == mSysUSBDevice::SEARCH_PRESENT)
++    {
++      flags|= DIGCF_PRESENT;
++    }
++    m_devInfo = SetupDiGetClassDevs(&guid, 0, 0, flags);
++    if(m_devInfo == INVALID_HANDLE_VALUE)
++    {
++      DWORD errorCode = GetLastError();
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetClassDevs", errorCode);
++      throw SystemError("SetupDiGetClassDevs", errorCode);
++    }
++  }
++
++  Devices::~Devices()
++  {
++    if(m_devInfo != INVALID_HANDLE_VALUE)
++    {
++      if(!SetupDiDestroyDeviceInfoList(m_devInfo))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiDestroyDeviceInfoList", GetLastError());
++      }
++    }
++  }
++
++  HDEVINFO Devices::getDeviceInfoHandle()
++  {
++    return m_devInfo;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
+new file mode 100644
+index 00000000..a318d5ec
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBHIDW32.cpp
+@@ -0,0 +1,110 @@
++// USB; HID helper functions
++
++#include "systools/mSysUSBHID.h"
++#include "mSysErrorW32.h"
++#include "mSysUSBDeviceW32.h"
++#include "text/textTools.h"
++#include <sstream>
++#include <iomanip>
++#include <windows.h>
++
++using MASSAI::trace::TraceInterface;
++using mSysUSBDeviceW32::Devices;
++using mSysUSBDeviceW32::DeviceInfo;
++using mSysUSBDeviceW32::DeviceData;
++using mSysUSBDevice::Search;
++using MASSAI::text::TextList;
++
++namespace
++{
++  const GUID HID_GUID = {0x4D1E55B2, 0xF16F, 0x11CF, {0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30} };
++
++  class FindHIDDevice
++  {
++    public:
++      FindHIDDevice(const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
++        Search search, TraceInterface& trc);
++
++      ~FindHIDDevice();
++
++      std::string getDevice();
++
++    private:
++      bool match(const std::string& deviceInstanceId);
++
++      std::string m_deviceIdPrefix;
++      std::string m_instanceIdPrefix;
++      Search m_search;
++      TraceInterface& m_trc;
++  };
++}
++
++namespace
++{
++  FindHIDDevice::FindHIDDevice(const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
++    Search search, TraceInterface& trc):
++    m_deviceIdPrefix(deviceIdPrefix),
++    m_instanceIdPrefix(instanceIdPrefix),
++    m_search(search),
++    m_trc(trc)
++  {}
++
++  FindHIDDevice::~FindHIDDevice()
++  {}
++
++  std::string FindHIDDevice::getDevice()
++  {
++    std::string result;
++    try
++    {
++      Devices devices(HID_GUID, m_search, m_trc);
++      for(DWORD i = 0;; i++)
++      {
++        DeviceInfo deviceInfo(devices, i, m_trc);
++        if(match(deviceInfo.getDeviceId()))
++        {
++          DeviceData deviceData(devices, i, HID_GUID, m_trc);
++          result = deviceData.getDeviceName();
++          m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
++          break;
++        }
++      }
++    }
++    catch(const mSysError::SystemError& e)
++    {
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
++    }
++    return result;
++  }
++
++  bool FindHIDDevice::match(const std::string& deviceInstanceId)
++  {
++    bool result = false;
++    m_trc.writeTrace(BasicRuntime_HERE, "check: (%s)", deviceInstanceId.c_str());
++    TextList parts;
++    MASSAI::text::split(deviceInstanceId, "\\", parts);
++    if(parts.size() > 2)
++    {
++      TextList::const_iterator it = parts.begin();
++      const std::string& hid = *(it++);
++      const std::string& deviceId = *(it++);
++      const std::string& instanceId = *(it++);
++      if(MASSAI::text::startsWith(deviceId, m_deviceIdPrefix)
++        && MASSAI::text::startsWith(instanceId, m_instanceIdPrefix))
++      {
++        result = true;
++      }
++    }
++    return result;
++  }
++}
++
++namespace mSysUSBHID
++{
++  std::string getUSBHIDDevice(const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
++    Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindHIDDevice find(deviceIdPrefix, instanceIdPrefix, search, trc);
++    return find.getDevice();
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+index 97e6acdb..fc3fff5e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+@@ -2,61 +2,45 @@
+ 
+ #include "systools/mSysUSBPrinter.h"
+ #include "mSysErrorW32.h"
++#include "mSysUSBDeviceW32.h"
++#include "text/textTools.h"
+ #include <windows.h>
+-#include <setupapi.h>
+ 
+ using MASSAI::trace::TraceInterface;
++using mSysUSBDeviceW32::Devices;
++using mSysUSBDeviceW32::DeviceData;
++using mSysUSBDeviceW32::DeviceRegistry;
++using mSysUSBDevice::Search;
+ 
+ namespace
+ {
+-  const GUID printerGUID = {0x28D78FAD, 0x5A12, 0x11D1, {0xAE, 0x5B, 0x00, 0x00, 0xF8, 0x03, 0xA8, 0xC2} };
+-  const char* usbEnumerator = "USB";
+-  const char* usbPrintPortNumber = "Port Number";
+-  const char* usbPrintBaseName = "Base Name";
+-
+-  bool startsWith(const std::string& text, const std::string& prefix);
+-
++  const GUID PRINTER_GUID = {0x28D78FAD, 0x5A12, 0x11D1, {0xAE, 0x5B, 0x00, 0x00, 0xF8, 0x03, 0xA8, 0xC2} };
++  const char* USB_PRINT_PORT_NUMBER = "Port Number";
++  const char* USB_PRINT_BASE_NAME = "Base Name";
+ 
+   class FindPrinterDevice
+   {
+     public:
+-      FindPrinterDevice(const std::string& printerPort, TraceInterface& trc);
++      FindPrinterDevice(const std::string& printerPort, Search search, TraceInterface& trc);
+       ~FindPrinterDevice();
+ 
+       std::string getDevice();
+ 
+     private:
+-      bool openPrinterDevs();
+-      void closePrinterDevs();
+-      bool readDevData(DWORD index);
+-      bool openDevRegistry();
+-      void closeDevRegistry();
+-      bool portNumberMatches();
+-      DWORD readPortNumber();
+-      std::string readPortBaseName();
+-      std::string getDeviceName();
++      bool portNumberMatches(DeviceData& deviceData);
+ 
+-      HDEVINFO m_devInfo;
+       const std::string& m_printerPort;
++      Search m_search;
+       TraceInterface& m_trc;
+-      SP_DEVICE_INTERFACE_DATA m_devData;
+-      HKEY m_devKey;
+   };
+ }
+ 
+ namespace
+ {
+-  bool startsWith(const std::string& text, const std::string& prefix)
+-  {
+-    return text.compare(0, prefix.size(), prefix) == 0;
+-  }
+-
+-  FindPrinterDevice::FindPrinterDevice(const std::string& printerPort, TraceInterface& trc):
+-    m_devInfo(INVALID_HANDLE_VALUE),
++  FindPrinterDevice::FindPrinterDevice(const std::string& printerPort, Search search, TraceInterface& trc):
+     m_printerPort(printerPort),
+-    m_trc(trc),
+-    m_devData(),
+-    m_devKey((HKEY)INVALID_HANDLE_VALUE)
++    m_search(search),
++    m_trc(trc)
+   {}
+ 
+   FindPrinterDevice::~FindPrinterDevice()
+@@ -65,186 +49,56 @@ namespace
+   std::string FindPrinterDevice::getDevice()
+   {
+     std::string result;
+-    if(openPrinterDevs())
++    try
+     {
++      Devices devices(PRINTER_GUID, m_search, m_trc);
+       for(DWORD i = 0;; i++)
+       {
+-        if(!readDevData(i))
++        DeviceData deviceData(devices, i, PRINTER_GUID, m_trc);
++        if(portNumberMatches(deviceData))
+         {
+-          break;
+-        }
+-        else if(portNumberMatches())
+-        {
+-          result = getDeviceName();
++          result = deviceData.getDeviceName();
+           break;
+         }
+       }
+     }
+-    closePrinterDevs();
+-    return result;
+-  }
+-
+-  std::string FindPrinterDevice::getDeviceName()
+-  {
+-    std::string result;
+-    DWORD devDataDetailSize;
+-    SetupDiGetDeviceInterfaceDetail(m_devInfo, &m_devData, 0, 0, &devDataDetailSize, 0);
+-    DWORD resultCode = GetLastError();
+-    if(resultCode != ERROR_INSUFFICIENT_BUFFER)
+-    {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", resultCode);
+-    }
+-    else if(devDataDetailSize == 0)
+-    {
+-      m_trc.writeTrace(MajorError_HERE, "SetupDiGetDeviceInterfaceDetail no data");
+-    }
+-    else
++    catch(const mSysError::SystemError& e)
+     {
+-      unsigned char* buffer = new unsigned char[devDataDetailSize];
+-      SP_DEVICE_INTERFACE_DETAIL_DATA& devDataDetail = *reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA*>(buffer);
+-      devDataDetail.cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+-      SP_DEVINFO_DATA devInfoData;
+-      devInfoData.cbSize = sizeof(devInfoData);
+-      if(!SetupDiGetDeviceInterfaceDetail(m_devInfo, &m_devData, &devDataDetail, devDataDetailSize, &devDataDetailSize, &devInfoData))
+-      {
+-        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
+-      }
+-      else
+-      {
+-        result = devDataDetail.DevicePath;
+-      }
+-      delete[] buffer;
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
+     }
+     return result;
+   }
+ 
+-  bool FindPrinterDevice::portNumberMatches()
++  bool FindPrinterDevice::portNumberMatches(DeviceData& deviceData)
+   {
+     bool result = false;
+-    if(openDevRegistry())
++    try
+     {
+-      DWORD portNumber = readPortNumber();
+-      std::string baseName = readPortBaseName();
+-      if(startsWith(m_printerPort, baseName))
++      DeviceRegistry deviceRegistry(deviceData, m_trc);
++      std::string baseName = deviceRegistry.getText(USB_PRINT_BASE_NAME);
++      if(MASSAI::text::startsWith(m_printerPort, baseName))
+       {
+         DWORD devicePort = atoi(m_printerPort.c_str() + baseName.size());
++        DWORD portNumber = deviceRegistry.getNumber(USB_PRINT_PORT_NUMBER);
+         if(portNumber == devicePort)
+         {
+           result = true;
+         }
+       }
+     }
+-    closeDevRegistry();
+-    return result;
+-  }
+-
+-  DWORD FindPrinterDevice::readPortNumber()
+-  {
+-    DWORD result = -1;
+-    DWORD portSize = sizeof(result);
+-    LONG resultCode = RegQueryValueEx(m_devKey, usbPrintPortNumber, 0, 0, reinterpret_cast<LPBYTE>(&result), &portSize);
+-    if(resultCode != ERROR_SUCCESS)
+-    {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
+-    }
+-    return result;
+-  }
+-
+-  std::string FindPrinterDevice::readPortBaseName()
+-  {
+-    std::string result;
+-    DWORD bufferSize = m_printerPort.size() + 1;
+-    char* buffer = new char[bufferSize];
+-    LONG resultCode = RegQueryValueEx(m_devKey, usbPrintBaseName, 0, 0, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
+-    if(resultCode != ERROR_SUCCESS)
+-    {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
+-    }
+-    else if(bufferSize > m_printerPort.size())
+-    {
+-      m_trc.writeTrace(BasicRuntime_HERE, "name too long to match");
+-    }
+-    else
+-    {
+-      result = buffer;
+-    }
+-    delete[] buffer;
+-    return result;
+-  }
+-
+-  bool FindPrinterDevice::openDevRegistry()
+-  {
+-    bool result = true;
+-    m_devKey = SetupDiOpenDeviceInterfaceRegKey(m_devInfo, &m_devData, 0, KEY_QUERY_VALUE);
+-    if(m_devKey == INVALID_HANDLE_VALUE)
+-    {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiOpenRegKey", GetLastError());
+-      result = false;
+-    }
+-    return result;
+-  }
+-
+-  void FindPrinterDevice::closeDevRegistry()
+-  {
+-    if(m_devKey != INVALID_HANDLE_VALUE)
+-    {
+-      LONG resultCode = RegCloseKey(m_devKey);
+-      if(resultCode != ERROR_SUCCESS)
+-      {
+-        mSysError::traceLastError(m_trc, MajorError_HERE, "RegCloseKey", resultCode);
+-      }
+-    }
+-  }
+-
+-  bool FindPrinterDevice::readDevData(DWORD index)
+-  {
+-    bool result = true;
+-    m_devData.cbSize = sizeof(m_devData);
+-    if(!SetupDiEnumDeviceInterfaces(m_devInfo, 0, &printerGUID, index, &m_devData))
+-    {
+-      DWORD resultCode = GetLastError();
+-      if(resultCode == ERROR_NO_MORE_ITEMS)
+-      {
+-        mSysError::traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
+-      }
+-      else
+-      {
+-        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
+-      }
+-      result = false;
+-    }
+-    return result;
+-  }
+-
+-  bool FindPrinterDevice::openPrinterDevs()
+-  {
+-    bool result = true;
+-    m_devInfo = SetupDiGetClassDevs(&printerGUID, 0, 0, DIGCF_PRESENT | DIGCF_INTERFACEDEVICE);
+-    if(m_devInfo == INVALID_HANDLE_VALUE)
++    catch(const mSysError::SystemError& e)
+     {
+-      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetClassDevs", GetLastError());
+-      result = false;
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
+     }
+     return result;
+   }
+-
+-  void FindPrinterDevice::closePrinterDevs()
+-  {
+-    if(m_devInfo != INVALID_HANDLE_VALUE)
+-    {
+-      if(!SetupDiDestroyDeviceInfoList(m_devInfo))
+-      {
+-        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiDestroyDeviceInfoList", GetLastError());
+-      }
+-    }
+-  }
+ }
+ 
+ namespace mSysUSBPrinter
+ {
+-  std::string getUSBPrinterDevice(const std::string& printerPort, TraceInterface& trc)
++  std::string getUSBPrinterDevice(const std::string& printerPort, Search search, TraceInterface& trc)
+   {
+-    FindPrinterDevice find(printerPort, trc);
++    FindPrinterDevice find(printerPort, search, trc);
+     return find.getDevice();
+   }
+ }
+-- 
+2.41.0.windows.1
+

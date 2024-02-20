@@ -1,0 +1,174 @@
+From 3be011e8b4c79ac70665b06ebf3ab857847a8fea Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 27 Feb 2015 14:11:26 +0000
+Subject: [PATCH 0646/1076] MANTIS 0035724 initial: Desko-Penta: RFID; optimize
+ antenna settings
+
+added methods mSysSmartCardReader::CardReader to access card reader direct,
+virtual ResultCode connectReader() = 0;
+virtual ResultCode disconnectReader() = 0;
+virtual ResultCode control(unsigned int command, const std::string& data, std::string& response) = 0;
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@826 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/systools/mSysSmartCardReader.h        |  4 ++
+ .../Massai/cpp/Systools/src/local_def.cpp     | 18 +++++--
+ .../Systools/src/mSysSmartCardReaderW32.cpp   | 48 ++++++++++++++++++-
+ 3 files changed, 63 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h b/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
+index 9354166b..0d86546b 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
+@@ -51,6 +51,10 @@ namespace mSysSmartCardReader
+       virtual ResultCode disable() = 0;
+ 
+       virtual ResultCode sendCmd(const std::string& commandAPDU, std::string& responseAPDU) = 0;
++
++      virtual ResultCode connectReader() = 0;
++      virtual ResultCode disconnectReader() = 0;
++      virtual ResultCode control(unsigned int command, const std::string& data, std::string& response) = 0;
+   };
+ 
+   CardReader* createCardReader(MASSAI::trace::TraceInterface& trc);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 5afcb0c9..b6af7e05 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 25);
++VERSION_ID_DT(systools, 1, 0, 0, 26);
+ 
+ /*!
+ \file
+@@ -8,14 +8,22 @@ VERSION_ID_DT(systools, 1, 0, 0, 25);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.25
++@version 1.0.0.26
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.26
++\li 27.02.2015
++\li extension SteT MANTIS 0035724: Desko-Penta: RFID; optimize antenna settings
++-added methods mSysSmartCardReader::CardReader to access card reader direct,
++ -virtual ResultCode connectReader() = 0;
++ -virtual ResultCode disconnectReader() = 0;
++ -virtual ResultCode control(unsigned int command, const std::string& data, std::string& response) = 0;
++
+ \version 1.0.0.25
+-\li 26.11.20014
++\li 26.11.2014
+ \li extension SteT Mantis 0034796: appControl: log application performance data at desktop switch
+ - added void ApplicationList::log(const std::string& group);
+ - added std::string child::getShortProcessInformation() const;
+@@ -31,13 +39,13 @@ massai_systools.lib
+   - program
+ 
+ \version 1.0.0.24
+-\li 18.11.20014
++\li 18.11.2014
+ \li extension SteT Mantis 0034570 GPPDev: FD Phoenix Protocol
+ - added close for mSysIO::Reader, mSysIO::Writer
+ - added mSysUSBPrinter::getUSBPrinterDeviceById
+ 
+ \version 1.0.0.23
+-\li 28.10.20014
++\li 28.10.2014
+ \li Mantis 0034299: switch resolution; start application with default resolution
+ - added method maximize, minimize, showDefault in mSysWindow
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+index 18569479..cfab71dc 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+@@ -102,6 +102,8 @@ namespace
+       LONG connectCard();
+       LONG disconnectCard();
+       LONG sendCmd(const std::string& commandAPDU, std::string& responseAPDU);
++      LONG connectReader();
++      LONG disconnectReader();
+       LONG control(unsigned int command, const std::string& data, std::string& response);
+ 
+       DWORD cardReaderStatus;
+@@ -141,6 +143,8 @@ namespace
+       virtual ResultCode disable();
+       virtual ResultCode sendCmd(const std::string& commandAPDU, std::string& responseAPDU);
+       virtual ResultCode control(unsigned int command, const std::string& data, std::string& response);
++      virtual ResultCode connectReader();
++      virtual ResultCode disconnectReader();
+ 
+     private:
+       // CardReaderListener
+@@ -346,12 +350,32 @@ namespace
+     return errorCode;
+   }
+ 
++  LONG CardReaderAccess::connectReader()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardConnect");
++    LONG errorCode = SCardConnect(context, readerName.c_str(), SCARD_SHARE_DIRECT, 0, &card, &protocol);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardConnect(0x%x)(%s):(0x%x)(%s)",
++      protocol, getProtocolText(protocol).c_str(), errorCode, getErrorCodeText(errorCode).c_str());
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::disconnectReader()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardDisconnect");
++    LONG errorCode = SCardDisconnect(card, SCARD_LEAVE_CARD);
++    card = 0;
++    trc.writeTrace(BasicRuntime_HERE, "<SCardDisconnect:(0x%x)(%s)",
++      errorCode, getErrorCodeText(errorCode).c_str());
++    return errorCode;
++  }
++
+   LONG CardReaderAccess::control(unsigned int command, const std::string& data, std::string& response)
+   {
+     BYTE buffer[MAX_RESPONSE_SIZE] = "";
+-    DWORD length = MAX_RESPONSE_SIZE;    trc.writeTrace(BasicRuntime_HERE, ">SCardControl(%d)(%d)", command, data.size());
++    DWORD length = MAX_RESPONSE_SIZE;
++    trc.writeTrace(BasicRuntime_HERE, ">SCardControl(%d)(%d)", command, data.size());
+     LONG errorCode = SCardControl(card, command, data.data(), data.size(), buffer, length, &length);
+-    trc.writeTrace(BasicRuntime_HERE, "<SCardTransmit(%d):(0x%x)(%s)",
++    trc.writeTrace(BasicRuntime_HERE, "<SCardControl(%d):(0x%x)(%s)",
+       length, errorCode, getErrorCodeText(errorCode).c_str());
+     if(errorCode == SCARD_S_SUCCESS)
+     {
+@@ -559,6 +583,26 @@ namespace
+     return result;
+   }
+ 
++  ResultCode CardReaderImpl::connectReader()
++  {
++    ResultCode result = SC_RC_FAILED;
++    if(reader.connectReader() == SCARD_S_SUCCESS)
++    {
++      result = SC_RC_SUCCESS;
++    }
++    return result;
++  }
++
++  ResultCode CardReaderImpl::disconnectReader()
++  {
++    ResultCode result = SC_RC_FAILED;
++    if(reader.disconnectReader() == SCARD_S_SUCCESS)
++    {
++      result = SC_RC_SUCCESS;
++    }
++    return result;
++  }
++
+   void CardReaderImpl::process()
+   {
+     State state = getState();
+-- 
+2.41.0.windows.1
+

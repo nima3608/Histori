@@ -1,0 +1,367 @@
+From 51c687cb266021d0d9481c97d91aa8043e518446 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 27 Jan 2020 15:33:00 +0000
+Subject: [PATCH 0993/1077] MANTIS 57154 massaiCfgXB.exe version 2.4.1 - MANTIS
+ 57154: Import of an item with path of exiting node kills node - Do not allow
+ to create a new item overwriting a directory node.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1529 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++--
+ .../Massai/cpp/CfgXMgrB/inc/cfgValueNode.hpp  | 10 ++++--
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 +++++--
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     | 35 +++++++++++--------
+ .../Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp    | 12 ++++++-
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   | 25 +++++++++++--
+ .../Massai/cpp/CfgXMgrB/src/cfgValueNode.cpp  | 26 +++++++-------
+ 7 files changed, 99 insertions(+), 35 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 1b2879ae..e267f78f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -592,8 +592,17 @@
+ //! @par     Change:
+ //! - MANTIS 52071: Extend CfgValuesS read operation by item sort
+ //! - Return the directory contents in ascending order.
+-#define FILE_VER_BIN 2,4,0,0
+-#define FILE_VER_DTS "2.4.0.0"
++// #define FILE_VER_BIN 2,4,0,0
++// #define FILE_VER_DTS "2.4.0.0"
++//
++//! @version 2.4.1
++//! @date    23.11.2020
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 57154: Import of an item with path of exiting node kills node
++//! - Do not allow to create a new item overwriting a directory node.
++#define FILE_VER_BIN 2,4,1,0
++#define FILE_VER_DTS "2.4.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueNode.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueNode.hpp
+index 2839488e..1933e0ee 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueNode.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueNode.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2004 Materna Information & Communications
++ * Copyright (c) 2002-2020 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -27,6 +27,12 @@
+ #include <string>
+ 
+ 
++// The reference to use for directory nodes.
++#define REFERENCE_FOR_DIRECTORY         0
++
++// The first reference id to use for a config item.
++#define REFERENCE_ITEM_FIRST            1
++
+ 
+ /**
+  *
+@@ -133,7 +139,7 @@ public:
+     * @param Ref:       The meta information reference.
+     *
+    **/
+-   void update( cfgEntity::reference Ref );
++   void updateRef( cfgEntity::reference Ref );
+ 
+    /**
+     *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 903e6ccd..92c086ff 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -586,8 +586,17 @@
+ //! @par     Change:
+ //! - MANTIS 52071: Extend CfgValuesS read operation by item sort
+ //! - Return the directory contents in ascending order.
+-#define FILE_VER_BIN 2,4,0,0
+-#define FILE_VER_DTS "2.4.0.0"
++// #define FILE_VER_BIN 2,4,0,0
++// #define FILE_VER_DTS "2.4.0.0"
++//
++//! @version 2.4.1
++//! @date    23.11.2020
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 57154: Import of an item with path of exiting node kills node
++//! - Do not allow to create a new item overwriting a directory node.
++#define FILE_VER_BIN 2,4,1,0
++#define FILE_VER_DTS "2.4.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index a5ace2f6..8fecbf95 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2019 MATERNA Information & Communications
++ * Copyright (c) 2002-2020 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -167,12 +167,12 @@ cfgMeta * cfgEntityMeta::cemFromRef
+    //
+    Materna::MSSD::autoMutex OnlyOne( M_Mutex );
+    //
+-   // Vector index is reference - 1
++   // Vector index is reference - REFERENCE_ITEM_FIRST
+    //
+-   if( ( Ref != 0 ) && ( M_Map.size() > (Ref - 1) ) )
++   int const vector_index = Ref - REFERENCE_ITEM_FIRST;
++   if( vector_index >= 0 )
+    {
+-      // Assume M_Map[X-1] has ref X!
+-      cfgMeta * const Meta = M_Map[Ref-1];
++      cfgMeta * const Meta = M_Map[vector_index];
+       if( Meta )
+       {
+          // Check access
+@@ -263,18 +263,18 @@ cfgEntity::reference cfgEntityMeta::cemFromMeta( cfgMeta const & Meta )
+       if( *M_Map[I] == Meta )
+       {
+          //
+-         // Reference is vector index + 1
++         // Reference is vector index + REFERENCE_ITEM_FIRST
+          //
+          //-std::cout << "cfgEntityMeta::cemFromMeta - old ref="
+-         //-          << I + 1 << "."
++         //-          << I + REFERENCE_ITEM_FIRST << "."
+          //-          << std::endl;
+-         return( I + 1 );
++         return( I + REFERENCE_ITEM_FIRST );
+       }
+    }
+    M_Map.push_back( Meta.clone() );
+    //-std::cout << "cfgEntityMeta::cemFromMeta - new ref="
+-   //-          << IEnd + 1 << "." << std::endl;
+-   return IEnd + 1;
++   //-          << IEnd + REFERENCE_ITEM_FIRST << "." << std::endl;
++   return IEnd + REFERENCE_ITEM_FIRST;
+ }
+ 
+ 
+@@ -294,9 +294,9 @@ void cfgEntityMeta::cemSave
+    for( cfgEntity::reference I = 0; I < IEnd; ++I )
+    {
+       //
+-      // Reference is vector index + 1
++      // Reference is vector index + REFERENCE_ITEM_FIRST
+       //
+-      M_Map[I]->save( Dst, I + 1, Indent );
++      M_Map[I]->save( Dst, I + REFERENCE_ITEM_FIRST, Indent );
+    }
+ }
+ 
+@@ -1171,7 +1171,7 @@ void cfgEntityValue::cevUpdate
+    Materna::MSSD::autoMutex OnlyOne( M_Mutex );
+    //
+    cfgValueNode * const N = node_find_or_creat( M_Root, Path );
+-   N->update( Metaref );
++   N->updateRef( Metaref );
+    //-std::cout << "cfgEntityValue::cevUpdate__2." << std::endl;
+ }
+ 
+@@ -1197,7 +1197,7 @@ void cfgEntityValue::cevUpdate
+    Materna::MSSD::autoMutex OnlyOne( M_Mutex );
+    //
+    cfgValueNode * const N = node_find_or_creat( M_Root, Path );
+-   N->update( Metaref );
++   N->updateRef( Metaref );
+    N->update( Value );
+    //-std::cout << "cfgEntityValue::cevUpdate__3." << std::endl;
+ }
+@@ -2035,6 +2035,13 @@ void cfgEntity::itemCreate
+          cfgValue const * RawValue = M_Value->cevGetRaw( Item );
+          // No exception - value already set.
+          reference const RefOrig = M_Value->cevGetRef( Item );
++         if( RefOrig == REFERENCE_FOR_DIRECTORY )
++         {
++            // Error: Meta already there, do not overwrite it.
++            //-std::cout << "cfgEntity::itemCreate - inside path."
++            //-          << std::endl;
++            throw cfgEntity_AlreadyExists();
++         }
+          if( RefOrig )
+          {
+             // Try to get metadata for creation - perhaps throwing?
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
+index cc1c365c..3c7b502c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
+@@ -257,12 +257,22 @@ void document2Value
+                   );
+                }
+             }
++            catch( std::exception & ex )
++            {
++               writeTrace
++               (
++                  BasicRuntime_HERE,
++                  "cfgFromXML: \"%s\" exception (%s) - ignored",
++                  XPath.c_str(),
++                  ex.what
++               );
++            }
+             catch( ... )
+             {
+                writeTrace
+                (
+                   BasicRuntime_HERE,
+-                  "cfgFromXML: exception - ignored(%s)",
++                  "cfgFromXML: \"%s\" exception - ignored",
+                   XPath.c_str()
+                );
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+index 95d10de4..b165f842 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -242,6 +242,11 @@ void document2Value
+ {
+    while( Node )
+    {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         "cfgFromXML: next node"
++      );
+       if
+       (
+          ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
+@@ -316,13 +321,21 @@ void document2Value
+                   );
+                }
+             }
++            catch( std::exception & ex )
++            {
++               writeTrace
++               (
++                  BasicRuntime_HERE,
++                  "cfgFromXML: exception (%s) - ignored",
++                  ex.what()
++               );
++            }
+             catch( ... )
+             {
+                writeTrace
+                (
+                   BasicRuntime_HERE,
+-                  "cfgFromXML: exception - ignored(%s)",
+-                  XPath.c_str()
++                  "cfgFromXML: exception - ignored"
+                );
+             }
+          }
+@@ -330,6 +343,14 @@ void document2Value
+          document2Value( SubNode, Dst, XPath, Level + 1 );
+ 
+       }
++      else
++      {
++         writeTrace
++         (
++            BasicRuntime_HERE,
++            "cfgFromXML: unusable"
++         );
++      }
+       Node = Node->getNextSibling();
+    }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueNode.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueNode.cpp
+index 709d3541..3972663e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueNode.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueNode.cpp
+@@ -74,17 +74,17 @@ namespace
+ 
+ 
+ cfgValueNode::cfgValueNode() :
+-   M_Ref( 0 ),
++   M_Ref( REFERENCE_FOR_DIRECTORY ),
+    M_Name(),
+    M_Value( 0 )
+ {
+-   //- std::cout << "cfgValueNode::cfgValueNode !!! - WHY?" << std::endl;
++   //-std::cout << "cfgValueNode::cfgValueNode !!! - WHY?" << std::endl;
+ }
+ 
+ 
+ 
+ cfgValueNode::cfgValueNode( char const * Item ) :
+-   M_Ref( 0 ),
++   M_Ref( REFERENCE_FOR_DIRECTORY ),
+    M_Name( Item ),
+    M_Value( 0 )
+ {
+@@ -126,11 +126,9 @@ cfgEntity::reference cfgValueNode::reference() const
+ 
+ 
+ 
+-void cfgValueNode::update
+-(
+-   cfgEntity::reference Ref
+-)
++void cfgValueNode::updateRef( cfgEntity::reference Ref )
+ {
++   //-std::cout << "cfgValueNode::updateRef(" << Ref << ")" << std::endl;
+    M_Ref = Ref;
+ }
+ 
+@@ -222,7 +220,11 @@ void cfgValueNode::save( std::ostream & Dst, std::string const & Indent )
+ 
+ 
+ 
+-void cfgValueNode::saveDir( std::ostream & Dst, std::string const & Indent )
++void cfgValueNode::saveDir
++   (
++      std::ostream &            Dst,
++      std::string const &       Indent
++   )
+    const
+ {
+    follow_all_save( M_Value, Dst, Indent );
+@@ -242,17 +244,17 @@ namespace
+       std::string const & Indent
+    )
+    {
+-      //- std::cout << "follow_all_save ..." << std::endl;
++      //-std::cout << "follow_all_save ..." << std::endl;
+       if( !Link )
+       {
+-         //- std::cout << "follow_all_save - NULL." << std::endl;
++         //-std::cout << "follow_all_save - NULL." << std::endl;
+          return;
+       }
+       cfgValueDirectory const * const NodeValueDirectory
+          = dynamic_cast<cfgValueDirectory const *>( Link );
+       if( !NodeValueDirectory )
+       {
+-         //- std::cout << "follow_all_save - no DIR." << std::endl;
++         //-std::cout << "follow_all_save - no DIR." << std::endl;
+          return;
+       }
+       cfgValueNodes::const_iterator I( NodeValueDirectory->get().begin() );
+@@ -261,7 +263,7 @@ namespace
+          cfgValueNode_Save( *I, Dst, Indent );
+          ++I;
+       }
+-      //- std::cout << "follow_all_save." << std::endl;
++      //-std::cout << "follow_all_save." << std::endl;
+    }
+ 
+ 
+-- 
+2.41.0.windows.1
+

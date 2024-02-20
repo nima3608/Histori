@@ -1,0 +1,680 @@
+From a433b45ba1fd08893cc0df851e961f914fcb09af Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 24 Feb 2016 18:33:10 +0000
+Subject: [PATCH 0736/1076] MANTIS 0040313 extension: CUSS1.4
+
+CUSS IDL XSD
+V1.4
+
+use CUSS1.4 IDL
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@994 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Cuss/CUSS.SBD.XSD              |  86 ++++++++++++++-
+ .../Massai/idl/Cuss/characteristics.idl       |  60 ++++++----
+ SelfServiceCommon/Massai/idl/Cuss/codes.idl   |  53 ++++++---
+ SelfServiceCommon/Massai/idl/Cuss/comps.idl   | 103 ++++++++++++++----
+ .../Massai/idl/Cuss/comps.tao140.idl          | 102 ++++++++++++++---
+ SelfServiceCommon/Massai/idl/Cuss/types.idl   |  15 ++-
+ 6 files changed, 336 insertions(+), 83 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/CUSS.SBD.XSD b/SelfServiceCommon/Massai/idl/Cuss/CUSS.SBD.XSD
+index 1cdb5d58..96b1068d 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/CUSS.SBD.XSD
++++ b/SelfServiceCommon/Massai/idl/Cuss/CUSS.SBD.XSD
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<!-- edited with XMLSpy v2010 (http://www.altova.com) by Detlef Meier (Materna GmbH) -->
++<!-- Mit XMLSpy v2013 rel. 2 (http://www.altova.com) von Andreas Gehling (Materna GmbH) bearbeitet -->
+ <!-- edited with XML Spy v4.4 U (http://www.xmlspy.com) by Ethan Hall-Beyer (private) -->
+-<xsd:schema targetNamespace="urn:CUSS-1.3/types/conveyorInterface" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:CUSS-1.3/types/conveyorInterface" id="baggageTypes">
++<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:CUSS-1.3/types/conveyorInterface" targetNamespace="urn:CUSS-1.3/types/conveyorInterface" id="baggageTypes">
+ 	<xsd:complexType name="baggageDataType">
+ 		<xsd:annotation>
+ 			<xsd:documentation>Data acquired for a single object on the bag measurement / conveyor device</xsd:documentation>
+@@ -48,7 +48,7 @@
+ 					<xsd:sequence>
+ 						<xsd:element name="load" type="tns:weightType" minOccurs="0">
+ 							<xsd:annotation>
+-								<xsd:documentation>Weight load value (for components supporting DS_TYPES_SCALE)</xsd:documentation>
++								<xsd:documentation>Weight load value (for components supporting DS_TYPES_WEIGHT</xsd:documentation>
+ 							</xsd:annotation>
+ 						</xsd:element>
+ 						<xsd:element name="size" type="tns:sizeType" minOccurs="0">
+@@ -59,6 +59,11 @@
+ 					</xsd:sequence>
+ 				</xsd:complexType>
+ 			</xsd:element>
++			<xsd:element name="baggageError" type="tns:baggageErrorType" minOccurs="0">
++				<xsd:annotation>
++					<xsd:documentation>Optional error code complementing the BAGGAGE_NOT_CONVEYABLE status code</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
+ 			<xsd:element name="bsmMessage" type="xsd:string" minOccurs="0">
+ 				<xsd:annotation>
+ 					<xsd:documentation>IATA RP1745 Baggage Source Message (BSM) values, containing at least the  following elements: .V, .F and .N. (for components supporting DS_TYPES_RP1745)</xsd:documentation>
+@@ -176,6 +181,12 @@
+ 					<xsd:documentation>Indicates if the measurement is stable</xsd:documentation>
+ 				</xsd:annotation>
+ 			</xsd:element>
++			<xsd:element name="extendedWeight" type="tns:extendedWeightType" minOccurs="0">
++				<xsd:annotation>
++					<xsd:documentation>Breakdown of the standard weight value if the platfrom is able to deliver this optional information.
++If extended weight is reported by the platfrom, the fields 'weight' and 'grossWeight' will show the same values.</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
+ 		</xsd:sequence>
+ 	</xsd:complexType>
+ 	<xsd:element name="barcodeTag" type="tns:barcodeTagDataType">
+@@ -200,4 +211,73 @@
+ 			</xsd:element>
+ 		</xsd:sequence>
+ 	</xsd:complexType>
++	<xsd:simpleType name="baggageErrorType">
++		<xsd:annotation>
++			<xsd:documentation>Additional error definitions complementing the BAGGAGE_NOT_CONVEYABLE status code</xsd:documentation>
++		</xsd:annotation>
++		<xsd:restriction base="xsd:string">
++			<xsd:enumeration value="BAGGAGE_IRREGULAR_BAG">
++				<xsd:annotation>
++					<xsd:documentation>Detected bag should be handled as bulky baggage like Skis, Strollers, Prams, Wheelchairs</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_BAG_WITH_STRAPS">
++				<xsd:annotation>
++					<xsd:documentation>Detected bag has lose straps which could block the BHS</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_UPRIGHT_BAG">
++				<xsd:annotation>
++					<xsd:documentation>Detected bag stands upright</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_MULTIPLE_BAGS">
++				<xsd:annotation>
++					<xsd:documentation>More than one bag detected</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_SLOPED_BAG">
++				<xsd:annotation>
++					<xsd:documentation>Bag leaning/levering on side walls probnably reducing weight</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_VOLUME_NOT_DETERMINABLE">
++				<xsd:annotation>
++					<xsd:documentation>The SBD system cannot perform a volumetric analysis of the bag</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++			<xsd:enumeration value="BAGGAGE_OVERFLOW_TUB">
++				<xsd:annotation>
++					<xsd:documentation>Detected bag overflows the sides of the tub</xsd:documentation>
++				</xsd:annotation>
++			</xsd:enumeration>
++		</xsd:restriction>
++	</xsd:simpleType>
++	<xsd:complexType name="extendedWeightType">
++		<xsd:annotation>
++			<xsd:documentation>Data acquired for a single object on the bag measurement / conveyor device</xsd:documentation>
++		</xsd:annotation>
++		<xsd:sequence>
++			<xsd:element name="netWeight" type="xsd:int">
++				<xsd:annotation>
++					<xsd:documentation>Weight of the baggage object, in grams</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
++			<xsd:element name="tareWeight" type="xsd:int">
++				<xsd:annotation>
++					<xsd:documentation>Weight of an optional tub, in grams</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
++			<xsd:element name="grossWeight" type="xsd:int">
++				<xsd:annotation>
++					<xsd:documentation>Summary of weights, in grams (tub + baggage object)</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
++			<xsd:element name="tubDetected" type="xsd:boolean" default="false">
++				<xsd:annotation>
++					<xsd:documentation>Indicates whether a tub was detected or not.</xsd:documentation>
++				</xsd:annotation>
++			</xsd:element>
++		</xsd:sequence>
++	</xsd:complexType>
+ </xsd:schema>
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/characteristics.idl b/SelfServiceCommon/Massai/idl/Cuss/characteristics.idl
+index 2590860e..95973d40 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/characteristics.idl
++++ b/SelfServiceCommon/Massai/idl/Cuss/characteristics.idl
+@@ -4,30 +4,38 @@
+ //
+ //  Purpose:   CUSS virtual components characteristics
+ //
+-//  Date:      17.06.2013
++//  Date:      31.03.2015
+ //
+-//  Version:   1.3
++//  Version:   1.4
+ //
+ //  Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
+ //
+-//  Copyright(c) 2003,2009,2013 International Air Transport Association, All Rights Reserved
+-//
+-//  Note:      Please refer to the CUSS 1.3 Technical Specification for more information
+-//
+-//  Changed:   Baggage handling support added. (Nicolas Bruns, 29.06.2004)
+-//
+-//  @date 24.01.2013
+-//  @li V1.3
+-//  @li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
+-//  @li added interface Scale
+-//
+-//  @date 26.11.2013
+-//  @li V1.3.1
+-//  @li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
+-//  @li use full CUSS1.3 IDL + Materna extension MediaType: BoardingPassFirst, BoardingPassBusiness, BoardingPassEconomy     
++//  Copyright(c) 2003,2009,2013,2015 International Air Transport Association, All Rights Reserved
+ //
+ //----------------------------------------------------------------------------
+ 
++/**
++Note:      Please refer to the CUSS 1.4 Technical Specification for more information
++Changed:   Baggage handling support added. (Nicolas Bruns, 29.06.2004)
++
++@date 24.01.2013
++@li V1.3
++@li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
++@li added interface Scale
++
++@date 26.11.2013
++@li V1.3.1
++@li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
++@li use full CUSS1.3 IDL + Materna extension MediaType: BoardingPassFirst, BoardingPassBusiness, BoardingPassEconomy     
++
++@date 24.02.2016
++@li V1.4
++@li Mantis 0040313: Accessible ApplicationManager
++@li use full CUSS1.4 IDL 
++- difference to original
++  - added Materna extension MediaType: BoardingPassFirst, BoardingPassBusiness, BoardingPassEconomy     
++*/
++
+ #ifndef CHARACTERISTICS_IDL
+ #define CHARACTERISTICS_IDL
+ 
+@@ -124,7 +132,7 @@ module Characteristics
+         /** The type of the image as specified above */
+         readonly attribute ImageType mapType;
+ 
+-        /** URL to usage image/animation */
++        /** URL to usage image/animation (in CUSS 1.4, full XML text for device help instruction) */
+         readonly attribute string howTo;
+ 
+         /** The type of the image/animation as specified above */
+@@ -544,9 +552,6 @@ module Characteristics
+         /** The maximum number of bags a conveyor can handle */
+         readonly attribute long maxBags;
+ 
+-        /** If true, conveyor can only move in forward direction */
+-        readonly attribute boolean onewayForward;
+-
+       /** If true, conveyor has a security barrier (for user safety) */
+       readonly attribute boolean barrierCapable;
+ 
+@@ -555,6 +560,9 @@ module Characteristics
+ 
+       /** If true, conveyor system can detect intrusions behind the front/user side (verification/parking) */
+       readonly attribute boolean safetyIntrusionCapable;
++
++        /** If true, conveyor can only move in forward direction */
++        readonly attribute boolean onewayForward;
+     };
+ 
+     /** Conveyor characteristics
+@@ -587,7 +595,7 @@ module Characteristics
+         /** the maximum width of baggage */
+         readonly attribute long maxWidth;
+ 
+-        /** the maximum height of baggage */
++        /** the maximum height of baggage [sic] for backwards compatibility*/
+         readonly attribute long maxHeigth;
+ 
+         /** the maximum length of baggage */
+@@ -600,7 +608,15 @@ module Characteristics
+         readonly attribute long currentNoOfBagsParked;
+     };
+ 
++    /** Announcement characteristics
++    */
+ 
++    interface Announcement : Manufacturer
++    {
++        /** The list of supported languages as RFC3066 2-letter codes or 2-2-letter codes */
++        typedef sequence<string> LanguageList;
++        readonly attribute LanguageList supportedLanguages;
++    };
+ };
+ 
+ #endif // CHARACTERISTICS
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/codes.idl b/SelfServiceCommon/Massai/idl/Cuss/codes.idl
+index 1769e60a..c4b77bd3 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/codes.idl
++++ b/SelfServiceCommon/Massai/idl/Cuss/codes.idl
+@@ -1,18 +1,21 @@
++//---------------------------------------------------------------------------
++//
++//  File:      codes.idl
++//
++//  Purpose:   Definition of CUSS codes
++//
++//  Date:      31.03.2015
++//
++//  Version:   1.4
++//
++//  Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
++//
++//  Copyright(c) 2003,2009,2013,2015 International Air Transport Association, All Rights Reserved
++//
++//  Note:      Please refer to the CUSS 1.4 Technical Specification for more information
++//
++//----------------------------------------------------------------------------
+ /**
+-File:      codes.idl
+-
+-Purpose:   Definition of CUSS codes
+-
+-Date:      17.06.2013
+-
+-Version:   1.3
+-
+-Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
+-
+-Copyright(c) 2003,2009,2013 International Air Transport Association, All Rights Reserved
+-
+-Note:      Please refer to the CUSS 1.3 Technical Specification for more information
+-
+ Changed:   Added baggage handling status codes (Nicolas Bruns, 29.06.2004)
+ 
+ @date 24.01.2013
+@@ -56,7 +59,15 @@ Changed:   Added baggage handling status codes (Nicolas Bruns, 29.06.2004)
+ @li V1.3.7
+ @li Mantis 0040061: Extend Conveyor-Component for extended ConveyorDev.idl
+ @li moved BAGGAGE_INCORRECTLY_PLACED, BAGGAGE_TUB_REQUIRED, BAGGAGE_HANDLE_EXTENDED, BAGGAGE_TOO_WIDE, BAGGAGE_TOO_SMALL from 151,... to 170,...
+-               
++
++@date 24.02.2016
++@li V1.4
++@li Mantis 0040313: Accessible ApplicationManager
++@li use full CUSS1.4 IDL
++- difference to original
++  - added DS_TYPES_KEY, DS_TYPES_KEY_UP, DS_TYPES_KEY_DOWN
++  - fixed DS_TYPES_SSML_11
++  - added materna extension BAGGAGE_INTRUSION, BAGGAGE_INTRUSION_FRONT, BAGGAGE_INTRUSION_BACK, BAGGAGE_TRANSPORT_BUSY, BAGGAGE_MISTRACKED, BAGGAGE_UNEXPECTED_CHANGE, BAGGAGE_ACCEPTED, BAGGAGE_DELIVERED, BAGGAGE_INTERFERENCE_USER, BAGGAGE_INTRUSION_SAFETY, BAGGAGE_INCORRECTLY_PLACED, BAGGAGE_TUB_REQUIRED, BAGGAGE_HANDLE_EXTENDED, BAGGAGE_TOO_WIDE, BAGGAGE_TOO_SMALL,               
+ */
+ 
+ #ifndef CODES_IDL
+@@ -168,7 +179,8 @@ module datastatus
+     const long DS_TYPES_EPASSPORT_DG20           = 22000; /**< e-Passport format */
+ 
+     const long DS_TYPES_EPAYMENT                 = 23000; /**< E-Payment: CuPaySchema.xsd */
+-    const long DS_TYPES_ILLUMINATION             = 24000; /**< LED CUSS_ILLUMINATION.xsd */
++
++    const long DS_TYPES_ILLUMINATION             = 24000; /**< Illumination LEDs Interface: CUSS.Illumination.xsd */
+ 
+     const long DS_TYPES_SSML10                   = 25000; /**< SSML Specification supported by the Announcement Interface */
+     const long DS_TYPES_SSML11                   = 25010; /**< SSML Specification supported by the Announcement Interface */
+@@ -257,6 +269,13 @@ module eventcodes
+     const long ACTIVE_UNAVAILABLE               = 133;  /**< Go unavailable while active in a transaction */
+     const long UPDATE_REQUEST                   = 1004; /**< Tell CLA the application wishes to update */
+ 
++
++    // Additional codes for CUSS 1.4
++
++    const long ACTIVE_ACCESSIBLE                = 134;  /**< Go unavailable while active in a transaction */
++    const long ACCESSIBLE_ACTIVE                = 135;  /**< Go unavailable while active in a transaction */
++    const long ACCESSIBLE                       = 211; /**< Logical state ACCESSIBLE (application) */
++
+ };
+ 
+ /**
+@@ -318,6 +337,7 @@ module statuscodes
+     const long BAGGAGE_DELIVERED             = 148; /**< <b>Scope:</b> private + platform  */
+     const long BAGGAGE_INTERFERENCE_USER     = 149; /**< <b>Scope:</b> private + platform  */
+     const long BAGGAGE_INTRUSION_SAFETY      = 150; /**< <b>Scope:</b> private + platform  */
++    const long BAGGAGE_NOT_CONVEYABLE        = 151; /**< <b>Scope:</b> private + platform  @note Specific reason codes are reported to the application within the XML data */
+     const long BAGGAGE_INCORRECTLY_PLACED    = 170; /**< <b>Scope:</b> private + platform; materna ccm extension */
+     const long BAGGAGE_TUB_REQUIRED          = 171; /**< <b>Scope:</b> private + platform; materna ccm extension */
+     const long BAGGAGE_HANDLE_EXTENDED       = 172; /**< <b>Scope:</b> private + platform; materna ccm extension */
+@@ -362,4 +382,3 @@ module statuscodes
+ 
+ #endif // CODES_IDL
+ 
+-
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/comps.idl b/SelfServiceCommon/Massai/idl/Cuss/comps.idl
+index f3aa77d5..fd91b8cb 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/comps.idl
++++ b/SelfServiceCommon/Massai/idl/Cuss/comps.idl
+@@ -4,29 +4,37 @@
+ //
+ //  Purpose:   Interfaces to CUSS components
+ //
+-//  Date:      17.06.2013
++//  Date:      31.03.2015
+ //
+-//  Version:   1.3
++//  Version:   1.4
+ //
+ //  Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
+ //
+-//  Copyright(c) 2003,2009,2013 International Air Transport Association, All Rights Reserved
++//  Copyright(c) 2003,2009,2013,2015 International Air Transport Association, All Rights Reserved
+ //
+-//  Note:      Please refer to the CUSS 1.3 Technical Specification for more information
++//  Note:      Please refer to the CUSS 1.4 Technical Specification for more information
+ //
+-//  Changed:   Added baggage handling support (Nicolas Bruns, 29.06.2004)
+-//
+-//  @date 24.01.2013
+-//  @li V1.3
+-//  @li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
+-//  @li added interface BaggageScale
+-//
+-//  @date 26.11.2013
+-//  @li V1.3.1
+-//  @li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
+-//  @li use full CUSS1.3 IDL
+ //----------------------------------------------------------------------------
+-
++/**
++Changed:   Added baggage handling support (Nicolas Bruns, 29.06.2004)
++
++@date 24.01.2013
++@li V1.3
++@li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
++@li added interface BaggageScale
++
++@date 26.11.2013
++@li V1.3.1
++@li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
++@li use full CUSS1.3 IDL
++
++@date 24.02.2016
++@li V1.4
++@li Mantis 0040313: Accessible ApplicationManager
++@li use full CUSS1.4 IDL 
++- difference to original
++  - added Materna extension MediaType: BoardingPassFirst, BoardingPassBusiness, BoardingPassEconomy     
++*/
+ 
+ /***************************************************************
+ !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+@@ -366,12 +374,15 @@ module Components
+     interface Storage : Peripheral, Userless, Media, Characteristics::Storage { };
+ 
+     /**
+-     *  Interface for virtual components handling a display (eg. kiosk computer screen)
++     *  Interface for virtual components handling a display (eg kiosk computer screen)
+      *
+      *  @note    As Display is a native device,
+      *           only acquire, release and query directives should be implemented.
+      *           All other inherited methods are not applicable and should return RC_NOT_SUPPORTED
+      *
++     *  @note    From CUSS 1.4 (Accessibility),
++     *           also enable and disable directives must be supported to allow screen blanking.
++     *
+      */
+     interface Display : Peripheral, User, Medialess, Characteristics::Display { };
+ 
+@@ -393,8 +404,8 @@ module Components
+ 
+     /**
+      *  Base definition for virtual components allowing self-service baggage check-in
+-    *  @note These are the new definitions for CUSS 1.3. Older definitions are deprecated
+-    *  from CUSS version 1.3 and will be completely removed in CUSS 1.5 latest.
++     *  @note These are the new definitions for CUSS 1.4. Older definitions are deprecated
++     *  from CUSS version 1.3 and will be completely removed in CUSS 1.6 latest.
+      */
+ 
+     interface ConveyorSBD : Peripheral, Medialess, Output, Input, Characteristics::ConveyorSBD
+@@ -564,6 +575,60 @@ module Components
+ 
+     };
+ 
++    /**
++     *  Interface for audible output allowing appliactions to use SSML to
++     *  provide accessibility
++     */
++
++    interface Announcement : Peripheral, User, Medialess, Characteristics::Announcement
++    {
++      /**
++       *  Announces the provided text for eg disabled users
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  blocking     Specifies whether call returns immediatly or only after finishing the output
++       *  @param  ssml         Text to be announced to the user formatted according to SSML 1.0.
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc play(in types::reference  appRef,
++                            in boolean           blocking,
++                            in types::bytestream ssml,
++                            out types::Event e);
++
++       /**
++       *  Stops announcing the current text output
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc stop(in types::reference  appRef,
++                            out types::Event e);
++      /**
++       *  Pauses the current announcement
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc pause(in types::reference  appRef,
++                            out types::Event e);
++      /**
++       *  Resumes the paused announcement
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc resume(in types::reference  appRef,
++                              out types::Event e);
++    };
++
+     /**
+       * This interface is used to query the state and/or characteristics
+       * of a kiosk application that is configured on the platform.
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/comps.tao140.idl b/SelfServiceCommon/Massai/idl/Cuss/comps.tao140.idl
+index ddc42c84..cff048ec 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/comps.tao140.idl
++++ b/SelfServiceCommon/Massai/idl/Cuss/comps.tao140.idl
+@@ -4,28 +4,37 @@
+ //
+ //  Purpose:   Interfaces to CUSS components
+ //
+-//  Date:      17.06.2013
++//  Date:      31.03.2015
+ //
+-//  Version:   1.3
++//  Version:   1.4
+ //
+ //  Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
+ //
+-//  Copyright(c) 2003,2009,2013 International Air Transport Association, All Rights Reserved
++//  Copyright(c) 2003,2009,2013,2015 International Air Transport Association, All Rights Reserved
+ //
+-//  Note:      Please refer to the CUSS 1.3 Technical Specification for more information
++//  Note:      Please refer to the CUSS 1.4 Technical Specification for more information
+ //
+-//  Changed:   Added baggage handling support (Nicolas Bruns, 29.06.2004)
+-//
+-//  @date 24.01.2013
+-//  @li V1.3
+-//  @li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
+-//  @li added interface BaggageScale
+-//
+-//  @date 26.11.2013
+-//  @li V1.3.1
+-//  @li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
+-//  @li use full CUSS1.3 IDL
+ //----------------------------------------------------------------------------
++/**
++Changed:   Added baggage handling support (Nicolas Bruns, 29.06.2004)
++
++@date 24.01.2013
++@li V1.3
++@li Mantis 0025566: WeightScale: support standalone Scale (BaggageScale CUSS1.3)
++@li added interface BaggageScale
++
++@date 26.11.2013
++@li V1.3.1
++@li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
++@li use full CUSS1.3 IDL
++
++@date 24.02.2016
++@li V1.4
++@li Mantis 0040313: Accessible ApplicationManager
++@li use full CUSS1.4 IDL 
++- difference to original
++  - added Materna extension MediaType: BoardingPassFirst, BoardingPassBusiness, BoardingPassEconomy     
++*/
+ 
+ #ifndef COMPS_IDL
+ #define COMPS_IDL
+@@ -357,12 +366,15 @@ module Components
+     interface Storage : Peripheral, Userless, Media, Characteristics::Storage { };
+ 
+     /**
+-     *  Interface for virtual components handling a display (eg. kiosk computer screen)
++     *  Interface for virtual components handling a display (eg kiosk computer screen)
+      *
+      *  @note    As Display is a native device,
+      *           only acquire, release and query directives should be implemented.
+      *           All other inherited methods are not applicable and should return RC_NOT_SUPPORTED
+      *
++     *  @note    From CUSS 1.4 (Accessibility),
++     *           also enable and disable directives must be supported to allow screen blanking.
++     *
+      */
+     interface Display : Peripheral, User, Medialess, Characteristics::Display { };
+ 
+@@ -384,8 +396,8 @@ module Components
+ 
+     /**
+      *  Base definition for virtual components allowing self-service baggage check-in
+-    *  @note These are the new definitions for CUSS 1.3. Older definitions are deprecated
+-    *  from CUSS version 1.3 and will be completely removed in CUSS 1.5 latest.
++     *  @note These are the new definitions for CUSS 1.4. Older definitions are deprecated
++     *  from CUSS version 1.3 and will be completely removed in CUSS 1.6 latest.
+      */
+ 
+     interface ConveyorSBD : Peripheral, Medialess, Output, Input, Characteristics::ConveyorSBD
+@@ -555,6 +567,60 @@ module Components
+ 
+     };
+ 
++    /**
++     *  Interface for audible output allowing appliactions to use SSML to
++     *  provide accessibility
++     */
++
++    interface Announcement : Peripheral, User, Medialess, Characteristics::Announcement
++    {
++      /**
++       *  Announces the provided text for eg disabled users
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  blocking     Specifies whether call returns immediatly or only after finishing the output
++       *  @param  ssml         Text to be announced to the user formatted according to SSML 1.0.
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc play(in types::reference  appRef,
++                            in boolean           blocking,
++                            in types::bytestream ssml,
++                            out types::Event e);
++
++       /**
++       *  Stops announcing the current text output
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc stop(in types::reference  appRef,
++                            out types::Event e);
++      /**
++       *  Pauses the current announcement
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc pause(in types::reference  appRef,
++                            out types::Event e);
++      /**
++       *  Resumes the paused announcement
++       *
++       *  @param  appRef       A valid application reference (token)
++       *  @param  e            Return value
++       *
++       */
++
++       returncodes::rc resume(in types::reference  appRef,
++                              out types::Event e);
++    };
++
+     /**
+       * This interface is used to query the state and/or characteristics
+       * of a kiosk application that is configured on the platform.
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/types.idl b/SelfServiceCommon/Massai/idl/Cuss/types.idl
+index f7ba95e1..c0c2ebc2 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/types.idl
++++ b/SelfServiceCommon/Massai/idl/Cuss/types.idl
+@@ -4,17 +4,24 @@
+ //
+ //  Purpose:   Type definitions for CUSS idls
+ //
+-//  Date:      17.06.2013
++//  Date:      31.03.2015
+ //
+-//  Version:   1.3
++//  Version:   1.4
+ //
+ //  Author:    IATA Passenger Experience Management Group: CUWG CUSS-TSG
+ //
+-//  Copyright(c) 2003,2009,2013 International Air Transport Association, All Rights Reserved
++//  Copyright(c) 2003,2009,2013,2015 International Air Transport Association, All Rights Reserved
+ //
+-//  Note:      Please refer to the CUSS 1.3 Technical Specification for more information
++//  Note:      Please refer to the CUSS 1.4 Technical Specification for more information
+ //
+ //----------------------------------------------------------------------------
++/**
++
++@date 24.02.2016
++@li V1.4
++@li Mantis 0040313: Accessible ApplicationManager
++@li use full CUSS1.4 IDL 
++*/
+ 
+ #ifndef TYPES_IDL
+ #define TYPES_IDL
+-- 
+2.41.0.windows.1
+

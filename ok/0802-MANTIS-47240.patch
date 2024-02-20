@@ -1,0 +1,2850 @@
+From 339546c58163c2fc895928ac6189ff6cf2b5e5f1 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 18 Sep 2017 10:46:02 +0000
+Subject: [PATCH 0802/1000] MANTIS 47240 Mantis 47240: Config service meta data
+ access - Implement Textlist servant extension
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1259 90b65887-3827-0410-9a23-83215b262276
+---
+ .../CfgXMgrB/inc/cfgCorba_ServiceTextlist.hpp |  162 ++
+ .../cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp       |    4 +-
+ .../cpp/CfgXMgrB/inc/cfgCorba_Textlist2.hpp   |   93 ++
+ .../cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp      |   94 +-
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |    1 +
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      |    2 +
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp    | 1324 +++++++++--------
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp   |  575 +++++++
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |   36 +-
+ .../cpp/CfgXMgrB/src/cfgMetaTextlist.cpp      |   81 +-
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |    4 +-
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |    1 +
+ 12 files changed, 1657 insertions(+), 720 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceTextlist.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Textlist2.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceTextlist.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceTextlist.hpp
+new file mode 100644
+index 00000000..bcf2cdfa
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceTextlist.hpp
+@@ -0,0 +1,162 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_ServiceTextlist.hpp
++ *
++ * Contains declaration of class cfgCorba_ServiceTextlist.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGCORBA_SERVICETEXTLIST
++#define CFGCORBA_SERVICETEXTLIST
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++
++#include "cfgCorba_Node.hpp"
++
++
++class cfgCorba_ServiceTextlist :
++   virtual public serviceCfg_Node,
++   virtual public POA_Config::Textlist
++{
++
++   cfgEntity * M_ConfigEntity;
++
++   /**
++    *
++    * Add a string to the configuration list.
++    *
++   **/
++   void add
++   (
++      Config::access const &            Acc,
++      char const *                      String
++   );
++
++   /**
++    *
++    * Add a string unique to the configuration list.
++    *
++   **/
++   void addU
++   (
++      Config::access const &            Acc,
++      char const *                      String
++   );
++
++   /**
++    *
++    * Add a string (initially) to the configuration list.
++    *
++   **/
++   void addInitial
++   (
++      Config::access const &            Acc,
++      char const *                      String
++   );
++
++   /**
++    *
++    * Add a string (initially) unique to the configuration list.
++    *
++   **/
++   void addUInitial
++   (
++      Config::access const &            Acc,
++      char const *                      String
++   );
++
++   /**
++    *
++    * Create a configuration item
++    *
++   **/
++   void create
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           Config::Textlist::strings const & DefaultValue,
++           CORBA::Long                       MaxLength
++        );
++
++   /**
++    *
++    * Get a configuration value
++    *
++   **/
++   Config::Textlist::strings * get( Config::access const & Acc );
++
++   /**
++    *
++    * Set a configuration value
++    *
++   **/
++   void set
++   (
++      Config::access const &            Acc,
++      Config::Textlist::strings const & Texts
++   );
++
++   /**
++    *
++    * Set an initial configuration value
++    *
++   **/
++   void setInitial
++   (
++      Config::access const &            Acc,
++      Config::Textlist::strings const & Texts
++   );
++
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       MaxLength
++        );
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Configuration:             Refers the configuration back-end.
++    *
++   **/
++   cfgCorba_ServiceTextlist( cfgEntity & Configuration );
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~cfgCorba_ServiceTextlist();
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   cfgCorba_ServiceTextlist();
++
++};
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
+index 735715b8..51145037 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
+@@ -5,9 +5,9 @@
+  *
+  * Contains declaration of class cfgCorba_Text2.
+  *
+- * @author JK
++ * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002 MATERNA Information & Communications
++ * Copyright (c) 2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Textlist2.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Textlist2.hpp
+new file mode 100644
+index 00000000..00657428
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Textlist2.hpp
+@@ -0,0 +1,93 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_Textlist2.hpp
++ *
++ * Contains declaration of class cfgCorba_Textlist2.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGCORBA_TEXTLIST2_HPP
++#define CFGCORBA_TEXTLIST2_HPP
++#ifdef SHOW_INCLUDE_FILES
++
++#pragma message("including: " __FILE__)
++
++#endif
++
++
++#include "cfgEntity.hpp"
++
++
++
++/**
++ *
++ * Handle class.
++ *
++**/
++class cfgCorba_Textlist2_Private;
++
++
++
++/**
++ *
++ * An object of this class provides a CORBA-based access to configuration
++ * items of "text" type.
++ *
++**/
++class cfgCorba_Textlist2
++{
++
++   /**
++    *
++    * Implementation handle.
++    *
++   **/
++   cfgCorba_Textlist2_Private * Handle;
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Entity:    Configuration data reference.
++    *
++   **/
++   explicit cfgCorba_Textlist2( cfgEntity & Entity );
++
++   /**
++    *
++    * Destructor
++    *
++   **/
++   ~cfgCorba_Textlist2();
++
++private:
++
++   //! Default constructor - Intentionally not implemented.
++   cfgCorba_Textlist2();
++
++   //! Copy constructor - Intentionally not implemented.
++   cfgCorba_Textlist2( cfgCorba_Textlist2 const & );
++
++   //! Assignment - Intentionally not implemented.
++   cfgCorba_Textlist2 & operator=( cfgCorba_Textlist2 const & );
++
++
++};
++
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+index 25961e39..2b61b57b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -30,10 +30,31 @@ class cfgMetaTextlist :
+ 
+    /**
+     *
+-    * Value restriction. A configuration value my not longer than this.
++    * Value restriction. A configuration value my not longer.
+     *
+    **/
+-   unsigned M_MaxLength;
++   unsigned     m_max_length;
++
++   /**
++    *
++    * Value restriction. A configuration value my not be shorter.
++    *
++   **/
++   unsigned     m_min_length;
++
++   /**
++    *
++    * Value restriction. A configuration value shall follow this rule.
++    *
++   **/
++   std::string  m_regex;
++
++   /**
++    *
++    * Value restriction. A configuration value my not be shorter.
++    *
++   **/
++   unsigned     m_semantic;
+ 
+ public:
+ 
+@@ -42,7 +63,7 @@ public:
+     * Constructor.
+     *
+    **/
+-   explicit cfgMetaTextlist( char const * Auth );
++   explicit cfgMetaTextlist( char const * auth );
+ 
+    /**
+     *
+@@ -51,8 +72,21 @@ public:
+    **/
+    cfgMetaTextlist
+    (
+-      std::string const & Rights, std::string const & Explanation,
+-      unsigned MaxLength
++      std::string const & rights, std::string const & explanation,
++      unsigned max_length
++   );
++
++   /**
++    *
++    * Constructor.
++    *
++   **/
++   cfgMetaTextlist
++   (
++      std::string const & rights, std::string const & explanation,
++      unsigned max_length, unsigned min_length,
++      std::string const & regex,
++      unsigned semantic
+    );
+ 
+    /**
+@@ -88,12 +122,42 @@ public:
+ 
+    /**
+     *
+-    * Return maximum length of string.
++    * Return maximum length of text.
+     *
+    **/
+    unsigned getMaxLength() const
+    {
+-      return M_MaxLength;
++      return m_max_length;
++   }
++
++   /**
++    *
++    * Return maximum length of text.
++    *
++   **/
++   unsigned getMinLength() const
++   {
++      return m_min_length;
++   }
++
++   /**
++    *
++    * Return regex for text.
++    *
++   **/
++   char const * getRegex() const
++   {
++      return m_regex.c_str();
++   }
++
++   /**
++    *
++    * Return semantic for text.
++    *
++   **/
++   unsigned getSemantic() const
++   {
++      return m_semantic;
+    }
+ 
+    /**
+@@ -109,18 +173,18 @@ public:
+     *
+     * Save the textlist value object to an ostream.
+     *
+-    * @param Dst:       Destination stream
++    * @param dst:       Destination stream
+     *
+-    * @param Ref:       Reference number
++    * @param ref:       Reference number
+     *
+-    * @param Indent:    Indentation string
++    * @param indent:    Indentation string
+     *
+    **/
+    virtual void save
+    (
+-      std::ostream &            Dst,
+-      cfgEntity::reference      Ref,
+-      std::string const &       Indent
++      std::ostream &            dst,
++      cfgEntity::reference      ref,
++      std::string const &       indent
+    ) const;
+ 
+    /**
+@@ -152,7 +216,7 @@ public:
+    **/
+    cfgValue * valueFactory
+    (
+-      cfgFlatZ const &          Src
++      cfgFlatZ const &          src
+    ) const;
+ 
+ };
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 6115990a..ac34b8b7 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -37,6 +37,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Text2.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
++    $(_OBJ)\cfgCorba_Textlist2.obj \
+     $(_OBJ)\cfgEntity.obj \
+     $(XERCES_IFOBJ) \
+     $(_OBJ)\cfgMeta.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index 0ed856e2..1e48d9da 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -26,6 +26,7 @@
+ #include "cfgCorba_Text.hpp"
+ #include "cfgCorba_Text2.hpp"
+ #include "cfgCorba_Textlist.hpp"
++#include "cfgCorba_Textlist2.hpp"
+ #include "CfgXMgrB_def.h"
+ #include "traceLocal.hpp"
+ 
+@@ -167,6 +168,7 @@ int main( int argc, char ** argv )
+       cfgCorba_Text       CorbaText( Configuration );
+       cfgCorba_Text2      CorbaText2( Configuration );
+       cfgCorba_Textlist   CorbaTextlist( Configuration );
++      cfgCorba_Textlist2  CorbaTextlist2( Configuration );
+       //
+       // Wait ...
+       //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+index bbe01207..07a5dc91 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,7 +17,11 @@
+ #pragma warning (disable:4786)
+ #endif /* _MSC_VER */
+ 
++// Exported
+ #include "cfgCorba_Textlist.hpp"
++
++// Local header
++#include "cfgCorba_ServiceTextlist.hpp"
+ #include "cfgCorba_Node.hpp"
+ #include "cfgCorba_Template.hpp"
+ 
+@@ -42,774 +46,776 @@
+ 
+ #include "trc/TraceClt.h"
+ 
+-#define  SCTL "serviceCfgTextlist::"
++#define  SCTL "cfgCorba_ServiceTextlist::"
+ 
+ 
+ 
+-/**
+- **************************************************************************
++/*
+  *
+- * Textlist configuration service implementation class.
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
+  *
+- **************************************************************************
+-**/
+-class serviceCfgTextlist :
+-   public serviceCfg_Node,
+-   public POA_Config::Textlist
++ */
++void cfgCorba_ServiceTextlist::add
++(
++   Config::access const &            Acc,
++   char const *                      String
++)
+ {
+-
+-   cfgEntity * M_ConfigEntity;
+-
+-   /**
+-    *
+-    * Add a string to the configuration list.
+-    *
+-   **/
+-   void add
++   verifyAccess( SCTL "add", Acc );
++   writeTrace
+    (
+-      Config::access const &            Acc,
+-      char const *                      String
+-   )
++      SecondaryRuntime_HERE,
++      SCTL "add(%s,%s) ...", access2Str(Acc).c_str(), String
++   );
++   try
+    {
+-      verifyAccess( SCTL "add", Acc );
+-      writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         SCTL "add(%s,%s) ...", access2Str(Acc).c_str(), String
+-      );
+-      try
+-      {
+-         cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueTextlist const * const valref_old =
+-            dynamic_cast<cfgValueTextlist const *>
+-            (
+-               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+-            );
+-         if( valref_old )
+-         {
+-            cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = valref_old->textlist();
+-            NewStringsI = OldStringsI;
+-         }
+-         else
+-         {
+-            throw Config::Node::notFound();
+-         }
+-         NewStringsI.push_back( std::string( String ) );
+-         M_ConfigEntity->itemSetValue
+-                        (
+-                           Acc.Authorization,
+-                           Acc.Item,
+-                           new cfgValueTextlist( NewStringsI )
+-                        );
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
++      cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueTextlist const * const valref_old =
++         dynamic_cast<cfgValueTextlist const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCTL "add - outOfRange exception."
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+          );
+-         throw Config::Node::outOfRange();
+-      }
+-      catch( cfgEntity_NotAuthorized & )
++      if( valref_old )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "add - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
++         cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
++            = valref_old->textlist();
++         NewStringsI = OldStringsI;
+       }
+-      catch( cfgEntity_NotFound & )
++      else
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "add - notFound exception."
+-         );
+          throw Config::Node::notFound();
+       }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "add - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "add." );
++      NewStringsI.push_back( std::string( String ) );
++      M_ConfigEntity->itemSetValue
++                     (
++                        Acc.Authorization,
++                        Acc.Item,
++                        new cfgValueTextlist( NewStringsI )
++                     );
+    }
+-
+-   /**
+-    *
+-    * Add a string unique to the configuration list.
+-    *
+-   **/
+-   void addU
+-   (
+-      Config::access const &            Acc,
+-      char const *                      String
+-   )
++   catch( cfgEntity_IllegalValue & )
+    {
+-      verifyAccess( SCTL "addU", Acc );
+       writeTrace
+       (
+          SecondaryRuntime_HERE,
+-         SCTL "addU(%s,%s) ...", access2Str(Acc).c_str(), String
++         SCTL "add - outOfRange exception."
+       );
+-      try
+-      {
+-         cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueTextlist const * const valref_old =
+-            dynamic_cast<cfgValueTextlist const *>
+-            (
+-               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+-            );
+-         if( valref_old )
+-         {
+-            cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = valref_old->textlist();
+-            NewStringsI = OldStringsI;
+-         }
+-         else
+-         {
+-            throw Config::Node::notFound();
+-         }
++      throw Config::Node::outOfRange();
++   }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "add - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "add - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "add - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "add." );
++}
+ 
+-         if (
+-               std::find(NewStringsI.begin(),NewStringsI.end(),String)
+-               == NewStringsI.end()
+-            )
+-         {
+-           NewStringsI.push_back( std::string( String ) );
+-           M_ConfigEntity->itemSetValue
+-                          (
+-                             Acc.Authorization,
+-                             Acc.Item,
+-                             new cfgValueTextlist( NewStringsI )
+-                          );
+-         }
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::addU
++(
++   Config::access const &            Acc,
++   char const *                      String
++)
++{
++   verifyAccess( SCTL "addU", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,
++      SCTL "addU(%s,%s) ...", access2Str(Acc).c_str(), String
++   );
++   try
++   {
++      cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueTextlist const * const valref_old =
++         dynamic_cast<cfgValueTextlist const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCTL "addU - outOfRange exception."
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+          );
+-         throw Config::Node::outOfRange();
+-      }
+-      catch( cfgEntity_NotAuthorized & )
++      if( valref_old )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addU - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
++         cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
++            = valref_old->textlist();
++         NewStringsI = OldStringsI;
+       }
+-      catch( cfgEntity_NotFound & )
++      else
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addU - notFound exception."
+-         );
+          throw Config::Node::notFound();
+       }
+-      catch( ... )
++
++      if (
++            std::find(NewStringsI.begin(),NewStringsI.end(),String)
++            == NewStringsI.end()
++         )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addU - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
++        NewStringsI.push_back( std::string( String ) );
++        M_ConfigEntity->itemSetValue
++                       (
++                          Acc.Authorization,
++                          Acc.Item,
++                          new cfgValueTextlist( NewStringsI )
++                       );
+       }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "addU." );
+    }
+-
+-   /**
+-    *
+-    * Add a string (initially) to the configuration list.
+-    *
+-   **/
+-   void addInitial
+-   (
+-      Config::access const &            Acc,
+-      char const *                      String
+-   )
++   catch( cfgEntity_IllegalValue & )
+    {
+-      verifyAccess( SCTL "addInitial", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE,  SCTL "addInitial(%s) ...",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCTL "addU - outOfRange exception."
+       );
+-      try
+-      {
+-         cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueTextlist const * const valref_old =
+-            dynamic_cast<cfgValueTextlist const *>
+-            (
+-               M_ConfigEntity->itemGetRawValue( Acc.Item )
+-            );
+-         if( valref_old )
+-         {
+-            cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = valref_old->textlist();
+-            NewStringsI = OldStringsI;
+-         }
+-         NewStringsI.push_back( std::string( String ) );
+-         cfgMetaTextlist Obj( Acc.Authorization );
+-         M_ConfigEntity->itemCreate
+-                        (
+-                           Obj, Acc.Item,
+-                           new cfgValueTextlist( NewStringsI )
+-                        );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addInitial - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addInitial - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addInitial - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "addInitial." );
++      throw Config::Node::outOfRange();
+    }
+-
+-   /**
+-    *
+-    * Add a string (initially) unique to the configuration list.
+-    *
+-   **/
+-   void addUInitial
+-   (
+-      Config::access const &            Acc,
+-      char const *                      String
+-   )
++   catch( cfgEntity_NotAuthorized & )
+    {
+-      verifyAccess( SCTL "addUInitial", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE,  SCTL "addUInitial(%s) ...",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCTL "addU - notAuthorized exception."
+       );
+-      try
+-      {
+-         cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueTextlist const * const valref_old =
+-            dynamic_cast<cfgValueTextlist const *>
+-            (
+-               M_ConfigEntity->itemGetRawValue( Acc.Item )
+-            );
+-         if( valref_old )
+-         {
+-            cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = valref_old->textlist();
+-            NewStringsI = OldStringsI;
+-         }
+-         if (
+-               std::find(NewStringsI.begin(),NewStringsI.end(),String)
+-               == NewStringsI.end()
+-            )
+-         {
+-           NewStringsI.push_back( std::string( String ) );
+-           cfgMetaTextlist Obj( Acc.Authorization );
+-           M_ConfigEntity->itemCreate
+-                          (
+-                             Obj, Acc.Item,
+-                             new cfgValueTextlist( NewStringsI )
+-                          );
+-         }
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addUInitial - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addUInitial - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "addUInitial - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "addUInitial." );
++      throw Config::Node::notAuthorized();
+    }
+-
+-   /**
+-    *
+-    * Create a configuration item
+-    *
+-   **/
+-   void create
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           Config::Textlist::strings const & DefaultValue,
+-           CORBA::Long                       MaxLength
+-        )
++   catch( cfgEntity_NotFound & )
+    {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCTL "create(%s) rights:%s",
+-         access2Str(Acc).c_str(), Desc.Rights
++         SecondaryRuntime_HERE,
++         SCTL "addU - notFound exception."
+       );
+-      try
+-      {
+-         cfgMetaTextlist   Obj
+-                           (
+-                              std::string(Desc.Rights),
+-                              std::string(Desc.Explanation),
+-                              static_cast<unsigned>( MaxLength )
+-                           );
+-         cfgValueTextlist::cfgType_Textlist_Value Values;
+-         unsigned LNumber = 0;
+-         unsigned const LLen = DefaultValue.length();
+-         while( LNumber < LLen )
+-         {
+-            Values.push_back( std::string( DefaultValue[LNumber] ) );
+-            ++LNumber;
+-         }
+-         M_ConfigEntity->itemCreate
+-         (
+-            Obj, Acc.Item,
+-            new cfgValueTextlist( Values )
+-         );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "create - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "create - notCreated (1) exception."
+-         );
+-         throw Config::Node::notCreated();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
++      throw Config::Node::notFound();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "addU - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "addU." );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::addInitial
++(
++   Config::access const &            Acc,
++   char const *                      String
++)
++{
++   verifyAccess( SCTL "addInitial", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,  SCTL "addInitial(%s) ...",
++      access2Str(Acc).c_str()
++   );
++   try
++   {
++      cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueTextlist const * const valref_old =
++         dynamic_cast<cfgValueTextlist const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCTL "create - notCreated (2) exception."
++            M_ConfigEntity->itemGetRawValue( Acc.Item )
+          );
+-         throw Config::Node::notCreated();
+-      }
+-      catch( ... )
++      if( valref_old )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "create - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
++         cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
++            = valref_old->textlist();
++         NewStringsI = OldStringsI;
+       }
++      NewStringsI.push_back( std::string( String ) );
++      cfgMetaTextlist Obj( Acc.Authorization );
++      M_ConfigEntity->itemCreate
++                     (
++                        Obj, Acc.Item,
++                        new cfgValueTextlist( NewStringsI )
++                     );
++   }
++   catch( cfgEntity_AlreadyExists & )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCTL "create(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCTL "addInitial - alreadyExists exception."
+       );
++      throw Config::Node::alreadyExists();
+    }
+-
+-   /**
+-    *
+-    * Get a configuration value
+-    *
+-   **/
+-   Config::Textlist::strings * get( Config::access const & Acc )
++   catch( cfgEntity_WrongParameter & )
+    {
+-      verifyAccess( SCTL "get", Acc );
+       writeTrace
+       (
+          SecondaryRuntime_HERE,
+-         SCTL "get(%s) ...", access2Str(Acc).c_str()
++         SCTL "addInitial - wrongParam exception."
+       );
+-      try
+-      {
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueTextlist const * const Value =
+-            dynamic_cast<cfgValueTextlist const *>
+-            (
+-               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+-            );
+-         if( Value )
+-         {
+-            Config::Textlist::strings * const pSList
+-               = new Config::Textlist::strings;
+-            unsigned Idx = 0;
+-            cfgValueTextlist::cfgType_Textlist_Value const &
+-               Src = Value->textlist();
+-
+-            pSList->length( Src.size() );
+-
+-            cfgValueTextlist::cfgType_Textlist_Value::const_iterator
+-               Iter( Src.begin() );
+-            while( Iter != Src.end() )
+-            {
+-               char const * const Listitem = Iter->c_str();
+-               writeTrace
+-               (
+-                  SecondaryRuntime_HERE, SCTL "get[%d] = [%s]",
+-                  Idx,
+-                  Listitem
+-               );
+-               // Introduce an explicit temporary "Tmp"
+-               // to avoid Lint warning
+-               //TAO_SeqElem_String_Manager Tmp = (*pSList)[Idx];
+-               (*pSList)[Idx] = CORBA::string_dup( Listitem );
+-               ++Idx;
+-               ++Iter;
+-            }
+-            writeTrace( SecondaryRuntime_HERE, SCTL "get." );
+-            return pSList;
+-         }
+-         else
+-         {
+-            throw Config::Node::notFound();
+-         }
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "get - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "addInitial - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "addInitial." );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::addUInitial
++(
++   Config::access const &            Acc,
++   char const *                      String
++)
++{
++   verifyAccess( SCTL "addUInitial", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,  SCTL "addUInitial(%s) ...",
++      access2Str(Acc).c_str()
++   );
++   try
++   {
++      cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueTextlist const * const valref_old =
++         dynamic_cast<cfgValueTextlist const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCTL "get - notFound exception."
++            M_ConfigEntity->itemGetRawValue( Acc.Item )
+          );
+-         throw Config::Node::notFound();
+-      }
+-      catch( Config::Node::notFound & )
++      if( valref_old )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "get - notFound exception (root)."
+-         );
+-         throw;
++         cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
++            = valref_old->textlist();
++         NewStringsI = OldStringsI;
+       }
+-      catch( ... )
++      if (
++            std::find(NewStringsI.begin(),NewStringsI.end(),String)
++            == NewStringsI.end()
++         )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "get - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
++        NewStringsI.push_back( std::string( String ) );
++        cfgMetaTextlist Obj( Acc.Authorization );
++        M_ConfigEntity->itemCreate
++                       (
++                          Obj, Acc.Item,
++                          new cfgValueTextlist( NewStringsI )
++                       );
+       }
+    }
++   catch( cfgEntity_AlreadyExists & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "addUInitial - alreadyExists exception."
++      );
++      throw Config::Node::alreadyExists();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "addUInitial - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "addUInitial - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "addUInitial." );
++}
+ 
+-   /**
+-    *
+-    * Set a configuration value
+-    *
+-   **/
+-   void set
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::create
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        Config::Textlist::strings const & DefaultValue,
++        CORBA::Long                       MaxLength
++     )
++{
++   writeTrace
+    (
+-      Config::access const &            Acc,
+-      Config::Textlist::strings const & Texts
+-   )
++      BasicRuntime_HERE,
++      SCTL "create(%s) rights:%s",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
++   {
++      cfgMetaTextlist   Obj
++                        (
++                           std::string(Desc.Rights),
++                           std::string(Desc.Explanation),
++                           static_cast<unsigned>( MaxLength )
++                        );
++      cfgValueTextlist::cfgType_Textlist_Value Values;
++      unsigned LNumber = 0;
++      unsigned const LLen = DefaultValue.length();
++      while( LNumber < LLen )
++      {
++         Values.push_back( std::string( DefaultValue[LNumber] ) );
++         ++LNumber;
++      }
++      M_ConfigEntity->itemCreate
++      (
++         Obj, Acc.Item,
++         new cfgValueTextlist( Values )
++      );
++   }
++   catch( cfgEntity_AlreadyExists & )
+    {
+-      verifyAccess( SCTL "set", Acc );
+       writeTrace
+       (
+          SecondaryRuntime_HERE,
+-         SCTL "set(%s) ...", access2Str(Acc).c_str()
++         SCTL "create - alreadyExists exception."
+       );
+-      try
++      throw Config::Node::alreadyExists();
++   }
++   catch( cfgEntity_IllegalValue & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "create - notCreated (1) exception."
++      );
++      throw Config::Node::notCreated();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "create - notCreated (2) exception."
++      );
++      throw Config::Node::notCreated();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "create - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCTL "create(%s).",
++      access2Str(Acc).c_str()
++   );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++Config::Textlist::strings * cfgCorba_ServiceTextlist::get
++   (
++      Config::access const & Acc
++   )
++{
++   verifyAccess( SCTL "get", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,
++      SCTL "get(%s) ...", access2Str(Acc).c_str()
++   );
++   try
++   {
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueTextlist const * const Value =
++         dynamic_cast<cfgValueTextlist const *>
++         (
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
++         );
++      if( Value )
+       {
+-         cfgValueTextlist::cfgType_Textlist_Value Values;
+-         unsigned LNumber = 0;
+-         unsigned const LLen = Texts.length();
+-         while( LNumber < LLen )
++         Config::Textlist::strings * const pSList
++            = new Config::Textlist::strings;
++         unsigned Idx = 0;
++         cfgValueTextlist::cfgType_Textlist_Value const &
++            Src = Value->textlist();
++
++         pSList->length( Src.size() );
++
++         cfgValueTextlist::cfgType_Textlist_Value::const_iterator
++            Iter( Src.begin() );
++         while( Iter != Src.end() )
+          {
+-            Values.push_back( std::string( Texts[LNumber] ) );
++            char const * const Listitem = Iter->c_str();
+             writeTrace
+             (
+-               SecondaryRuntime_HERE,
+-               SCTL "set[%d] = [%s]",
+-               LNumber,
+-               std::string( Texts[LNumber] ).c_str()
++               SecondaryRuntime_HERE, SCTL "get[%d] = [%s]",
++               Idx,
++               Listitem
+             );
+-            ++LNumber;
++            // Introduce an explicit temporary "Tmp"
++            // to avoid Lint warning
++            //TAO_SeqElem_String_Manager Tmp = (*pSList)[Idx];
++            (*pSList)[Idx] = CORBA::string_dup( Listitem );
++            ++Idx;
++            ++Iter;
+          }
+-         M_ConfigEntity->itemSetValue
+-                        (
+-                           Acc.Authorization,
+-                           Acc.Item,
+-                           new cfgValueTextlist( Values )
+-                        );
++         writeTrace( SecondaryRuntime_HERE, SCTL "get." );
++         return pSList;
+       }
+-      catch( cfgEntity_IllegalValue & )
++      else
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "set - outOfRange exception."
+-         );
+-         throw Config::Node::outOfRange();
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "set - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "set - notFound exception."
+-         );
+          throw Config::Node::notFound();
+       }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "set - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "set." );
+    }
+-
+-   /**
+-    *
+-    * Set an initial configuration value
+-    *
+-   **/
+-   void setInitial
+-   (
+-      Config::access const &            Acc,
+-      Config::Textlist::strings const & Texts
+-   )
++   catch( cfgEntity_NotAuthorized & )
+    {
+-      verifyAccess( SCTL "setInitial", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE,  SCTL "setInitial(%s) ...",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCTL "get - notAuthorized exception."
+       );
+-      try
+-      {
+-         cfgValueTextlist::cfgType_Textlist_Value Values;
+-         unsigned LNumber = 0;
+-         unsigned const LLen = Texts.length();
+-         while( LNumber < LLen )
+-         {
+-            Values.push_back( std::string( Texts[LNumber] ) );
+-            ++LNumber;
+-         }
+-         cfgMetaTextlist Obj( Acc.Authorization );
+-         M_ConfigEntity->itemCreate
+-                        (
+-                           Obj, Acc.Item,
+-                           new cfgValueTextlist( Values )
+-                        );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setInitial - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setInitial - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setInitial - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCTL "setInitial." );
++      throw Config::Node::notAuthorized();
+    }
+-
+-   /**
+-    *
+-    * Set new meta-data for an existing configuration item.
+-    *
+-   **/
+-   void setMeta
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           CORBA::Long                       MaxLength
+-        )
++   catch( cfgEntity_NotFound & )
+    {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCTL "setMeta(%s) rights:%s",
+-         access2Str(Acc).c_str(), Desc.Rights
++         SecondaryRuntime_HERE,
++         SCTL "get - notFound exception."
+       );
+-      try
+-      {
+-         cfgMetaTextlist   Obj
+-                           (
+-                              std::string(Desc.Rights),
+-                              std::string(Desc.Explanation),
+-                              static_cast<unsigned>( MaxLength )
+-                           );
+-         M_ConfigEntity->itemSetMeta
+-         (
+-            Obj, Acc.Item
+-         );
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setMeta - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setMeta - notFound exception."
+-         );
+-         throw Config::Node::notFound();
+-      }
+-      catch( cfgEntity_WrongParameter & )
++      throw Config::Node::notFound();
++   }
++   catch( Config::Node::notFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "get - notFound exception (root)."
++      );
++      throw;
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "get - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::set
++(
++   Config::access const &            Acc,
++   Config::Textlist::strings const & Texts
++)
++{
++   verifyAccess( SCTL "set", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,
++      SCTL "set(%s) ...", access2Str(Acc).c_str()
++   );
++   try
++   {
++      cfgValueTextlist::cfgType_Textlist_Value Values;
++      unsigned LNumber = 0;
++      unsigned const LLen = Texts.length();
++      while( LNumber < LLen )
+       {
++         Values.push_back( std::string( Texts[LNumber] ) );
+          writeTrace
+          (
+             SecondaryRuntime_HERE,
+-            SCTL "setMeta - wrongParam exception."
++            SCTL "set[%d] = [%s]",
++            LNumber,
++            std::string( Texts[LNumber] ).c_str()
+          );
+-         throw Config::Node::wrongParam();
++         ++LNumber;
+       }
+-      catch( ... )
++      M_ConfigEntity->itemSetValue
++                     (
++                        Acc.Authorization,
++                        Acc.Item,
++                        new cfgValueTextlist( Values )
++                     );
++   }
++   catch( cfgEntity_IllegalValue & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "set - outOfRange exception."
++      );
++      throw Config::Node::outOfRange();
++   }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "set - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "set - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "set - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "set." );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::setInitial
++(
++   Config::access const &            Acc,
++   Config::Textlist::strings const & Texts
++)
++{
++   verifyAccess( SCTL "setInitial", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE,  SCTL "setInitial(%s) ...",
++      access2Str(Acc).c_str()
++   );
++   try
++   {
++      cfgValueTextlist::cfgType_Textlist_Value Values;
++      unsigned LNumber = 0;
++      unsigned const LLen = Texts.length();
++      while( LNumber < LLen )
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCTL "setMeta - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
++         Values.push_back( std::string( Texts[LNumber] ) );
++         ++LNumber;
+       }
++      cfgMetaTextlist Obj( Acc.Authorization );
++      M_ConfigEntity->itemCreate
++                     (
++                        Obj, Acc.Item,
++                        new cfgValueTextlist( Values )
++                     );
++   }
++   catch( cfgEntity_AlreadyExists & )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCTL "setMeta(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCTL "setInitial - alreadyExists exception."
+       );
++      throw Config::Node::alreadyExists();
+    }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setInitial - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setInitial - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCTL "setInitial." );
++}
+ 
+-public:
+ 
+-   /**
+-    *
+-    * Constructor.
+-    *
+-    * @param Configuration:             Refers the configuration back-end.
+-    *
+-   **/
+-   serviceCfgTextlist( cfgEntity & Configuration ) :
+-      serviceCfg_Node( Configuration ),
+-      POA_Config::Textlist(),
+-      M_ConfigEntity( &Configuration )
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++void cfgCorba_ServiceTextlist::setMeta
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        CORBA::Long                       MaxLength
++     )
++{
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCTL "setMeta(%s) rights:%s",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
+    {
++      cfgMetaTextlist   Obj
++                        (
++                           std::string(Desc.Rights),
++                           std::string(Desc.Explanation),
++                           static_cast<unsigned>( MaxLength )
++                        );
++      M_ConfigEntity->itemSetMeta
++      (
++         Obj, Acc.Item
++      );
+    }
+-
+-   /**
+-    *
+-    * Destructor.
+-    *
+-   **/
+-   ~serviceCfgTextlist()
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setMeta - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setMeta - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setMeta - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
+    {
+-      M_ConfigEntity = 0;
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCTL "setMeta - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
+    }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCTL "setMeta(%s).",
++      access2Str(Acc).c_str()
++   );
++}
+ 
+-private:
+ 
+-   //! Default constructor - intentionally not implemented.
+-   serviceCfgTextlist();
+ 
+-};
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++cfgCorba_ServiceTextlist::cfgCorba_ServiceTextlist
++      (
++         cfgEntity & Configuration
++      ) :
++   serviceCfg_Node( Configuration ),
++   POA_Config::Textlist(),
++   M_ConfigEntity( &Configuration )
++{
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceTextlist.hpp".
++ *
++ */
++cfgCorba_ServiceTextlist::~cfgCorba_ServiceTextlist()
++{
++   M_ConfigEntity = 0;
++}
++
+ 
+ 
+ 
+@@ -822,8 +828,8 @@ private:
+ **/
+ class cfgCorba_Textlist_Private
+ {
+-   serviceCfgTextlist *                         pLC_Textlist;
+-   corbaServantEx<serviceCfgTextlist> *         pLD_Textlist;
++   cfgCorba_ServiceTextlist *                         pLC_Textlist;
++   corbaServantEx<cfgCorba_ServiceTextlist> *         pLD_Textlist;
+ 
+ public:
+ 
+@@ -844,8 +850,8 @@ public:
+       pLD_Textlist( 0 )
+    {
+ 
+-      pLC_Textlist = new serviceCfgTextlist( Configuration );
+-      pLD_Textlist = new_Servant<serviceCfgTextlist>
++      pLC_Textlist = new cfgCorba_ServiceTextlist( Configuration );
++      pLD_Textlist = new_Servant<cfgCorba_ServiceTextlist>
+                      (
+                         *pLC_Textlist,
+                         CFGMGR_SRVNAME_TEXTLIST
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+new file mode 100644
+index 00000000..ebca3e13
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+@@ -0,0 +1,575 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_Textlist2.cpp
++ *
++ * Contains method implementation of class cfgCorba_Textlist2.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
++#include "cfgCorba_Textlist2.hpp"
++
++// Loacal header
++#include "cfgCorba_ServiceTextlist.hpp"
++#include "cfgCorba_Template.hpp"
++#include "cfgRightsMan.hpp"
++
++#include "cfgclnt/CfgMgrIPC.h"
++
++#include "massaiCorba/orbIncDefs.h"
++#include "massaiCorba/corbasrvr.h"
++
++#ifdef _TAO_
++#include "Tao/CORBA.h"
++#include "massaiCorba/orbIncDefs.h"
++#include "CfgMgr.h"
++#include "CfgMgr_skel.h"
++#endif
++
++#ifdef _ORBACUS_
++#include <CfgMgr_skel.h>
++#endif
++
++#include "cfgMetaTextlist.hpp"
++#include "cfgValueTextlist.hpp"
++
++#include "trc/TraceClt.h"
++
++#define SCTL2  "cfgCorba_ServiceTextlist2::"
++
++
++
++/**
++ **************************************************************************
++ *
++ * Textlist2 configuration service implementation class
++ *
++ **************************************************************************
++**/
++class cfgCorba_ServiceTextlist2 :
++   virtual public cfgCorba_ServiceTextlist,
++   virtual public POA_Config::Textlist2
++{
++
++   cfgEntity * M_ConfigEntity;
++
++   /**
++    *
++    * Create a configuration item
++    *
++   **/
++   void create2
++         (
++            Config::access const &              acc,
++            Config::Textlist2::metaData const & meta_data,
++            Config::Textlist::strings const &   default_value
++         )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL2 "create2(%s) rights:%s",
++         access2Str(acc).c_str(), meta_data.Desc.Rights
++      );
++      try
++      {
++         std::string const rights( meta_data.Desc.Rights );
++         std::string const explanation( meta_data.Desc.Explanation );
++         std::string const regex( meta_data.RegEx );
++         cfgMetaTextlist cfg_meta_textlist
++                     (
++                        rights,
++                        explanation,
++#if 1
++                        static_cast<unsigned>( meta_data.MaxLength ),
++                        static_cast<unsigned>( meta_data.MinLength ),
++                        regex,
++                        static_cast<unsigned>( meta_data.Semantic )
++#else
++                        static_cast<unsigned>( meta_data.MaxLength )
++#endif
++                     );
++            // Read access -> plain text in file.
++
++         cfgValueTextlist::cfgType_Textlist_Value Values;
++         unsigned LNumber = 0;
++         unsigned const LLen = default_value.length();
++         while( LNumber < LLen )
++         {
++            Values.push_back( std::string( default_value[LNumber] ) );
++            ++LNumber;
++         }
++         M_ConfigEntity->itemCreate
++         (
++            cfg_meta_textlist, acc.Item,
++#if 0
++            new cfgValueTextlist( false, explanation, default_value )
++#else
++            new cfgValueTextlist( Values )
++#endif
++         );
++      }
++      catch( cfgEntity_AlreadyExists & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "create2 - alreadyExists exception."
++         );
++         throw Config::Node::alreadyExists();
++      }
++      catch( cfgEntity_IllegalValue & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "create2 - notCreated (1) exception."
++         );
++         throw Config::Node::notCreated();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "create2 - notCreated (2) exception."
++         );
++         throw Config::Node::notCreated();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "create2 - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL2 "create2(%s).",
++         access2Str(acc).c_str()
++      );
++   }
++
++   Config::Textlist::strings * getWithMeta
++      (
++         Config::access const &                 acc,
++         Config::Textlist2::metaData_out        meta_data_out
++      )
++   {
++      //TODO
++      verifyAccess( SCTL2 "getWithMeta", acc );
++      writeTrace
++      (
++         SecondaryRuntime_HERE, SCTL2 "getWithMeta(%s) ...",
++         access2Str(acc).c_str()
++      );
++      try
++      {
++         //
++         // Metadata
++         //
++         Config::Textlist2::metaData * md =
++            new Config::Textlist2::metaData;
++         cfgMeta const * const meta_data_cfg
++            = M_ConfigEntity->itemGetMeta
++               (
++                  acc.Authorization,
++                  cfgEntity::PURP_DIRGET, //TODO
++                  acc.Item
++               );
++         if( meta_data_cfg )
++         {
++            md->Desc.Explanation
++                        = CORBA::string_dup
++                           (
++                              meta_data_cfg->getExplanation().c_str()
++                           );
++            std::string rights_cfg;
++            meta_data_cfg->getRights( acc.Authorization, rights_cfg );
++            md->Desc.Rights
++               = CORBA::string_dup( rights_cfg.c_str() );
++            //
++            try
++            {
++               cfgMetaTextlist const * const cfg_meta_textlist =
++                  dynamic_cast<cfgMetaTextlist const *>( meta_data_cfg );
++               if( cfg_meta_textlist )
++               {
++#if 1
++                  md->MinLength = cfg_meta_textlist->getMinLength();
++                  md->MaxLength = cfg_meta_textlist->getMaxLength();
++                  md->RegEx = CORBA::string_dup
++                                 (
++                                    cfg_meta_textlist->getRegex()
++                                 );
++                  md->Semantic = static_cast<Config::semanticType>
++                                 (
++                                    cfg_meta_textlist->getSemantic()
++                                 );
++#else
++                  md->MinLength = 0;
++                  md->MaxLength = cfg_meta_textlist->getMaxLength();
++                  md->RegEx = CORBA::string_dup
++                                 (
++                                    "rex"
++                                 );
++                  md->Semantic = static_cast<Config::semanticType>(0);
++#endif
++               }
++               else
++               {
++                  writeTrace
++                  (
++                     SecondaryRuntime_HERE,
++                     SCTL2 "getWithMeta - NULL."
++                  );
++               }
++            }
++            catch( ... )
++            {
++               writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  SCTL2 "getWithMeta - exception."
++               );
++            }
++         }
++         else
++         {
++            // No meta data available, probably just initialized.
++            // Fake an explanation.
++            md->Desc.Explanation
++                     = CORBA::string_dup
++                        (
++                           "ENTRY NOT YET CREATED!"
++                        );
++            // Fake the access rights
++            md->Desc.Rights
++                     = CORBA::string_dup
++                       (
++                          "rl"
++                       );
++            md->MinLength = 0;
++            md->MaxLength = 0;
++            md->RegEx = CORBA::string_dup( "" );
++            md->Semantic = Config::ST_NONE;
++         }
++         meta_data_out = md;
++         //
++         // Value
++         //
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueTextlist const * const valref =
++            dynamic_cast<cfgValueTextlist const *>
++            (
++               M_ConfigEntity->itemGetValue( acc.Authorization, acc.Item )
++            );
++         if( valref )
++         {
++            Config::Textlist::strings * const pSList
++               = new Config::Textlist::strings;
++            unsigned Idx = 0;
++            cfgValueTextlist::cfgType_Textlist_Value const &
++               Src = valref->textlist();
++            pSList->length( Src.size() );
++            cfgValueTextlist::cfgType_Textlist_Value::const_iterator
++               Iter( Src.begin() );
++            while( Iter != Src.end() )
++            {
++               char const * const Listitem = Iter->c_str();
++               writeTrace
++               (
++                  SecondaryRuntime_HERE, SCTL2 "getWithMeta[%d] = [%s]",
++                  Idx,
++                  Listitem
++               );
++               // Introduce an explicit temporary "Tmp"
++               // to avoid Lint warning
++               //TAO_SeqElem_String_Manager Tmp = (*pSList)[Idx];
++               (*pSList)[Idx] = CORBA::string_dup( Listitem );
++               ++Idx;
++               ++Iter;
++            }
++            writeTrace( SecondaryRuntime_HERE, SCTL2 "get." );
++            return pSList;
++         }
++         else
++         {
++            throw Config::Node::notFound();
++         }
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "getWithMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "getWithMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( Config::Node::notFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "getWithMeta - notFound exception (root)."
++         );
++         throw;
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "getWithMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++   }
++
++
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta2
++         (
++            Config::access const &              acc,
++            Config::Textlist2::metaData const & meta_data
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL2 "setMeta2(%s) Rights:%s Expl:%s MinL:%d"
++              " MaxL:%d RegEx:%s Sem:%d",
++         access2Str(acc).c_str(),
++         meta_data.Desc.Rights,
++         meta_data.Desc.Explanation,
++         meta_data.MinLength,
++         meta_data.MaxLength,
++         meta_data.RegEx,
++         meta_data.Semantic
++      );
++      try
++      {
++         std::string const rights( meta_data.Desc.Rights );
++         std::string const explanation( meta_data.Desc.Explanation );
++         std::string const regex( meta_data.RegEx );
++         cfgMetaTextlist cfg_meta_textlist
++                     (
++                        rights,
++                        explanation,
++#if 1
++                        static_cast<unsigned>( meta_data.MaxLength ),
++                        static_cast<unsigned>( meta_data.MinLength ),
++                        regex,
++                        static_cast<unsigned>( meta_data.Semantic )
++#else
++                        static_cast<unsigned>( meta_data.MaxLength )
++#endif
++                     );
++         M_ConfigEntity->itemSetMeta
++         (
++            cfg_meta_textlist, acc.Item
++         );
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "setMeta2 - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "setMeta2 - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "setMeta2 - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCTL2 "setMeta2 - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCTL2 "setMeta2(%s).",
++         access2Str(acc).c_str()
++      );
++   } // void setMeta2()
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Configuration:             Refers the configuration back-end.
++    *
++   **/
++   explicit cfgCorba_ServiceTextlist2( cfgEntity & Configuration ) :
++      serviceCfg_Node( Configuration ),
++      cfgCorba_ServiceTextlist( Configuration ),
++      POA_Config::Textlist2(),
++      M_ConfigEntity( &Configuration )
++   {
++   }
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~cfgCorba_ServiceTextlist2()
++   {
++      M_ConfigEntity = 0;
++   }
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   cfgCorba_ServiceTextlist2();
++
++};
++
++
++
++class cfgCorba_Textlist2_Private
++{
++   cfgCorba_ServiceTextlist2 *                             pLC_Textlist;
++   corbaServantEx<cfgCorba_ServiceTextlist2> *             pLD_Textlist;
++
++public:
++
++   /**
++    *
++    * Constructor
++    *
++   **/
++   cfgCorba_Textlist2_Private();
++
++   /**
++    *
++    * Constructor
++    *
++   **/
++   explicit cfgCorba_Textlist2_Private( cfgEntity & Configuration ) :
++      pLC_Textlist( 0 ),
++      pLD_Textlist( 0 )
++   {
++
++      pLC_Textlist = new cfgCorba_ServiceTextlist2( Configuration );
++      pLD_Textlist = new_Servant<cfgCorba_ServiceTextlist2>
++                     (
++                        *pLC_Textlist,
++                        CFGMGR_SRVNAME_TEXTLIST2
++                     );
++   }
++
++   /**
++    *
++    * Destructor
++    *
++   **/
++   ~cfgCorba_Textlist2_Private()
++   {
++      try
++      {
++         delete pLD_Textlist;
++         delete pLC_Textlist;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++private:
++
++   //! Copy constructor - Intentionally not implemented.
++   cfgCorba_Textlist2_Private( cfgCorba_Textlist2_Private const & );
++
++   //! Assignment - Intentionally not implemented.
++   cfgCorba_Textlist2_Private & operator=
++      (
++         cfgCorba_Textlist2_Private const &
++      );
++
++};
++
++
++
++cfgCorba_Textlist2::cfgCorba_Textlist2( cfgEntity & Configuration ) :
++   Handle( new cfgCorba_Textlist2_Private( Configuration ) )
++{
++   writeTrace
++      (
++         SecondaryRuntime_HERE, "cfgCorba_Textlist2::cfgCorba_Textlist2"
++      );
++}
++
++
++
++cfgCorba_Textlist2::~cfgCorba_Textlist2()
++{
++   try
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "cfgCorba_Textlist2::~cfgCorba_Textlist2"
++         );
++      delete Handle;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index 95634d33..41cece99 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -35,8 +35,8 @@
+  * Method implementation - see cfgMetaText.hpp.
+  *
+ **/
+-cfgMetaText::cfgMetaText( char const * Auth ) :
+-   cfgMeta( Auth ),
++cfgMetaText::cfgMetaText( char const * auth ) :
++   cfgMeta( auth ),
+    m_max_length( 0 ),
+    m_min_length( 0 ),
+    m_regex(),
+@@ -46,22 +46,6 @@ cfgMetaText::cfgMetaText( char const * Auth ) :
+ 
+ 
+ 
+-/**
+- *
+- * Method implementation - see cfgMetaText.hpp.
+- *
+-**/
+-cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
+-   cfgMeta( src ),
+-   m_max_length( src.m_max_length ),
+-   m_min_length( src.m_min_length ),
+-   m_regex( src.m_regex ),
+-   m_semantic( src.m_semantic )
+-{
+-}
+-
+-
+-
+ /**
+  *
+  * Method implementation - see cfgMetaText.hpp.
+@@ -104,6 +88,22 @@ cfgMetaText::cfgMetaText
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMetaText.hpp.
++ *
++**/
++cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
++   cfgMeta( src ),
++   m_max_length( src.m_max_length ),
++   m_min_length( src.m_min_length ),
++   m_regex( src.m_regex ),
++   m_semantic( src.m_semantic )
++{
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMetaText.hpp.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index d6e4a3ee..ed57ec0a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2013 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -34,9 +34,12 @@
+  * Method implementation - see cfgMetaTextlist.hpp.
+  *
+ **/
+-cfgMetaTextlist::cfgMetaTextlist( char const * Auth ) :
+-   cfgMeta( Auth ),
+-   M_MaxLength( 0 )
++cfgMetaTextlist::cfgMetaTextlist( char const * auth ) :
++   cfgMeta( auth ),
++   m_max_length( 0 ),
++   m_min_length( 0 ),
++   m_regex(),
++   m_semantic( 0 )
+ {
+ }
+ 
+@@ -49,11 +52,14 @@ cfgMetaTextlist::cfgMetaTextlist( char const * Auth ) :
+ **/
+ cfgMetaTextlist::cfgMetaTextlist
+ (
+-   std::string const & Rights, std::string const & Explanation,
+-   unsigned MaxLength
++   std::string const & rights, std::string const & explanation,
++   unsigned max_length
+ ) :
+-   cfgMeta( Rights, Explanation ),
+-   M_MaxLength( MaxLength )
++   cfgMeta( rights, explanation ),
++   m_max_length( max_length ),
++   m_min_length( 0 ),
++   m_regex(),
++   m_semantic( 0 )
+ {
+ }
+ 
+@@ -64,9 +70,34 @@ cfgMetaTextlist::cfgMetaTextlist
+  * Method implementation - see cfgMetaTextlist.hpp.
+  *
+ **/
+-cfgMetaTextlist::cfgMetaTextlist( cfgMetaTextlist const & Src ) :
+-   cfgMeta( Src ),
+-   M_MaxLength( Src.M_MaxLength )
++cfgMetaTextlist::cfgMetaTextlist
++(
++   std::string const & rights, std::string const & explanation,
++   unsigned max_length, unsigned min_length,
++   std::string const & regex,
++   unsigned semantic
++) :
++   cfgMeta( rights, explanation ),
++   m_max_length( max_length ),
++   m_min_length( min_length ),
++   m_regex( regex ),
++   m_semantic( semantic )
++{
++}
++
++
++
++/**
++ *
++ * Method implementation - see cfgMetaTextlist.hpp.
++ *
++**/
++cfgMetaTextlist::cfgMetaTextlist( cfgMetaTextlist const & src ) :
++   cfgMeta( src ),
++   m_max_length( src.m_max_length ),
++   m_min_length( src.m_min_length ),
++   m_regex( src.m_regex ),
++   m_semantic( src.m_semantic )
+ {
+ }
+ 
+@@ -94,7 +125,7 @@ bool cfgMetaTextlist::operator==( cfgMeta const & Other ) const
+       dynamic_cast<cfgMetaTextlist const *>( &Other );
+    if( pOther )
+    {
+-      if( M_MaxLength == pOther->M_MaxLength )
++      if( m_max_length == pOther->m_max_length )
+       {
+          return cfgMeta::operator==( Other );
+       }
+@@ -130,7 +161,7 @@ void cfgMetaTextlist::save
+ {
+    Dst << Indent << "<" CFGTOKEN_META;
+    cfgMeta::saveCommon( Dst, Ref );
+-   Dst << " " CFGTOKEN_MAXIMUM "=\"" << M_MaxLength;
++   Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length;
+    Dst << "\"/>" << std::endl;
+ }
+ 
+@@ -141,10 +172,10 @@ void cfgMetaTextlist::save
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-bool cfgMetaTextlist::valueAllow( cfgValue const & Value )
++bool cfgMetaTextlist::valueAllow( cfgValue const & value )
+ {
+    cfgValueTextlist const * const Val =
+-      dynamic_cast<cfgValueTextlist const *>( &Value );
++      dynamic_cast<cfgValueTextlist const *>( &value );
+    if( !Val )
+    {
+       writeTrace
+@@ -164,15 +195,15 @@ bool cfgMetaTextlist::valueAllow( cfgValue const & Value )
+          Longest = It->size();
+       ++It;
+    }
+-   if( Longest > M_MaxLength )
++   if( Longest > m_max_length )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaTextlist::valueAllow - max: %d -> %d",
+-            M_MaxLength, Longest
++            m_max_length, Longest
+          );
+-      M_MaxLength = Longest;
++      m_max_length = Longest;
+    }
+    writeTrace
+       (
+@@ -189,10 +220,10 @@ bool cfgMetaTextlist::valueAllow( cfgValue const & Value )
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
++bool cfgMetaTextlist::valueAllowed( cfgValue const & value ) const
+ {
+    cfgValueTextlist const * const Val =
+-      dynamic_cast<cfgValueTextlist const *>( &Value );
++      dynamic_cast<cfgValueTextlist const *>( &value );
+    if( !Val )
+    {
+       writeTrace
+@@ -221,13 +252,13 @@ bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
+          Longest = It->size();
+       ++It;
+    }
+-   if( Longest > M_MaxLength )
++   if( Longest > m_max_length )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaTextlist::valueAllowed=false length:%d > max:%d",
+-            Longest, M_MaxLength
++            Longest, m_max_length
+          );
+       return false;
+    }
+@@ -235,7 +266,7 @@ bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
+       (
+          SecondaryRuntime_HERE,
+          "cfgMetaTextlist::valueAllowed=true length:%d < max:%d",
+-         Longest, M_MaxLength
++         Longest, m_max_length
+       );
+    return true;
+ }
+@@ -249,10 +280,10 @@ bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
+ **/
+ cfgValue * cfgMetaTextlist::valueFactory
+ (
+-   cfgFlatZ const & Src
++   cfgFlatZ const & src
+ ) const
+ {
+-   return new cfgValueTextlist( Src );
++   return new cfgValueTextlist( src );
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index bd0b2f18..4c7c3973 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2015 MATERNA Information & Communications
++ * Copyright (c) 2003-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -25,6 +25,7 @@
+ #include "cfgCorba_Text.hpp"
+ #include "cfgCorba_Text2.hpp"
+ #include "cfgCorba_Textlist.hpp"
++#include "cfgCorba_Textlist2.hpp"
+ #include "cfgEntity.hpp"
+ #include "massaiCfgXB_def.h"
+ #include "matEnv.hpp"
+@@ -217,6 +218,7 @@ int mDaemon_main( int argc, char const * const * argv )
+       cfgCorba_Text       CorbaText( Configuration );
+       cfgCorba_Text2      CorbaText2( Configuration );
+       cfgCorba_Textlist   CorbaTextlist( Configuration );
++      cfgCorba_Textlist2  CorbaTextlist2( Configuration );
+ 
+       //
+       // Signal "Ready master!"
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index e8a836f0..57386912 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -43,6 +43,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Text2.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
++    $(_OBJ)\cfgCorba_Textlist2.obj \
+     $(_OBJ)\cfgEntity.obj \
+     $(XERCES_IFOBJ) \
+     $(_OBJ)\cfgMeta.obj \
+-- 
+2.41.0.windows.1
+

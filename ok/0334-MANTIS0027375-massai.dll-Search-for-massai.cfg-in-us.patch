@@ -1,0 +1,117 @@
+From 9d8ccb8a385466d4117a122c83312d97a903e3c2 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 4 Jun 2013 11:54:13 +0000
+Subject: [PATCH 0334/1000] MANTIS0027375: massai.dll Search for massai.cfg in
+ user dir
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@504 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/MassaiDLL/dll/makefile.mak     |  2 +
+ .../Massai/cpp/MassaiDLL/inc/local_def.h      |  9 +++--
+ .../Massai/cpp/MassaiDLL/src/mConfig.cpp      | 39 +++++++++++++++++++
+ 3 files changed, 47 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiDLL/dll/makefile.mak b/SelfServiceCommon/Massai/cpp/MassaiDLL/dll/makefile.mak
+index 36aec3bc..6d62f26f 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiDLL/dll/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/MassaiDLL/dll/makefile.mak
+@@ -30,6 +30,8 @@ MY_DLL1_LINKLIBS = \
+     $(SYS_ACETAO) \
+     $(SYS_ADVAPI32) \
+     $(SYS_USER32) \
++    $(SYS_SHELL32) \
++    Shlwapi.lib \
+     $(SYS_WS2_32)
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiDLL/inc/local_def.h b/SelfServiceCommon/Massai/cpp/MassaiDLL/inc/local_def.h
+index 33f9291e..4e0b5492 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiDLL/inc/local_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiDLL/inc/local_def.h
+@@ -1,13 +1,16 @@
+-#define FILE_VER_BIN     1,0,0,17
+-#define FILE_VER_STR     "FileVersion", "1.0.0.17\0"
++#define FILE_VER_BIN     1,0,0,18
++#define FILE_VER_STR     "FileVersion", "1.0.0.18\0"
+ 
+ /*!
+ \page massaidll massaiDll - Release Notes
+ 
+-@version 1.0.0.17
++@version 1.0.0.18
+ 
+ \section change1 Change history
+ 
++\date 04.06.2013 \li V1.0.0.18
++                 \li Git Mantis 0024715: Search for massai.cfg in user dir
++
+ \date 27.11.2012 \li V1.0.0.17
+                  \li SteT Mantis 0024715: Build: VC10; fix compiler warnings
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiDLL/src/mConfig.cpp b/SelfServiceCommon/Massai/cpp/MassaiDLL/src/mConfig.cpp
+index 10f7736f..fc5e4dc4 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiDLL/src/mConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiDLL/src/mConfig.cpp
+@@ -10,6 +10,10 @@
+ 
+ ****************************************************************************/
+ 
++#include <winsock2.h>
++#include "shlobj.h"
++#include "Shlwapi.h"
++
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -17,6 +21,8 @@
+ #include <io.h>
+ #include <direct.h>
+ 
++#include <string>
++
+ #include "massaidll/BASE_OS.h"
+ #include "massaidll/massai.hpp"
+ #include "massaidll/mTrace.hpp"
+@@ -988,6 +994,39 @@ CHAR   *pStr;
+ 
+       }
+ 
++      std::string testpath(szRootPath);
++      testpath.append(MUTILS_CFG_FILE);
++      
++      std::string userDir;
++      if(!::PathFileExists(testpath.c_str()))
++      {
++        //try user dir
++        try
++        {
++          TCHAR app_path[MAX_PATH] = {0};
++          if(SHGetSpecialFolderPath(NULL, app_path, CSIDL_APPDATA, FALSE))
++          {
++            PathAddBackslash(reinterpret_cast<LPTSTR>(app_path));
++            std::string buf(app_path); buf.append("materna");
++            if(PathIsDirectory(buf.c_str()))
++            {
++              PathAppend(app_path,"materna");
++            }
++            userDir.assign(app_path);
++          }
++        }
++        catch(...)
++        {
++          userDir.assign("");
++        }
++       
++      }
++      if(userDir.size())
++      {
++        strncpy(szRootPath,userDir.c_str(),CHARBUF-1);
++        szRootPath[CHARBUF-1]= '\0';
++      }
++      
+       strcpy(pszPath,szRootPath);
+       return(0);
+     }
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,318 @@
+From f6506f9498e65f553f9917953f6b9802fbcf21e7 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 5 Feb 2013 18:09:11 +0000
+Subject: [PATCH 0321/1000] Mantis 0025897: GPPDev: NCR K8 workaround for crash
+ of printer driver add serviceMonitor to systools (monitor status of windows
+ services)
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@481 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/systools/mSysServiceMonitor.h         |  55 +++++
+ .../Massai/cpp/Systools/makefile.mak          |   4 +-
+ .../Systools/src/mSysServiceMonitorW32.cpp    | 217 ++++++++++++++++++
+ 3 files changed, 275 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysServiceMonitor.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceMonitorW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysServiceMonitor.h b/SelfServiceCommon/Interfaces/inc/systools/mSysServiceMonitor.h
+new file mode 100644
+index 00000000..528a050a
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysServiceMonitor.h
+@@ -0,0 +1,55 @@
++// monitor service status
++
++#ifndef MSYSSERVICEMONITOR_H_INCLUDED
++#define MSYSSERVICEMONITOR_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include "tools/TraceInterface.h"
++
++namespace mSysService
++{
++  enum serviceStatus
++  {
++    SVC_UNKNOWN,
++    SVC_STOPPED,
++    SVC_START_PENDING,
++    SVC_RUNNING,
++    SVC_PAUSE_PENDING,
++    SVC_PAUSED,
++    SVC_CONTINUE_PENDING,
++    SVC_STOP_PENDING,
++  };
++
++  class serviceListener
++  {
++    public:
++      serviceListener();
++      virtual ~serviceListener();
++      virtual void statusChanged(const std::string& serviceName, serviceStatus status)= 0;
++      virtual std::string getStatusText(serviceStatus status) const;
++  };
++
++  class serviceMonitor
++  {
++    public:
++      static serviceMonitor* createServiceMonitor
++      (
++        const std::string& serviceName,
++        serviceListener& listener,
++        MASSAI::trace::TraceInterface& trc
++      );
++
++      virtual ~serviceMonitor();
++      virtual serviceStatus getStatus() const;
++      virtual void stopMonitor();
++      virtual void startMonitor();
++
++    protected:
++      serviceMonitor();
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 2953c3dd..07774def 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -40,7 +40,9 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\tRexLookupComport.obj \
+                         $(_OBJ)\Console.obj \
+                         $(_OBJ)\mMutexCSW32.obj \
+-                        $(_OBJ)\mSysWindowW32.obj
++                        $(_OBJ)\mSysWindowW32.obj \
++                        $(_OBJ)\mSysServiceMonitorW32.obj
++
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceMonitorW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceMonitorW32.cpp
+new file mode 100644
+index 00000000..a0af5b97
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceMonitorW32.cpp
+@@ -0,0 +1,217 @@
++// monitor service status
++
++#include "sysTools/mSysserviceMonitor.h"
++#include "sysTools/mSysThread.hpp"
++#include "msysErrorW32.h"
++#include <windows.h>
++
++using mSysThread::thread;
++using MASSAI::trace::TraceInterface;
++using namespace mSysService;
++using namespace mSysError;
++
++namespace
++{
++  enum Constants
++  {
++    PollingTime = 200,
++  };
++}
++
++namespace
++{
++  class serviceMonitorImpl: public serviceMonitor, private thread
++  {
++    public:
++      serviceMonitorImpl
++      (
++        const std::string& serviceName,
++        serviceListener& listener,
++        TraceInterface& trc
++      );
++      virtual ~serviceMonitorImpl();
++      virtual void stopMonitor();
++      virtual void startMonitor();
++      virtual serviceStatus getStatus() const;
++
++    private:
++      serviceStatus convert(DWORD status) const;
++      virtual void function();
++
++      std::string m_serviceName;
++      serviceListener& m_listener;
++      bool m_stop;
++      serviceStatus m_status;
++      TraceInterface& m_trc;
++  };
++}
++
++namespace
++{
++  serviceMonitorImpl::serviceMonitorImpl
++  (
++    const std::string& serviceName,
++    serviceListener& listener,
++    TraceInterface& trc
++  ):
++    serviceMonitor(),
++    thread(0),
++    m_serviceName(serviceName),
++    m_listener(listener),
++    m_stop(false),
++    m_status(SVC_UNKNOWN),
++    m_trc(trc)
++  {}
++
++  serviceMonitorImpl::~serviceMonitorImpl()
++  {
++    stopMonitor();
++  }
++
++  void serviceMonitorImpl::startMonitor()
++  {
++    start();
++  }
++
++  void serviceMonitorImpl::stopMonitor()
++  {
++    m_stop = true;
++    waitTerminated();
++  }
++
++  serviceStatus serviceMonitorImpl::getStatus() const
++  {
++    return m_status;
++  }
++
++  serviceStatus serviceMonitorImpl::convert(DWORD status) const
++  {
++    switch(status)
++    {
++      case SERVICE_STOPPED:          return SVC_STOPPED;
++      case SERVICE_START_PENDING:    return SVC_START_PENDING;
++      case SERVICE_STOP_PENDING:     return SVC_STOP_PENDING;
++      case SERVICE_RUNNING:          return SVC_RUNNING;
++      case SERVICE_CONTINUE_PENDING: return SVC_CONTINUE_PENDING;
++      case SERVICE_PAUSE_PENDING:    return SVC_PAUSE_PENDING;
++      case SERVICE_PAUSED:           return SVC_PAUSED;
++      default:                       return SVC_UNKNOWN;
++    }
++  }
++
++  void serviceMonitorImpl::function()
++  {
++    SC_HANDLE serviceControlManager =
++      OpenSCManager(0, 0, SC_MANAGER_ENUMERATE_SERVICE);
++    if(!serviceControlManager)
++    {
++      unsigned long errorCode = getErrorCode();
++      traceLastError(m_trc, MajorError_HERE, "OpenSCManager", errorCode);
++    }
++    else
++    {
++      while(!m_stop)
++      {
++        SC_HANDLE service = OpenService(serviceControlManager,
++          m_serviceName.c_str(), SERVICE_QUERY_STATUS);
++        if(!service)
++        {
++          unsigned long errorCode = getErrorCode();
++          traceLastError(m_trc, MajorError_HERE, "OpenService", errorCode);
++        }
++        else
++        {
++          while(!m_stop)
++          {
++            SERVICE_STATUS status;
++            if(!QueryServiceStatus(service, &status))
++            {
++              unsigned long errorCode = getErrorCode();
++              traceLastError(m_trc, MajorError_HERE, "QueryserviceStatus", errorCode);
++            }
++            else
++            {
++              serviceStatus new_status = convert(status.dwCurrentState);
++              if(new_status != m_status)
++              {
++                m_status = new_status;
++                m_listener.statusChanged(m_serviceName, m_status);
++              }
++            }
++            mSysThread::sleep(PollingTime);
++          }
++          if(!CloseServiceHandle(service))
++          {
++            unsigned long errorCode = getErrorCode();
++            traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle", errorCode);
++          }
++        }
++        mSysThread::sleep(PollingTime);
++      }
++      try
++      {
++        if(!CloseServiceHandle(serviceControlManager))
++        {
++          unsigned long errorCode = getErrorCode();
++          traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle", errorCode);
++        }
++      }
++      catch(...)
++      {
++        m_trc.writeTrace(MajorError_HERE, "exception in CloseServiceHandle");
++      }
++    }
++  }
++}
++
++namespace mSysService
++{
++  serviceListener::serviceListener()
++  {}
++
++  serviceListener::~serviceListener()
++  {}
++
++  std::string serviceListener::getStatusText(serviceStatus status) const
++  {
++    switch(status)
++    {
++      case SVC_STOPPED:          return "STOPPED";
++      case SVC_START_PENDING:    return "START_PENDING";
++      case SVC_RUNNING:          return "RUNNING";
++      case SVC_PAUSE_PENDING:    return "PAUSE_PENDING";
++      case SVC_PAUSED:           return "PAUSED";
++      case SVC_CONTINUE_PENDING: return "CONTINUE_PENDING";
++      case SVC_STOP_PENDING:     return "STOP_PENDING";
++      default:                   return "UNKNOWN";
++    }
++  }
++
++  serviceMonitor* serviceMonitor::createServiceMonitor
++  (
++    const std::string& serviceName,
++    serviceListener& listener,
++    TraceInterface& trc
++  )
++  {
++    serviceMonitorImpl* result = new serviceMonitorImpl(serviceName, listener, trc);
++    return result;
++  }
++
++  serviceMonitor::~serviceMonitor()
++  {}
++
++  serviceStatus serviceMonitor::getStatus() const
++  {
++    return SVC_UNKNOWN;
++  }
++
++  serviceMonitor::serviceMonitor()
++  {}
++
++  void serviceMonitor::stopMonitor()
++  {}
++
++  void serviceMonitor::startMonitor()
++  {}
++}
+-- 
+2.41.0.windows.1
+

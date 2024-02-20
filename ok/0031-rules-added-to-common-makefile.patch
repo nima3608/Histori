@@ -1,0 +1,687 @@
+From 873ff005284144e0cfc763a605311037c0996083 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Mon, 25 Oct 2010 18:30:25 +0000
+Subject: [PATCH 031/462] rules added to common makefile: common-lint,
+ cuss-lint, platform-lint, abls-lint, hostif-lint common-dep, cuss-dep,
+ platform-dep, abls-dep, hostif-dep common-cleandep, cuss-cleandep,
+ platform-cleandep, abls-cleandep, hostif-cleandep common-clean-lint,
+ cuss-clean-lint, platform-clean-lint, abls-clean-lint, hostif-clean-lint
+ common-globaldep, cuss-globaldep, platform-globaldep, abls-globaldep,
+ hostif-globaldep, finalize-globaldep
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@41 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             |  10 +
+ SelfServiceBuild/Build/cpp/makefile.mak       | 409 ++++++++++--------
+ SelfServiceBuild/Build/cpp/makefile.rules.mak | 158 ++++++-
+ SelfServiceBuild/Build/scripts/setenv.bat     |   1 +
+ 4 files changed, 402 insertions(+), 176 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index 07312ed..031c3e0 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -124,6 +124,7 @@ MKDEPFLAGS       = -op$(_OBJ) -oeobj -rp$(_OBJ) -reres -xi$(DIR_GLOBALS) -xi$(DI
+ # includierte Datei "make.dep" gefunden werden kann, muss der
+ # Include-Pfad erweitert werden.
+ 
++INCLUDE          = $(INCLUDE);$(_DEP);$(BUILDROOT)\Build\cpp\dep
+ INCLUDE          = $(INCLUDE);$(BUILDROOT)\Build\cpp
+ 
+ ######################################################################
+@@ -248,3 +249,12 @@ SYS_WINMM        = winmm.lib
+ SYS_WINSPOOL     = winspool.lib
+ SYS_WS2_32       = ws2_32.lib
+ SYS_WSOCK32      = wsock32.lib
++
++######################################################################
++# SOURCE-GENERATION
++######################################################################
++
++GEN_MASSAI_COMMON= $(COMMONROOT)\Massai\idl\Massai
++GEN_MASSAI_CUSS=   $(CUSSROOT)\Massai\idl\massai
++GEN_CUSS=          $(CUSSROOT)\Massai\idl\cuss
++GEN_MASSAI_ABLS=   $(ABLSROOT)\Massai\idl\Massai
+diff --git a/SelfServiceBuild/Build/cpp/makefile.mak b/SelfServiceBuild/Build/cpp/makefile.mak
+index fd8625c..ceb563f 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.mak
+@@ -6,106 +6,136 @@
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
++
++######################################################################
++# GLOBALDEP
++######################################################################
++
++# PSEUDOTARGET for globaldependecies
++forcebuild:
++
++!include <all.dep>
++
++######################################################################
++# DIRECTORIES
++######################################################################
++
++
++COMMON_DIRECTORIES= \
++ Massai\cpp\GracefullyCrash \
++ Massai\cpp\Mcrypt \
++ Massai\cpp\Tools \
++ Massai\cpp\asso \
++ Massai\cpp\text \
++ Massai\cpp\graphic \
++ Massai\cpp\systools \
++ Massai\cpp\mSystools \
++ Massai\idl\Massai \
++ Services\cpp\CxComm\dll \
++ Massai\cpp\MassaiTools \
++ Massai\cpp\MassaiDll\dll \
++ Massai\cpp\MassaiDll\static \
++ Massai\cpp\MassaiCorba\dll \
++ Massai\cpp\MassaiCorba\static \
++ Massai\cpp\CfgClnt\dll \
++ Massai\cpp\CfgClnt\static \
++ Massai\cpp\CfgXMgrB \
++ Massai\cpp\CfgXMgrB\static \
++ Services\cpp\TrcServ \
++ Services\cpp\TrcServ\static \
++ Massai\cpp\SecureLogging \
++ Massai\cpp\CfgTools \
++ Massai\cpp\CfgTools\static \
++ Massai\cpp\LogService \
++ Massai\cpp\Controller \
++ Services\cpp\CxComm\StdApps \
++ Massai\cpp\XmlWriter \
++ Services\cpp\Statistics \
++ Services\cpp\Statistics\static \
++ Massai\cpp\StatisticsService \
++ Massai\cpp\BillingService \
++ Massai\cpp\BillingService\static \
++ Massai\cpp\MailService \
++ Massai\cpp\MailService\static \
++ Services\cpp\CardScanner \
++ Massai\cpp\MStopP
++
++CUSS_DIRECTORIES= \
++ Massai\idl\massai \
++ Massai\idl\cuss \
++ Massai\cpp\CussIF \
++ Massai\cpp\CussIF\static
++
++PLATFORM_DIRECTORIES= \
++ Massai\cpp\massaiJNI \
++ Massai\cpp\MassaiUpdate \
++ Massai\cpp\xtras\terminal \
++ Massai\cpp\DevicesCommon \
++ Massai\cpp\SerialCon \
++ Massai\cpp\DeviceSimulation \
++ Massai\cpp\Contxt \
++ Massai\cpp\Conveyor \
++ Massai\cpp\ConveyorTest \
++ Massai\cpp\GPPDev \
++ Massai\cpp\GPPDev\console \
++ Massai\cpp\GPPDev\windows \
++ Massai\cpp\GPPDev\windows_IM629 \
++ Massai\cpp\GPPDev\windows_IM629CKG \
++ Massai\cpp\GPPDev\windows_IM629PEK \
++ Massai\cpp\GPPDev\windows_IM63 \
++ Massai\cpp\ScreenResolution \
++ Massai\cpp\Sel \
++ Massai\cpp\ATBTest \
++ Massai\cpp\crd\projects\HS \
++ Massai\cpp\crd\projects\HW \
++ Massai\cpp\crd\projects\MAGTEK \
++ Massai\cpp\crd\projects\MAT \
++ Massai\cpp\crd\projects\TEST \
++ Massai\cpp\crd\projects\WN \
++ Massai\cpp\CRD\projects\HWC \
++ Massai\cpp\CRD\projects\HWB \
++ Massai\cpp\mr \
++ Massai\cpp\xtras\display \
++ Applications\ServiceApp \
++ Massai\cpp\AppControl \
++ Massai\cpp\IER\projects\512_557LH_FD300 \
++ Massai\cpp\IER\projects\557_557MC \
++ Massai\cpp\IER\projects\557AP \
++ Massai\cpp\IER\projects\567MC \
++ Massai\cpp\IER\projects\ATP \
++ Massai\cpp\IER\projects\BPR640 \
++ Massai\cpp\DeviceTest \
++ Massai\cpp\GPPClient \
++ Massai\cpp\SaveTrc \
++ Massai\cpp\devAEA \
++ Massai\cpp\Door \
++ Massai\cpp\CsvToDB
++
++ABLS_DIRECTORIES= \
++ Massai\idl\Massai \
++ Services\cpp\msABLSController
++
++HOSTIF_DIRECTORIES= \
++ Services\cpp\MSHostIF
++
+ ######################################################################
+ # all
+ ######################################################################
+ 
+ common:
+-    cd $(COMMONROOT)\Massai\cpp\GracefullyCrash                && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\Mcrypt                         && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\Tools                          && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\asso                           && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\text                           && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\graphic                        && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\systools                       && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\mSystools                      && $(MAKE)
+-    cd $(COMMONROOT)\Massai\idl\Massai                         && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\CxComm\dll                   && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MassaiTools                    && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MassaiDll\dll                  && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MassaiDll\static               && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MassaiCorba\dll                && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MassaiCorba\static             && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgClnt\dll                    && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgClnt\static                 && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgXMgrB                       && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgXMgrB\static                && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\TrcServ                      && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\TrcServ\static               && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\SecureLogging                  && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgTools                       && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\CfgTools\static                && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\LogService                     && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\Controller                     && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\CxComm\StdApps               && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\XmlWriter                      && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\Statistics                   && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\Statistics\static            && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\StatisticsService              && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\BillingService                 && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\BillingService\static          && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MailService                    && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MailService\static             && $(MAKE)
+-    cd $(COMMONROOT)\Services\cpp\CardScanner                  && $(MAKE)
+-    cd $(COMMONROOT)\Massai\cpp\MStopP                         && $(MAKE)
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE)
+ 
+ cuss:
+-    cd $(CUSSROOT)\Massai\idl\massai                           && $(MAKE)
+-    cd $(CUSSROOT)\Massai\idl\cuss                             && $(MAKE)
+-    cd $(CUSSROOT)\Massai\cpp\CussIF                           && $(MAKE)
+-    cd $(CUSSROOT)\Massai\cpp\CussIF\static                    && $(MAKE)
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE)
+ 
+ platform: cuss
+-    cd $(PLATFORMROOT)\Massai\cpp\massaiJNI                    && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\MassaiUpdate                 && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\xtras\terminal               && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\DevicesCommon                && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\SerialCon                    && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\DeviceSimulation             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\Contxt                       && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\Conveyor                     && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\ConveyorTest                 && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev                       && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\console               && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows               && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629         && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629CKG      && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629PEK      && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM63          && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\ScreenResolution             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\Sel                          && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\ATBTest                      && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\HS              && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\HW              && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\MAGTEK          && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\MAT             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\TEST            && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\WN              && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\CRD\projects\HWC             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\CRD\projects\HWB             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\mr                           && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\xtras\display                && $(MAKE)
+-    cd $(PLATFORMROOT)\Applications\ServiceApp                 && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\AppControl                   && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\512_557LH_FD300 && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\557_557MC       && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\557AP           && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\567MC           && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\ATP             && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\BPR640          && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\DeviceTest                   && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPClient                    && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\SaveTrc                      && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\devAEA                       && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\Door                         && $(MAKE)
+-    cd $(PLATFORMROOT)\Massai\cpp\CsvToDB                      && $(MAKE)
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE)
+ 
+ abls:
+-    cd $(ABLSROOT)\Massai\idl\Massai                           && $(MAKE)
+-    cd $(ABLSROOT)\Services\cpp\msABLSController               && $(MAKE)
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE)
+ 
+ hostif:
+-    cd $(HOSTIFROOT)\Services\cpp\MSHostIF                     && $(MAKE)
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE)
+ 
+ ##################################################################
+ # clean
+@@ -120,102 +150,131 @@ clean::
+         DUMMY) do @if exist %%F echo %%F && del %%F
+ 
+ common-clean:
+-    cd $(COMMONROOT)\Massai\cpp\GracefullyCrash                && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\Mcrypt                         && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\Tools                          && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\asso                           && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\text                           && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\graphic                        && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\systools                       && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\mSystools                      && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\idl\Massai                         && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\CxComm\dll                   && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MassaiTools                    && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MassaiDll\dll                  && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MassaiDll\static               && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MassaiCorba\dll                && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MassaiCorba\static             && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgClnt\dll                    && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgClnt\static                 && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgXMgrB                       && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgXMgrB\static                && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\TrcServ                      && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\TrcServ\static               && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\SecureLogging                  && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgTools                       && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\CfgTools\static                && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\LogService                     && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\Controller                     && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\CxComm\StdApps               && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\XmlWriter                      && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\Statistics                   && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\Statistics\static            && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\StatisticsService              && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\BillingService                 && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\BillingService\static          && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MailService                    && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MailService\static             && $(MAKE) clean
+-    cd $(COMMONROOT)\Services\cpp\CardScanner                  && $(MAKE) clean
+-    cd $(COMMONROOT)\Massai\cpp\MStopP                         && $(MAKE) clean
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) clean
+ 
+ cuss-clean:
+-    cd $(CUSSROOT)\Massai\idl\massai                           && $(MAKE) clean
+-    cd $(CUSSROOT)\Massai\idl\cuss                             && $(MAKE) clean
+-    cd $(CUSSROOT)\Massai\cpp\CussIF                           && $(MAKE) clean
+-    cd $(CUSSROOT)\Massai\cpp\CussIF\static                    && $(MAKE) clean
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) clean
+ 
+ platform-clean: cuss-clean
+-    cd $(PLATFORMROOT)\Massai\cpp\massaiJNI                    && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\MassaiUpdate                 && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\xtras\terminal               && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\DevicesCommon                && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\SerialCon                    && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\DeviceSimulation             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\Contxt                       && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\Conveyor                     && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\ConveyorTest                 && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev                       && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\console               && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows               && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629         && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629CKG      && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629PEK      && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM63          && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\ScreenResolution             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\Sel                          && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\ATBTest                      && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\HS              && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\HW              && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\MAGTEK          && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\MAT             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\TEST            && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\crd\projects\WN              && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\CRD\projects\HWC             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\CRD\projects\HWB             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\mr                           && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\xtras\display                && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Applications\ServiceApp                 && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\AppControl                   && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\512_557LH_FD300 && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\557_557MC       && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\557AP           && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\567MC           && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\ATP             && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\IER\projects\BPR640          && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\DeviceTest                   && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\GPPClient                    && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\SaveTrc                      && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\devAEA                       && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\Door                         && $(MAKE) clean
+-    cd $(PLATFORMROOT)\Massai\cpp\CsvToDB                      && $(MAKE) clean
+-
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) clean
+ 
+ abls-clean:
+-    cd $(ABLSROOT)\Massai\idl\Massai                           && $(MAKE) clean
+-    cd $(ABLSROOT)\Services\cpp\msABLSController               && $(MAKE) clean
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) clean
+ 
+ hostif-clean:
+-    cd $(HOSTIFROOT)\Services\cpp\MSHostIF                     && $(MAKE) clean
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) clean
++
++
++##################################################################
++# lint
++##################################################################
++
++common-lint:
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) lint
++
++cuss-lint:
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) lint
++
++platform-lint:
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) lint
++
++abls-lint:
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) lint
++
++hostif-lint:
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) lint
++
++##################################################################
++# dep
++##################################################################
++
++common-dep:
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) dep
++
++cuss-dep:
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) dep
++
++platform-dep:
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) dep
++
++abls-dep:
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) dep
++
++hostif-dep:
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) dep
++
++
++##################################################################
++# cleandep
++##################################################################
++
++common-cleandep:
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) cleandep
++
++cuss-cleandep:
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) cleandep
++
++platform-cleandep:
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) cleandep
++
++abls-cleandep:
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) cleandep
++
++hostif-cleandep:
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) cleandep
++
++##################################################################
++# clean-lint
++##################################################################
++
++common-clean-lint:
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) clean-lint
++
++cuss-clean-lint:
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) clean-lint
++
++platform-clean-lint:
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) clean-lint
++
++abls-clean-lint:
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) clean-lint
++
++hostif-clean-lint:
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) clean-lint
++
++##################################################################
++# globaldep
++##################################################################
++
++common-globaldep:
++    for %%i in ($(COMMON_DIRECTORIES)) do cd "$(COMMONROOT)\%%i" && $(MAKE) globaldep
++
++cuss-globaldep:
++    for %%i in ($(CUSS_DIRECTORIES)) do cd "$(CUSSROOT)\%%i" && $(MAKE) globaldep
++
++platform-globaldep:
++    for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) globaldep
++
++abls-globaldep:
++    for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) globaldep
++
++hostif-globaldep:
++    for %%i in ($(HOSTIF_DIRECTORIES)) do cd "$(HOSTIFROOT)\%%i" && $(MAKE) globaldep
++
++######################################################################
++# finalize-globaldep
++######################################################################
++
++finalize-globaldep:
++  $(BUILDROOT)\Build\cygwin\bin\sort.exe -u -f $(_DEP)\all.dep -o $(_DEP)\all.dep
++
++######################################################################
++# clean-globaldep
++######################################################################
++
++clean-globaldep:
++  del /Q $(_DEP)\*.dep
++
+ 
+ ######################################################################
+ # java
+diff --git a/SelfServiceBuild/Build/cpp/makefile.rules.mak b/SelfServiceBuild/Build/cpp/makefile.rules.mak
+index cf2a062..c9435ba 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.rules.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.rules.mak
+@@ -162,7 +162,7 @@ all: $(DEP_MAKEDEP) \
+      
+ 
+ ######################################################################
+-# all
++# lint
+ ######################################################################
+ 
+ MY_DLL1_LINT= $(MY_DLL1)
+@@ -183,6 +183,161 @@ lint: $(DEP_MAKEDEP) \
+       $(MY_BIN6:.exe=.exe.lnt.txt)  $(MY_BIN7:.exe=.exe.lnt.txt)  $(MY_BIN8:.exe=.exe.lnt.txt)  $(MY_BIN9:.exe=.exe.lnt.txt)  $(MY_BIN10:.exe=.exe.lnt.txt) \
+       $(MY_BIN11:.exe=.exe.lnt.txt) $(MY_BIN12:.exe=.exe.lnt.txt) $(MY_BIN13:.exe=.exe.lnt.txt) $(MY_BIN14:.exe=.exe.lnt.txt) $(MY_BIN15:.exe=.exe.lnt.txt)      
+ 
++######################################################################
++# globaldep
++######################################################################
++
++DEPFILE= $(MAKEDIR)
++DEPFILE= $(DEPFILE:\=_)
++DEPFILE= $(DEPFILE::=_)
++DEPFILE= $(_DEP)\$(DEPFILE).dep
++
++globaldep: $(_DEP)
++      @echo # Automatically generated makefile, do not change > $(DEPFILE)
++      @echo !include $(DEPFILE) >> $(_DEP)\all.dep
++!if "$(MY_GEN_CPPS)" != ""
++      @for %%i in ($(MY_GEN_CPPS)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_GEN_CPPS): forcebuild>> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) ^$@ >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++      @echo $(MAKEDIR): forcebuild>> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_LIB1)" != ""
++      @for %%i in ($(MY_LIB1)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_LIB1): forcebuild $(MY_LIB1_USER_LIBS) $(MY_LIB1_GEN_DIRS)>> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_LIB1) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_LIB2)" != ""
++      @for %%i in ($(MY_LIB2)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_LIB2): forcebuild $(MY_LIB2_USER_LIBS) $(MY_LIB2_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_LIB2) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_LIB3)" != ""
++      @for %%i in ($(MY_LIB3)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_LIB3): forcebuild $(MY_LIB3_USER_LIBS) (MY_LIB3_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_LIB3) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_DLL1)" != ""
++      @for %%i in ($(MY_DLL1)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_DLL1): forcebuild $(MY_DLL1_USER_LIBS) $(MY_DLL1_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_DLL1) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++      @for %%i in ($(MY_DLL1)) do @echo $(_LIB)\%%~ni.lib: $(MY_DLL1) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_DLL2)" != ""
++      @for %%i in ($(MY_DLL2)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_DLL2): forcebuild $(MY_DLL2_USER_LIBS) $(MY_DLL2_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_DLL2) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++      @for %%i in ($(MY_DLL2)) do @echo $(_LIB)\%%~ni.lib: $(MY_DLL2) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN1)" != ""
++      @for %%i in ($(MY_BIN1)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN1): forcebuild $(MY_BIN1_USER_LIBS) $(MY_BIN1_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN1) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN2)" != ""
++      @for %%i in ($(MY_BIN2)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN2): forcebuild $(MY_BIN2_USER_LIBS) $(MY_BIN2_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN2) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN3)" != ""
++      @for %%i in ($(MY_BIN3)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN3): forcebuild $(MY_BIN3_USER_LIBS) $(MY_BIN3_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN3) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN4)" != ""
++      @for %%i in ($(MY_BIN4)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN4): forcebuild $(MY_BIN4_USER_LIBS) $(MY_BIN4_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN4) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN5)" != ""
++      @for %%i in ($(MY_BIN5)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN5): forcebuild $(MY_BIN5_USER_LIBS) $(MY_BIN5_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN5) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN6)" != ""
++      @for %%i in ($(MY_BIN6)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN6): forcebuild $(MY_BIN6_USER_LIBS) $(MY_BIN6_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN6) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN7)" != ""
++      @for %%i in ($(MY_BIN7)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN7): forcebuild $(MY_BIN7_USER_LIBS) $(MY_BIN7_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN7) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN8)" != ""
++      @for %%i in ($(MY_BIN8)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN8): forcebuild $(MY_BIN8_USER_LIBS) $(MY_BIN8_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN8) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN9)" != ""
++      @for %%i in ($(MY_BIN9)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN9): forcebuild $(MY_BIN9_USER_LIBS) $(MY_BIN9_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN9) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN10)" != ""
++      @for %%i in ($(MY_BIN10)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN10): forcebuild $(MY_BIN10_USER_LIBS) $(MY_BIN10_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN10) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN11)" != ""
++      @for %%i in ($(MY_BIN11)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN11): forcebuild $(MY_BIN11_USER_LIBS) $(MY_BIN11_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN11) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN12)" != ""
++      @for %%i in ($(MY_BIN12)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN12): forcebuild $(MY_BIN12_USER_LIBS) $(MY_BIN12_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN12) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN13)" != ""
++      @for %%i in ($(MY_BIN13)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN13): forcebuild $(MY_BIN13_USER_LIBS) $(MY_BIN13_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN13) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN14)" != ""
++      @for %%i in ($(MY_BIN14)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN14): forcebuild $(MY_BIN14_USER_LIBS) $(MY_BIN14_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN14) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++!if "$(MY_BIN15)" != ""
++      @for %%i in ($(MY_BIN15)) do @echo %%~nxi: %%i >> $(DEPFILE) && @echo. >> $(DEPFILE)
++      @echo $(MY_BIN15): forcebuild $(MY_BIN15_USER_LIBS) $(MY_BIN15_GEN_DIRS) >> $(DEPFILE)
++      @echo.   cd $(MAKEDIR) ^&^& ^$(MAKE) $(MY_BIN15) >> $(DEPFILE)
++      @echo. >> $(DEPFILE)
++!endif
++
++
++
++######################################################################
++# out-directory
++######################################################################
++
++$(_DEP):
++     mkdir $@
++
+ $(_OBJ):
+      mkdir $@
+      
+@@ -698,3 +853,4 @@ $(DEP_MAKEFILES):
+     $(PERL) $(MKFILES) $(_SRC) $(_SOAPGEN) $(_RES) $(P_SRC) $(P_RES) $(P_SOAPGEN) $(PP_SRC) $(PP_RES) $(PP_SOAPGEN) 
+     
+ !include <make.dep>
++
+diff --git a/SelfServiceBuild/Build/scripts/setenv.bat b/SelfServiceBuild/Build/scripts/setenv.bat
+index ddf5766..ea6bc7a 100644
+--- a/SelfServiceBuild/Build/scripts/setenv.bat
++++ b/SelfServiceBuild/Build/scripts/setenv.bat
+@@ -204,6 +204,7 @@ set _BIN=%PROJECTOUTPUT%\bin
+ set _DLL=%PROJECTOUTPUT%\dll
+ set _LIB=%PROJECTOUTPUT%\lib
+ set _GEN=%PROJECTOUTPUT%\idl
++set _DEP=%PROJECTOUTPUT%\dep
+ set _INC=inc
+ set _OBJ=out
+ set _RES=res
+-- 
+2.41.0.windows.1
+

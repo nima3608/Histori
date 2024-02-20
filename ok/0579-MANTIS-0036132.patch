@@ -1,0 +1,86 @@
+From 20033fa330f6b58a6a06bc2cfacec4765ce63f2e Mon Sep 17 00:00:00 2001
+From: hgering <hgering@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 31 Mar 2015 12:06:59 +0000
+Subject: [PATCH 0579/1000] MANTIS 0036132 mantis #0036132: GetUserSid in
+ MConfig_CustomAction.dll has to check case insensitive
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@844 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Installer_CustomAction/makefile.mak   |  1 +
+ .../src/MConfig_CustomAction.cpp              | 26 +++++++++++++------
+ 2 files changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
+index ecfe252a..e57b4fca 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
+@@ -9,6 +9,7 @@
+ MY_CFLAGS = \
+     $(MY_CFLAGS_3) \
+     $(INC_WIX) \
++    $(INC_BOOST) \    
+     /D "_WINDOWS" /D "_USRDLL" /D "_WINDLL" /D "_UNICODE" /D "UNICODE" /D nologo
+ 
+ MY_LDFLAGS = \
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index e4fbef6a..b50bc552 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -3046,6 +3046,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_GetUserSID(MSIHANDLE hInstall)
+ {
+   #define USER_PROPERTY L"USER_PROPERTY"
+   #define SID_PROPERTY L"SID_PROPERTY"
++  #define USER_PROPERTY_REG L"USER_PROPERTY_REG"
+   #define MAX_KEY_LENGTH 256
+   #define MAX_VALUE_NAME 16384
+   #define MAX_PROFILE_IMAGE_PATH_LENGTH 4096
+@@ -3083,6 +3084,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_GetUserSID(MSIHANDLE hInstall)
+ 
+   std::wstring userName;
+   std::wstring sid;
++  std::wstring userNameReg;
+   
+   hr = WcaInitialize(hInstall, "CA_GetUserSID");
+   dbstrs << L"CA_GetUserSID: WcaInitialize " << std::hex << (int)hr << std::endl;
+@@ -3165,15 +3167,19 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_GetUserSID(MSIHANDLE hInstall)
+                 Log_Str(dbstrs);
+                 
+                 std::wstring strProfileImagePath = achProfileImagePath;
+-                
+-                if((strProfileImagePath.size() >= userName.size()) && (0 == strProfileImagePath.compare(strProfileImagePath.size() - userName.size(), userName.size(), userName)))
+-                {
+-                  dbstrs << L"CA_GetUserSID: User found: "  << achProfileImagePath << L" in " << achKey;
+-                  Log_Str(dbstrs);
+-                  userFound = true;
+-                  sid = achKey;
++                std::wstring strProfileImagePathUser;
++
++                if(strProfileImagePath.size() >= userName.size()){
++                  strProfileImagePathUser = strProfileImagePath.substr(strProfileImagePath.size() - userName.size(), userName.size());
++                  if(boost::iequals(strProfileImagePathUser, userName))
++                  {
++                    dbstrs << L"CA_GetUserSID: User found: "  << achProfileImagePath << L" in " << achKey;
++                    Log_Str(dbstrs);
++                    userFound = true;
++                    sid = achKey;
++                    userNameReg = strProfileImagePathUser;
++                  }
+                 }
+-                
+               }
+ 
+               lResult = RegCloseKey(hKeySub);
+@@ -3194,6 +3200,10 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_GetUserSID(MSIHANDLE hInstall)
+         dbstrs << L"CA_GetUserSID: SetProperty SID_PROPERTY: " << sid.c_str() << L" Result:" << hr;
+         Log_Str(dbstrs);
+         ExitOnFailure(hr, "Failed to set SID_PROPERTY property value");    
++        hr = WcaSetProperty(USER_PROPERTY_REG, userNameReg.c_str());
++        dbstrs << L"CA_GetUserSID: SetProperty USER_PROPERTY_REG: " << userNameReg.c_str() << L" Result:" << hr;
++        Log_Str(dbstrs);
++        ExitOnFailure(hr, "Failed to set USER_PROPERTY_REG property value");    
+       }
+       else
+       {
+-- 
+2.41.0.windows.1
+

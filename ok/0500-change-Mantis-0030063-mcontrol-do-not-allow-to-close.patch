@@ -1,0 +1,488 @@
+From 81a9ab31bc2fa4dc678affe6a3a2e931131e5a62 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 6 Dec 2013 17:45:12 +0000
+Subject: [PATCH 0500/1077] change Mantis 0030063: mcontrol: do not allow to
+ close mcontrol without starting explorer when started as user shell
+
+mControl.exe
+V1.0.2.13
+
+  - new command line parameter
+    -usershell Run as windows user shell, default is not run as user shell
+  - Function key table\n
+    Msg: Message Box\n
+    Min: Minimize mControl window\n
+    Expl: start Windows Explorer\n
+    Close: shutdown platform\n
+    Restart: restart platform
+    | Key            | User Shell     | Kiosk          | Server         | Service        |
+    | -------------: | :------------- | :------------- | :------------- | :------------- |
+    | F1             | Msg            | Msg            | Msg            | Msg            |
+    | F8             | Msg Min Expl   | Msg Min Expl   |                |                |
+    | F9             | Msg Min Expl   | Msg Min        | Min            | Min            |
+    | F11            | Msg Min Expl   | Msg Min        | Min            | Min            |
+    | F12            | Msg Close Expl | Msg Close      | Msg Close      | Msg            |
+    | Ctrl Shift F12 | Msg Reboot     | Msg Reboot     | Msg            | Msg            |
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@620 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  | 71 ++++++++++++-------
+ .../Massai/cpp/Controller/inc/serverwin.h     |  7 --
+ .../Massai/cpp/Controller/src/main.cpp        | 28 +++++---
+ .../Massai/cpp/Controller/src/pslist.cpp      |  8 +--
+ .../Massai/cpp/Controller/src/reboot.cpp      |  2 +-
+ .../Massai/cpp/Controller/src/server.cpp      | 36 +++++-----
+ .../Massai/cpp/Controller/src/serverwin.cpp   | 30 ++++++--
+ 7 files changed, 112 insertions(+), 70 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index b5ca8d9c..80d7a673 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,18 +9,44 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,12
+-#define FILE_VER_STR     "FileVersion", "1.0.2.12\0"
++#define FILE_VER_BIN     1,0,2,13
++#define FILE_VER_STR     "FileVersion", "1.0.2.13\0"
+ 
+-/*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
++/*!
++\file
++\brief Release Notes - mControl.exe
+ 
+-@version 1.0.2.12
++\page mControl.exe Release Notes - mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
++
++@version 1.0.2.13
+ 
+ \section change1 Change history
+ 
++mControl.exe
++
++\date 04.12.2013
++\li V1.0.2.13
++\li change SteT Mantis 0030063: mcontrol: do not allow to close mcontrol without starting explorer when started as user shell
++  - new command line parameter
++    -usershell Run as windows user shell, default is not run as user shell
++  - Function key table\n
++    Msg: Message Box\n
++    Min: Minimize mControl window\n
++    Expl: start Windows Explorer\n
++    Close: shutdown platform\n
++    Restart: restart platform
++    | Key            | User Shell     | Kiosk          | Server         | Service        |
++    | -------------: | :------------- | :------------- | :------------- | :------------- |
++    | F1             | Msg            | Msg            | Msg            | Msg            |
++    | F8             | Msg Min Expl   | Msg Min Expl   |                |                |
++    | F9             | Msg Min Expl   | Msg Min        | Min            | Min            |
++    | F11            | Msg Min Expl   | Msg Min        | Min            | Min            |
++    | F12            | Msg Close Expl | Msg Close      | Msg Close      | Msg            |
++    | Ctrl Shift F12 | Msg Reboot     | Msg Reboot     | Msg            | Msg            |
++
+ \date 11.09.2013
+ \li V1.0.2.12
+-\li modification - Mantis  0029017: Platform Setup: Remove generated files and directories in the user local folder with an uninstallation - change mcontrol file location 
++\li modification - Mantis  0029017: Platform Setup: Remove generated files and directories in the user local folder with an uninstallation - change mcontrol file location
+ 
+ \date 25.07.2013
+ \li V1.0.2.11
+@@ -177,25 +203,22 @@
+                  \li SteT EDB 28061: mControl waits initial for initialization of LogService.exe/massaiSNMP.dll
+                  \li synchronized by named semaphore "MassaiLoggingService"
+                  \li LogService.exe/massaiSNMP.dll >= 1.0.3.6 must be used
+-\li Testfall:
+-       - mControl wird ohne LogService.exe/massaiSNMP.dll gestartet
+-         Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
+-         Aktion: mControl starten
+-         Nachbedingung: mControl wartet 60 Sekunden bevor PLATFORM.STARTUP geschickt wird, das Event kann aber nicht geschickt werden
+-
+-       - LogService.exe/massaiSNMP.dll wird vor mControl  gestartet
+-         Vorbedingung: LogService.exe/massaiSNMP.dll ist gestartet
+-         Aktion: mControl starten
+-         Nachbedingung: mControl wartet nicht bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
+-
+-       - mControl wird vor LogService.exe/massaiSNMP.dll gestartet
+-         Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
+-         Aktion: mControl starten, dann LogService.exe/massaiSNMP.dll
+-         Nachbedingung: mControl wartet bis LogService.exe/massaiSNMP.dll sich initialisiert hat bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
+-
+-    -nderung in Windows >= 5 beim Semaphorenamespace
+-        Also Test mit Windows >= 5 (Windows 2000, XP, ...)
+-                  und Windows < 5  (..., Windows 95, Windows 98, NT 4.0)
++                 \li Testfall:
++                     - mControl wird ohne LogService.exe/massaiSNMP.dll gestartet
++                       Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
++                       Aktion: mControl starten
++                       Nachbedingung: mControl wartet 60 Sekunden bevor PLATFORM.STARTUP geschickt wird, das Event kann aber nicht geschickt werden
++                     - LogService.exe/massaiSNMP.dll wird vor mControl  gestartet
++                       Vorbedingung: LogService.exe/massaiSNMP.dll ist gestartet
++                       Aktion: mControl starten
++                       Nachbedingung: mControl wartet nicht bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
++                     - mControl wird vor LogService.exe/massaiSNMP.dll gestartet
++                       Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
++                       Aktion: mControl starten, dann LogService.exe/massaiSNMP.dll
++                       Nachbedingung: mControl wartet bis LogService.exe/massaiSNMP.dll sich initialisiert hat bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
++                     - Aenderung in Windows >= 5 beim Semaphorenamespace
++                       Also Test mit Windows >= 5 (Windows 2000, XP, ...)
++                                 und Windows < 5  (..., Windows 95, Windows 98, NT 4.0)
+ 
+ \date 29.03.2007 \li V 1.0.0.13
+                  \li bugfix display correct process bar after watchdog restarted a process(PtM)
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+index 8d1692ba..a964b856 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+@@ -40,12 +40,5 @@ LRESULT CALLBACK serverwinWindowProc
+ 
+ #define WM_START_DELAY_TIMER      (WM_USER + 101)
+ 
+-// imports ------------------------------------------------------------------
+-
+-HINSTANCE getInstance();    // from main.cpp
+-bool serverMode();          // from main.cpp
+-bool noLOG();               // from main.cpp
+-bool noSNMP();              // from main.cpp
+-bool portableMCC();         // also from main.hpp .... sic ....
+ 
+ #endif //SERVERWIN_H
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index df0386ea..95e56d36 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -21,6 +21,7 @@
+ #include "serverwin.h"
+ #include "resource.h"
+ #include "pslist.h"
++#include "mcontrol_args.h"
+ 
+ #include "server.h"
+ 
+@@ -53,16 +54,11 @@ static bool      fNoSNMP     = false;
+ static bool      bPortableMCC= false;
+ static HWND      hwnd= 0;
+ 
+-
+-
+ namespace
+ {
+-
+-
+    HINSTANCE    l_instance;
+-
+    mcData *     l_mcdata = 0;
+-
++   bool         runningAsUserShell = false;
+ 
+    char const * c_str( bool in )
+    {
+@@ -72,7 +68,6 @@ namespace
+          return "false";
+    }
+ 
+-
+ } // namespace
+ 
+ 
+@@ -210,6 +205,12 @@ bool noSNMP()
+ }
+ 
+ 
++bool isRunningAsUserShell()
++{
++  return runningAsUserShell;
++}
++
++
+ 
+ //---------------------------------------------------------------------------
+ //
+@@ -390,7 +391,7 @@ int mDaemon_main( int argc, char const * const * argv )
+                "\t\t-deinstall }\n\n"
+                "<params>: [-delaybeforestart:seconds]"
+                " [-wait[:timeout]]\n\t[-service:<servicename>]"
+-               " [-server]\n\t[-nolog] [-nosnmp]\n\n"
++               " [-server][-usershell]\n\t[-nolog] [-nosnmp]\n\n"
+                "-delaybeforestart\n\tSet delay in seconds to wait"
+                " before startup\n"
+                "-wait\tSet timeout in ms for initial waiting for"
+@@ -398,6 +399,7 @@ int mDaemon_main( int argc, char const * const * argv )
+                "\t- wait forever, if no timeout is given\n"
+                "-service\tSet dependency\n"
+                "-server\tRun in server mode, default is kiosk mode\n"
++               "-usershell\tRun as windows user shell, default is not run as user shell\n"
+                "-enableportablemcc\n\tEnables the detection of"
+                " a mcc on removable devices\n"
+                "-nolog\tEvent logging disabled\n"
+@@ -448,6 +450,11 @@ int mDaemon_main( int argc, char const * const * argv )
+       if( args.option( "NOSNMP" ) )
+         fNoSNMP = true;
+ 
++      if(args.option("USERSHELL"))
++      {
++        runningAsUserShell = true;
++      }
++
+       if(noLOG())
+       {
+          // A noSNMP parameter is ignored.
+@@ -466,12 +473,13 @@ int mDaemon_main( int argc, char const * const * argv )
+          TRACE
+             (
+                HERE,
+-               "%s started (server mode = %s, as service = %s, noLOG = %s noNSMP = %s) ...",
++               "%s started (server mode = %s, as service = %s, noLOG = %s noNSMP = %s userShell = %s) ...",
+                szAppName,
+                c_str( fServerMode ),
+                c_str( mDaemon_isService() != 0 ),
+                c_str( noLOG() ),
+-               c_str( noSNMP() )
++               c_str( noSNMP() ),
++               c_str(isRunningAsUserShell())
+             );
+       }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/pslist.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/pslist.cpp
+index 9d91cc91..a87f4387 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/pslist.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/pslist.cpp
+@@ -114,7 +114,7 @@ DWORD       cModules;
+ 
+          GetModuleFileNameEx(hProcess,ahMod[0],szProcessPath,sizeof(szProcessPath));
+ 
+-         strlwr(szProcessPath);
++         _strlwr(szProcessPath);
+ 
+          if((pStr = strrchr(szProcessPath,'\\')) != NULL)
+          {
+@@ -175,7 +175,7 @@ DWORD       cModules;
+ 
+          GetModuleFileNameEx(hProcess,ahMod[0],szProcessPath,sizeof(szProcessPath));
+ 
+-         strlwr(szProcessPath);
++         _strlwr(szProcessPath);
+ 
+          if((pStr = strrchr(szProcessPath,'\\')) != NULL)
+          {
+@@ -302,7 +302,7 @@ long        lMem = -1;
+ int hextolong(int value)
+ {
+     char test[128]="";
+-    itoa(value,test,10);
++    _itoa(value,test,10);
+     return atoi(test);
+ }
+ 
+@@ -310,7 +310,7 @@ void GetMemoryInfo(process *pProcess)
+ {
+     HANDLE hProcess;
+     PROCESS_MEMORY_COUNTERS pmc;
+-    
++
+     hProcess = OpenProcess( PROCESS_QUERY_INFORMATION |
+                             PROCESS_VM_READ,
+                             FALSE, pProcess->pid );
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+index 444177cc..832ce7f0 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+@@ -240,7 +240,7 @@ void checkReboot::init()
+ 
+     if(pDelayRange->get() > 0)
+     {
+-      srand(time(NULL));
++      srand(static_cast<unsigned int>(time(NULL)));
+ 
+       lDelay = rand() % pDelayRange->get();
+     }
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+index 4ac8b669..7389a991 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+@@ -115,10 +115,10 @@ void scanArguments(char *pszInput,
+       else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+       {
+         int length= parsed[3].second - parsed[3].first;
+-        if     (_strnicmp(&*parsed[3].first, "YES" , length) == 0)      *piShow = PROCESS_SHOW; 
++        if     (_strnicmp(&*parsed[3].first, "YES" , length) == 0)      *piShow = PROCESS_SHOW;
+         else if(_strnicmp(&*parsed[3].first, "NO"  , length) == 0)      *piShow = PROCESS_HIDE;
+         else if(_strnicmp(&*parsed[3].first, "HIDE", length) == 0)      *piShow = PROCESS_HIDE;
+-        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) *piShow = PROCESS_MINIMIZED; 
++        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) *piShow = PROCESS_MINIMIZED;
+       }
+       else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+       {
+@@ -240,7 +240,7 @@ static void scanArgs(
+     }
+ 
+     pStr = strrchr( pszInput, cDelimiter );
+-    
++
+     if( pStr != NULL )
+     {
+         *pStr = '\0';
+@@ -323,7 +323,7 @@ static void scanArgs(
+                 {
+                     --pStr;
+                 }
+-				
++
+                 strArgs = std::string( szArgs, pStr - szArgs + 1);
+             }
+         }
+@@ -695,7 +695,7 @@ std::string controllerServant::getRebootFileName()
+     {
+       userDir.assign(".\\"REBOOT_FILE_NAME);
+     }
+-    return userDir; 
++    return userDir;
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -897,23 +897,23 @@ CORBA::Long controllerServant::executeCommand( const Controller::kioskControl::s
+         TRACE( HERE, "controllerServant::executeCommand: wrong length sequence" );
+         return -1;
+     }
+-    
++
+     long lTimeOut = 0;
+     int iShow = 0;
+ 
+-    std::string strInput = string_args[ 0 ];    
+-    char *szInput = ::strdup( strInput.c_str() ); //   Don't want 2 const_cast
+-    char szWorkingDir[ MAX_PATH ], 
+-         szArgs      [ 1024 ], 
+-         szWndName   [ 1024 ];    
+-         
++    std::string strInput = string_args[ 0 ];
++    char *szInput = ::_strdup( strInput.c_str() ); //   Don't want 2 const_cast
++    char szWorkingDir[ MAX_PATH ],
++         szArgs      [ 1024 ],
++         szWndName   [ 1024 ];
++
+     scanArguments(  szInput,
+                     &lTimeOut,
+                     &iShow,
+                     szArgs,
+                     szWndName,
+                     szWorkingDir);
+-    
++
+     STARTUPINFO siStartupInfo;
+     memset(&siStartupInfo, 0, sizeof(siStartupInfo));
+     siStartupInfo.cb = sizeof(siStartupInfo);
+@@ -933,7 +933,7 @@ CORBA::Long controllerServant::executeCommand( const Controller::kioskControl::s
+     PROCESS_INFORMATION pi;
+     memset(&pi, 0, sizeof(pi));
+ 
+-    BOOL bRc = ::CreateProcess( szInput, 
++    BOOL bRc = ::CreateProcess( szInput,
+                                 szArgs,
+                                 NULL, NULL,             // secAttrs, threadAttrs by default
+                                 FALSE,                  // don't bInheritHandles
+@@ -946,7 +946,7 @@ CORBA::Long controllerServant::executeCommand( const Controller::kioskControl::s
+     {
+         TRACE( HERE, "controllerServant::executeCommand %s w.cmdLine \"%s\" failed error %d", \
+             szInput, szArgs, GetLastError());
+-        
++
+     }
+     else
+     {
+@@ -961,12 +961,12 @@ CORBA::Long controllerServant::executeCommand( const Controller::kioskControl::s
+                ::GetExitCodeProcess ( pi.hProcess, &dwExitCode );
+             //TRACE( HERE, "executeCommand retCode %d", dwExitCode );
+         }
+-    
++
+         // Close process and thread handles.
+-        ::CloseHandle( pi.hProcess ); 
++        ::CloseHandle( pi.hProcess );
+         ::CloseHandle( pi.hThread ) ;
+     }
+-    
++
+     ::free( szInput );
+     return (bRc != FALSE) ? 0 : -1;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index 446b2bd6..78b236d7 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -24,6 +24,7 @@
+ #include "logging/alert.h"
+ #include "logging/alertDef.h"
+ #include "appcontrol.h"
++#include "mcontrol_args.h"
+ 
+ #include "systools/matDaemon.h"
+ #include "systools/mEventSem.hpp"
+@@ -938,14 +939,24 @@ LRESULT CALLBACK serverwinWindowProc
+           switch(wParam)
+           {
+           case VK_F1:
+-
+-               if(!serverMode())
++               if(isRunningAsUserShell())
++               {
++                 MessageBox(hwnd,
++                            TEXT("You may use the following function keys:\n\n"
++                                 "[F1]\t\tto display this help message.\n"
++                                 "[F8]/[F9]/[F11]\tto minimize this window and to start the Windows Explorer for administration work.\n"
++                                 "[F12]\t\tto shut down the platform and stop all Massai-processes and to start the Windows Explorer.\n"
++                                 "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
++                            TEXT("Massai"),
++                            MB_ICONINFORMATION | MB_OK);
++               }
++               else if(!serverMode())
+                {
+                  MessageBox(hwnd,
+                             TEXT("You may use the following function keys:\n\n"
+                                  "[F1]\t\tto display this help message.\n"
+                                  "[F8]\t\tto minimize this window and to start the Windows Explorer for administration work.\n"
+-                                 "[F11]\t\tto minimize this window for administration work.\n"
++                                 "[F9]/[F11]\tto minimize this window for administration work.\n"
+                                  "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"
+                                  "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
+                             TEXT("Massai"),
+@@ -956,8 +967,8 @@ LRESULT CALLBACK serverwinWindowProc
+                  MessageBox(hwnd,
+                             TEXT("You may use the following function keys:\n\n"
+                                  "[F1]\tto display this help message.\n"
+-                                 "[F11]\tto minimize this window.\n"
+-                                 "[F12]\tto shut down the platform and stop all Massai-processes.\n"),
++                                 "[F9]/[F11]\tto minimize this window.\n"
++                                 "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"),
+                             TEXT("Massai"),
+                             MB_ICONINFORMATION | MB_OK);
+                }
+@@ -995,6 +1006,10 @@ LRESULT CALLBACK serverwinWindowProc
+                                MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
+                  {
+                    ShowWindow(hwnd,SW_MINIMIZE);
++                   if(isRunningAsUserShell())
++                   {
++                     startExplorer();
++                   }
+                  }
+                }
+                else
+@@ -1035,7 +1050,10 @@ LRESULT CALLBACK serverwinWindowProc
+                                MB_ICONQUESTION | MB_YESNO) == IDYES)
+                  {
+                    sendAlert(ALERT_E_SHUTDOWN_LOCAL);
+-
++                   if(isRunningAsUserShell())
++                   {
++                     startExplorer();
++                   }
+                    PostMessage(hwnd,WM_CLOSE,0,0);
+                  }
+                }
+-- 
+2.41.0.windows.1
+

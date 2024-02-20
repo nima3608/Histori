@@ -1,0 +1,167 @@
+From 763e1d514ff1002b0507df433f05f47961a1bb72 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Sun, 4 Oct 2015 11:14:19 +0000
+Subject: [PATCH 0610/1000] MANTIS 0037349 change: integration of ingenico
+ payment device for KIS kiosk
+
+massai_systools.lib
+V1.0.0.29
+
+- added getRealCOMPort using serial port GUID in msysFindComPort
+- getCOMPort still uses port GUID
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@907 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 ++++--
+ .../cpp/Systools/src/mSysFindComPortW32.cpp   | 34 ++++++++++++++-----
+ 2 files changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 17280993..0c743de0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 28);
++VERSION_ID_DT(systools, 1, 0, 0, 29);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 28);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.28
++@version 1.0.0.29
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.29
++\li 04.10.2015
++\li change SteT Mantis 0037349: integration of ingenico payment device for KIS kiosk
++- added getRealCOMPort using serial port GUID in msysFindComPort
++- getCOMPort still uses port GUID
++
+ \version 1.0.0.28
+ \li 19.03.2015
+ \li extension OtM MANTIS 0032431: Added new Constructor for creating a Process under a specified User-Account
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
+index 0c1960bc..8ee7bf1e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindComPortW32.cpp
+@@ -18,12 +18,13 @@ using MASSAI::text::TextList;
+ namespace
+ {
+   const GUID PORT_GUID = {0x4D36E978, 0xE325, 0x11CE, {0xBF, 0xC1, 0x08, 0x00, 0x2B, 0xE1, 0x03, 0x18} };
++  const GUID COM_PORT_GUID = {0x86E0D1E0, 0x8089, 0x11D0, {0x9C, 0xE4, 0x08, 0x00, 0x3E, 0x30, 0x1F, 0x73} };
+   const char* COM_PORT_NAME = "PortName";
+ 
+   class FindCOMPort
+   {
+     public:
+-      FindCOMPort(const std::string& deviceTypePrefix, const std::string& deviceIdPrefix,
++      FindCOMPort(const GUID& guid, const std::string& deviceTypePrefix, const std::string& deviceIdPrefix,
+         const std::string& instanceIdPrefix, Search search, TraceInterface& trc);
+ 
+       ~FindCOMPort();
+@@ -33,6 +34,7 @@ namespace
+     private:
+       bool match(const std::string& deviceInstanceId);
+ 
++      GUID m_guid;
+       std::string m_deviceTypePrefix;
+       std::string m_deviceIdPrefix;
+       std::string m_instanceIdPrefix;
+@@ -43,7 +45,7 @@ namespace
+   class FindCOMPortById
+   {
+     public:
+-      FindCOMPortById(const std::string& idPart, Search search, TraceInterface& trc);
++      FindCOMPortById(const GUID& guid, const std::string& idPart, Search search, TraceInterface& trc);
+ 
+       ~FindCOMPortById();
+ 
+@@ -52,6 +54,7 @@ namespace
+     private:
+       bool match(const std::string& deviceInstanceId);
+ 
++      GUID m_guid;
+       std::string m_idPart;
+       Search m_search;
+       TraceInterface& m_trc;
+@@ -60,8 +63,9 @@ namespace
+ 
+ namespace
+ {
+-  FindCOMPort::FindCOMPort(const std::string& deviceTypePrefix, const std::string& deviceIdPrefix,
++  FindCOMPort::FindCOMPort(const GUID& guid, const std::string& deviceTypePrefix, const std::string& deviceIdPrefix,
+     const std::string& instanceIdPrefix, Search search, TraceInterface& trc):
++    m_guid(guid),
+     m_deviceTypePrefix(deviceTypePrefix),
+     m_deviceIdPrefix(deviceIdPrefix),
+     m_instanceIdPrefix(instanceIdPrefix),
+@@ -77,7 +81,7 @@ namespace
+     std::string result;
+     try
+     {
+-      Devices devices(PORT_GUID, m_search, m_trc);
++      Devices devices(m_guid, m_search, m_trc);
+       for(DWORD i = 0;; i++)
+       {
+         DeviceInfo deviceInfo(devices, i, m_trc);
+@@ -120,7 +124,8 @@ namespace
+   }
+ 
+ 
+-  FindCOMPortById::FindCOMPortById(const std::string& idPart, Search search, TraceInterface& trc):
++  FindCOMPortById::FindCOMPortById(const GUID& guid, const std::string& idPart, Search search, TraceInterface& trc):
++    m_guid(guid),
+     m_idPart(idPart),
+     m_search(search),
+     m_trc(trc)
+@@ -134,7 +139,7 @@ namespace
+     std::string result;
+     try
+     {
+-      Devices devices(PORT_GUID, m_search, m_trc);
++      Devices devices(m_guid, m_search, m_trc);
+       for(DWORD i = 0;; i++)
+       {
+         DeviceInfo deviceInfo(devices, i, m_trc);
+@@ -166,13 +171,26 @@ namespace mSysCOMPort
+   std::string getCOMPort(const std::string& deviceTypePrefix, const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
+     Search search, MASSAI::trace::TraceInterface& trc)
+   {
+-    FindCOMPort find(deviceTypePrefix, deviceIdPrefix, instanceIdPrefix, search, trc);
++    FindCOMPort find(PORT_GUID, deviceTypePrefix, deviceIdPrefix, instanceIdPrefix, search, trc);
++    return find.getPort();
++  }
++
++  std::string getRealCOMPort(const std::string& deviceTypePrefix, const std::string& deviceIdPrefix, const std::string& instanceIdPrefix,
++    Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindCOMPort find(COM_PORT_GUID, deviceTypePrefix, deviceIdPrefix, instanceIdPrefix, search, trc);
+     return find.getPort();
+   }
+ 
+   std::string getCOMPort(const std::string& idPart, Search search, MASSAI::trace::TraceInterface& trc)
+   {
+-    FindCOMPortById find(idPart, search, trc);
++    FindCOMPortById find(PORT_GUID, idPart, search, trc);
++    return find.getPort();
++  }
++
++  std::string getRealCOMPort(const std::string& idPart, Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindCOMPortById find(COM_PORT_GUID, idPart, search, trc);
+     return find.getPort();
+   }
+ }
+-- 
+2.41.0.windows.1
+

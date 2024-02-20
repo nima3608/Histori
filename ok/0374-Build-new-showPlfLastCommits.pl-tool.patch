@@ -1,0 +1,147 @@
+From 2a175c9b2ea49433277dbca78dfb1981b4ba1702 Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 22 May 2020 08:55:46 +0000
+Subject: [PATCH 374/462] Build: new showPlfLastCommits.pl tool
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@685 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/showPlfLastCommits.pl       | 127 ++++++++++++++++++
+ 1 file changed, 127 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+new file mode 100644
+index 0000000..d8ec805
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+@@ -0,0 +1,127 @@
++#!/usr/bin/perl
++
++use List::MoreUtils qw(uniq);
++use Getopt::Long;
++use DateTime;
++
++# ----------------------------------------------------------
++#  showPlfLastCommit.pl                 kkluge 22.05.2020
++#
++#  Show the last commit of the configured list of PLF
++#  branches, if it was in the current month.
++#
++#  With the option "--all" the last commit of all branches
++#  are shown, no matter when it was done.
++#
++#  Old branches which really aren't used any more should not
++#  be included, or commented out, to reduce runtime. You can
++#  use the "--all" option to find those.
++#
++#  Usage:
++#    perl showPlfLastCommit.pl [--all]
++# ----------------------------------------------------------
++
++my $svnBaseURL      = "http://subversion.materna.de:7770/svn-repos";
++
++my $ipsPlfBaseURL    = "$svnBaseURL/SelfServicePlatform";  # trunk
++my $ipsPlfBranchURL  = "$svnBaseURL/SelfServicePlatform/branches";
++
++my @allURLs =
++(
++  "$ipsPlfBaseURL/trunk",
++  "$ipsPlfBranchURL/RC_5.30.00",
++  "$ipsPlfBranchURL/RC_5.27.00_Haneda",
++  "$ipsPlfBranchURL/RC_5.20.00",
++  "$ipsPlfBranchURL/RC_5.19.00_Chubu",
++  # "$ipsPlfBranchURL/RC_5.18.00_BRU",
++  "$ipsPlfBranchURL/RC_5.14.00_DEN",
++  "$ipsPlfBranchURL/RC_5.13.00_Toronto",
++  "$ipsPlfBranchURL/RC_5.12.00_LaGuardia",
++  "$ipsPlfBranchURL/RC_5.10.00",
++  "$ipsPlfBranchURL/RC_4.48.00_Montreal",
++  "$ipsPlfBranchURL/RC_4.47.00_BLR",
++  "$ipsPlfBranchURL/RC_4.46.00_HAM",
++  "$ipsPlfBranchURL/RC_4.45.00_Gatwick",
++  "$ipsPlfBranchURL/RC_4.41.00_LH",
++  "$ipsPlfBranchURL/RC_4.41.00_SNA",
++  "$ipsPlfBranchURL/RC_4.40.00",
++  "$ipsPlfBranchURL/RC_4.33.00_Avinor",
++  "$ipsPlfBranchURL/RC_4.30.00",
++);
++
++my $optAll = 0;
++my $thisMonth;
++
++GetOptions ("all!"       => \$optAll,
++            "help!"      => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if ( $help ) {
++  print STDERR "usage: $0 [--all]\n" ;
++  exit 0;
++}
++
++# ----------------------------------------------------------
++
++sub getUser
++{
++  my ($log) = @_;
++  my ($user) = ($log =~ /\| ([^ ]*) \|/);
++}
++
++# ----------------------------------------------------------
++
++sub getDate
++{
++  my ($log) = @_;
++  my ($date) = ($log =~ /\| (20[^ ]*)/);
++}
++
++# ----------------------------------------------------------
++
++sub getDateTime
++{
++  my ($log) = @_;
++  my ($dateTime) = ($log =~ /\| (20[^ ]* ..:..)/);
++}
++
++# ----------------------------------------------------------
++
++sub getRevision
++{
++  my ($log) = @_;
++  my ($rev) = ($log =~ /(r[^ ]*) \|/);
++}
++
++# ----------------------------------------------------------
++
++sub showRevs
++{
++  my ($branch,$url,$revs) = @_;
++
++  my (@revs2) = ($revs =~ /(r[0-9]*)/g);
++  foreach my $rev (@revs2) {
++    my $result = `svn log $url -r $rev | perl -l40pe 's/^-+/\\n/'`;
++    my ($user) = getUser($result);
++    my ($date) = getDateTime($result);
++    my ($ym) = $date =~ /^(....-..)/;
++    if (($thisMonth eq $ym) || $optAll) {
++      printf("%-20s $date $rev $user\n", $branch);
++    }
++  }
++}
++
++# ----------------------------------------------------------
++
++my ($today) = DateTime->now(time_zone => "local")->ymd('-'); 
++($thisMonth) = $today =~ /^(....-..)/; 
++print "-- PLF BRANCHES ---- $today ----- LAST COMMIT ---\n";
++foreach my $url (@allURLs) {
++  my ($repo) = ($url =~ /svn-repos\/([^\/]*)/);
++  my ($branch) = ($url =~ /([^\/]*)$/);
++  my $lastCommit = `svn log -l1 $url`;
++  (@revs) = getRevision($lastCommit);
++  showRevs($branch,$url,@revs);
++}
++
++# ----------------------------------------------------------
+-- 
+2.41.0.windows.1
+

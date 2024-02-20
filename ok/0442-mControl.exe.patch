@@ -1,0 +1,468 @@
+From b6a6b99588901fdf0b6deb8eb8c07c3555d8445f Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 22 Jul 2013 13:22:04 +0000
+Subject: [PATCH 0442/1076] mControl.exe V1.0.2.9 Mantis 0028167: mcontrol:
+ common key assignment use F9 (and F11) to minimize mcontrol F12 to shutdown
+ mcontrol Ctrl-Shift-F12 to reboot the kiosk
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@540 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  | 400 +++++++++---------
+ .../Massai/cpp/Controller/src/serverwin.cpp   |   7 +-
+ 2 files changed, 205 insertions(+), 202 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index 5b640c06..8df054ad 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,206 +9,210 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,8
+-#define FILE_VER_STR     "FileVersion", "1.0.2.8\0"
++#define FILE_VER_BIN     1,0,2,9
++#define FILE_VER_STR     "FileVersion", "1.0.2.9\0"
+ 
+ /*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+- *
+- *  @version 1.0.2.8
+- *
+- *  \section change1 Change history
+- *
+- *  \date 09.01.2013 \li V1.0.2.8
+- *                   \li GIT: Mantis0025517: mcontrol: Windows7; mcontrol.reboot is written to the directory bin 
+- *
+- *  \date 25.10.2012 \li V1.0.2.7
+- *                   \li GIT: Mantis0024822: Mcontrol sets workingdir to the path of the executable. Change to use user path (Win7 compatibility) 
+- *
+- *  \date 25.10.2012 \li V1.0.2.6
+- *                   \li JK: Mantis 0024819  "illogical test for boot time".
+- *
+- *  \date 22.08.2012 \li V1.0.2.5
+- *                   \li JK: Mantis 22014 "do not start mcontrol.exe as console".
+- *                   \li - Change link-options to generate pure Windos app.
+- *                   \li - Like for "mStarter" pipe the output of other controlled processes to trace.
+- *                   \li - Remove console outputs, no longer useful.
+- *                   \li - Remove the default dependency to "massaiConfig" ("massaiConfig" is no longer used).
+- *                   \li - Remove the deprecated use of "mSysException::standardException".
+- *                   \li - Do not close the stop-semaphore twice - would result in a lock.
+- *
+- *  \date 31.05.2012 \li V1.0.2.4
+- *                   \li bugfix - 0023436: Mcontrol - W7 dialog pops up if the string "update" is found in a name.
+- *                   \li Rename mUpdate.exe to mUpdat.exe
+- *
+- *  \date 07.05.2012 \li V1.0.2.3
+- *                   \li bugfix - Mantis 0023196: MControl needs ADMINISTRATOR rights to start
+- *
+- *  \date 23.02.2012 \li V1.0.2.2
+- *                   \li enhancement - SteT; Mantis 0022962: mcontrol: change default dependency to massaiConfig
+- *
+- *  \date 23.02.2012 \li V1.0.2.1
+- *                   \li enhancement - SteT; Mantis 0022537: mcontrol.exe: avoid unnecessary pause at startup
+- *
+- *  \date 16.12.2011 \li V1.0.2.0
+- *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
+- *                   progress bar: progress is calculated by mstarter
+- *
+- *  \date 17.11.2011 \li V1.0.1.8
+- *                   \li GiT: Mantis0021563: SelfServiceCommon Controller changes for VC10 compatibilty
+- *
+- *  \date 17.11.2011 \li V1.0.1.7
+- *                   \li JK: Mantis0021539: mcontrol not responding
+- *                   \li - Fix possible lock in SysTools / mSysProcessW32
+- *
+- *  \date 14.09.2011 \li V1.0.1.6
+- *                   \li GiT: Mantis0014919: placeholder for system paths in
+- *                   \li      PLATFORM.STARTUP.SystemCommands
+- *                   \li      PLATFORM.SHUTDOWN.SystemCommands
+- *                   \li      The following substitutions are now supported:
+- *                   \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
+- *                   \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
+- *                   \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
+- *
+- *  \date 25.05.2011 \li V1.0.1.5
+- *                   \li GiT: Mantis0019385: MControl - make MCC detection on removable device configurable
+- *                   \li new commandline parameter:
+- *                   \li -enableportablemcc
+- *
+- *  \date 09.05.2011 \li V1.0.1.4
+- *                   \li GiT: Mantis0019075: Mcontrol should support background images for 1024 and 1280 screen resolution
+- *                   \li new bitmaps used:
+- *                   \li - bitmap mcontrol_1024.bmp
+- *                   \li - bitmap mcontrol_1280.bmp
+- *                   \li - For a resolution of 1280 the bitmap mcontrol_1280.bmp will be shown,
+- *                   \li - for 1024 the bitmap mcontrol_1024.bmp will be shown.
+- *                   \li - If neither bitmap is found the old mcontrol.bmp will be used.
+- *                   \li - If none of the bitmaps fit the screen resolution any bitmap mcontrol*.bmp found will be used
+- *                   \li - and resized.
+- *                   \li QA-Tests: Check backgrounds shown for 1280x,1024x screen resoulution
+- *                   \li QA-Tests: Check backgrounds shown for other resolutions
+- *                   \li QA-Tests: Check backgrounds shown for different resolutions if the according bmp files are missing
+- *
+- *
+- *  \date 28.04.2011 \li V1.0.1.3
+- *                   \li GiT: Mantis0013984,Mantis0014040: Update-Service should show a message when update is carried out
+- *                   \li      - mcontrol_small_su.bmp is shown, has to be placed in the working folder of mcontrol.exe
+- *                   \li GiT: Mantis0018904: mcontrol hung if corba servant is created too early
+- *                   \li GiT: Mantis0018811: mcontrol should wait a given time till startup
+- *                   \li      - new parameter: delaybeforestart:seconds
+- *                   \li      - mcontrol_small_ds.bmp is shown, has to be placed in the working folder of mcontrol.exe
+- *                   \li QA-Tests: Check window shown while start is delayed
+- *                   \li QA-Tests: Check window shown while update is carried out
+- *                   \li QA-Tests: Check all windows shown and start funtions in server and kiosk mode
+- *                   \li QA-Tests: Check platform startup with high kiosk load
+- *                   \li QA-Tests: Check if several times start/stop of platform is reliable
+- *
+- *
+- *  \date 07.12.2009 \li V1.0.1.2
+- *                   \li JK: Mantis0006878: mcontrol stürzt ab
+- *                   \li - More traces to improve debugging.
+- *                   \li - Use structured exception handling
+- *                   \li   implemented in "mSysException.hpp".
+- *                   \li - Rename the function shutdownOS()
+- *                   \li   to shutdownOS_Now() in order distinguish it
+- *                   \li   from the class method shutdownOS().
+- *                   \li - Remove prototypes from "serverwin.h",
+- *                   \li   which are also in "mctools.h".
+- *                   \li - Remove Lint warnings
+- *
+- *  \date 02.12.2009 \li V1.0.1.1
+- *                   \li JK: Mantis0006874: mControl ignoriert noSNMP wenn es als Dienst gestartet wird
+- *                   \li - Allow parameters to be given to the process, when running as service.
+- *                   \li   Previosly parameters have been ignored, when specified explicitly with service start.
+- *                   \li   Parameters given at service installation-time were OK.
+- *                   \li - Installation-time parameters are now the default, but are replaced
+- *                   \li   by start-parameters, if given (e.g. "SC start massaiControl -nolog" will cause any
+- *                   \li   installation-time parameters to be ignored and replaced by -nolog).
+- *                   \li - Use systools library version of matDaemon object, remove the implementation here.
+- *                   \li - Remove also "argscan.hpp", "TRACE.H", and "version.h".
+- *                   \li - Link mControl as console-application. Thus it is possible to display std-out for
+- *                   \li   e.g. parameter error messages.
+- *
+- *  \date 30.10.2009 \li V1.0.1.0
+- *                   \li JK: Increase functionality, initiated by the Gate project.
+- *                   \li - Change interface in "controller.idl" to add a new method forcedRestartPlatform().
+- *                   \li - New commandline parameter -nolog to disable event logging (both SNMP and LogService based).
+- *                   \li - Fixed trace (Mantis0011247).
+- *                   \li - Fixed some Lint warnings.
+- *
+- *  \date 15.10.2009 \li V1.0.0.18
+- *                   \li bugfix   - SteT: Mantis0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
+- *
+- *  \date 10.06.2009 \li V 1.0.0.17
+- *                   \li JK Mantis0009916
+- *                   \li - Processes started by scheduler were patched to lower case.
+- *                   \li   This is a problem, if process parameters are case-sensitive.
+- *
+- *  \date 04.02.2009 \li V 1.0.0.16
+- *                   \li JK Mantis0007405 "Fehlerausgaben in mControl"
+- *                   \li - Processes started by mControl no longer write to their own console.
+- *                   \li   Stdout and stderr are redirected to mControl, which in turn writes a trace entry
+- *                   \li   for every line of redirected output.
+- *                   \li   A redirection trace line entry is of the form <application>:{STDOUT|STDERR}[<data>]
+- *                   \li   Example "mstarter.exe:STDERR[java.lang.NullPointerException]"
+- *                   \li - Beautifications & warnings fixed
+- *
+- *  \date 18.11.2008 \li V 1.0.0.15
+- *                   \li SteT EDB 28146: mControl ignores parameter if running as windows service
+- *                   \li The parameter of the service can be set with installation
+- *                   \li New Parameter for Installation: -param
+- *
+- *  \date 25.06.2008 \li V 1.0.0.14
+- *                   \li SteT EDB 28061: mControl waits initial for initialization of LogService.exe/massaiSNMP.dll
+- *                   \li synchronized by named semaphore "MassaiLoggingService"
+- *                   \li LogService.exe/massaiSNMP.dll >= 1.0.3.6 must be used
+- *  \li Testfall:
+- *         - mControl wird ohne LogService.exe/massaiSNMP.dll gestartet
+- *           Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
+- *           Aktion: mControl starten
+- *           Nachbedingung: mControl wartet 60 Sekunden bevor PLATFORM.STARTUP geschickt wird, das Event kann aber nicht geschickt werden
+- *
+- *         - LogService.exe/massaiSNMP.dll wird vor mControl  gestartet
+- *           Vorbedingung: LogService.exe/massaiSNMP.dll ist gestartet
+- *           Aktion: mControl starten
+- *           Nachbedingung: mControl wartet nicht bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
+- *
+- *         - mControl wird vor LogService.exe/massaiSNMP.dll gestartet
+- *           Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
+- *           Aktion: mControl starten, dann LogService.exe/massaiSNMP.dll
+- *           Nachbedingung: mControl wartet bis LogService.exe/massaiSNMP.dll sich initialisiert hat bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
+- *
+- *      -nderung in Windows >= 5 beim Semaphorenamespace
+- *          Also Test mit Windows >= 5 (Windows 2000, XP, ...)
+- *                    und Windows < 5  (..., Windows 95, Windows 98, NT 4.0)
+- *
+- *  \date 29.03.2007 \li V 1.0.0.13
+- *                   \li bugfix display correct process bar after watchdog restarted a process(PtM)
+- *
+- *  \date 29.09.2006 \li V 1.0.0.12
+- *                   \li bugfix memory display in processlist via mcc  (EDB:27057) (PtM)
+- *
+- *  \date 29.09.2006 \li V 1.0.0.11
+- *                   \li remove memory leaks (configuration) (PtM)
+- *
+- *  \date 29.09.2006 \li V 1.0.0.10  SteT
+- *                   \li catch CTRL-Break signal
+- *
+- *  \date 29.09.2006 \li V 1.0.0.9  MaK
+- *                   \li BugFix: try to send snmp-traps only if platform is started (logServiceEx running)
+- *                               or if SNMP-Service is running
+- *
+- *  \date 24.08.2006 \li V 1.0.0.8  MaK
+- *                   \li BugFix: Run-only-once-semaphore created in global namespace
+- *                               only on systems with WINVER >= 5
+- *
+- *  \date 17.05.2006 \li V 1.0.0.7  SteT
+- *                   \li BugFix: run only once, semaphore must be created successfully
+- *
+- *  \date 17.05.2006 \li V 1.0.0.6  SteT
+- *                   \li add parameter NORMAL
+- *
+- *  \date 21.03.2006 \li V 1.0.0.5  MaM
+- *                   \li minor changes
++
++@version 1.0.2.9
++
++\section change1 Change history
++
++\date 22.07.2013
++\li V1.0.2.9
++\li SteT: Mantis 0028167: mcontrol: common key assignment
++
++\date 09.01.2013 \li V1.0.2.8
++                 \li GIT: Mantis0025517: mcontrol: Windows7; mcontrol.reboot is written to the directory bin
++
++\date 25.10.2012 \li V1.0.2.7
++                 \li GIT: Mantis0024822: Mcontrol sets workingdir to the path of the executable. Change to use user path (Win7 compatibility)
++
++\date 25.10.2012 \li V1.0.2.6
++                 \li JK: Mantis 0024819  "illogical test for boot time".
++
++\date 22.08.2012 \li V1.0.2.5
++                 \li JK: Mantis 22014 "do not start mcontrol.exe as console".
++                 \li - Change link-options to generate pure Windos app.
++                 \li - Like for "mStarter" pipe the output of other controlled processes to trace.
++                 \li - Remove console outputs, no longer useful.
++                 \li - Remove the default dependency to "massaiConfig" ("massaiConfig" is no longer used).
++                 \li - Remove the deprecated use of "mSysException::standardException".
++                 \li - Do not close the stop-semaphore twice - would result in a lock.
++
++\date 31.05.2012 \li V1.0.2.4
++                 \li bugfix - 0023436: Mcontrol - W7 dialog pops up if the string "update" is found in a name.
++                 \li Rename mUpdate.exe to mUpdat.exe
++
++\date 07.05.2012 \li V1.0.2.3
++                 \li bugfix - Mantis 0023196: MControl needs ADMINISTRATOR rights to start
++
++\date 23.02.2012 \li V1.0.2.2
++                 \li enhancement - SteT; Mantis 0022962: mcontrol: change default dependency to massaiConfig
++
++\date 23.02.2012 \li V1.0.2.1
++                 \li enhancement - SteT; Mantis 0022537: mcontrol.exe: avoid unnecessary pause at startup
++
++\date 16.12.2011 \li V1.0.2.0
++                 \li SteT Mantis 0021947: mstarter: problems at shutdown
++                 progress bar: progress is calculated by mstarter
++
++\date 17.11.2011 \li V1.0.1.8
++                 \li GiT: Mantis0021563: SelfServiceCommon Controller changes for VC10 compatibilty
++
++\date 17.11.2011 \li V1.0.1.7
++                 \li JK: Mantis0021539: mcontrol not responding
++                 \li - Fix possible lock in SysTools / mSysProcessW32
++
++\date 14.09.2011 \li V1.0.1.6
++                 \li GiT: Mantis0014919: placeholder for system paths in
++                 \li      PLATFORM.STARTUP.SystemCommands
++                 \li      PLATFORM.SHUTDOWN.SystemCommands
++                 \li      The following substitutions are now supported:
++                 \li      - $PROGRAMFILES will be substituted by the environment var ProgramFiles
++                 \li      - $SYSTEMROOT will be substituted by the environment var SystemRoot
++                 \li      - $SYSTEMDRIVE will be substituted by the environment var SystemDrive
++
++\date 25.05.2011 \li V1.0.1.5
++                 \li GiT: Mantis0019385: MControl - make MCC detection on removable device configurable
++                 \li new commandline parameter:
++                 \li -enableportablemcc
++
++\date 09.05.2011 \li V1.0.1.4
++                 \li GiT: Mantis0019075: Mcontrol should support background images for 1024 and 1280 screen resolution
++                 \li new bitmaps used:
++                 \li - bitmap mcontrol_1024.bmp
++                 \li - bitmap mcontrol_1280.bmp
++                 \li - For a resolution of 1280 the bitmap mcontrol_1280.bmp will be shown,
++                 \li - for 1024 the bitmap mcontrol_1024.bmp will be shown.
++                 \li - If neither bitmap is found the old mcontrol.bmp will be used.
++                 \li - If none of the bitmaps fit the screen resolution any bitmap mcontrol*.bmp found will be used
++                 \li - and resized.
++                 \li QA-Tests: Check backgrounds shown for 1280x,1024x screen resoulution
++                 \li QA-Tests: Check backgrounds shown for other resolutions
++                 \li QA-Tests: Check backgrounds shown for different resolutions if the according bmp files are missing
++
++
++\date 28.04.2011 \li V1.0.1.3
++                 \li GiT: Mantis0013984,Mantis0014040: Update-Service should show a message when update is carried out
++                 \li      - mcontrol_small_su.bmp is shown, has to be placed in the working folder of mcontrol.exe
++                 \li GiT: Mantis0018904: mcontrol hung if corba servant is created too early
++                 \li GiT: Mantis0018811: mcontrol should wait a given time till startup
++                 \li      - new parameter: delaybeforestart:seconds
++                 \li      - mcontrol_small_ds.bmp is shown, has to be placed in the working folder of mcontrol.exe
++                 \li QA-Tests: Check window shown while start is delayed
++                 \li QA-Tests: Check window shown while update is carried out
++                 \li QA-Tests: Check all windows shown and start funtions in server and kiosk mode
++                 \li QA-Tests: Check platform startup with high kiosk load
++                 \li QA-Tests: Check if several times start/stop of platform is reliable
++
++
++\date 07.12.2009 \li V1.0.1.2
++                 \li JK: Mantis0006878: mcontrol stürzt ab
++                 \li - More traces to improve debugging.
++                 \li - Use structured exception handling
++                 \li   implemented in "mSysException.hpp".
++                 \li - Rename the function shutdownOS()
++                 \li   to shutdownOS_Now() in order distinguish it
++                 \li   from the class method shutdownOS().
++                 \li - Remove prototypes from "serverwin.h",
++                 \li   which are also in "mctools.h".
++                 \li - Remove Lint warnings
++
++\date 02.12.2009 \li V1.0.1.1
++                 \li JK: Mantis0006874: mControl ignoriert noSNMP wenn es als Dienst gestartet wird
++                 \li - Allow parameters to be given to the process, when running as service.
++                 \li   Previosly parameters have been ignored, when specified explicitly with service start.
++                 \li   Parameters given at service installation-time were OK.
++                 \li - Installation-time parameters are now the default, but are replaced
++                 \li   by start-parameters, if given (e.g. "SC start massaiControl -nolog" will cause any
++                 \li   installation-time parameters to be ignored and replaced by -nolog).
++                 \li - Use systools library version of matDaemon object, remove the implementation here.
++                 \li - Remove also "argscan.hpp", "TRACE.H", and "version.h".
++                 \li - Link mControl as console-application. Thus it is possible to display std-out for
++                 \li   e.g. parameter error messages.
++
++\date 30.10.2009 \li V1.0.1.0
++                 \li JK: Increase functionality, initiated by the Gate project.
++                 \li - Change interface in "controller.idl" to add a new method forcedRestartPlatform().
++                 \li - New commandline parameter -nolog to disable event logging (both SNMP and LogService based).
++                 \li - Fixed trace (Mantis0011247).
++                 \li - Fixed some Lint warnings.
++
++\date 15.10.2009 \li V1.0.0.18
++                 \li bugfix   - SteT: Mantis0010459: sporadic CORBA COMM_FAILURE exception when sending indiciation to Java-Servant
++
++\date 10.06.2009 \li V 1.0.0.17
++                 \li JK Mantis0009916
++                 \li - Processes started by scheduler were patched to lower case.
++                 \li   This is a problem, if process parameters are case-sensitive.
++
++\date 04.02.2009 \li V 1.0.0.16
++                 \li JK Mantis0007405 "Fehlerausgaben in mControl"
++                 \li - Processes started by mControl no longer write to their own console.
++                 \li   Stdout and stderr are redirected to mControl, which in turn writes a trace entry
++                 \li   for every line of redirected output.
++                 \li   A redirection trace line entry is of the form <application>:{STDOUT|STDERR}[<data>]
++                 \li   Example "mstarter.exe:STDERR[java.lang.NullPointerException]"
++                 \li - Beautifications & warnings fixed
++
++\date 18.11.2008 \li V 1.0.0.15
++                 \li SteT EDB 28146: mControl ignores parameter if running as windows service
++                 \li The parameter of the service can be set with installation
++                 \li New Parameter for Installation: -param
++
++\date 25.06.2008 \li V 1.0.0.14
++                 \li SteT EDB 28061: mControl waits initial for initialization of LogService.exe/massaiSNMP.dll
++                 \li synchronized by named semaphore "MassaiLoggingService"
++                 \li LogService.exe/massaiSNMP.dll >= 1.0.3.6 must be used
++\li Testfall:
++       - mControl wird ohne LogService.exe/massaiSNMP.dll gestartet
++         Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
++         Aktion: mControl starten
++         Nachbedingung: mControl wartet 60 Sekunden bevor PLATFORM.STARTUP geschickt wird, das Event kann aber nicht geschickt werden
++
++       - LogService.exe/massaiSNMP.dll wird vor mControl  gestartet
++         Vorbedingung: LogService.exe/massaiSNMP.dll ist gestartet
++         Aktion: mControl starten
++         Nachbedingung: mControl wartet nicht bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
++
++       - mControl wird vor LogService.exe/massaiSNMP.dll gestartet
++         Vorbedingung: LogService.exe/massaiSNMP.dll noch nicht gestartet
++         Aktion: mControl starten, dann LogService.exe/massaiSNMP.dll
++         Nachbedingung: mControl wartet bis LogService.exe/massaiSNMP.dll sich initialisiert hat bevor PLATFORM.STARTUP geschickt wird, das Event kann geschickt werden
++
++    -nderung in Windows >= 5 beim Semaphorenamespace
++        Also Test mit Windows >= 5 (Windows 2000, XP, ...)
++                  und Windows < 5  (..., Windows 95, Windows 98, NT 4.0)
++
++\date 29.03.2007 \li V 1.0.0.13
++                 \li bugfix display correct process bar after watchdog restarted a process(PtM)
++
++\date 29.09.2006 \li V 1.0.0.12
++                 \li bugfix memory display in processlist via mcc  (EDB:27057) (PtM)
++
++\date 29.09.2006 \li V 1.0.0.11
++                 \li remove memory leaks (configuration) (PtM)
++
++\date 29.09.2006 \li V 1.0.0.10  SteT
++                 \li catch CTRL-Break signal
++
++\date 29.09.2006 \li V 1.0.0.9  MaK
++                 \li BugFix: try to send snmp-traps only if platform is started (logServiceEx running)
++                             or if SNMP-Service is running
++
++\date 24.08.2006 \li V 1.0.0.8  MaK
++                 \li BugFix: Run-only-once-semaphore created in global namespace
++                             only on systems with WINVER >= 5
++
++\date 17.05.2006 \li V 1.0.0.7  SteT
++                 \li BugFix: run only once, semaphore must be created successfully
++
++\date 17.05.2006 \li V 1.0.0.6  SteT
++                 \li add parameter NORMAL
++
++\date 21.03.2006 \li V 1.0.0.5  MaM
++                 \li minor changes
+  */
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index 81b4f07d..ace797a2 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -948,7 +948,7 @@ LRESULT CALLBACK serverwinWindowProc
+                                  "[F8]\t\tto minimize this window and to start the Windows Explorer for administration work.\n"
+                                  "[F11]\t\tto minimize this window for administration work.\n"
+                                  "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"
+-                                 "[CTRL+F12]\tto reboot the kiosk.\n\n"),
++                                 "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
+                             TEXT("Massai"),
+                             MB_ICONINFORMATION | MB_OK);
+                }
+@@ -964,8 +964,6 @@ LRESULT CALLBACK serverwinWindowProc
+                }
+                break;
+ 
+-          case VK_F9:  execSysCmdsStartup();  break;
+-          case VK_F10: execSysCmdsShutdown(); break;
+ 
+           case VK_F8:
+ 
+@@ -985,6 +983,7 @@ LRESULT CALLBACK serverwinWindowProc
+                }
+                break;
+ 
++          case VK_F9:
+           case VK_F11:
+ 
+                if(!serverMode())
+@@ -1012,7 +1011,7 @@ LRESULT CALLBACK serverwinWindowProc
+                                TEXT("Massai"),
+                                MB_ICONEXCLAMATION | MB_OK);
+                }
+-               else if(!serverMode() && GetKeyState(VK_CONTROL) & 0xffff0000)
++               else if(!serverMode() && (GetKeyState(VK_CONTROL) & 0xffff0000) && (GetKeyState(VK_SHIFT) & 0xffff0000))
+                {
+                  if(MessageBox(hwnd,
+                                TEXT("Do you really want to reboot the kiosk?"),
+-- 
+2.41.0.windows.1
+

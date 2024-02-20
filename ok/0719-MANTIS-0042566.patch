@@ -1,0 +1,140 @@
+From a56bdd243eb2777d8b30311969f447881c2e132e Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 21 Sep 2016 08:42:00 +0000
+Subject: [PATCH 0719/1000] MANTIS 0042566 -adapted trace in myChild::shutdown
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1090 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 60 +++++++++++--------
+ 1 file changed, 34 insertions(+), 26 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 9ddb2d79..8bf322a2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -43,6 +43,9 @@
+ #include <iomanip>
+ #include <stdlib.h>
+ 
++//boost
++#include "boost/format.hpp"
++
+ #pragma comment(lib, "User32.lib")
+ 
+ 
+@@ -1472,55 +1475,62 @@ namespace
+   {
+     bool isTerminated = false;
+ 
+-    std::stringstream infoStream("");
+-    infoStream << "Initiate shutdown of process=[" << this->getProgram()
+-               << "] with processId=["             << this->getProcessId();
++    if (!AttachConsole(M_ProcessId))
++    {
++      logLastError(M_Logging, "AttacheConsole(...)");
++    }
++
++    std::string sInfo = (boost::format("Process=[%1%] with processId=[%2%] received shutdown...") % this->getProgram() % this->getProcessId()).str();
+ 
+     if(M_Logging)
+-      M_Logging->lineOut(infoStream.str().c_str());
++      M_Logging->lineOut(sInfo.c_str());
+ 
+     try
+     {
+-      this->sendBreak();
++      sInfo = (boost::format("Send break to process=[%1%] with processId=[%2%]") % this->getProgram() % this->getProcessId()).str();
+ 
+-      mSysTime::sleep(100);
++      if (M_Logging)
++        M_Logging->lineOut(sInfo.c_str());
+ 
+       this->sendBreak();
+ 
+-      mSysTime::sleep(900);
++      this->waitForTermination(1);
+ 
+       if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+       {
+-        this->sendCtrlC();
++        sInfo = (boost::format("Send ctrl-c to process=[%1%] with processId=[%2%]") % this->getProgram() % this->getProcessId()).str();
+ 
+-        mSysTime::sleep(100);
++        if (M_Logging)
++          M_Logging->lineOut(sInfo.c_str());
+ 
+         this->sendCtrlC();
+ 
+-        mSysTime::sleep(900);
++        this->waitForTermination(1);
+ 
+         if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+         {
++          sInfo = (boost::format("Kill process=[%1%] with processId=[%2%]") % this->getProgram() % this->getProcessId()).str();
++
++          if (M_Logging)
++            M_Logging->lineOut(sInfo.c_str());
++
+           this->kill();
+ 
+-          mSysTime::sleep(1000);
++          this->waitForTermination(1);
+ 
+           if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+           {
+-            infoStream.clear();
+-            infoStream << "WARNING: Could not terminate process=[" << this->getProgram()
+-                       << "] with processId=[" << this->getProcessId();
++            sInfo = (boost::format("WARNING: Could not terminate process=[%1%] with processId=[%2%]") % this->getProgram() % this->getProcessId()).str();
++
+             if (M_Logging)
+-              M_Logging->lineOut(infoStream.str().c_str());
++              M_Logging->lineOut(sInfo.c_str());
+           }
+           else
+           {
+-            infoStream.clear();
+-            infoStream << "Successfully terminated process=[" << this->getProgram()
+-                       << "] with processId=[" << this->getProcessId();
++            sInfo = (boost::format("Successfully terminated process=[%1%] with processId=[%2%]") % this->getProgram() % this->getProcessId()).str();
+ 
+             if (M_Logging)
+-              M_Logging->lineOut(infoStream.str().c_str());
++              M_Logging->lineOut(sInfo.c_str());
+ 
+             isTerminated = true;
+           }
+@@ -1529,17 +1539,15 @@ namespace
+     }
+     catch (std::exception &exeception)
+     {
+-      infoStream.clear();
+-      infoStream << "std::exeception:" << exeception.what();
++      sInfo = (boost::format("std::exeception: %1%") % exeception.what()).str();
+ 
+-      logLastError(M_Logging, infoStream.str().c_str());
++      logLastError(M_Logging, sInfo.c_str());
+     }
+     catch (...)
+     {
+-      infoStream.clear();
+-      infoStream << "unknown execption";
++      sInfo = (boost::format("unknown execption")).str();
+ 
+-      logLastError(M_Logging, infoStream.str().c_str());
++      logLastError(M_Logging, sInfo.c_str());
+     }
+ 
+     return isTerminated;
+@@ -1575,7 +1583,7 @@ namespace
+   {
+     if( canTerminate() )
+     {
+-      if ( !TerminateProcess(M_HandleProcess, 1) )
++      if ( !TerminateProcess(M_HandleProcess, static_cast<unsigned int>(-1) ))
+       {
+         std::string errorString = "ProcID=[" + getProcessId() + "] TerminateProcess";
+         logLastError( M_Logging, errorString.c_str() );
+-- 
+2.41.0.windows.1
+

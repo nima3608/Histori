@@ -1,0 +1,1434 @@
+From e7043eed4d1340cd3750f448f7831c310952f23c Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 24 Jan 2014 19:34:15 +0000
+Subject: [PATCH 0519/1076] MANTIS 0030519 Report successfully checked bags to
+ billing log ...
+
+Billing.exe
+V1.0.1.0
+
+BillingClnt.exe
+V1.0.1.0
+
+Billing.idl
+V1.1
+
+platform.idl
+V1.6
+
+- added methods for conveyor and SVG/PDF-Printer
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@646 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/BillingService/inc/BillingC_def.h     |  11 +-
+ .../cpp/BillingService/inc/BillingClient.h    |  12 +
+ .../cpp/BillingService/inc/BillingS_def.h     |  11 +-
+ .../Massai/cpp/BillingService/inc/File.h      |   4 +-
+ .../Massai/cpp/BillingService/inc/server.h    |   4 +
+ .../cpp/BillingService/inc/sessionlist.h      |  10 +-
+ .../cpp/BillingService/src/BillingClient.cpp  | 314 ++++++++++++++++--
+ .../Massai/cpp/BillingService/src/File.cpp    |  32 +-
+ .../cpp/BillingService/src/clientmain.cpp     |  40 +++
+ .../Massai/cpp/BillingService/src/server.cpp  |  58 ++++
+ .../cpp/BillingService/src/sessionlist.cpp    |  31 +-
+ .../Massai/idl/Massai/BillingService.idl      |  91 ++---
+ .../Massai/idl/Massai/platform.idl            | 262 +++++++--------
+ 13 files changed, 659 insertions(+), 221 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingC_def.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingC_def.h
+index e5635804..4c102cf7 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingC_def.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingC_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,0,0
+-#define FILE_VER_STR     "FileVersion", "1.0.0.0"
++#define FILE_VER_BIN     1,0,1,0
++#define FILE_VER_STR     "FileVersion", "1.0.1.0"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page Billingclnt.exe Release Notes - Billingclnt.exe - test client for billing.exe
+ 
+-@version 1.0.0.0
++@version 1.0.1.0
+ 
+ \section changehistory Change history
+ 
+ Billing.exe
+ 
++\version 1.0.1.0
++\li 23.01.2014
++\li change SteT Mantis 0030519: Report successfully checked bags to billing log ...
++- added methods for conveyor and SVG/PDF-Printer
++
+ \version 1.0.0.0
+ \li Initial Version
+ */
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
+index dd219ec5..28aef8b5 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
+@@ -36,6 +36,18 @@ class billingSession
+     /** add GPP response to the BillingService */
+     long addGPPResponse(const char *pszResponse);
+ 
++    /** add ATB response to the BillingService */
++    long addATBResponse(const char *type, long used);
++
++    /** add BTP response to the BillingService */
++    long addBTPResponse(const char *type, long used);
++
++    /** add GPP response to the BillingService */
++    long addGPPResponse(const char *type, long used);
++
++    /** add conveyor response to the BillingService */
++    long addCONResponse(long delivered);
++
+     /** class constructor
+         @param pszAppName - The name of the application
+         @param pszBrand - The brand of the session
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+index 2e639481..f4099f8d 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,0,9
+-#define FILE_VER_STR     "FileVersion", "1.0.0.9"
++#define FILE_VER_BIN     1,0,1,0
++#define FILE_VER_STR     "FileVersion", "1.0.1.0"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page Billing.exe Release Notes - Billing.exe - Billing Service
+ 
+-@version 1.0.0.9
++@version 1.0.1.0
+ 
+ \section changehistory Change history
+ 
+ Billing.exe
+ 
++\version 1.0.1.0
++\li 23.01.2014
++\li change SteT Mantis 0030519: Report successfully checked bags to billing log ...
++- added methods for conveyor and SVG/PDF-Printer
++
+ \version 1.0.0.9
+ \li 04.11.2013
+ \li bugfix SteT Mantis 0026690: Billing: add attribute Brand to Billing-Data
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
+index 3c791cfe..194fe7e9 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
+@@ -15,6 +15,7 @@ class Response
+     std::string Rsp;
+     bool bParseError;
+     Response(const std::string& setRsp, bool setbParseError);
++    Response(const std::string& type, long used);
+ };
+ 
+ typedef std::list<Response> ResponseList;
+@@ -24,6 +25,7 @@ void write(const std::string& KioskId, const std::string& Brand,
+   const std::string& AppType, time_t start, time_t end, bool bClosed,
+   const ResponseList& ATBResponse, int iATBUsed,
+   const ResponseList& GPPResponse, int iGPPUsed,
+-  const ResponseList& BTPResponse, int iBTPUsed);
++  const ResponseList& BTPResponse, int iBTPUsed,
++  int baggagesDelivered);
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
+index 8380b0e6..eaf98b58 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
+@@ -26,6 +26,10 @@ class BillingServiceServant: public  POA_BillingAccess::BillingService,
+     Long addBTPResponse(Long sessionId, const char* response);
+     Long addGPPResponse(Long sessionId, const char* response);
+ 
++    Long addATBNonAEAResponse(Long sessionId, const char* type, Long used);
++    Long addBTPNonAEAResponse(Long sessionId, const char* type, Long used);
++    Long addGPPNonAEAResponse(Long sessionId, const char* type, Long used);
++    Long addCONResponse(Long sessionId, Long delivered);
+ 
+      BillingServiceServant();
+     ~BillingServiceServant();
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
+index 22c72508..4819e8dd 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
+@@ -23,6 +23,12 @@ class session
+     void     addATBResponse(const char* pResponse);
+     void     addGPPResponse(const char* pResponse);
+     void     addBTPResponse(const char* pResponse);
++
++    void     addATBResponse(const char* type, long used);
++    void     addGPPResponse(const char* type, long used);
++    void     addBTPResponse(const char* type, long used);
++    void     addCONResponse(long delivered);
++
+     void     close();
+     int      eq(const char* appName, const char* brand,
+                const char* appType, const char* kioskID,
+@@ -46,10 +52,12 @@ class session
+     ResponseList GPPResponse;
+     ResponseList BTPResponse;
+ 
+-    time_t     start, end;
++    time_t     start;
++    time_t     end;
+     int        iATBUsed;
+     int        iGPPUsed;
+     int        iBTPUsed;
++    int        baggagesDelivered;
+     bool       bClosed;
+ };
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
+index 8ce6c2a1..aa5f2070 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
+@@ -1,5 +1,5 @@
+ // CORBA client basics
+-//  history:    ts 11.07.2001 adapted to BillingService (msHostClient.cpp)
++//  history:    ts 11.07.2001 adapted to BillingService(msHostClient.cpp)
+ //              ts 04.03.2003 use AlternateBillingService
+ //
+ 
+@@ -106,7 +106,7 @@ billingSession::billingSession(const char* pszAppName, const char* pszBrand,
+   }
+ 
+ 
+-  if (pLocalHost && pLocalHost->proxy())
++  if(pLocalHost && pLocalHost->proxy())
+   {
+     try
+     {
+@@ -121,7 +121,7 @@ billingSession::billingSession(const char* pszAppName, const char* pszBrand,
+       lLocalSessionId= 0;
+     }
+   }
+-  if (pHost && pHost->proxy())
++  if(pHost && pHost->proxy())
+   {
+     try
+     {
+@@ -138,7 +138,7 @@ billingSession::billingSession(const char* pszAppName, const char* pszBrand,
+       lSessionId= 0;
+     }
+   }
+-  if (!pHost)
++  if(!pHost)
+   {
+     try
+     {
+@@ -156,7 +156,7 @@ billingSession::billingSession(const char* pszAppName, const char* pszBrand,
+     }
+ 
+   }
+-  if (pAlternateHost && pAlternateHost->proxy())
++  if(pAlternateHost && pAlternateHost->proxy())
+   {
+     try
+     {
+@@ -176,7 +176,7 @@ billingSession::billingSession(const char* pszAppName, const char* pszBrand,
+ 
+ billingSession::~billingSession()
+ {
+-  if (lLocalSessionId && pLocalHost && pLocalHost->proxy())
++  if(lLocalSessionId && pLocalHost && pLocalHost->proxy())
+   {
+     try
+     {
+@@ -185,7 +185,7 @@ billingSession::~billingSession()
+     catch(CORBA::Exception&)
+     {}
+   }
+-  if (lSessionId && pHost && pHost->proxy())
++  if(lSessionId && pHost && pHost->proxy())
+   {
+     try
+     {
+@@ -194,7 +194,7 @@ billingSession::~billingSession()
+     catch(CORBA::Exception&)
+     {}
+   }
+-  if (lAlternateSessionId && pAlternateHost && pAlternateHost->proxy())
++  if(lAlternateSessionId && pAlternateHost && pAlternateHost->proxy())
+   {
+     try
+     {
+@@ -212,24 +212,24 @@ billingSession::~billingSession()
+ long billingSession::addATBResponse(const char* pszResponse)
+ {
+   long result= -1;
+-  if (pszResponse)
++  if(pszResponse)
+   {
+-    if (lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
+     {
+       try
+       {
+         result= pLocalHost->proxy()->addATBResponse(lLocalSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {}
+     }
+-    if (lSessionId > 0 && pHost && pHost->proxy())
++    if(lSessionId > 0 && pHost && pHost->proxy())
+     {
+       try
+       {
+         result= pHost->proxy()->addATBResponse(lSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {
+         delete pHost;
+         pHost= 0;
+@@ -261,7 +261,7 @@ long billingSession::addATBResponse(const char* pszResponse)
+         }
+       }
+     }
+-    if (lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
+     {
+       try
+       {
+@@ -278,24 +278,24 @@ long billingSession::addATBResponse(const char* pszResponse)
+ long billingSession::addBTPResponse(const char* pszResponse)
+ {
+   long result= -1;
+-  if (pszResponse)
++  if(pszResponse)
+   {
+-    if (lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
+     {
+       try
+       {
+         result= pLocalHost->proxy()->addBTPResponse(lLocalSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {}
+     }
+-    if (lSessionId > 0 && pHost && pHost->proxy())
++    if(lSessionId > 0 && pHost && pHost->proxy())
+     {
+       try
+       {
+         result= pHost->proxy()->addBTPResponse(lSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {
+         delete pHost;
+         pHost= 0;
+@@ -328,7 +328,7 @@ long billingSession::addBTPResponse(const char* pszResponse)
+ 
+       }
+     }
+-    if (lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
+     {
+       try
+       {
+@@ -345,24 +345,24 @@ long billingSession::addBTPResponse(const char* pszResponse)
+ long billingSession::addGPPResponse(const char* pszResponse)
+ {
+   long result= -1;
+-  if (pszResponse)
++  if(pszResponse)
+   {
+-    if (lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
+     {
+       try
+       {
+         result= pLocalHost->proxy()->addGPPResponse(lLocalSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {}
+     }
+-    if (lSessionId > 0 && pHost && pHost->proxy())
++    if(lSessionId > 0 && pHost && pHost->proxy())
+     {
+       try
+       {
+         result= pHost->proxy()->addGPPResponse(lSessionId, pszResponse);
+       }
+-      catch (CORBA::Exception&)
++      catch(CORBA::Exception&)
+       {
+         delete pHost;
+         pHost= 0;
+@@ -394,7 +394,7 @@ long billingSession::addGPPResponse(const char* pszResponse)
+         }
+       }
+     }
+-    if (lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
+     {
+       try
+       {
+@@ -406,3 +406,265 @@ long billingSession::addGPPResponse(const char* pszResponse)
+   }
+   return result;
+ }
++
++
++/** add ATB response to the BillingService */
++long billingSession::addATBResponse(const char *type, long used)
++{
++  long result= -1;
++  if(type)
++  {
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    {
++      try
++      {
++        result= pLocalHost->proxy()->addATBNonAEAResponse(lLocalSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++    if(lSessionId > 0 && pHost && pHost->proxy())
++    {
++      try
++      {
++        result= pHost->proxy()->addATBNonAEAResponse(lSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {
++        delete pHost;
++        pHost= 0;
++        try
++        {
++          pAlternateHost= new corbaClient<BillingAccess::BillingService>(getConfigHost(pAlternateBilling), getConfigPort(pAlternateBilling), pBilling);
++          try
++          {
++            lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
++                                      string_dup(AppType.c_str()),
++                                      string_dup(KioskID.c_str()),
++                                      string_dup(Location.c_str()));
++          }
++          catch(CORBA::Exception&)
++          {
++            pAlternateHost= 0;
++            delete pAlternateHost;
++            lAlternateSessionId= 0;
++          }
++        }
++        catch(CORBA::Exception&)
++        {
++          pAlternateHost= 0;
++        }
++        catch(char*)
++        {
++          pAlternateHost= 0;
++        }
++      }
++    }
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    {
++      try
++      {
++        result= pAlternateHost->proxy()->addATBNonAEAResponse(lAlternateSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++  }
++  return result;
++}
++
++/** add BTP response to the BillingService */
++long billingSession::addBTPResponse(const char *type, long used)
++{
++  long result= -1;
++  if(type)
++  {
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    {
++      try
++      {
++        result= pLocalHost->proxy()->addBTPNonAEAResponse(lLocalSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++    if(lSessionId > 0 && pHost && pHost->proxy())
++    {
++      try
++      {
++        result= pHost->proxy()->addBTPNonAEAResponse(lSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {
++        delete pHost;
++        pHost= 0;
++        try
++        {
++          pAlternateHost= new corbaClient<BillingAccess::BillingService>(getConfigHost(pAlternateBilling), getConfigPort(pAlternateBilling), pBilling);
++          try
++          {
++            lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
++                                      string_dup(AppType.c_str()),
++                                      string_dup(KioskID.c_str()),
++                                      string_dup(Location.c_str()));
++          }
++          catch(CORBA::Exception&)
++          {
++            pAlternateHost= 0;
++            delete pAlternateHost;
++            lAlternateSessionId= 0;
++          }
++        }
++        catch(CORBA::Exception&)
++        {
++          pAlternateHost= 0;
++        }
++        catch(char*)
++        {
++          pAlternateHost= 0;
++        }
++      }
++    }
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    {
++      try
++      {
++        result= pAlternateHost->proxy()->addBTPNonAEAResponse(lAlternateSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++  }
++  return result;
++}
++
++/** add GPP response to the BillingService */
++long billingSession::addGPPResponse(const char *type, long used)
++{
++  long result= -1;
++  if(type)
++  {
++    if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++    {
++      try
++      {
++        result= pLocalHost->proxy()->addGPPNonAEAResponse(lLocalSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++    if(lSessionId > 0 && pHost && pHost->proxy())
++    {
++      try
++      {
++        result= pHost->proxy()->addGPPNonAEAResponse(lSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {
++        delete pHost;
++        pHost= 0;
++        try
++        {
++          pAlternateHost= new corbaClient<BillingAccess::BillingService>(getConfigHost(pAlternateBilling), getConfigPort(pAlternateBilling), pBilling);
++          try
++          {
++            lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
++                                      string_dup(AppType.c_str()),
++                                      string_dup(KioskID.c_str()),
++                                      string_dup(Location.c_str()));
++          }
++          catch(CORBA::Exception&)
++          {
++            pAlternateHost= 0;
++            delete pAlternateHost;
++            lAlternateSessionId= 0;
++          }
++        }
++        catch(CORBA::Exception&)
++        {
++          pAlternateHost= 0;
++        }
++        catch(char*)
++        {
++          pAlternateHost= 0;
++        }
++      }
++    }
++    if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++    {
++      try
++      {
++        result= pAlternateHost->proxy()->addGPPNonAEAResponse(lAlternateSessionId, type, used);
++      }
++      catch(CORBA::Exception&)
++      {}
++    }
++  }
++  return result;
++}
++
++/** add conveyor response to the BillingService */
++long billingSession::addCONResponse(long delivered)
++{
++  long result= -1;
++  if(lLocalSessionId > 0 && pLocalHost && pLocalHost->proxy())
++  {
++    try
++    {
++      result= pLocalHost->proxy()->addCONResponse(lLocalSessionId, delivered);
++    }
++    catch(CORBA::Exception&)
++    {}
++  }
++  if(lSessionId > 0 && pHost && pHost->proxy())
++  {
++    try
++    {
++      result= pHost->proxy()->addCONResponse(lSessionId, delivered);
++    }
++    catch(CORBA::Exception&)
++    {
++      delete pHost;
++      pHost= 0;
++      try
++      {
++        pAlternateHost= new corbaClient<BillingAccess::BillingService>(getConfigHost(pAlternateBilling), getConfigPort(pAlternateBilling), pBilling);
++        try
++        {
++          lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                    string_dup(Brand.c_str()),
++                                    string_dup(AppType.c_str()),
++                                    string_dup(KioskID.c_str()),
++                                    string_dup(Location.c_str()));
++        }
++        catch(CORBA::Exception&)
++        {
++          pAlternateHost= 0;
++          delete pAlternateHost;
++          lAlternateSessionId= 0;
++        }
++      }
++      catch(CORBA::Exception&)
++      {
++        pAlternateHost= 0;
++      }
++      catch(char*)
++      {
++        pAlternateHost= 0;
++      }
++    }
++  }
++  if(lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
++  {
++    try
++    {
++      result= pAlternateHost->proxy()->addCONResponse(lAlternateSessionId, delivered);
++    }
++    catch(CORBA::Exception&)
++    {}
++  }
++  return result;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+index d7c5a990..ed2a60e4 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+@@ -11,8 +11,10 @@
+ #include "path.h"
+ 
+ #include <fstream>
++#include <sstream>
+ #include <time.h>
+ 
++using std::ostringstream;
+ using std::ostream;
+ using std::endl;
+ using std::ofstream;
+@@ -250,6 +252,32 @@ Response::Response(const string& setRsp, bool setbParseError)
+   bParseError= setbParseError;
+ }
+ 
++Response::Response(const std::string& type, long used)
++{
++  ostringstream out;
++  out << type;
++  out << ": ";
++  out << used;
++  Rsp = out.str();
++  bParseError= false;
++}
++
++
++// write conveyor entry to file
++void writeConveyor(ostream& out, int delivered)
++{
++  string Used;
++  char Buffer[48];
++  ResponseList::const_iterator it;
++  sprintf(Buffer, "%d", delivered);
++  Used= Buffer;
++  out << " <CONVEYOR";
++  out << " Delivered=";
++  writeAttValueQuot(out, Used.begin(), Used.end());
++  out << " />" << endl;
++}
++
++
+ // write printer entry to file
+ void writePrinter(ostream& out, const string& PrinterType, const ResponseList& Response, int iUsed)
+ {
+@@ -284,7 +312,8 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+   time_t start, time_t end, bool bClosed,
+   const ResponseList& ATBResponse, int iATBUsed,
+   const ResponseList& GPPResponse, int iGPPUsed,
+-  const ResponseList& BTPResponse, int iBTPUsed)
++  const ResponseList& BTPResponse, int iBTPUsed,
++  int baggagesDelivered)
+ {
+   string Start, End, Duration;
+   string StartDate, EndDate, StartMonth;
+@@ -388,6 +417,7 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+     writePrinter((*pOut), "ATB", ATBResponse, iATBUsed);
+     writePrinter((*pOut), "GPP", GPPResponse, iGPPUsed);
+     writePrinter((*pOut), "BTP", BTPResponse, iBTPUsed);
++    writeConveyor((*pOut), baggagesDelivered);
+     (*pOut) << "</EVENT>" << endl;
+     (*pOut) << endl;
+     (*pOut) << "</BILLING>" << endl;
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
+index 65d5cc4c..48c19da6 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
+@@ -47,6 +47,10 @@ void help()
+   std::cout << "a: send atb response" << std::endl;
+   std::cout << "g: send gpp response" << std::endl;
+   std::cout << "b: send btp response" << std::endl;
++  std::cout << "A: send non aea atb response" << std::endl;
++  std::cout << "G: send non aea gpp response" << std::endl;
++  std::cout << "B: send non aea btp response" << std::endl;
++  std::cout << "C: send conveyor response" << std::endl;
+   std::cout << "x: send atb response with chars below 0x20" << std::endl;
+ }
+ 
+@@ -112,6 +116,42 @@ int main(int argc, char** argv)
+           std::cout << "addBTPResponse: " << result << std::endl;
+           break;
+         }
++        case 'A':
++        {
++          std::cout << "ATB documents used:" << std::endl;
++          long used;
++          std::cin >> used;
++          long result= hclnt.addATBResponse("SVG", used);
++          std::cout << "addATBResponse: " << result << std::endl;
++          break;
++        }
++        case 'G':
++        {
++          std::cout << "GPP documents used:" << std::endl;
++          long used;
++          std::cin >> used;
++          long result= hclnt.addGPPResponse("SVG", used);
++          std::cout << "addGPPResponse: " << result << std::endl;
++          break;
++        }
++        case 'B':
++        {
++          std::cout << "BTP documents used:" << std::endl;
++          long used;
++          std::cin >> used;
++          long result= hclnt.addBTPResponse("SVG", used);
++          std::cout << "addBTPResponse: " << result << std::endl;
++          break;
++        }
++        case 'C':
++        {
++          std::cout << "baggage delivered:" << std::endl;
++          long used;
++          std::cin >> used;
++          long result= hclnt.addCONResponse(used);
++          std::cout << "addBTPResponse: " << result << std::endl;
++          break;
++        }
+         case 'x':
+         {
+           char szInput[1024];
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
+index aa89888c..0bb4ed3d 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
+@@ -194,3 +194,61 @@ Long BillingServiceServant::addGPPResponse (Long sessionId, const char* response
+   }
+   return result;
+ }
++
++
++Long BillingServiceServant::addATBNonAEAResponse(Long sessionId, const char* type, Long used)
++{
++  Long result = -1;
++  TRACE(HERE_7, "addATBNonAEAResponse(%d, (%.200s), (%d))", sessionId, type, used);
++  prot("addATBNonAEAResponse(%d, (%.200s), (%d))\n", sessionId, type, used);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addATBResponse(type, used);
++    result = 0;
++  }
++  return result;
++}
++
++Long BillingServiceServant::addBTPNonAEAResponse(Long sessionId, const char* type, Long used)
++{
++  Long result = -1;
++  TRACE(HERE_7, "addBTPNonAEAResponse(%d, (%.200s), (%d))", sessionId, type, used);
++  prot("addBTPNonAEAResponse(%d, (%.200s), (%d))\n", sessionId, type, used);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addBTPResponse(type, used);
++    result = 0;
++  }
++  return result;
++}
++
++Long BillingServiceServant::addGPPNonAEAResponse(Long sessionId, const char* type, Long used)
++{
++  Long result = -1;
++  TRACE(HERE_7, "addGPPNonAEAResponse(%d, (%.200s), (%d))", sessionId, type, used);
++  prot("addGPPNonAEAResponse(%d, (%.200s), (%d))\n", sessionId, type, used);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addGPPResponse(type, used);
++    result = 0;
++  }
++  return result;
++}
++
++Long BillingServiceServant::addCONResponse(Long sessionId, Long delivered)
++{
++  Long result = -1;
++  TRACE(HERE_7, "addCONResponse(%d, (%d))", sessionId, delivered);
++  prot("addCONResponse(%d, %d)\n", sessionId, delivered);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addCONResponse(delivered);
++    result = 0;
++  }
++  return result;
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+index 4a49de2e..a9da5c5a 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+@@ -89,7 +89,7 @@ void session::addBTPResponse(const char *pResponse)
+   {
+     int iUsed= 0;
+     bool bBTPError = true;
+-    if (parseBTP(iUsed, pResponse) == 0)
++    if(parseBTP(iUsed, pResponse) == 0)
+     {
+       bBTPError= false;
+       iBTPUsed+= iUsed;
+@@ -98,6 +98,31 @@ void session::addBTPResponse(const char *pResponse)
+   }
+ }
+ 
++void session::addATBResponse(const char* type, long used)
++{
++  iATBUsed+= used;
++  ATBResponse.push_back(Response(type, used));
++}
++
++void session::addGPPResponse(const char* type, long used)
++{
++  iGPPUsed+= used;
++  GPPResponse.push_back(Response(type, used));
++}
++
++void session::addBTPResponse(const char* type, long used)
++{
++  iBTPUsed+= used;
++  BTPResponse.push_back(Response(type, used));
++}
++
++void session::addCONResponse(long delivered)
++{
++  baggagesDelivered+= delivered;
++}
++
++
++
+ int session::eq(const char* appName, const char* brand, const char* appType,
+   const char* kioskID, const char* location)
+ {
+@@ -133,6 +158,7 @@ session::session(const char* appName, const char* brand,
+   iATBUsed= 0;
+   iGPPUsed= 0;
+   iBTPUsed= 0;
++  baggagesDelivered= 0;
+ 
+   bClosed= false;
+ }
+@@ -145,7 +171,8 @@ session::~session()
+   }
+   // clean up everything
+   write(KioskId, Location, AppName, Brand, AppType, start, end, bClosed,
+-    ATBResponse, iATBUsed, GPPResponse, iGPPUsed, BTPResponse, iBTPUsed);
++    ATBResponse, iATBUsed, GPPResponse, iGPPUsed, BTPResponse, iBTPUsed,
++    baggagesDelivered);
+ }
+ 
+ sessionList::sessionList()
+diff --git a/SelfServiceCommon/Massai/idl/Massai/BillingService.idl b/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
+index e1052c7c..29e27c34 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
+@@ -1,32 +1,30 @@
+ //---------------------------------------------------------------------------
+ //
+ //  file:     Billing.idl
+-//
+-//  purpose:  Interface definition for billing service access
+-//
+-//  date:     02.04.2001
+-//
+-//  author:   Materna Information & Communications (AGe)
+-//
+-//  history:  ts 11.07.2001 adapted to BillingService
+-//
+-//---------------------------------------------------------------------------
+-
++// Interface definition for billing service access
+ #ifndef BILLING_IDL
+ #define BILLING_IDL
+ 
+ #pragma prefix "massai.materna.com"
+ 
+-/** Definitions for the billing service.
+-  * @author Thomas Stegemann, Andreas Gehling
+-  * @version 1.0
+-  * \date 25.09.2001 \li No changes - first complete documentation
+-  */
++/**
++Definitions for the billing service.
++@author Thomas Stegemann, Andreas Gehling
++
++@version 1.0
++\date 25.09.2001 \li No changes - first complete documentation
++
++@version 1.1
++\date 23.01.2014 \li SteT change Mantis 0030519: Report successfully checked bags to billing log ...
++- added methods for conveyor and SVG/PDF-Printer
++
++*/
+ 
+ module BillingAccess
+ {
+-    /** Billing Service Interface */
++    const string interface_version = "1.1";
+ 
++    /** Billing Service Interface */
+     interface BillingService
+     {
+         /** Open a new billing session
+@@ -35,42 +33,59 @@ module BillingAccess
+             @param appType - The type of the application
+             @param kioskID - The id of the kiosk
+             @param location - The location of the kiosk
+-            @return A valid session identifier or error if return value is < 0
+-        */
+-
+-        long openInvoice (in string appName, in string brand, in string appType, in string kioskID, in string location);
++            @return A valid session identifier or error if return value is < 0 */
++        long openInvoice(in string appName, in string brand, in string appType, in string kioskID, in string location);
+ 
+         /** Close a previously opened billing session
+             @param sessionId - The session identifier returned with openInvoice()
+-            @return Zero if Ok, error code otherwise
+-        */
++            @return Zero if Ok, error code otherwise */
++        long closeInvoice(in long sessionId);
+ 
+-        long closeInvoice (in long sessionId);
+-
+-        /** add an ATB response to the session
++        /** add an ATB/BPP response to the session
+             @param sessionId - The session identifier returned with openSession()
+             @param response  - The response of the ATB printer
+-            @return Zero if Ok, error code otherwise
+-        */
+-
+-        long addATBResponse (in long sessionId, in string response);
++            @return Zero if Ok, error code otherwise */
++        long addATBResponse(in long sessionId, in string response);
+ 
+         /** add an BTP response to the session
+             @param sessionId - The session identifier returned with openSession()
+             @param response  - The response of the BT printer
+-            @return Zero if Ok, error code otherwise
+-        */
+-
+-        long addBTPResponse (in long sessionId, in string response);
++            @return Zero if Ok, error code otherwise */
++        long addBTPResponse(in long sessionId, in string response);
+ 
+         /** add an GPP response to the session
+             @param sessionId - The session identifier returned with openSession()
+             @param response  - The response of the GP printer
+-            @return Zero if Ok, error code otherwise
+-        */
++            @return Zero if Ok, error code otherwise */
++        long addGPPResponse(in long sessionId, in string response);
++
++        /** add an ATB/BPP response for svgs to the session
++            @param sessionId - The session identifier returned with openSession()
++            @param type      - The data type of print command
++            @param used      - The number of documents printed
++            @return Zero if Ok, error code otherwise */
++        long addATBNonAEAResponse(in long sessionId, in string type, in long used);
++
++        /** add an BTP response to the session
++            @param sessionId - The session identifier returned with openSession()
++            @param type      - The data type of print command
++            @param used      - The number of documents printed
++            @return Zero if Ok, error code otherwise */
++        long addBTPNonAEAResponse(in long sessionId, in string type, in long used);
++
++        /** add an GPP response to the session
++            @param sessionId - The session identifier returned with openSession()
++            @param type      - The data type of print command
++            @param used      - The number of documents printed
++            @return Zero if Ok, error code otherwise */
++        long addGPPNonAEAResponse(in long sessionId, in string type, in long used);
+ 
+-        long addGPPResponse (in long sessionId, in string response);
++        /** add an Conveyor response to the session
++            @param sessionId - The session identifier returned with openSession()
++            @param delivered - The number of baggages delivered
++            @return Zero if Ok, error code otherwise */
++        long addCONResponse(in long sessionId, in long delivered);
+     };
+ };
+ 
+-#endif // BILLING_IDL
+\ No newline at end of file
++#endif
+diff --git a/SelfServiceCommon/Massai/idl/Massai/platform.idl b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+index fe0a6f76..fbd2e8f8 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/platform.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+@@ -2,11 +2,11 @@
+ //
+ //  file:     platform.idl
+ //
+-//  purpose:  basic definition for the massai platform (internal)
++//  purpose:  basic definition for the massai platform(internal)
+ //
+ //  date:     10.09.01
+ //
+-//  author:   (CMe)
++//  author:(CMe)
+ //
+ //---------------------------------------------------------------------------
+ 
+@@ -22,54 +22,49 @@
+ #pragma prefix "massai.materna.com"
+ 
+ /** This module provides interfaces for the platform internal communication between
+- *  the platform management and the device components.
+- *  @author Carsten Metzler - Materna Information & Communications
+- */
++    the platform management and the device components.
++    @author Carsten Metzler - Materna Information & Communications */
+ 
+ module PlatformManagement
+ {
+-    const string interface_version = "1.5";
++    const string interface_version = "1.6";
+ 
+     /** Data type for text lists. */
+-
+     typedef sequence<string> list;
+ 
+     /** Returncodes returned by the servant. */
+-
+     enum code
+     {
+-        RC_OK,            /**< Function has been executed correctly */
+-        RC_UNKNOWN,         /**< Unknown, if function has been executed correctly */
+-        RC_ERROR            /**< Function could not be executed */
++        RC_OK,      /**< Function has been executed correctly */
++        RC_UNKNOWN, /**< Unknown, if function has been executed correctly */
++        RC_ERROR    /**< Function could not be executed */
+     };
+ 
+     /** Token status returned by the platform management. */
+-
+     enum tokenStatus
+     {
+         TOKEN_SSM,        /**< token of the service provider's system manager */
+         TOKEN_ASM,        /**< token of an application's system manager */
+         TOKEN_APP,        /**< token of an installed application */
+-        TOKEN_APP_ACTIVE,    /**< token of the currently ACTIVE application */
+-        TOKEN_APP_INIT,        /**< token of the currently INITILAIZE application */
+-        TOKEN_APP_IDLE,        /**< token of a currently AVAILABLE or UNAVAILABLE application */
+-        TOKEN_INVALID        /**< invalid token */
++        TOKEN_APP_ACTIVE, /**< token of the currently ACTIVE application */
++        TOKEN_APP_INIT,   /**< token of the currently INITILAIZE application */
++        TOKEN_APP_IDLE,   /**< token of a currently AVAILABLE or UNAVAILABLE application */
++        TOKEN_INVALID     /**< invalid token */
+     };
+ 
+-
+     typedef sequence<long> longList;
+-    /** Base environment component definition (like in CUSS 'types.idl'). */
+-
++    
++    /** Base environment component definition(like in CUSS 'types.idl'). */
+     struct mEnvironmentComponent
+     {
+-        string virtualComponentName;        /**< Virtual component name */
+-        string virtualComponentRef;        /**< CORBA reference to the virtual component (IOR) */
+-        string realComponentName;        /**< Real component name (e.g. ATB_PRNT_BP, ATB_PRNT_TK) */
+-        string realDeviceName;            /**< Real device name (e.g. Atb2DeviceWithEscrow) */
+-        longList linkedComponents;        /**< This list of indexes indicates,
+-                                                     at which position in the component list
+-                                                     the linked components can be found.
+-                                                     (Index counting starts with 0) */
++        string virtualComponentName; /**< Virtual component name */
++        string virtualComponentRef;  /**< CORBA reference to the virtual component(IOR) */
++        string realComponentName;    /**< Real component name(e.g. ATB_PRNT_BP, ATB_PRNT_TK) */
++        string realDeviceName;       /**< Real device name(e.g. Atb2DeviceWithEscrow) */
++        longList linkedComponents;   /**< This list of indexes indicates,
++                                          at which position in the component list
++                                          the linked components can be found.
++                                          (Index counting starts with 0) */
+     };
+ 
+     typedef sequence<mEnvironmentComponent> mEnvironmentComponents;
+@@ -111,44 +106,33 @@ module PlatformManagement
+     };
+ 
+     /** Component interface for the platform management. Via this interface the platform
+-     *  communicates with the device components internally.
+-     */
++        communicates with the device components internally. */
+ 
+     interface ComponentIF: ComponentServiceIF
+     {
+         /** Prepares a device for a specific application context.
+-         *  @param contextName - The name of the application context
+-         *  @return RC_OK if the context switch was successfull, RC_ERROR if not.
+-         */
+-
+-        code prepareDevice ( in string contextName );
++            @param contextName - The name of the application context
++            @return RC_OK if the context switch was successfull, RC_ERROR if not. */
++        code prepareDevice(in string contextName);
+ 
+         /** Tries to bring the device in a proper state to be used by
+-         *  the next application.
+-         *  @return RC_OK is the reset was successfull, RC_ERROR if not.
+-         */
+-
+-        code resetDevices ();
+-
+-        /** Tells the device component, that an error (e.g. paper jam) has been recovered.
+-         *  @return RC_OK.
+-         */
++            the next application.
++            @return RC_OK is the reset was successfull, RC_ERROR if not. */
++        code resetDevices();
+ 
+-        code errorRecovered ();
++        /** Tells the device component, that an error(e.g. paper jam)has been recovered.
++            @return RC_OK. */
++        code errorRecovered();
+ 
+         /** Releases components acquired by an application that has been disabled by the
+-         *  application manager.
+-         *  @param whichApp - The application reference of the disabled application
+-         *  @return RC_OK.
+-         */
+-
+-        code releaseComponents ( in string whichApp );
++            application manager.
++            @param whichApp - The application reference of the disabled application
++            @return RC_OK. */
++        code releaseComponents(in string whichApp);
+ 
+         /** Tells the device component to terminate.
+-         *  @return RC_OK.
+-         */
+-
+-        code terminate ();
++            @return RC_OK. */
++        code terminate();
+     };
+ 
+     enum DataStatusExtension
+@@ -164,23 +148,16 @@ module PlatformManagement
+       PCE_FOID                /* default media type for card reader components is DS_TYPES_FOID_ISO, DS_TYPES_FOID_JIS2 */
+     };
+ 
+-
+-    /** Characteristics of the application
+-     *
+-     */
+-
++    /** Characteristics of the application */
+     struct mApplicationProperties
+     {
+-      DataStatusExtension dataStatusSupport;  /* cuss datastatus supported by application */
++      DataStatusExtension dataStatusSupport;     /* cuss datastatus supported by application */
+       PaymentCardExtension paymentCardExtension; /* default media type for card reader components for the application */
+     };
+ 
+ 
+     /** Platform interface for the device components. Via this interface the device
+-     *  components communicate with the platform manager internally.
+-     */
+-
+-
++        components communicate with the platform manager internally. */
+     enum LoggingClass
+     {
+       LC_APPLICATION,
+@@ -205,26 +182,26 @@ module PlatformManagement
+     struct LoggingComponentData 
+     {
+       string componentRef;      // identify virtual component by virtualComponentRef 
+-      list unitId;              // list of strings (unitIds)
++      list unitId;              // list of strings(unitIds)
+                                 // - use one unitId for LC_APPLICATION, LC_PRINTER, LC_SCANNER, LC_CONVEYOR
+                                 //      LC_PRINTER_FEEDER and LC_CONVEYOR_FEEDER
+                                 // - LC_CAPTURE and LC_DISPENSER may be responsible for multiple units                                
+       LoggingClass unitClass;   // class of component 
+                                 //   LC_BIN* not used in LoggingComponentData
+-      string moduleName;    // needed for GAC_MODULENAME
++      string moduleName;        // needed for GAC_MODULENAME
+     };
+     
+     struct LoggingCounterData
+     {
+-	  string unitId;
++   	  string unitId;
+       LoggingClass unitClass;
+-      long bin;                 //bin number
+-      long mediaStatusTypeValue;//int value of mediaStatusType
++      long bin;                  //bin number
++      long mediaStatusTypeValue; //int value of mediaStatusType
+       long couponsproduced;
+-      long paperType;           //org.iata.cuss.Characteristics.MediaOutputPackage;
+-      string paperClass;        //com.materna.massai.DeviceComponents.characteristics.types
++      long paperType;            //org.iata.cuss.Characteristics.MediaOutputPackage;
++      string paperClass;         //com.materna.massai.DeviceComponents.characteristics.types
+       long mediaCount;
+-      string type;              // type = "gpp" or type ="atb"; needed for evaluation of mediaStatusTypeValue
++      string type;               // type = "gpp" or type ="atb"; needed for evaluation of mediaStatusTypeValue
+     };
+     
+     interface PlatformIF
+@@ -238,112 +215,105 @@ module PlatformManagement
+         void logCounterSuccess(in string unitId, in LoggingClass unitClass, in long numberOfSuccesfullDocs);
+         
+         /** Checks the status of the token passed by the application.
+-         *  @param token - The application token
+-         *  @return the token status of the application token.
+-         */
+-
+-        tokenStatus checkToken ( in string token );
++            @param token - The application token
++            @return the token status of the application token. */
++        tokenStatus checkToken(in string token);
+ 
+         /** Get the characteristics of the application.
+-         *  @param token - The application token
+-         *  @return the application characteristics
+-         */
+-
+-        mApplicationProperties getProperties( in string token );
++            @param token - The application token
++            @return the application characteristics */
++        mApplicationProperties getProperties(in string token);
+ 
+         /** Get the characteristics of the active application.
+-         *  @return the application characteristics
+-         */
+-
++            @return the application characteristics  */
+         mApplicationProperties getActiveProperties();
+ 
+         /** Gets the currently active token.
+-         *  @return the currently active token.
+-         */
+-
+-        string getActiveToken ();
++            @return the currently active token. */
++        string getActiveToken();
+ 
+         /** Logs an ATB response for billing purposes.
+-         *  @param response - The ATB response
+-         *  @return RC_OK.
+-         */
+-
+-        code logATBResponse ( in string response );
++            @param response - The ATB response
++            @return RC_OK. */
++        code logATBResponse(in string response);
+ 
+         /** Logs an BTP response for billing purposes.
+-         *  @param response - The BTP response
+-         *  @return RC_OK.
+-         */
++            @param response - The BTP response
++            @return RC_OK. */
++        code logBTPResponse(in string response);
++
++        /** Logs an GPP response for billing purposes.
++            @param response - The GPP response
++            @return RC_OK.*/
++        code logGPPResponse(in string response);
+ 
+-        code logBTPResponse ( in string response );
++        /** Logs an ATB response for billing purposes.
++            @param type - the type of the print command
++            @param used - the number of documents printed
++            @return RC_OK. */
++        code logATBNonAEAResponse(in string type, in long used);
+ 
+         /** Logs an GPP response for billing purposes.
+-         *  @param response - The GPP response
+-         *  @return RC_OK.
+-         */
++            @param type - the type of the print command
++            @param used - the number of documents printed
++            @return RC_OK. */
++        code logGPPNonAEAResponse(in string type, in long used);
+ 
+-        code logGPPResponse ( in string response );
++        /** Logs an BTP response for billing purposes.
++            @param type - the type of the print command
++            @param used - the number of documents printed
++            @return RC_OK. */
++        code logBTPNonAEAResponse(in string type, in long used);
+ 
+-        /** Dispatches a platform event.
+-         *  @param event - The plaform event
+-         *  @return RC_OK if no error occurs, RC_ERROR if the event has the wrong format.
+-         */
++        /** Logs an conveyor response for billing purposes.
++            @param delivered - The number of baggages delivered
++            @return RC_OK. */
++        code logCONResponse(in long delivered);
+ 
+-        code sendPlatformEvent ( in any event );
++        /** Dispatches a platform event.
++            @param event - The plaform event
++            @return RC_OK if no error occurs, RC_ERROR if the event has the wrong format. */
++        code sendPlatformEvent(in any event);
+ 
+         /** Dispatches a private event.
+-         *  @param event - The private event
+-         *  @param appRef - The token of the receiver of the private event
+-         *  @return RC_OK if no error occurs, RC_ERROR if the event cannot be sent.
+-         */
+-
+-        code sendPrivateEvent ( in any event, in string appRef );
++            @param event - The private event
++            @param appRef - The token of the receiver of the private event
++            @return RC_OK if no error occurs, RC_ERROR if the event cannot be sent. */
++        code sendPrivateEvent(in any event, in string appRef);
+ 
+         /** Dispatches a public event.
+-         *  @param event - The public event
+-         *  @param appRefsAlreadySent - A list of application references those have
+-         *                already received the event via their component listeners
+-         *  @return RC_OK if no error occurs, RC_ERROR if the event cannot be sent.
+-         */
+-
+-        code sendPublicEvent ( in any event, in list appRefsAlreadySent );
++            @param event - The public event
++            @param appRefsAlreadySent - A list of application references those have
++                          already received the event via their component listeners
++            @return RC_OK if no error occurs, RC_ERROR if the event cannot be sent. */
++        code sendPublicEvent(in any event, in list appRefsAlreadySent);
+ 
+         /** Gets the CUSS platform level.
+-         *  @param level - The return value
+-         *  @return RC_OK.
+-         */
+-
+-        code getLevel ( out any level );
++            @param level - The return value
++            @return RC_OK. */
++        code getLevel(out any level);
+ 
+         /** Makes the reference of this device component interface and the list of virtual components
+-         *  available for the platform manager.
+-         *  @param realDeviceName - The name of the device component
+-         *  @param comp - The reference of the device component interface
+-         *  @param compList - The list of virtual components belonging to the device component
+-         *  @return RC_OK.
+-         **/
+-
+-        code bindDevice ( in string realDeviceName, in ComponentIF comp, in mEnvironmentComponents compList );
++            available for the platform manager.
++            @param realDeviceName - The name of the device component
++            @param comp - The reference of the device component interface
++            @param compList - The list of virtual components belonging to the device component
++            @return RC_OK. */
++        code bindDevice(in string realDeviceName, in ComponentIF comp, in mEnvironmentComponents compList);
+ 
+         /** Deletes a device component from the list of the current available device components.
+-         *  @param realDeviceName - The name of the device component
+-         *  @return RC_OK if no error occurs, RC_UNKNOWN if the device is unknown by the platform.
+-         **/
+-
+-        code unbindDevice ( in string realDeviceName );
+-        
++            @param realDeviceName - The name of the device component
++            @return RC_OK if no error occurs, RC_UNKNOWN if the device is unknown by the platform. */
++        code unbindDevice(in string realDeviceName);        
+ 
+         /** gets the component by name
+-         *  @param realDeviceName - The name of the device component
+-         *  @return ComponentServiceIF
+-         **/
++            @param realDeviceName - The name of the device component
++            @return ComponentServiceIF */
+         ComponentServiceIF getComponentService(in string realDeviceName);
+ 
+-
+         /** a device has received data
+-         *  @param componentType - type of the component that received the data; e.g.: BCR for barcode reader
+-         *  @param data - data as defined in cuss types.idl (msgDataType, aeaDataType, svgDataType, ...)
+-         **/
++            @param componentType - type of the component that received the data; e.g.: BCR for barcode reader
++            @param data - data as defined in cuss types.idl(msgDataType, aeaDataType, svgDataType, ...) */
+         void dataReceived(in string componentType, in any data);
+     };
+ };
+-- 
+2.41.0.windows.1
+

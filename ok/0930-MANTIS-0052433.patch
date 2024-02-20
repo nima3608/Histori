@@ -1,0 +1,452 @@
+From 92c86f01cc70af668737927ec982cc4ab085ebf3 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Nov 2018 13:26:28 +0000
+Subject: [PATCH 0930/1076] MANTIS 0052433 extension: appcontrol: add current
+ AppId and PLATFORM.ENVIRONMENT.Variables to application start environment
+
+massai_systools.lib
+V1.0.0.38
+- added parent::setUserInfo to start process for an other user account
+- added ProcessProperties
+  - env, setEnv to set the process environment variables
+  - user, domain, password, setUser to start process for an other user account
+  - stdErr, stdOut to redirect stdOut and stdErr
+
+massai_text.lib
+V1.0.0.10
+- added Environment getPlatformEnvironment(CEnvSubst& env, MASSAI::trace::TraceInterface& trc) to read
+  - PLFINSTALLPATH
+  - PLFINSTALLDATAPATH
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1395 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   | 21 +++--
+ .../Interfaces/inc/systools/mSysProcessList.h | 10 +++
+ .../Interfaces/inc/text/readEnv.h             |  2 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 13 ++-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 30 ++++++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 89 +++++++++++++------
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  2 +-
+ .../Massai/cpp/Text/src/local_def.cpp         | 11 ++-
+ .../Massai/cpp/Text/src/readEnv.cpp           | 14 ++-
+ 9 files changed, 153 insertions(+), 39 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index b961966f..a9110801 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -38,23 +38,23 @@ namespace mSysProcess
+    **/
+    typedef std::map<std::string, std::string> Environment;
+ 
+-   
++
+    /**
+     *
+     *  Struct to define a user, which can be used to start
+     *  a pocess with specified rights. The account is given as User@domain.
+-    *  
++    *
+     *
+    **/
+-   struct UserInfo 
++   struct UserInfo
+    {
+        std::string account;
+        std::string password;
+ 
+        UserInfo(std::string acc, std::string pw);
+-   };  
++   };
++
+ 
+-   
+    /**
+     *
+     * The callBack for every line out output. The output
+@@ -315,7 +315,7 @@ namespace mSysProcess
+        *
+       **/
+       child * newChild();
+-      
++
+       /**
+        *
+        * Create a new child object with the specific right
+@@ -483,6 +483,15 @@ namespace mSysProcess
+       **/
+       parent & setNewProcessGroup();
+ 
++      /**
++       *
++       * use user account for starting the process
++       *
++       * @return                A reference to this object.
++       *
++      **/
++      parent & setUserInfo(const std::string& user, const std::string& domain, const std::string& password);
++
+ 
+    private:
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index 3a961bd1..1ebd9ed1 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -64,7 +64,17 @@ namespace mSysProcess
+       Show show;
+       long timeout;
+       Termination termination;
++
++      Environment env;
++      bool setEnv;
++      std::string user;
++      std::string domain;
++      std::string password;
++      bool setUser;
++      const callBack* stdErr;
++      const callBack* stdOut;
+   };
++
+   typedef std::list<ProcessProperties> PropertyList;
+ 
+   // settings for Watchdog
+diff --git a/SelfServiceCommon/Interfaces/inc/text/readEnv.h b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+index 346d96ed..19574264 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/readEnv.h
++++ b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+@@ -8,6 +8,7 @@
+ #include <string>
+ #include <map>
+ #include "tools/TraceInterface.h"
++#include "text/cEnvSubst.hpp"
+ 
+ namespace mText
+ {
+@@ -17,6 +18,7 @@ namespace mText
+   Environment getConfigValues(const std::string& authentification, MASSAI::trace::TraceInterface& trc);
+   Environment getFullEnvironment(MASSAI::trace::TraceInterface& trc);
+   Environment getSystemEnvironment(MASSAI::trace::TraceInterface& trc);
++  Environment getPlatformEnvironment(CEnvSubst& env, MASSAI::trace::TraceInterface& trc);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 1b71ccd5..4a92246c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 37);
++VERSION_ID_DT(systools, 1, 0, 0, 38);
+ 
+ /*!
+ \file
+@@ -8,12 +8,21 @@ VERSION_ID_DT(systools, 1, 0, 0, 37);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.37
++@version 1.0.0.38
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.38
++\li 14.11.2018
++\li extension - SteT Mantis 0052433: appcontrol: add current AppId and PLATFORM.ENVIRONMENT.Variables to application start environment
++- added parent::setUserInfo to start process for an other user account
++- added ProcessProperties
++  - env, setEnv to set the process environment variables
++  - user, domain, password, setUser to start process for an other user account
++  - stdErr, stdOut to redirect stdOut and stdErr
++
+ \version 1.0.0.37
+ \li 14.03.2017
+ \li change SteT Mantis 0048338: SmartCardReader: Desko Penta does not read reliable
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index d9216aa1..8ef55552 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -717,6 +717,26 @@ namespace
+     factory.setDesktop(m_properties.desktop.c_str());
+     factory.setNewProcessGroup();
+     factory.setReuseConsole();
++
++    if(m_properties.setEnv)
++    {
++      factory.setEnvironment(m_properties.env);
++    }
++
++    if(m_properties.setUser)
++    {
++      factory.setUserInfo(m_properties.user, m_properties.domain, m_properties.password);
++    }
++
++    if(m_properties.stdErr)
++    {
++      factory.setStdErr(*m_properties.stdErr);
++    }
++    if(m_properties.stdOut)
++    {
++      factory.setStdOut(*m_properties.stdOut);
++    }
++
+     if(m_properties.workingDir.size() > 0)
+     {
+       // Select the working directory with the "try_create" option set
+@@ -1764,7 +1784,15 @@ namespace mSysProcess
+     terminateWindow(),
+     show(HIDE),
+     timeout(0),
+-    termination(PT_NORMAL)
++    termination(PT_NORMAL),
++    env(),
++    setEnv(false),
++    user(""),
++    domain(""),
++    password(""),
++    setUser(false),
++    stdErr(0),
++    stdOut(0)
+   {}
+ 
+   bool ProcessProperties::operator<(const ProcessProperties& cmp) const
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 8b1ea3f7..930904d0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -532,7 +532,7 @@ namespace
+       mSysProcess::child& stdIn(char const * Input);
+       mSysProcess::child& closeStdIn();
+       mSysProcess::child& kill();
+-      
++
+       bool sendBreak();
+       bool sendCtrlC();
+       bool shutdown();
+@@ -2214,6 +2214,12 @@ class mSysProcess::parent::impl
+ 
+    bool                                 M_NewProcessGroup;
+ 
++   std::string                          m_user;
++   std::string                          m_domain;
++   std::string                          m_password;
++   bool                                 m_useUser;
++
++
+ public:
+ 
+ 
+@@ -2240,7 +2246,11 @@ public:
+       M_Title(),
+       M_Desktop(),
+       M_ReuseConsole(false),
+-      M_NewProcessGroup(false)
++      M_NewProcessGroup(false),
++      m_user(),
++      m_domain(),
++      m_password(),
++      m_useUser(false)
+    {
+    }
+ 
+@@ -2263,24 +2273,31 @@ public:
+    **/
+    mSysProcess::child * newChild()
+    {
+-      return new  myChild
+-                     (
+-                        M_Commandline,
+-                        M_Directory,
+-                        M_Hide,
+-                        M_Logging,
+-                        M_Minimized,
+-                        M_Maximized,
+-                        M_StdErr,
+-                        M_StdIn,
+-                        M_StdOut,
+-                        M_ThreadExeption,
+-                        M_Environment,
+-                        M_Title,
+-                        M_Desktop,
+-                        M_ReuseConsole,
+-                        M_NewProcessGroup
+-                     );
++      if(m_useUser)
++      {
++        return newChild(m_user.c_str(), m_domain.c_str(), m_password.c_str());
++      }
++      else
++      {
++        return new  myChild
++                       (
++                          M_Commandline,
++                          M_Directory,
++                          M_Hide,
++                          M_Logging,
++                          M_Minimized,
++                          M_Maximized,
++                          M_StdErr,
++                          M_StdIn,
++                          M_StdOut,
++                          M_ThreadExeption,
++                          M_Environment,
++                          M_Title,
++                          M_Desktop,
++                          M_ReuseConsole,
++                          M_NewProcessGroup
++                       );
++     }
+    }
+ 
+ 
+@@ -2494,19 +2511,18 @@ public:
+       M_Environment = environment;
+       if( M_Logging )
+       {
+-         std::string Str;
+-         Str += "setEnvironment(\n";
+          Environment::const_iterator it = M_Environment.begin();
+          Environment::const_iterator end = M_Environment.end();
+          for(; it != end; it++)
+          {
++           std::string Str;
++           Str += "setEnvironment(";
+            Str += it->first;
+            Str += "=";
+            Str += it->second;
+-           Str += "\n";
++           Str += ")";
++           M_Logging->lineOut( Str.c_str() );
+          }
+-         Str += ")";
+-         M_Logging->lineOut( Str.c_str() );
+       }
+    }
+ 
+@@ -2586,6 +2602,24 @@ public:
+      }
+    }
+ 
++   void setUserInfo(const std::string& user, const std::string& domain, const std::string& password)
++   {
++     m_user = user;
++     m_domain = domain;
++     m_password = password;
++     m_useUser = true;
++     if(M_Logging)
++     {
++        std::string logLine;
++        logLine += "setUserInfo(";
++        logLine += m_user;
++        logLine += ", ";
++        logLine += m_domain;
++        logLine += ", ***)";
++        M_Logging->lineOut(logLine.c_str());
++     }
++   }
++
+ 
+ private:
+ 
+@@ -2825,6 +2859,11 @@ mSysProcess::parent& mSysProcess::parent::setWindowTitle(const char* title)
+   return *this;
+ }
+ 
++mSysProcess::parent& mSysProcess::parent::setUserInfo(const std::string& user, const std::string& domain, const std::string& password)
++{
++  M_Impl->setUserInfo(user, domain, password);
++  return *this;
++}
+ 
+ 
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 2bdee5a1..7be97e24 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -193,7 +193,7 @@ namespace
+ 
+   void WindowW32::activate()
+   {
+-    m_trc.writeTrace(BasicRuntime_HERE, "activate (%d)(%s)", m_hwnd, m_title.c_str());
++    m_trc.writeTrace(BasicRuntime_HERE, "activate (%d)(%s)", m_hwnd, getTitle().c_str());
+     if(!BringWindowToTop(m_hwnd))
+     {
+       traceLastError(MinorError_HERE, "BringWindowToTop", mSysError::getErrorCode());
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 6b19dfbb..8e3bcc5f 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,25 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 9);
++VERSION_ID_DT(text, 1, 0, 0, 10);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.9
++\version 1.0.0.10
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.10
++\li 14.11.2018
++\li extension - SteT Mantis 0052433: appcontrol: add current AppId and PLATFORM.ENVIRONMENT.Variables to application start environment
++- added Environment getPlatformEnvironment(CEnvSubst& env, MASSAI::trace::TraceInterface& trc) to read
++  - PLFINSTALLPATH
++  - PLFINSTALLDATAPATH
++
+ \version 1.0.0.9
+ \li 24.10.2018
+ \li extension - SteT MANTIS 0045259 MAT_CLA: HTML5: replace CORBA by WS
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+index d35de13d..2dadd4d9 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+@@ -12,7 +12,8 @@ using namespace mText;
+ 
+ namespace
+ {
+-  const char* systemVariables[]= {
++  const char* systemVariables[]=
++  {
+     "ALLUSERSPROFILE",
+     "APPDATA",
+     "COMPUTERNAME",
+@@ -42,7 +43,8 @@ namespace
+     "windir"
+   };
+ 
+-  const char* textConfigurationValues[]= {
++  const char* textConfigurationValues[]=
++  {
+     "TRACES.TrcServ.TraceDirectory"
+   };
+ 
+@@ -191,4 +193,12 @@ namespace mText
+     }
+     return result;
+   }
++
++  Environment getPlatformEnvironment(CEnvSubst& env, MASSAI::trace::TraceInterface& trc)
++  {
++    Environment result;
++    result["PLFINSTALLPATH"]=     env.getPlfInstallPath();
++    result["PLFINSTALLDATAPATH"]= env.getPlfInstallDataPath();
++    return result;
++  }
+ }
+-- 
+2.41.0.windows.1
+

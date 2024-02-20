@@ -1,0 +1,3283 @@
+From a8c9eedc94306df4af203adf365817f07c75c64b Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 12 Aug 2013 18:37:56 +0000
+Subject: [PATCH 0387/1000] MANTIS	0026897: Setup doesn't set
+ Apache-config
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@565 90b65887-3827-0410-9a23-83215b262276
+---
+ .../src/MConfig_CustomAction.cpp              | 2844 ++++++++++-------
+ .../src/MConfig_CustomAction.def              |   16 +-
+ 2 files changed, 1652 insertions(+), 1208 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index b12652c3..20d8ee50 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -28,12 +28,7 @@
+ #include <set>
+ #include <vector>
+ #include <regex>
+-
+-
+-
+-
+-
+-
++#include <iomanip>
+ 
+ #include "strutil.h"
+ 
+@@ -44,16 +39,12 @@ typedef std::set<std::wstring> TUNIQUESET;
+ #define MAX_NUM_DIALOGS 100
+ #define CFGVALUES_TIMEOUT_MS 10*1000
+ 
+-#pragma comment(linker, "/EXPORT:WriteSNMPConfigFile=_WriteSNMPConfigFile@4")
+-#pragma comment(linker, "/EXPORT:PrepareAddressValues=_PrepareAddressValues@4")
+-#pragma comment(lib, "ws2_32.lib")
+-
+ #define DEL_CFG_FILE_NAME "del_cfg.txt"
+-#define	SETINITIAL_FILE_NAME "setinitial_cfg.txt"
+-#define	AUTOINITIAL_FILE_NAME "autoinitial_cfg.txt"
+-#define	SET_ADDLIST_FILE_NAME "set_addlist_cfg.txt"
+-#define	SET_ADDLISTUNIQUE_FILE_NAME "set_addlistunique_cfg.txt"
+-#define	SET_FILE_NAME "set_cfg.txt"
++#define  SETINITIAL_FILE_NAME "setinitial_cfg.txt"
++#define  AUTOINITIAL_FILE_NAME "autoinitial_cfg.txt"
++#define  SET_ADDLIST_FILE_NAME "set_addlist_cfg.txt"
++#define  SET_ADDLISTUNIQUE_FILE_NAME "set_addlistunique_cfg.txt"
++#define  SET_FILE_NAME "set_cfg.txt"
+ 
+ BOOL __stdcall WcaIsPropertySetW(__in LPCWSTR szProperty)
+ {
+@@ -68,7 +59,7 @@ std::string ToNarrow( const wchar_t *s, char dfault = '?', const std::locale& lo
+   std::ostringstream stm;
+   while( *s != L'\0' )
+   {
+-	stm << std::use_facet< std::ctype<wchar_t> >( loc ).narrow( *s++, dfault );
++    stm << std::use_facet< std::ctype<wchar_t> >( loc ).narrow( *s++, dfault );
+   }
+   return stm.str();
+ }
+@@ -78,25 +69,59 @@ std::wstring ToWiden( const char *s, const std::locale& loc = std::locale() )
+   std::wostringstream stm;
+   while( *s != '\0' )
+   {
+-	stm << std::use_facet< std::ctype<wchar_t> >( loc ).widen( *s++ );
++    stm << std::use_facet< std::ctype<wchar_t> >( loc ).widen( *s++ );
+   }
+   return stm.str();
+ }
+ 
+-int checkInstalled(MSIHANDLE hInstall, std::wstring& wstrFeature)
++int count_back_chars(const std::string& st,const size_t pos, const char sc)
+ {
+-	int ret = 0;
+-
+-	INSTALLSTATE installed;
+-    INSTALLSTATE action;
+-
+-	::MsiGetFeatureState( hInstall, wstrFeature.c_str() ,  &installed, &action );
+-	if(action==INSTALLSTATE_LOCAL)
+-		ret = 1;
+-	else
+-		ret = 0;
++	int count = 0;
++	size_t sp = pos;
++	while(sp>0 && st[sp]==sc)
++	{
++		count++;
++		sp--;
++	}
++	return count;
++}
+ 
++std::string find_sub_par(std::string& sp, size_t& start_search)
++{
++  std::string ret;
++  if(start_search==std::string::npos)
+ 	return ret;
++  size_t cutPos = sp.find(';',start_search);
++  while(cutPos!=std::string::npos && cutPos>0 && count_back_chars(sp,cutPos,'\\')%2  )
++  {
++	  cutPos = sp.find(';',cutPos+1);
++  }
++  if(cutPos!=std::string::npos)
++  {
++	  ret = sp.substr(start_search,cutPos-start_search);
++	  start_search = cutPos+1;
++  } else
++  {
++	ret= sp.substr(start_search);
++	start_search = cutPos;
++  }
++  return ret;
++}
++
++int checkInstalled(MSIHANDLE hInstall, std::wstring& wstrFeature)
++{
++  int ret = 0;
++
++  INSTALLSTATE installed;
++  INSTALLSTATE action;
++  
++  ::MsiGetFeatureState( hInstall, wstrFeature.c_str() ,  &installed, &action );
++  if(action==INSTALLSTATE_LOCAL)
++    ret = 1;
++  else
++    ret = 0;
++
++  return ret;
+ }
+ 
+ extern "C" UINT __stdcall PrepareAddressValues(MSIHANDLE hInstall)
+@@ -406,59 +431,53 @@ extern "C" UINT __stdcall WriteSNMPConfigFile (MSIHANDLE hInstall)
+     UINT er = SUCCEEDED(hResult) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+ 
+     return WcaFinalize(er);
+-
+ }
+ 
+-
+ extern "C" _declspec(dllexport) UINT __stdcall CA_MutuallyExclusive(MSIHANDLE hInstall)
+ {
+-	std::wstring wstrPropertyValue;
+-
+-	std::wstring wstrFeatureList;
+-	std::wstring resBuf;
+-
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
++  std::wstring wstrPropertyValue;
+ 
+-	dbstrs << L"MSI SETUP: CA_MutuallyExclusive" << std::endl;
++  std::wstring wstrFeatureList;
++  std::wstring resBuf;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	hr = WcaInitialize(hInstall, "CA_MutuallyExclusive");
+-	dbstrs << L"MSI SETUP CA_MutuallyExclusive: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
+ 
+-	LPWSTR pwzPropertyValue = NULL;
+-	hr = WcaGetProperty(L"ME_FEATURE_LIST_PROP", &pwzPropertyValue);
+-	ExitOnFailure(hr, "Failed to get ME_FEATURE_LIST_PROP property value");
+-	dbstrs << "MSI SETUP CA_MutuallyExclusive: Read ME_FEATURE_LIST_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
++  dbstrs << L"MSI SETUP: CA_MutuallyExclusive" << std::endl;
+ 
+-	size_t  start = 0, end = 0;
+-	int iInstalledC = 0;
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_MutuallyExclusive");
++  dbstrs << L"MSI SETUP CA_MutuallyExclusive: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	wstrFeatureList.assign(pwzPropertyValue);
+-    while ( end != std::wstring::npos)
+-    {
+-        end = wstrFeatureList.find( ';', start);
++  LPWSTR pwzPropertyValue = NULL;
++  hr = WcaGetProperty(L"ME_FEATURE_LIST_PROP", &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get ME_FEATURE_LIST_PROP property value");
++  dbstrs << "MSI SETUP CA_MutuallyExclusive: Read ME_FEATURE_LIST_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
+ 
+-        iInstalledC += checkInstalled( hInstall, 
+-			wstrFeatureList.substr( start, (end == std::wstring::npos) ? std::wstring::npos : end - start)
+-			);
++  size_t  start = 0, end = 0;
++  int iInstalledC = 0;
+ 
+-        start = (( end > (std::wstring::npos - 1) ) ? std::wstring::npos  :  end + 1);
+-    }
++  wstrFeatureList.assign(pwzPropertyValue);
++  while ( end != std::wstring::npos)
++  {
++    end = wstrFeatureList.find( ';', start);
++    iInstalledC += checkInstalled( hInstall, wstrFeatureList.substr( start, (end == std::wstring::npos) ? std::wstring::npos : end - start) );
++    start = (( end > (std::wstring::npos - 1) ) ? std::wstring::npos  :  end + 1);
++  }
+ 
+-	if(iInstalledC>1)
+-		resBuf = L"0";
+-	else 
+-		resBuf = L"1";
++  if(iInstalledC>1)
++    resBuf = L"0";
++  else 
++    resBuf = L"1";
+ 
+-	hr = WcaSetProperty(L"MUTUALLYEXCLUSIVE", resBuf.c_str());
+-	dbstrs << "MSI SETUP CA_MutuallyExclusive: SetProperty MUTUALLYEXCLUSIVE [" << resBuf.c_str() << "] Result:" << hr;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
++  hr = WcaSetProperty(L"MUTUALLYEXCLUSIVE", resBuf.c_str());
++  dbstrs << "MSI SETUP CA_MutuallyExclusive: SetProperty MUTUALLYEXCLUSIVE [" << resBuf.c_str() << "] Result:" << hr;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
+ 
+ LExit:
+     er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+@@ -467,54 +486,54 @@ LExit:
+ 
+ bool Check_Dialog_Cond(MSIHANDLE hInstall, std::wstring& prop_name, HRESULT& hr )
+ {
+-	bool ret = false;
+-	std::wstringstream dbstrs;
+-	LPWSTR pwzPropertyValue = NULL;
++  bool ret = false;
++  std::wstringstream dbstrs;
++  LPWSTR pwzPropertyValue = NULL;
+ 
+-	if(!prop_name.length() || !WcaIsPropertySetW(prop_name.c_str()))
+-	{
+-		hr = S_OK;
+-		ret = true;
+-		return ret;
+-	}
++  if(!prop_name.length() || !WcaIsPropertySetW(prop_name.c_str()))
++  {
++    hr = S_OK;
++    ret = true;
++    return ret;
++  }
+ 
+-	hr = WcaGetProperty(prop_name.c_str(), &pwzPropertyValue);
+-	if(hr != S_OK)
+-	{
+-		dbstrs << "MSI SETUP CA_NextDialog: failed to read [" << prop_name.c_str() << "]";
+-		Log_Str(dbstrs);
+-		return ret;
+-	}
+-	//dbstrs << "MSI SETUP CA_NextDialog: Check Dialog " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	//Log_Str(dbstrs);
++  hr = WcaGetProperty(prop_name.c_str(), &pwzPropertyValue);
++  if(hr != S_OK)
++  {
++    dbstrs << "MSI SETUP CA_NextDialog: failed to read [" << prop_name.c_str() << "]";
++    Log_Str(dbstrs);
++    return ret;
++  }
++  //dbstrs << "MSI SETUP CA_NextDialog: Check Dialog " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "]";
++  //Log_Str(dbstrs);
+ 
+-	if (pwzPropertyValue && *pwzPropertyValue)
+-	{
+-		MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzPropertyValue);
+-
+-		if (condition == MSICONDITION_ERROR)
+-		{
+-			hr = E_INVALIDARG;
+-			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] Error:Invalid Argument";
+-			Log_Str(dbstrs);
+-			ret = false;
+-		}
+-		else if (condition == MSICONDITION_TRUE)
+-		{
+-			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = True";
+-			Log_Str(dbstrs);
+-			ret = true;
+-
+-		}
+-		else 
+-		{
+-			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = False";
+-			Log_Str(dbstrs);
+-			ret = false;
+-
+-		}
+-	}
+-	return ret;
++  if (pwzPropertyValue && *pwzPropertyValue)
++  {
++    MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzPropertyValue);
++
++    if (condition == MSICONDITION_ERROR)
++    {
++      hr = E_INVALIDARG;
++      dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] Error:Invalid Argument";
++      Log_Str(dbstrs);
++      ret = false;
++    }
++    else if (condition == MSICONDITION_TRUE)
++    {
++      dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = True";
++      Log_Str(dbstrs);
++      ret = true;
++
++    }
++    else 
++    {
++      dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = False";
++      Log_Str(dbstrs);
++      ret = false;
++
++    }
++  }
++  return ret;
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_NextDialog(MSIHANDLE hInstall)
+@@ -523,322 +542,377 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_NextDialog(MSIHANDLE hInstall)
+ 
+ #define DIALOG_CONDITION_PREFIX L"COND_"
+ 
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	dbstrs << L"MSI SETUP: CA_NextDialog" << std::endl;
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  dbstrs << L"MSI SETUP: CA_NextDialog" << std::endl;
+ 
+-	HRESULT hr = S_OK;
+-    UINT er = ERROR_SUCCESS;
+-    hr = WcaInitialize(hInstall, "CA_NextDialog");
+-	dbstrs << L"MSI SETUP CA_NextDialog: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_NextDialog");
++  dbstrs << L"MSI SETUP CA_NextDialog: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
+ 
+-	ExitOnFailure(hr, "Failed to initialize");
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzPropertyValue = NULL;
++  LPWSTR pwzPropertyValue = NULL;
+ 
+-	bool init_prop=false;
+-	bool set_initial_dialog=true;
+-	int iDialogNum=-1;
+-	if(!WcaIsPropertySet("NEXT_DIALOG"))
++  bool init_prop=false;
++  bool set_initial_dialog=true;
++  int iDialogNum=-1;
++  if(!WcaIsPropertySet("NEXT_DIALOG"))
+     {
+-		init_prop=true;
++    init_prop=true;
+     }
+-	else
+-	{
+-		hr = WcaGetProperty(L"NEXT_DIALOG", &pwzPropertyValue);
+-		ExitOnFailure(hr, "Failed to get NEXT_DIALOG property value");
+-		dbstrs << "MSI SETUP CA_NextDialog: Read NEXT_DIALOG [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-		Log_Str(dbstrs);
+-		init_prop=!wcslen(pwzPropertyValue);
+-	}
++  else
++  {
++    hr = WcaGetProperty(L"NEXT_DIALOG", &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get NEXT_DIALOG property value");
++    dbstrs << "MSI SETUP CA_NextDialog: Read NEXT_DIALOG [" << std::wstring(pwzPropertyValue).c_str() << "]";
++    Log_Str(dbstrs);
++    init_prop=!wcslen(pwzPropertyValue);
++  }
+ 
+-	if(!init_prop)
+-	{
+-		std::wstring wzDialogNum(pwzPropertyValue);
+-		size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
+-
+-		if(not_num != std::wstring::npos)
+-		{
+-			wzDialogNum.erase(0,not_num+1);
+-			std::wstringstream ss(wzDialogNum);
+-			ss >> iDialogNum;
+-		}
+-	}
++  if(!init_prop)
++  {
++    std::wstring wzDialogNum(pwzPropertyValue);
++    size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
+ 
+-	for(int i = iDialogNum; i < MAX_NUM_DIALOGS; i++)
+-	{
+-		strbuf.str(std::wstring());
+-		strbuf << DIALOG_NAME << (int)(i + 1);
+-		std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
+-
+-		wstrDialogCondProp.append(strbuf.str());
+-		bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
+-		ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
+-		if(!bCond) continue;
+-
+-		dbstrs << "MSI SETUP CA_NextDialog: NEXT_DIALOG found Dialog " << strbuf.str().c_str();
+-		Log_Str(dbstrs);
+-		hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
+-		dbstrs << "MSI SETUP CA_NextDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
+-		Log_Str(dbstrs);
+-		ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+-		set_initial_dialog=false;
+-		break;
+-	}
++    if(not_num != std::wstring::npos)
++    {
++      wzDialogNum.erase(0,not_num+1);
++      std::wstringstream ss(wzDialogNum);
++      ss >> iDialogNum;
++    }
++  }
+ 
+-	if( !pwzPropertyValue || !strbuf.str().length() || (strbuf.str().length() && !WcaIsPropertySetW(strbuf.str().c_str())) )
+-	{
+-		set_initial_dialog = true;
+-		dbstrs << "MSI SETUP CA_NextDialog: Dialog NEXT_DIALOG not found -> set DIALOG0 ";
+-		Log_Str(dbstrs);
+-	}
++  for(int i = iDialogNum; i < MAX_NUM_DIALOGS; i++)
++  {
++    strbuf.str(std::wstring());
++    strbuf << DIALOG_NAME << (int)(i + 1);
++    std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
+ 
+-	if(set_initial_dialog)
+-	{
+-		std::wstring dln(DIALOG_NAME);
+-		dln.append(L"0");
+-		hr = WcaSetProperty(L"NEXT_DIALOG", dln.c_str());
+-		dbstrs << "CA_NextDialog: SetProperty NEXT_DIALOG [" << dln.c_str() << "] Result:" << hr;
+-		Log_Str(dbstrs);
+-		ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
++    wstrDialogCondProp.append(strbuf.str());
++    bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
++    ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
++    if(!bCond) continue;
++
++    dbstrs << "MSI SETUP CA_NextDialog: NEXT_DIALOG found Dialog " << strbuf.str().c_str();
++    Log_Str(dbstrs);
++    hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
++    dbstrs << "MSI SETUP CA_NextDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
++    set_initial_dialog=false;
++    break;
++  }
++
++  if( !pwzPropertyValue || !strbuf.str().length() || (strbuf.str().length() && !WcaIsPropertySetW(strbuf.str().c_str())) )
++  {
++    set_initial_dialog = true;
++    dbstrs << "MSI SETUP CA_NextDialog: Dialog NEXT_DIALOG not found -> set DIALOG0 ";
++    Log_Str(dbstrs);
++  }
++
++  if(set_initial_dialog)
++  {
++    std::wstring dln(DIALOG_NAME);
++    dln.append(L"0");
++    hr = WcaSetProperty(L"NEXT_DIALOG", dln.c_str());
++    dbstrs << "CA_NextDialog: SetProperty NEXT_DIALOG [" << dln.c_str() << "] Result:" << hr;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+     }
+ LExit:
+-	if(pwzPropertyValue)ReleaseStr(pwzPropertyValue);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  if(pwzPropertyValue)ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_PrevDialog(MSIHANDLE hInstall)
+ {
+ #define DIALOG_NAME L"DIALOG"
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	dbstrs << L"MSI SETUP: CA_PrevDialog" << std::endl;
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  dbstrs << L"MSI SETUP: CA_PrevDialog" << std::endl;
+ 
+-	HRESULT hr = S_OK;
++  HRESULT hr = S_OK;
+     UINT er = ERROR_SUCCESS;
+     hr = WcaInitialize(hInstall, "CA_PrevDialog");
+-	dbstrs << L"MSI SETUP CA_PrevDialog: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  dbstrs << L"MSI SETUP CA_PrevDialog: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzPropertyValue = NULL;
++  LPWSTR pwzPropertyValue = NULL;
+ 
+-	bool init_prop=false;
+-	bool set_initial_dialog=true;
+-	int iDialogNum=-1;
+-	if(!WcaIsPropertySet("NEXT_DIALOG"))
++  bool init_prop=false;
++  bool set_initial_dialog=true;
++  int iDialogNum=-1;
++  if(!WcaIsPropertySet("NEXT_DIALOG"))
+     {
+-		init_prop = true;
++    init_prop = true;
+     }
+-	else
+-	{
+-		hr = WcaGetProperty(L"NEXT_DIALOG", &pwzPropertyValue);
+-		ExitOnFailure(hr, "Failed to get NEXT_DIALOG property value");
+-		dbstrs << "MSI SETUP CA_PrevDialog: Read NEXT_DIALOG [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-		Log_Str(dbstrs);
+-		init_prop=!wcslen(pwzPropertyValue);
+-	}
++  else
++  {
++    hr = WcaGetProperty(L"NEXT_DIALOG", &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get NEXT_DIALOG property value");
++    dbstrs << "MSI SETUP CA_PrevDialog: Read NEXT_DIALOG [" << std::wstring(pwzPropertyValue).c_str() << "]";
++    Log_Str(dbstrs);
++    init_prop=!wcslen(pwzPropertyValue);
++  }
+ 
+-	if(!init_prop)
+-	{
+-		std::wstring wzDialogNum(pwzPropertyValue);
+-		size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
+-
+-		if(not_num != std::wstring::npos)
+-		{
+-			wzDialogNum.erase(0,not_num+1);
+-			std::wstringstream ss(wzDialogNum);
+-			ss >> iDialogNum;
+-		}
+-	}
++  if(!init_prop)
++  {
++    std::wstring wzDialogNum(pwzPropertyValue);
++    size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
+ 
+-	for(int i = iDialogNum; i < MAX_NUM_DIALOGS && i>=0 ; i--)
+-	{
+-			strbuf.str(std::wstring());
+-			strbuf << DIALOG_NAME << (int)(i - 1);
+-			std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
+-
+-			wstrDialogCondProp.append(strbuf.str());
+-			bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
+-			ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
+-			if(!bCond) continue;
+-
+-			dbstrs << "MSI SETUP CA_PrevDialog: NEXT_DIALOG found Dialog " << strbuf.str().c_str();
+-			Log_Str(dbstrs);
+-			init_prop = false;
+-			hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
+-			dbstrs << "MSI SETUP CA_PrevDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
+-			Log_Str(dbstrs);
+-			ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+-			set_initial_dialog=false;
+-			break;
+-	}
+-	if(!pwzPropertyValue || !strbuf.str().length() || (strbuf.str().length() && !WcaIsPropertySetW(strbuf.str().c_str())))
+-	{
+-		set_initial_dialog = true;
+-		dbstrs << "MSI SETUP CA_PrevDialog: Dialog NEXT_DIALOG not found -> set DIALOG0 ";
+-		Log_Str(dbstrs);
+-	}
+-	if(set_initial_dialog)
+-	{
+-		std::wstring dln(DIALOG_NAME);
+-		dln.append(L"0");
+-		hr = WcaSetProperty(L"NEXT_DIALOG", dln.c_str());
+-		dbstrs << "CA_NextDialog: SetProperty NEXT_DIALOG [" << dln.c_str() << "] Result:" << hr;
+-		Log_Str(dbstrs);
+-		ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
++    if(not_num != std::wstring::npos)
++    {
++      wzDialogNum.erase(0,not_num+1);
++      std::wstringstream ss(wzDialogNum);
++      ss >> iDialogNum;
++    }
++  }
++
++  for(int i = iDialogNum; i < MAX_NUM_DIALOGS && i>=0 ; i--)
++  {
++      strbuf.str(std::wstring());
++      strbuf << DIALOG_NAME << (int)(i - 1);
++      std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
++
++      wstrDialogCondProp.append(strbuf.str());
++      bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
++      ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
++      if(!bCond) continue;
++
++      dbstrs << "MSI SETUP CA_PrevDialog: NEXT_DIALOG found Dialog " << strbuf.str().c_str();
++      Log_Str(dbstrs);
++      init_prop = false;
++      hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
++      dbstrs << "MSI SETUP CA_PrevDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
++      Log_Str(dbstrs);
++      ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
++      set_initial_dialog=false;
++      break;
++  }
++  if(!pwzPropertyValue || !strbuf.str().length() || (strbuf.str().length() && !WcaIsPropertySetW(strbuf.str().c_str())))
++  {
++    set_initial_dialog = true;
++    dbstrs << "MSI SETUP CA_PrevDialog: Dialog NEXT_DIALOG not found -> set DIALOG0 ";
++    Log_Str(dbstrs);
++  }
++  if(set_initial_dialog)
++  {
++    std::wstring dln(DIALOG_NAME);
++    dln.append(L"0");
++    hr = WcaSetProperty(L"NEXT_DIALOG", dln.c_str());
++    dbstrs << "CA_NextDialog: SetProperty NEXT_DIALOG [" << dln.c_str() << "] Result:" << hr;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+     }
+ LExit:
+-	if(pwzPropertyValue)ReleaseStr(pwzPropertyValue);
++  if(pwzPropertyValue)ReleaseStr(pwzPropertyValue);
+     er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_FillPrinterListbox(MSIHANDLE hInstall)
+ {
+-	PRINTER_INFO_4 * list = NULL;
+-	DWORD cnt = 0;
+-	DWORD sz = 0;
+-	DWORD i;
+-
+-	MSIHANDLE hTable = NULL;
+-	MSIHANDLE hColumns = NULL;
+-
+-	std::wstring wstrPropertyValue;
+-
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	dbstrs << L"MSI SETUP: CA_FillPrinterListbox" << std::endl;
+-
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	hr = WcaInitialize(hInstall, "CA_FillPrinterListbox");
+-	dbstrs << L"MSI SETUP CA_FillPrinterListbox: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
+-
+-	LPWSTR pwzPropertyValue = NULL;
+-	hr = WcaGetProperty(L"PRINTER_LISTBOX_VALUE_PROP", &pwzPropertyValue);
+-	ExitOnFailure(hr, "Failed to get PRINTER_LISTBOX_VALUE_PROP property value");
+-	dbstrs << "MSI SETUP CA_FillPrinterListbox: Read PRINTER_LISTBOX_VALUE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
+-
+-	EnumPrinters( PRINTER_ENUM_LOCAL, NULL, 4, NULL, 0, &sz, &cnt );
+-	if ((list = (PRINTER_INFO_4*) malloc(sz)) == 0) return ERROR_INSTALL_FAILURE;
+-	if (!EnumPrinters(PRINTER_ENUM_LOCAL, NULL, 4, (LPBYTE)list, sz, &sz, &cnt))
+-	{
+-	  free( list );
+-	  return ERROR_INSTALL_FAILURE;
+-	}
++  PRINTER_INFO_4 * list = NULL;
++  DWORD cnt = 0;
++  DWORD sz = 0;
++  DWORD i;
++
++  MSIHANDLE hTable = NULL;
++  MSIHANDLE hColumns = NULL;
++
++  std::wstring wstrPropertyValue;
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  dbstrs << L"MSI SETUP: CA_FillPrinterListbox" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_FillPrinterListbox");
++  dbstrs << L"MSI SETUP CA_FillPrinterListbox: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  LPWSTR pwzPropertyValue = NULL;
++  hr = WcaGetProperty(L"PRINTER_LISTBOX_VALUE_PROP", &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get PRINTER_LISTBOX_VALUE_PROP property value");
++  dbstrs << "MSI SETUP CA_FillPrinterListbox: Read PRINTER_LISTBOX_VALUE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
++
++  EnumPrinters( PRINTER_ENUM_LOCAL, NULL, 4, NULL, 0, &sz, &cnt );
++  if ((list = (PRINTER_INFO_4*) malloc(sz)) == 0) return ERROR_INSTALL_FAILURE;
++  if (!EnumPrinters(PRINTER_ENUM_LOCAL, NULL, 4, (LPBYTE)list, sz, &sz, &cnt))
++  {
++    free( list );
++    return ERROR_INSTALL_FAILURE;
++  }
+    
+-	if(!cnt)
+-	{
+-		hr = WcaAddTempRecord(&hTable, &hColumns, L"ComboBox", NULL, 0, 3, std::wstring(pwzPropertyValue).c_str(), 1,  L"EPSON BA-T500 Receipt");
+-	} else
+-	for( i = 0; i < cnt; i++ )
+-	{
+-		dbstrs << "MSI SETUP CA_FillPrinterListbox: Add Printer (" << std::wstring(list[i].pPrinterName).c_str() << ") to [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-		Log_Str(dbstrs);
+-		hr = WcaAddTempRecord(&hTable, &hColumns, L"ComboBox", NULL, 0, 3, std::wstring(pwzPropertyValue).c_str(), i+1, std::wstring(list[i].pPrinterName).c_str());
+-	}
++  if(!cnt)
++  {
++    hr = WcaAddTempRecord(&hTable, &hColumns, L"ComboBox", NULL, 0, 3, std::wstring(pwzPropertyValue).c_str(), 1,  L"EPSON BA-T500 Receipt");
++  } else
++  for( i = 0; i < cnt; i++ )
++  {
++    dbstrs << "MSI SETUP CA_FillPrinterListbox: Add Printer (" << std::wstring(list[i].pPrinterName).c_str() << ") to [" << std::wstring(pwzPropertyValue).c_str() << "]";
++    Log_Str(dbstrs);
++    hr = WcaAddTempRecord(&hTable, &hColumns, L"ComboBox", NULL, 0, 3, std::wstring(pwzPropertyValue).c_str(), i+1, std::wstring(list[i].pPrinterName).c_str());
++  }
+ 
+-	LPWSTR pwzPropertyValue1 = NULL;
+-	hr = WcaGetProperty(std::wstring(pwzPropertyValue).c_str(), &pwzPropertyValue1);
+-	if(SUCCEEDED(hr) && wcslen(pwzPropertyValue1))
+-		wstrPropertyValue.assign(pwzPropertyValue1);
+-	else
+-		wstrPropertyValue.assign(L"T500");
++  LPWSTR pwzPropertyValue1 = NULL;
++  hr = WcaGetProperty(std::wstring(pwzPropertyValue).c_str(), &pwzPropertyValue1);
++  if(SUCCEEDED(hr) && wcslen(pwzPropertyValue1))
++    wstrPropertyValue.assign(pwzPropertyValue1);
++  else
++    wstrPropertyValue.assign(L"T500");
+ 
+-	for(i = 0; i < cnt; i++)
+-	{
+-		if(std::wstring(list[i].pPrinterName).find(wstrPropertyValue) != std::wstring::npos)
+-		{
+-			break;
+-		}
+-	}
+-	if(i == cnt && cnt > 0)
+-		hr = WcaSetProperty(std::wstring(pwzPropertyValue).c_str(), std::wstring(list[0].pPrinterName).c_str());
++  for(i = 0; i < cnt; i++)
++  {
++    if(std::wstring(list[i].pPrinterName).find(wstrPropertyValue) != std::wstring::npos)
++    {
++      break;
++    }
++  }
++  if(i == cnt && cnt > 0)
++    hr = WcaSetProperty(std::wstring(pwzPropertyValue).c_str(), std::wstring(list[0].pPrinterName).c_str());
+ LExit:
+-	if (hTable)	MsiCloseHandle(hTable);
+-	if (hColumns) MsiCloseHandle(hColumns);
+-	ReleaseStr(pwzPropertyValue);
+-	ReleaseStr(pwzPropertyValue1);
++  if (hTable)  MsiCloseHandle(hTable);
++  if (hColumns) MsiCloseHandle(hColumns);
++  ReleaseStr(pwzPropertyValue);
++  ReleaseStr(pwzPropertyValue1);
+ 
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_ReplaceBSlash(MSIHANDLE hInstall)
++{
++  std::wstringstream dbstrs;
++
++  std::string strPath;
++  
++  LPWSTR pwzPropertyValue = NULL;
++  LPWSTR pwzPropertyName = NULL;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_ReplaceBSlash");
++  dbstrs << L"CA_ReplaceBSlash: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  if( WcaIsPropertySet("CustomActionData") && (hr = WcaGetProperty( L"CustomActionData", &pwzPropertyName)) == S_OK && pwzPropertyName && *pwzPropertyName)
++  {
++    dbstrs << "MSI SETUP CA_ReplaceBSlash CustomActionData:" << std::wstring(pwzPropertyName).c_str() << std::endl;
++    Log_Str(dbstrs);
++  } else
++  {
++    hr = WcaGetProperty(L"REPLACEBSLASH_PROP", &pwzPropertyName);
++    dbstrs << "MSI SETUP CA_ReplaceBSlash: Read REPLACEBSLASH_PROP [" << std::wstring(pwzPropertyName).c_str() << "]";
++    Log_Str(dbstrs);
++  }
++  ExitOnFailure(hr, "Failed to get REPLACEBSLASH_PROP property value or CustomActionData");
++
++  if( pwzPropertyName && wcslen(pwzPropertyName))
++  {
++    hr = WcaGetProperty(pwzPropertyName, &pwzPropertyValue);
++    dbstrs << "MSI SETUP CA_ReplaceBSlash: Read " << std::wstring(pwzPropertyName).c_str() << " [" << std::wstring(pwzPropertyValue).c_str() << "]";
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to get REPLACEBSLASH_PROP property value");
++    if( pwzPropertyValue && *pwzPropertyValue)
++    {
++      std::wstring wzPropertyValue( pwzPropertyValue );
++      std::replace( wzPropertyValue.begin(), wzPropertyValue.end(), L'\\', L'/');
++      if ( (wzPropertyValue.rbegin() != wzPropertyValue.rend()) && *wzPropertyValue.rbegin() == L'/')
++        wzPropertyValue = wzPropertyValue.substr(0,wzPropertyValue.length()-1);
++      hr = WcaSetProperty(pwzPropertyName, wzPropertyValue.c_str());
++      dbstrs << "MSI SETUP CA_ReplaceBSlash: Read " << std::wstring(pwzPropertyName).c_str() << " [" << wzPropertyValue.c_str() << "]";
++      Log_Str(dbstrs);
++      ExitOnFailure(hr, "Failed to set REPLACEBSLASH_PROP property value");    
++    }
++
++  }
++  
++LExit:
++  if(pwzPropertyName) ReleaseStr(pwzPropertyName);
++  if(pwzPropertyValue) ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_DirBrowser(MSIHANDLE hInstall)
+ {
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	dbstrs << L"MSI SETUP: CA_DirBrowser" << std::endl;
+-
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	hr = WcaInitialize(hInstall, "CA_DirBrowser");
+-	dbstrs << L"MSI SETUP CA_DirBrowser: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
+-
+-	LPWSTR pwzPropertyValue = NULL;
+-	WCHAR szEditPath[MAX_PATH];
+-
+-	hr = WcaGetProperty(L"DIRBROWSER_EDIT_VALUE_PROP", &pwzPropertyValue);
+-	ExitOnFailure(hr, "Failed to get DIRBROWSER_EDIT_VALUE_PROP property value");
+-	dbstrs << "MSI SETUP CA_DirBrowser: Read DIRBROWSER_EDIT_VALUE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
+-	wcsncpy_s(szEditPath,pwzPropertyValue,MAX_PATH-2);
+-
+-	OPENFILENAME ofn;
+-	ZeroMemory(&ofn, sizeof(ofn));
+-	ofn.lStructSize = sizeof(ofn);
+-	ofn.hwndOwner = GetForegroundWindow();
+-	ofn.lpstrFile = szEditPath;
+-	ofn.nMaxFile = sizeof(szEditPath);
+-	ofn.lpstrFilter = L"All Files (*.*)\0*.*\0\0\0\0";
+-	ofn.nFilterIndex = 1;
+-	ofn.lpstrFileTitle = NULL;
+-	ofn.nMaxFileTitle = 0;
+-	ofn.lpstrInitialDir = NULL;
+-	ofn.Flags = OFN_PATHMUSTEXIST;
+-
+-	if(GetOpenFileName(&ofn))
+-	{
+-		dbstrs << "MSI SETUP CA_DirBrowser: Set (" << std::wstring(pwzPropertyValue).c_str() << ") to [" << szEditPath << "]";
+-		WcaSetProperty( std::wstring(pwzPropertyValue).c_str(), szEditPath);
+-	} else
+-		dbstrs << "MSI SETUP CA_DirBrowser: (" << std::wstring(pwzPropertyValue).c_str() << ") not changed ";
+-	Log_Str(dbstrs);
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  dbstrs << L"MSI SETUP: CA_DirBrowser" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_DirBrowser");
++  dbstrs << L"MSI SETUP CA_DirBrowser: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  LPWSTR pwzPropertyValue = NULL;
++  WCHAR szEditPath[MAX_PATH];
++
++  hr = WcaGetProperty(L"DIRBROWSER_EDIT_VALUE_PROP", &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get DIRBROWSER_EDIT_VALUE_PROP property value");
++  dbstrs << "MSI SETUP CA_DirBrowser: Read DIRBROWSER_EDIT_VALUE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
++  wcsncpy_s(szEditPath,pwzPropertyValue,MAX_PATH-2);
++
++  OPENFILENAME ofn;
++  ZeroMemory(&ofn, sizeof(ofn));
++  ofn.lStructSize = sizeof(ofn);
++  ofn.hwndOwner = GetForegroundWindow();
++  ofn.lpstrFile = szEditPath;
++  ofn.nMaxFile = sizeof(szEditPath);
++  ofn.lpstrFilter = L"All Files (*.*)\0*.*\0\0\0\0";
++  ofn.nFilterIndex = 1;
++  ofn.lpstrFileTitle = NULL;
++  ofn.nMaxFileTitle = 0;
++  ofn.lpstrInitialDir = NULL;
++  ofn.Flags = OFN_PATHMUSTEXIST;
++
++  if(GetOpenFileName(&ofn))
++  {
++    dbstrs << "MSI SETUP CA_DirBrowser: Set (" << std::wstring(pwzPropertyValue).c_str() << ") to [" << szEditPath << "]";
++    WcaSetProperty( std::wstring(pwzPropertyValue).c_str(), szEditPath);
++  } else
++    dbstrs << "MSI SETUP CA_DirBrowser: (" << std::wstring(pwzPropertyValue).c_str() << ") not changed ";
++  Log_Str(dbstrs);
+  
+ LExit:
+-	ReleaseStr(pwzPropertyValue);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ bool exec_commandline(MSIHANDLE hInstall, std::wstring& cmdLine)
+ {
+-	std::wstringstream dbstrs;
++  std::wstringstream dbstrs;
+ 
+-	std::vector<wchar_t> buffer(cmdLine.begin(),cmdLine.end());
+-	buffer.push_back(0);
+-	HRESULT exec_hr=S_FALSE;
+-	try
+-	{
+-			exec_hr = QuietExec(buffer.data(),CFGVALUES_TIMEOUT_MS);
+-	}
+-	catch(...)
+-	{
+-		dbstrs << L"Exception in QuietExec" << std::wstring(buffer.data()).c_str() << std::endl;
+-		Log_Str(dbstrs);
+-	}
+-	dbstrs << L"QuietExec (" << std::wstring(buffer.data()).c_str() << L") result=" << exec_hr << std::endl;
+-	Log_Str(dbstrs);
++  std::vector<wchar_t> buffer(cmdLine.begin(),cmdLine.end());
++  buffer.push_back(0);
++  HRESULT exec_hr=S_FALSE;
++  try
++  {
++      exec_hr = QuietExec(buffer.data(),CFGVALUES_TIMEOUT_MS);
++  }
++  catch(...)
++  {
++    dbstrs << L"Exception in QuietExec" << std::wstring(buffer.data()).c_str() << std::endl;
++    Log_Str(dbstrs);
++  }
++  dbstrs << L"QuietExec (" << std::wstring(buffer.data()).c_str() << L") result=" << exec_hr << std::endl;
++  Log_Str(dbstrs);
+ 
+-	return exec_hr==S_OK;
++  return exec_hr==S_OK;
+ }
+ 
+ //
+@@ -890,6 +964,370 @@ LExit:
+     return hr;
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_SearchTextInFile(MSIHANDLE hInstall)
++{
++#define CHECKTEXTINFILEPROPNAME L"CHECK_TEXT_IN_FILE_PROP"
++#define CHECKTEXTINFILERES L"CHECK_TEXT_IN_FILE_RES"
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++
++  std::string tmp_params;
++  std::string check_file_name;
++  std::string reg_expr;
++  
++  std::ifstream check_file;
++  std::string strItem;
++  std::smatch m;
++  std::tr1::regex regexp;
++  bool matched = false;
++  
++  LPWSTR pwzPropertyValue = NULL;
++
++  dbstrs << L"MSI SETUP: CA_SearchTextInFile" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_SearchTextInFile");
++  dbstrs << L"MSI SETUP CA_SearchTextInFile: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(CHECKTEXTINFILEPROPNAME, &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get CHECK_TEXT_IN_FILE_PROP property value");
++  dbstrs << "MSI SETUP CA_SearchTextInFile: Read CHECK_TEXT_IN_FILE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";  
++  Log_Str(dbstrs);
++
++  tmp_params.assign(ToNarrow(pwzPropertyValue));
++  size_t cutPos = tmp_params.find(';');
++  if(cutPos!=std::string::npos)
++  {
++    check_file_name=tmp_params.substr(0,cutPos);
++    reg_expr=tmp_params.substr(cutPos+1);
++  } else
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_SearchTextInFile wrong format of CHECK_TEXT_IN_FILE_PROP:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of CHECK_TEXT_IN_FILE_PROP");
++  }
++
++  dbstrs << "MSI SETUP CA_SearchTextInFile filename:" << check_file_name.c_str() << " regular expression:" << reg_expr.c_str() << std::endl;
++  Log_Str(dbstrs);
++  
++  try
++  {
++    regexp.assign(reg_expr.c_str(),std::tr1::regex::grep|std::tr1::regex::icase);
++  }
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_SearchTextInFile exception - wrong format of regular expression" << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of regular expression");
++  }
++  
++  check_file.open(check_file_name.c_str());
++  if (check_file.is_open() && check_file.good())
++  {
++    while(std::getline(check_file,strItem))
++    {
++      matched = std::tr1::regex_search(strItem,m,regexp);
++      if(matched)
++      {
++        dbstrs << "MSI SETUP CA_SearchTextInFile " << check_file_name.c_str() << " found:" << m.str(0).c_str() << std::endl;
++        Log_Str(dbstrs);
++        hr = WcaSetProperty(CHECKTEXTINFILERES, ToWiden(m.str(0).c_str()).c_str());
++        ExitOnFailure(hr, "Failed to set CHECK_TEXT_IN_FILE_RES property value");
++        break;
++      }
++    }
++    if(!matched)
++    {
++      dbstrs << "MSI SETUP CA_SearchTextInFile " << check_file_name.c_str() << " nothing found" << std::endl;
++      Log_Str(dbstrs);
++      hr = WcaSetProperty(CHECKTEXTINFILERES, L"");
++      ExitOnFailure(hr, "Failed to set CHECK_TEXT_IN_FILE_RES property value");
++    }
++    check_file.close();
++  } else
++  {
++      dbstrs << "MSI SETUP CA_SearchTextInFile failed to open " << check_file_name.c_str() << std::endl;
++      Log_Str(dbstrs);
++      hr = WcaSetProperty(CHECKTEXTINFILERES, L"");
++      ExitOnFailure(hr, "Failed to set CHECK_TEXT_IN_FILE_RES property value");
++  }
++
++LExit:
++  if(pwzPropertyValue)  ReleaseStr(pwzPropertyValue);
++
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_AppendToFile(MSIHANDLE hInstall)
++{
++#define APPENDTOFILEPROPNAME L"APPEND_TO_FILE_PROP"
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++
++  std::string tmp_params;
++  std::string append_file_name;
++  std::string append_text;
++  
++  std::ofstream append_file;
++ 
++  LPWSTR pwzPropertyValue = NULL;
++
++  dbstrs << L"MSI SETUP: CA_AppendToFile" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_AppendToFile");
++  dbstrs << L"MSI SETUP CA_AppendToFile: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(L"CustomActionData", &pwzPropertyValue);
++  if( hr != S_OK || pwzPropertyValue==NULL || *pwzPropertyValue==0)
++  {
++    hr = WcaGetProperty( APPENDTOFILEPROPNAME, &pwzPropertyValue);
++    ExitOnFailure(hr, "failed to get APPEND_TO_FILE_PROP property value or CustomActionData");
++    dbstrs << "MSI SETUP CA_AppendToFile Parameter:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++  }
++  
++  tmp_params.assign(ToNarrow(pwzPropertyValue));
++  size_t cutPos = tmp_params.find(';');
++  if(cutPos!=std::string::npos)
++  {
++    append_file_name=tmp_params.substr(0,cutPos);
++    append_text=tmp_params.substr(cutPos+1);
++  } else
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_AppendToFile wrong format of APPEND_TO_FILE_PROP:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of APPEND_TO_FILE_PROP");
++  }
++
++  dbstrs << "MSI SETUP CA_AppendToFile filename:" << append_file_name.c_str() << " Text to append:" << append_text.c_str() << std::endl;
++  Log_Str(dbstrs);
++  
++  append_file.open(append_file_name.c_str(), std::ios::out | std::ios::app);
++  if (append_file.is_open() && append_file.good())
++  {
++    append_file << append_text << std::endl;
++    append_file.close();
++  } else
++  {
++    hr = E_FAIL;
++    dbstrs << "MSI SETUP CA_AppendToFile failed to open " << append_file_name.c_str() << std::endl;
++    Log_Str(dbstrs);
++  }
++
++LExit:
++  if(pwzPropertyValue)  ReleaseStr(pwzPropertyValue);
++
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_ReplaceTextInFile(MSIHANDLE hInstall)
++{
++#define REPLACETEXTINFILEPROPNAME L"REPLACE_TEXT_IN_FILE_PROP"
++#define LOC_REPLACETINF_SEP ';'  
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++
++  std::string tmp_params;
++  std::string replace_file_name;
++  std::string reg_expr;
++  std::string replace_string;
++  std::string tmp_path;
++  
++  std::string strItem;
++  std::smatch m;
++  std::stringstream mtstamp;
++  std::tr1::regex regexp;
++  bool matched = false;
++  bool param_err = false;
++  
++  LPWSTR pwzPropertyValue = NULL;
++
++  dbstrs << L"MSI SETUP: CA_ReplaceTextInFile" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_ReplaceTextInFile");
++  dbstrs << L"MSI SETUP CA_ReplaceTextInFile: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++/*
++  hr = WcaGetProperty(REPLACETEXTINFILEPROPNAME, &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get REPLACE_TEXT_IN_FILE_PROP property value");
++  dbstrs << "MSI SETUP CA_ReplaceTextInFile: Read REPLACE_TEXT_IN_FILE_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";  
++  Log_Str(dbstrs);
++*/
++  hr = WcaGetProperty( L"CustomActionData", &pwzPropertyValue);
++  ExitOnFailure(hr, "failed to get CustomActionData");
++  dbstrs << "MSI SETUP CA_ReplaceTextInFile CustomActionData:" << pwzPropertyValue << std::endl;
++  Log_Str(dbstrs);
++  
++  tmp_params.assign(ToNarrow(pwzPropertyValue));
++
++  size_t cutPos = tmp_params.find(LOC_REPLACETINF_SEP);
++  size_t cutPosPrev = std::string::npos;
++  if(cutPos!=std::string::npos)
++  {
++    replace_file_name=tmp_params.substr(0,cutPos);
++    cutPosPrev = cutPos;
++    cutPos = tmp_params.find(LOC_REPLACETINF_SEP,cutPos+1);
++  } else
++    param_err = true;
++  if(!param_err && cutPos!=std::string::npos)
++  {
++    reg_expr=tmp_params.substr(cutPosPrev+1,cutPos-cutPosPrev-1);
++    replace_string=tmp_params.substr(cutPos+1);
++  } else
++    param_err = true;
++ 
++  if(param_err)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_ReplaceTextInFile wrong format of CustomActionData - 3 parameter with a ; as delimiter are expected:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of CustomActionData");
++  }
++
++  dbstrs << "MSI SETUP CA_ReplaceTextInFile filename: " << replace_file_name.c_str() << " regular expression: " << reg_expr.c_str() << " replace with:" << replace_string.c_str() <<std::endl;
++  Log_Str(dbstrs);
++  
++  try
++  {
++    regexp.assign(reg_expr.c_str(),std::tr1::regex::grep|std::tr1::regex::icase);
++  }
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_ReplaceTextInFile exception - wrong format of regular expression" << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of regular expression");
++  }
++
++  char * pPath;
++  pPath = getenv("TMP");
++  if (pPath==NULL) pPath = getenv("TEMP");
++  if (pPath==NULL) pPath="c:";
++  tmp_path.assign(pPath);
++
++  time_t rawtime;
++  time (&rawtime);
++  struct tm saveTime;
++  struct tm* pST= localtime(&rawtime);
++  if(pST)
++  {
++    saveTime= *pST;
++  }
++
++  mtstamp << "." << std::setfill('0')<<std::setw(4)<<(saveTime.tm_year%5000)+1900 << std::setfill('0')<<std::setw(2)<< (saveTime.tm_mon%12)+1 << std::setfill('0')<<std::setw(2)<< (saveTime.tm_mday%32) << "_" <<
++             std::setfill('0')<<std::setw(2)<< saveTime.tm_hour << std::setfill('0')<<std::setw(2)<< saveTime.tm_min << std::setfill('0')<<std::setw(2)<< saveTime.tm_sec;
++      
++  try
++  {
++    tmp_path.append("\\setup_replace_buff.tmp");
++    std::ifstream source(replace_file_name.c_str(), std::ios::in|std::ios::binary);
++    std::ofstream dest(tmp_path.c_str(), std::ios::out|std::ios::trunc|std::ios::binary);
++    
++    if( source && source.good() )
++    {
++      if( dest && dest.good() )
++      {
++        dest << source.rdbuf();
++        source.close();
++        dest.close();
++      } else
++      {
++        dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to open " << tmp_path.c_str() << std::endl;
++        Log_Str(dbstrs);  
++      }
++    } else
++    {
++      dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to open " << replace_file_name.c_str() << std::endl;
++      Log_Str(dbstrs);  
++    }      
++/*    std::ifstream source1(replace_file_name.c_str(), std::ios::binary);
++    std::ofstream dest1((replace_file_name+".mback"+mtstamp.str()).c_str(), std::ios::out|std::ios::binary);
++    if( source1 && dest1 && source1.good() && dest1.good() )
++    {
++      dest1 << source1.rdbuf();
++      source1.close();
++    } else
++    {
++      dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to open files " << replace_file_name.c_str() << " or " << (replace_file_name+".mback"+mtstamp.str()).c_str() << std::endl;
++      Log_Str(dbstrs);  
++    }*/
++  }
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to generate temp file " << tmp_path.c_str() << " or " << (replace_file_name+".mback"+mtstamp.str()).c_str() << " -> " <<  tmp_path.c_str() << std::endl;
++    Log_Str(dbstrs);  
++  }
++  
++  ExitOnFailure(hr, "Failed to generate temp file");
++
++  try
++  {  
++    std::ifstream replace_file(tmp_path.c_str());
++    if(replace_file.is_open() && replace_file.good())
++    {
++      std::ofstream wr_replace_file(replace_file_name.c_str(),std::ios::out|std::ios::trunc);
++      if ( wr_replace_file.is_open() && wr_replace_file.good())
++      {
++        while(std::getline(replace_file,strItem))
++        {
++          matched = std::tr1::regex_search(strItem,m,regexp);
++          if(matched)
++          {
++            dbstrs << "MSI SETUP CA_ReplaceTextInFile " << replace_file_name.c_str() << " found:" << m.str(0).c_str() << " replaced with:" << replace_string.c_str() << std::endl;
++            Log_Str(dbstrs);
++            wr_replace_file << std::tr1::regex_replace (strItem, regexp, replace_string) << std::endl;
++          } else
++          {
++            wr_replace_file << strItem << std::endl;
++          }
++        }
++        replace_file.close();
++        wr_replace_file.close();
++      } else
++      {
++          dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to open " << replace_file_name.c_str() << std::endl;
++          Log_Str(dbstrs);
++      }
++    } else
++    {
++        dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to open " << tmp_path.c_str() << std::endl;
++        Log_Str(dbstrs);
++    }
++  }  
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_ReplaceTextInFile failed to write changed file " << replace_file_name.c_str() << std::endl;
++    Log_Str(dbstrs);  
++  }
++  
++LExit:
++  if(pwzPropertyValue)  ReleaseStr(pwzPropertyValue);
++
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ {
+ #define CFGVALUES_BINARY_ID L"CfgValues_Static"
+@@ -897,141 +1335,141 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ #define CFGVALUES_FILENAME "CfgValuesS.exe"
+ #define CFGERASE_FILENAME "CfgEraseS.exe"
+ 
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
+ 
+-    char* pbData = NULL;
+-    DWORD cbData = 0;
++  char* pbData = NULL;
++  DWORD cbData = 0;
+ 
+-	std::wstring cmdline;
+-	std::string strItem;
+-	std::string del_file_name;
+-	std::ifstream del_file;
+-	std::ofstream tmp_file;
+-	std::wstring tmp_cmdline;
+-	std::string cfgvalues_filename,cfgerase_filename,tmp_params;
++  std::wstring cmdline;
++  std::string strItem;
++  std::string del_file_name;
++  std::ifstream del_file;
++  std::ofstream tmp_file;
++  std::wstring tmp_cmdline;
++  std::string cfgvalues_filename,cfgerase_filename,tmp_params;
+     LPWSTR pwzCAData = NULL;
+ 
+-	dbstrs << L"MSI SETUP: CA_WriteCfg" << std::endl;
++  dbstrs << L"MSI SETUP: CA_WriteCfg" << std::endl;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	hr = WcaInitialize(hInstall, "CA_WriteCfg");
+-	dbstrs << L"MSI SETUP CA_WriteCfg: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_WriteCfg");
++  dbstrs << L"MSI SETUP CA_WriteCfg: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	char * pPath;
+-	pPath = getenv ("TMP");
+-	if (pPath==NULL) pPath="c:";
++  char * pPath;
++  pPath = getenv ("TMP");
++  if (pPath==NULL) pPath="c:";
+ 
+-/*	hr = ExtractBinary(CFGVALUES_BINARY_ID, (BYTE**)&pbData, &cbData);
++/*  hr = ExtractBinary(CFGVALUES_BINARY_ID, (BYTE**)&pbData, &cbData);
+     ExitOnFailure(hr, "failed to extract binary data for CFGVALUES");
+-	cfgvalues_filename.assign(pPath);
+-	cfgvalues_filename.append("\\" CFGVALUES_FILENAME);
+-	tmp_file.open(cfgvalues_filename, std::ios::out | std::ios::binary);
+-	if (tmp_file.is_open())
+-	{
+-		tmp_file.write (const_cast<char *>(pbData), cbData);
+-		tmp_file.close();
+-	} else
+-	{
+-			dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGVALUES_FILENAME  << std::endl;
+-			Log_Str(dbstrs);
+-			hr = E_UNEXPECTED;
+-			ExitOnFailure(hr, "failed to write " CFGVALUES_FILENAME);
+-	};
++  cfgvalues_filename.assign(pPath);
++  cfgvalues_filename.append("\\" CFGVALUES_FILENAME);
++  tmp_file.open(cfgvalues_filename, std::ios::out | std::ios::binary);
++  if (tmp_file.is_open())
++  {
++    tmp_file.write (const_cast<char *>(pbData), cbData);
++    tmp_file.close();
++  } else
++  {
++      dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGVALUES_FILENAME  << std::endl;
++      Log_Str(dbstrs);
++      hr = E_UNEXPECTED;
++      ExitOnFailure(hr, "failed to write " CFGVALUES_FILENAME);
++  };
+ 
+-	hr = ExtractBinary(CFGERASE_BINARY_ID, (BYTE**)&pbData, &cbData);
++  hr = ExtractBinary(CFGERASE_BINARY_ID, (BYTE**)&pbData, &cbData);
+     ExitOnFailure(hr, "failed to extract binary data for CFGERASE");
+-	cfgerase_filename.assign(pPath);
+-	cfgerase_filename.append("\\" CFGERASE_FILENAME);
+-	tmp_file.open(cfgerase_filename, std::ios::out | std::ios::binary);
+-	if (tmp_file.is_open())
+-	{
+-		tmp_file.write (const_cast<char *>(pbData), cbData);
+-		tmp_file.close();
+-	} else
+-	{
+-			dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGERASE_FILENAME  << std::endl;
+-			Log_Str(dbstrs);
+-			hr = E_UNEXPECTED;
+-			ExitOnFailure(hr, "failed to write " CFGERASE_FILENAME);
+-	}
++  cfgerase_filename.assign(pPath);
++  cfgerase_filename.append("\\" CFGERASE_FILENAME);
++  tmp_file.open(cfgerase_filename, std::ios::out | std::ios::binary);
++  if (tmp_file.is_open())
++  {
++    tmp_file.write (const_cast<char *>(pbData), cbData);
++    tmp_file.close();
++  } else
++  {
++      dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGERASE_FILENAME  << std::endl;
++      Log_Str(dbstrs);
++      hr = E_UNEXPECTED;
++      ExitOnFailure(hr, "failed to write " CFGERASE_FILENAME);
++  }
+ */
+-	hr = WcaGetProperty( L"CustomActionData", &pwzCAData);
+-	ExitOnFailure(hr, "failed to get CustomActionData");
+-	dbstrs << "MSI SETUP CA_WriteCfg CustomActionData:" << pwzCAData << std::endl;
+-	Log_Str(dbstrs);
+-
+-	tmp_params.assign(ToNarrow(pwzCAData));
+-	size_t cutPos = tmp_params.find(';');
+-	if(cutPos!=std::string::npos)
+-	{
+-		cfgvalues_filename=tmp_params.substr(0,cutPos);
+-		cfgerase_filename=tmp_params.substr(cutPos+1);
+-	} else
+-	{
+-		hr = E_UNEXPECTED;
+-		dbstrs << "MSI SETUP CA_WriteCfg wrong format of CustomActionData:" << pwzCAData << std::endl;
+-		Log_Str(dbstrs);
+-		ExitOnFailure(hr, " wrong format of CustomActionData");
+-	}
++  hr = WcaGetProperty( L"CustomActionData", &pwzCAData);
++  ExitOnFailure(hr, "failed to get CustomActionData");
++  dbstrs << "MSI SETUP CA_WriteCfg CustomActionData:" << pwzCAData << std::endl;
++  Log_Str(dbstrs);
++
++  tmp_params.assign(ToNarrow(pwzCAData));
++  size_t cutPos = tmp_params.find(';');
++  if(cutPos!=std::string::npos)
++  {
++    cfgvalues_filename=tmp_params.substr(0,cutPos);
++    cfgerase_filename=tmp_params.substr(cutPos+1);
++  } else
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_WriteCfg wrong format of CustomActionData:" << pwzCAData << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of CustomActionData");
++  }
+ 
+-	tmp_cmdline.assign(L"\"");
+-	tmp_cmdline.append(ToWiden(cfgerase_filename.c_str()));
+-	tmp_cmdline.append(L"\"");
+-	del_file_name.assign(pPath);
+-	del_file_name.append("\\" DEL_CFG_FILE_NAME );
++  tmp_cmdline.assign(L"\"");
++  tmp_cmdline.append(ToWiden(cfgerase_filename.c_str()));
++  tmp_cmdline.append(L"\"");
++  del_file_name.assign(pPath);
++  del_file_name.append("\\" DEL_CFG_FILE_NAME );
+ 
+-	del_file.open(del_file_name);
+-	if (del_file.is_open())
+-	{
+-		while(!del_file.eof())
+-		{
+-			del_file >> strItem;
+-			cmdline.assign( tmp_cmdline+L" "+ToWiden(strItem.c_str()) );
+-			exec_commandline(hInstall,cmdline);
+-			dbstrs << "MSI SETUP CA_WriteCfg: " << cmdline.c_str() << std::endl;
+-			Log_Str(dbstrs);
+-		}
+-		del_file.close();
+-	} else
+-	{
+-			dbstrs << "MSI SETUP CA_WriteCfg failed to open " << del_file_name.c_str() << std::endl;
+-			Log_Str(dbstrs);
+-	}
++  del_file.open(del_file_name);
++  if (del_file.is_open())
++  {
++    while(!del_file.eof())
++    {
++      del_file >> strItem;
++      cmdline.assign( tmp_cmdline+L" "+ToWiden(strItem.c_str()) );
++      exec_commandline(hInstall,cmdline);
++      dbstrs << "MSI SETUP CA_WriteCfg: " << cmdline.c_str() << std::endl;
++      Log_Str(dbstrs);
++    }
++    del_file.close();
++  } else
++  {
++      dbstrs << "MSI SETUP CA_WriteCfg failed to open " << del_file_name.c_str() << std::endl;
++      Log_Str(dbstrs);
++  }
+ 
+-	tmp_cmdline.assign(L"\"");
+-	tmp_cmdline.append(ToWiden(cfgvalues_filename.c_str()));
+-	tmp_cmdline.append(L"\" -write:\"");
+-	tmp_cmdline.append(ToWiden(pPath));
+-	tmp_cmdline.append(L"\\");
++  tmp_cmdline.assign(L"\"");
++  tmp_cmdline.append(ToWiden(cfgvalues_filename.c_str()));
++  tmp_cmdline.append(L"\" -write:\"");
++  tmp_cmdline.append(ToWiden(pPath));
++  tmp_cmdline.append(L"\\");
+ 
+-	cmdline.assign(tmp_cmdline);
+-	cmdline.append(ToWiden(SET_FILE_NAME "\""));
+-	exec_commandline(hInstall,cmdline);
++  cmdline.assign(tmp_cmdline);
++  cmdline.append(ToWiden(SET_FILE_NAME "\""));
++  exec_commandline(hInstall,cmdline);
+ 
+-	cmdline.assign(tmp_cmdline);
+-	cmdline.append(ToWiden(SETINITIAL_FILE_NAME "\" -setinitial"));
+-	exec_commandline(hInstall,cmdline);
++  cmdline.assign(tmp_cmdline);
++  cmdline.append(ToWiden(SETINITIAL_FILE_NAME "\" -setinitial"));
++  exec_commandline(hInstall,cmdline);
+ 
+-	cmdline.assign(tmp_cmdline);
+-	cmdline.append(ToWiden(AUTOINITIAL_FILE_NAME "\" -autoinitial"));
+-	exec_commandline(hInstall,cmdline);
++  cmdline.assign(tmp_cmdline);
++  cmdline.append(ToWiden(AUTOINITIAL_FILE_NAME "\" -autoinitial"));
++  exec_commandline(hInstall,cmdline);
+ 
+-	cmdline.assign(tmp_cmdline);
+-	cmdline.append(ToWiden(SET_ADDLIST_FILE_NAME "\" -addtolist"));
+-	exec_commandline(hInstall,cmdline);
++  cmdline.assign(tmp_cmdline);
++  cmdline.append(ToWiden(SET_ADDLIST_FILE_NAME "\" -addtolist"));
++  exec_commandline(hInstall,cmdline);
+ 
+-	cmdline.assign(tmp_cmdline);
+-	cmdline.append(ToWiden(SET_ADDLISTUNIQUE_FILE_NAME "\" -addtolistunique"));
+-	exec_commandline(hInstall,cmdline);
++  cmdline.assign(tmp_cmdline);
++  cmdline.append(ToWiden(SET_ADDLISTUNIQUE_FILE_NAME "\" -addtolistunique"));
++  exec_commandline(hInstall,cmdline);
+ 
+ LExit:
+-	ReleaseStr(pwzCAData);
++  ReleaseStr(pwzCAData);
+ 
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+@@ -1039,419 +1477,419 @@ LExit:
+ 
+ bool JEscape( std::wstring& res, wchar_t ch, wchar_t ch1 )
+ {
+-	bool ret = false;
+-	switch(ch)
+-	{
+-		case L'/':
+-			if(ch1==';')
+-			{
+-				ret = true;
+-				res.push_back( ch1 );
+-				break;
+-			}
+-		res.append(L"//");
+-		break;
+-		case L'"':
+-		res.append(L"/\"");
+-		break;
+-		case L';':
+-		res.append(L"/;");
+-		break;
+-		default:
+-		res.push_back( ch );
+-	}
+-	return ret;
++  bool ret = false;
++  switch(ch)
++  {
++    case L'/':
++      if(ch1==';')
++      {
++        ret = true;
++        res.push_back( ch1 );
++        break;
++      }
++    res.append(L"//");
++    break;
++    case L'"':
++    res.append(L"/\"");
++    break;
++    case L';':
++    res.append(L"/;");
++    break;
++    default:
++    res.push_back( ch );
++  }
++  return ret;
+   }
+ 
+ std::wstring escape_str(const std::wstring& strpar)
+ {
+-	std::wstring buf;
+-	for(std::wstring::const_iterator it=strpar.begin(); it!=strpar.end();++it)
+-		if(JEscape(buf,*it, *(it+1)))
+-			if((it+1)!=strpar.end())
+-				++it;
+-	return buf;
++  std::wstring buf;
++  for(std::wstring::const_iterator it=strpar.begin(); it!=strpar.end();++it)
++    if(JEscape(buf,*it, *(it+1)))
++      if((it+1)!=strpar.end())
++        ++it;
++  return buf;
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hInstall)
+ {
+-	const LPCWSTR vcsCfgTableQuery = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags` FROM `";
+-	const LPCWSTR vcsCfgTableQueryC = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags`, `Entry_Condition` FROM `";
+-	
+-	#define CFGPATHSEPERATOR ';'
++  const LPCWSTR vcsCfgTableQuery = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags` FROM `";
++  const LPCWSTR vcsCfgTableQueryC = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags`, `Entry_Condition` FROM `";
++  
++  #define CFGPATHSEPERATOR ';'
+ 
+-	enum eCfgQuery
+-	{
+-		cn_Cfg_Path = 1,
+-		cn_Cfg_Entry_Type,
+-		cn_Cfg_Entry_Value,
+-		cn_Cfg_Entry_Meta,
+-		cn_Cfg_Entry_Flags,
+-		cn_Entry_Condition,
+-	};
+-	enum eCfgSetMode
+-	{
+-		cf_set,
+-		cf_setinitial,
+-		cf_autoinitial,
+-	};
+-	enum eCfgSetlistFlags
+-	{
+-		cf_none,
+-		cf_addtolist,
+-		cf_addtolistunique,
+-	};
++  enum eCfgQuery
++  {
++    cn_Cfg_Path = 1,
++    cn_Cfg_Entry_Type,
++    cn_Cfg_Entry_Value,
++    cn_Cfg_Entry_Meta,
++    cn_Cfg_Entry_Flags,
++    cn_Entry_Condition,
++  };
++  enum eCfgSetMode
++  {
++    cf_set,
++    cf_setinitial,
++    cf_autoinitial,
++  };
++  enum eCfgSetlistFlags
++  {
++    cf_none,
++    cf_addtolist,
++    cf_addtolistunique,
++  };
+ 
+     LPWSTR pwzPath = NULL, pwzType = NULL, pwzValue = NULL, pwzMeta = NULL, pwzFlags = NULL, pwzCondition = NULL;
+-	bool cfg_table_condition_present;
+-	eCfgSetMode fCfgSet;
+-	eCfgSetlistFlags fCfgSetList;
+-	bool fDelete;
++  bool cfg_table_condition_present;
++  eCfgSetMode fCfgSet;
++  eCfgSetlistFlags fCfgSetList;
++  bool fDelete;
+ 
+-	PMSIHANDLE hView, hRec;
++  PMSIHANDLE hView, hRec;
+ 
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	std::ofstream test_file;
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  std::ofstream test_file;
+ 
+-	std::wstring sql_gen_select;
++  std::wstring sql_gen_select;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
+ 
+-	hr = WcaInitialize(hInstall, "CA_ProcessCFGTable");
+-	dbstrs << L"MSI SETUP CA_ProcessCFGTable: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  hr = WcaInitialize(hInstall, "CA_ProcessCFGTable");
++  dbstrs << L"MSI SETUP CA_ProcessCFGTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzTablePropertyValue = NULL;
++  LPWSTR pwzTablePropertyValue = NULL;
+ 
+-	hr = WcaGetProperty(L"CFG_TABLE_PROP", &pwzTablePropertyValue);
+-	ExitOnFailure(hr, "Failed to get CFG_TABLE_PROP property value");
+-	dbstrs << "MSI SETUP CA_ProcessCFGTable: Read CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
++  hr = WcaGetProperty(L"CFG_TABLE_PROP", &pwzTablePropertyValue);
++  ExitOnFailure(hr, "Failed to get CFG_TABLE_PROP property value");
++  dbstrs << "MSI SETUP CA_ProcessCFGTable: Read CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
+ 
+     if (S_OK != WcaTableExists(pwzTablePropertyValue))
+     {
+-		dbstrs << "MSI SETUP CA_ProcessCFGTable: Skipping CA_ProcessCFGTable() because CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
+-		Log_Str(dbstrs);
++    dbstrs << "MSI SETUP CA_ProcessCFGTable: Skipping CA_ProcessCFGTable() because CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++    Log_Str(dbstrs);
+ 
+         hr = S_FALSE;
+-		ExitOnFailure(hr, "Skipping CA_ProcessCFGTable()");
++    ExitOnFailure(hr, "Skipping CA_ProcessCFGTable()");
+     }
+ 
+-	sql_gen_select.assign(vcsCfgTableQueryC);
+-	sql_gen_select.append(pwzTablePropertyValue);
+-	sql_gen_select.append(L"`");
++  sql_gen_select.assign(vcsCfgTableQueryC);
++  sql_gen_select.append(pwzTablePropertyValue);
++  sql_gen_select.append(L"`");
+     hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+-	cfg_table_condition_present = true;
+-	if( hr != S_OK)
+-	{
+-		sql_gen_select.assign(vcsCfgTableQuery);
+-		sql_gen_select.append(pwzTablePropertyValue);
+-		sql_gen_select.append(L"`");
+-		hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+-		cfg_table_condition_present = false;
+-	}
++  cfg_table_condition_present = true;
++  if( hr != S_OK)
++  {
++    sql_gen_select.assign(vcsCfgTableQuery);
++    sql_gen_select.append(pwzTablePropertyValue);
++    sql_gen_select.append(L"`");
++    hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++    cfg_table_condition_present = false;
++  }
+     ExitOnFailure(hr, "Failed to open view on [CFG_TABLE_PROP] table");
+ 
+-	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
+     {
+-		fDelete = false;
+-		fCfgSet = cf_set;
+-		fCfgSetList = cf_none;
+-		strbuf.str(std::wstring());
+-
+-		if(cfg_table_condition_present)
+-		{
+-			hr = WcaGetRecordFormattedString(hRec, cn_Entry_Condition, &pwzCondition);
+-			ExitOnFailure(hr, "failed to get Entry_Condition from [CFG_TABLE_PROP] table");
+-			if (pwzCondition && *pwzCondition)
+-			{
+-				MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzCondition);
+-				if (MSICONDITION_ERROR == condition)
+-				{
+-					hr = E_INVALIDARG;
+-					ExitOnFailure(hr, "failed to process condition from [CFG_TABLE_PROP] table");
+-				}
+-				else if (MSICONDITION_FALSE == condition)
+-				{
+-					dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = FALSE" << std::endl;
+-					Log_Str(dbstrs);
+-					continue; // skip processing this entry
+-				}
+-				dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = TRUE" << std::endl;
+-				Log_Str(dbstrs);
+-			}
+-		}
++    fDelete = false;
++    fCfgSet = cf_set;
++    fCfgSetList = cf_none;
++    strbuf.str(std::wstring());
++
++    if(cfg_table_condition_present)
++    {
++      hr = WcaGetRecordFormattedString(hRec, cn_Entry_Condition, &pwzCondition);
++      ExitOnFailure(hr, "failed to get Entry_Condition from [CFG_TABLE_PROP] table");
++      if (pwzCondition && *pwzCondition)
++      {
++        MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzCondition);
++        if (MSICONDITION_ERROR == condition)
++        {
++          hr = E_INVALIDARG;
++          ExitOnFailure(hr, "failed to process condition from [CFG_TABLE_PROP] table");
++        }
++        else if (MSICONDITION_FALSE == condition)
++        {
++          dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = FALSE" << std::endl;
++          Log_Str(dbstrs);
++          continue; // skip processing this entry
++        }
++        dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = TRUE" << std::endl;
++        Log_Str(dbstrs);
++      }
++    }
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Path, &pwzPath);
+         ExitOnFailure(hr, "failed to get Cfg_Path from [CFG_TABLE_PROP] table");
+-		std::wstring wstrPath(pwzPath);
+-		size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
+-		if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
+-		strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
++    std::wstring wstrPath(pwzPath);
++    size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
++    if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
++    strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
+ 
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Type from [CFG_TABLE_PROP] table");
+-		strbuf << "typ=\"" << pwzType << "\" ";
++    strbuf << "typ=\"" << pwzType << "\" ";
+ 
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Value, &pwzValue);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Value from [CFG_TABLE_PROP] table");
+-		strbuf << "val=\"" << escape_str(std::wstring(pwzValue)).c_str() << "\" ";
++    strbuf << "val=\"" << escape_str(std::wstring(pwzValue)).c_str() << "\" ";
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Meta, &pwzMeta);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Meta from [CFG_TABLE_PROP] table");
+-		if(pwzMeta && wcslen(pwzMeta))
+-		{
+-			strbuf << pwzMeta << " ";
+-			dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+-			Log_Str(dbstrs);
+-		}
++    if(pwzMeta && wcslen(pwzMeta))
++    {
++      strbuf << pwzMeta << " ";
++      dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
++      Log_Str(dbstrs);
++    }
+ 
+-		dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
+-		Log_Str(dbstrs);
++    dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
++    Log_Str(dbstrs);
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Flags, &pwzFlags);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Flags from [CFG_TABLE_PROP] table");
+-		if(pwzFlags && wcslen(pwzFlags))
+-		{
+-			std::wstring strFlags(pwzFlags);
+-
+-			if(strFlags.find(L"delete")!=std::wstring::npos)
+-			{
+-				fDelete = true;
+-			} else
+-			if(strFlags.compare(L"setinitial")!=std::wstring::npos)
+-			{
+-				fCfgSet = cf_setinitial;
+-			} else
+-			if(strFlags.compare(L"autoinitial")!=std::wstring::npos)
+-			{
+-				fCfgSet = cf_autoinitial;
+-			};
+-
+-			if(strFlags.compare(L"addtolistunique")!=std::wstring::npos)
+-			{
+-				fCfgSetList = cf_addtolistunique;
+-			} else
+-			if(strFlags.compare(L"addtolist")!=std::wstring::npos)
+-			{
+-				fCfgSetList = cf_addtolist;
+-			}
+-			dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] : " << pwzFlags << std::endl;
+-			Log_Str(dbstrs);
+-		}
+-
+-		std::string cfg_file_name;
+-
+-		char * pPath;
+-		pPath = getenv ("TMP");
+-		if (pPath==NULL) pPath="";
+-		std::string strPath(pPath);
+-
+-		if(fDelete)
+-		{
+-			cfg_file_name=DEL_CFG_FILE_NAME;
+-		}
+-		else if(fCfgSet==cf_setinitial)
+-		{
+-			cfg_file_name=SETINITIAL_FILE_NAME;
+-		} else if(fCfgSet==cf_autoinitial)
+-		{
+-			cfg_file_name=AUTOINITIAL_FILE_NAME;
+-		} else
+-		{
+-			if(fCfgSetList==cf_addtolist)
+-			{
+-				cfg_file_name=SET_ADDLIST_FILE_NAME;
+-			}
+-			else if(fCfgSetList==cf_addtolistunique)
+-			{
+-				cfg_file_name=SET_ADDLISTUNIQUE_FILE_NAME;
+-			}
+-			else 
+-				cfg_file_name=SET_FILE_NAME;
+-		}
+-		std::string buf_filename(strPath);
+-		buf_filename.append("\\");
+-		buf_filename.append(cfg_file_name);
+-		dbstrs << L"CA_ProcessCFGTable write Entry to " << ToWiden(buf_filename.c_str()).c_str() << std::endl;
+-		Log_Str(dbstrs);
+-		test_file.open(buf_filename.c_str(), std::ios::out | std::ios::app);
+-		if (test_file.is_open())
+-		{
+-			test_file << ToNarrow(strbuf.str().c_str()).c_str() << std::endl;
+-			test_file.flush();
+-			test_file.close();
+-		} else
+-		{
+-			DWORD err = GetLastError();
+-			LPVOID lpMsgBuf;
+-			FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+-						  FORMAT_MESSAGE_FROM_SYSTEM | 
+-						  FORMAT_MESSAGE_IGNORE_INSERTS,
+-						  NULL, 
+-						  GetLastError(), 
+-						  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+-						  (LPTSTR) &lpMsgBuf, 
+-						  0, 
+-						  NULL);
+-
+-			dbstrs << "MSI SETUP CA_ProcessCFGTable failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
+-			Log_Str(dbstrs);
+-			LocalFree( lpMsgBuf );
+-		}
+-	}
++    if(pwzFlags && wcslen(pwzFlags))
++    {
++      std::wstring strFlags(pwzFlags);
++
++      if(strFlags.find(L"delete")!=std::wstring::npos)
++      {
++        fDelete = true;
++      } else
++      if(strFlags.compare(L"setinitial")!=std::wstring::npos)
++      {
++        fCfgSet = cf_setinitial;
++      } else
++      if(strFlags.compare(L"autoinitial")!=std::wstring::npos)
++      {
++        fCfgSet = cf_autoinitial;
++      };
++
++      if(strFlags.compare(L"addtolistunique")!=std::wstring::npos)
++      {
++        fCfgSetList = cf_addtolistunique;
++      } else
++      if(strFlags.compare(L"addtolist")!=std::wstring::npos)
++      {
++        fCfgSetList = cf_addtolist;
++      }
++      dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] : " << pwzFlags << std::endl;
++      Log_Str(dbstrs);
++    }
++
++    std::string cfg_file_name;
++
++    char * pPath;
++    pPath = getenv ("TMP");
++    if (pPath==NULL) pPath="";
++    std::string strPath(pPath);
++
++    if(fDelete)
++    {
++      cfg_file_name=DEL_CFG_FILE_NAME;
++    }
++    else if(fCfgSet==cf_setinitial)
++    {
++      cfg_file_name=SETINITIAL_FILE_NAME;
++    } else if(fCfgSet==cf_autoinitial)
++    {
++      cfg_file_name=AUTOINITIAL_FILE_NAME;
++    } else
++    {
++      if(fCfgSetList==cf_addtolist)
++      {
++        cfg_file_name=SET_ADDLIST_FILE_NAME;
++      }
++      else if(fCfgSetList==cf_addtolistunique)
++      {
++        cfg_file_name=SET_ADDLISTUNIQUE_FILE_NAME;
++      }
++      else 
++        cfg_file_name=SET_FILE_NAME;
++    }
++    std::string buf_filename(strPath);
++    buf_filename.append("\\");
++    buf_filename.append(cfg_file_name);
++    dbstrs << L"CA_ProcessCFGTable write Entry to " << ToWiden(buf_filename.c_str()).c_str() << std::endl;
++    Log_Str(dbstrs);
++    test_file.open(buf_filename.c_str(), std::ios::out | std::ios::app);
++    if (test_file.is_open())
++    {
++      test_file << ToNarrow(strbuf.str().c_str()).c_str() << std::endl;
++      test_file.flush();
++      test_file.close();
++    } else
++    {
++      DWORD err = GetLastError();
++      LPVOID lpMsgBuf;
++      FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
++              FORMAT_MESSAGE_FROM_SYSTEM | 
++              FORMAT_MESSAGE_IGNORE_INSERTS,
++              NULL, 
++              GetLastError(), 
++              MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
++              (LPTSTR) &lpMsgBuf, 
++              0, 
++              NULL);
++
++      dbstrs << "MSI SETUP CA_ProcessCFGTable failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
++      Log_Str(dbstrs);
++      LocalFree( lpMsgBuf );
++    }
++  }
+     if (hr == E_NOMOREITEMS)
+         hr = S_OK;
+     ExitOnFailure(hr, "Failure while processing [CFG_TABLE_PROP]");
+     hr = S_OK;
+ 
+ LExit:
+-	ReleaseStr(pwzTablePropertyValue);
+-	ReleaseStr(pwzPath);
+-	ReleaseStr(pwzType);
+-	ReleaseStr(pwzValue);
+-	ReleaseStr(pwzMeta);
+-	ReleaseStr(pwzFlags);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzTablePropertyValue);
++  ReleaseStr(pwzPath);
++  ReleaseStr(pwzType);
++  ReleaseStr(pwzValue);
++  ReleaseStr(pwzMeta);
++  ReleaseStr(pwzFlags);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ HRESULT clearTmpCfgFile(MSIHANDLE hInstall, std::string& basePath, std::string& filename)
+ {
+-	HRESULT hr = S_OK;
+-
+-	std::wstringstream dbstrs;
+-	std::ofstream test_file;
+-
+-	std::string buf_filename;
+-	buf_filename.assign(basePath);
+-	buf_filename.append("\\");
+-	buf_filename.append(filename);
+-	dbstrs << L"CA_ClearTmpCfgfiles" << ToWiden(buf_filename.c_str()).c_str() << std::endl;
+-	Log_Str(dbstrs);
+-	test_file.open(buf_filename.c_str(), std::ios::out);
+-	if (test_file.is_open())
+-	{
+-		test_file.close();
+-	} else
+-	{
+-		DWORD err = GetLastError();
+-		LPVOID lpMsgBuf;
+-		FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+-						FORMAT_MESSAGE_FROM_SYSTEM | 
+-						FORMAT_MESSAGE_IGNORE_INSERTS,
+-						NULL, 
+-						GetLastError(), 
+-						MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
+-						(LPTSTR) &lpMsgBuf, 
+-						0, 
+-						NULL);
+-
+-		dbstrs << "CA_ClearTmpCfgfiles failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
+-		Log_Str(dbstrs);
+-		LocalFree( lpMsgBuf );
+-		hr = E_UNEXPECTED;
+-	}
+-	return hr;
++  HRESULT hr = S_OK;
++
++  std::wstringstream dbstrs;
++  std::ofstream test_file;
++
++  std::string buf_filename;
++  buf_filename.assign(basePath);
++  buf_filename.append("\\");
++  buf_filename.append(filename);
++  dbstrs << L"CA_ClearTmpCfgfiles" << ToWiden(buf_filename.c_str()).c_str() << std::endl;
++  Log_Str(dbstrs);
++  test_file.open(buf_filename.c_str(), std::ios::out);
++  if (test_file.is_open())
++  {
++    test_file.close();
++  } else
++  {
++    DWORD err = GetLastError();
++    LPVOID lpMsgBuf;
++    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
++            FORMAT_MESSAGE_FROM_SYSTEM | 
++            FORMAT_MESSAGE_IGNORE_INSERTS,
++            NULL, 
++            GetLastError(), 
++            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
++            (LPTSTR) &lpMsgBuf, 
++            0, 
++            NULL);
++
++    dbstrs << "CA_ClearTmpCfgfiles failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
++    Log_Str(dbstrs);
++    LocalFree( lpMsgBuf );
++    hr = E_UNEXPECTED;
++  }
++  return hr;
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ClearTmpCfgfiles(MSIHANDLE hInstall)
+ {
+-	std::wstringstream dbstrs;
++  std::wstringstream dbstrs;
+ 
+-	std::string strPath;
+-	std::string cfg_file_name;
++  std::string strPath;
++  std::string cfg_file_name;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	hr = WcaInitialize(hInstall, "CA_ClearTmpCfgfiles");
+-	dbstrs << L"CA_ClearTmpCfgfiles: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_ClearTmpCfgfiles");
++  dbstrs << L"CA_ClearTmpCfgfiles: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	char * pPath;
+-	pPath = getenv ("TMP");
+-	if (pPath==NULL) pPath="";
+-	strPath.assign(pPath);
++  char * pPath;
++  pPath = getenv ("TMP");
++  if (pPath==NULL) pPath="";
++  strPath.assign(pPath);
+ 
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(DEL_CFG_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(DEL_CFG_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(SETINITIAL_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(SETINITIAL_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(AUTOINITIAL_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(AUTOINITIAL_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLIST_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLIST_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLISTUNIQUE_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLISTUNIQUE_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_FILE_NAME));
++  hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+ 
+ LExit:
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE hInstall)
+ {
+-	const LPCWSTR vcsCfgTableQuery = L"SELECT `Feature`, `State`, `Feature_Condition` FROM `";
+-	
+-	#define CFGFEATSEPERATOR ';'
++  const LPCWSTR vcsCfgTableQuery = L"SELECT `Feature`, `State`, `Feature_Condition` FROM `";
++  
++  #define CFGFEATSEPERATOR ';'
+ 
+-	enum eCfgQuery
+-	{
+-		cn_Feature = 1,
+-		cn_State,
+-		cn_Feature_Condition,
+-	};
++  enum eCfgQuery
++  {
++    cn_Feature = 1,
++    cn_State,
++    cn_Feature_Condition,
++  };
+ 
+-	LPWSTR pwzFeature = NULL, pwzState = NULL, pwzCondition = NULL;
++  LPWSTR pwzFeature = NULL, pwzState = NULL, pwzCondition = NULL;
+ 
+-	PMSIHANDLE hView, hRec;
++  PMSIHANDLE hView, hRec;
+ 
+-	std::wstringstream dbstrs;
++  std::wstringstream dbstrs;
+ 
+-	std::wstring sql_gen_select;
++  std::wstring sql_gen_select;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-	INSTALLSTATE iState = INSTALLSTATE_ABSENT;
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  INSTALLSTATE iState = INSTALLSTATE_ABSENT;
+ 
+ 
+-	hr = WcaInitialize(hInstall, "CA_ProcessFeatureTable");
+-	dbstrs << L"MSI SETUP CA_ProcessFeatureTable: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  hr = WcaInitialize(hInstall, "CA_ProcessFeatureTable");
++  dbstrs << L"MSI SETUP CA_ProcessFeatureTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzTablePropertyValue = NULL;
++  LPWSTR pwzTablePropertyValue = NULL;
+ 
+-	hr = WcaGetProperty(L"FEATURE_TABLE_PROP", &pwzTablePropertyValue);
+-	ExitOnFailure(hr, "Failed to get FEATURE_TABLE_PROP property value");
+-	dbstrs << "MSI SETUP CA_ProcessFeatureTable: Read FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
++  hr = WcaGetProperty(L"FEATURE_TABLE_PROP", &pwzTablePropertyValue);
++  ExitOnFailure(hr, "Failed to get FEATURE_TABLE_PROP property value");
++  dbstrs << "MSI SETUP CA_ProcessFeatureTable: Read FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
+ 
+-	if (S_OK != WcaTableExists(pwzTablePropertyValue))
+-	{
+-		dbstrs << "MSI SETUP CA_ProcessFeatureTable: Skipping CA_ProcessFeatureTable() because FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
+-		Log_Str(dbstrs);
++  if (S_OK != WcaTableExists(pwzTablePropertyValue))
++  {
++    dbstrs << "MSI SETUP CA_ProcessFeatureTable: Skipping CA_ProcessFeatureTable() because FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++    Log_Str(dbstrs);
+ 
+-		hr = S_FALSE;
+-		ExitOnFailure(hr, "Skipping CA_ProcessFeatureTable()");
+-	}
++    hr = S_FALSE;
++    ExitOnFailure(hr, "Skipping CA_ProcessFeatureTable()");
++  }
+ 
+-	sql_gen_select.assign(vcsCfgTableQuery);
+-	sql_gen_select.append(pwzTablePropertyValue);
+-	sql_gen_select.append(L"`");
+-	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+-	ExitOnFailure(hr, "Failed to open view on [FEATURE_TABLE_PROP] table");
++  sql_gen_select.assign(vcsCfgTableQuery);
++  sql_gen_select.append(pwzTablePropertyValue);
++  sql_gen_select.append(L"`");
++  hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++  ExitOnFailure(hr, "Failed to open view on [FEATURE_TABLE_PROP] table");
+ 
+-	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
+   {
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Feature_Condition, &pwzCondition);
+@@ -1474,28 +1912,28 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Feature, &pwzFeature);
+     ExitOnFailure(hr, "failed to get Feature from [FEATURE_TABLE_PROP] table");
+-	std::wstring wstrFeature(pwzFeature);
+-	size_t cutPos = wstrFeature.rfind(CFGFEATSEPERATOR);
+-	if(cutPos!=std::wstring::npos) wstrFeature=wstrFeature.erase(cutPos);
+-	dbstrs << L"Feature from [FEATURE_TABLE_PROP] Feature=" << pwzFeature << std::endl;
+-	Log_Str(dbstrs);
++  std::wstring wstrFeature(pwzFeature);
++  size_t cutPos = wstrFeature.rfind(CFGFEATSEPERATOR);
++  if(cutPos!=std::wstring::npos) wstrFeature=wstrFeature.erase(cutPos);
++  dbstrs << L"Feature from [FEATURE_TABLE_PROP] Feature=" << pwzFeature << std::endl;
++  Log_Str(dbstrs);
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_State, &pwzState);
+     ExitOnFailure(hr, "failed to get State from [FEATURE_TABLE_PROP] table");
+-	dbstrs << L"State from [FEATURE_TABLE_PROP] State=" << pwzState << std::endl;
+-	Log_Str(dbstrs);
++  dbstrs << L"State from [FEATURE_TABLE_PROP] State=" << pwzState << std::endl;
++  Log_Str(dbstrs);
+ 
+-	if (pwzFeature && *pwzFeature)
+-	{
+-		std::wstring strState(pwzState);
+-		if(!strState.compare(L"ABSENT"))
+-			iState = INSTALLSTATE_ABSENT;
+-		else
+-			iState = INSTALLSTATE_LOCAL;
+-		UINT er = ::MsiSetFeatureState(hInstall, pwzFeature, iState );
+-		dbstrs << L"MsiSetFeatureState (" << pwzFeature << "," << iState << ") ret=" << er << std::endl;
+-		Log_Str(dbstrs);
+-	}    
++  if (pwzFeature && *pwzFeature)
++  {
++    std::wstring strState(pwzState);
++    if(!strState.compare(L"ABSENT"))
++      iState = INSTALLSTATE_ABSENT;
++    else
++      iState = INSTALLSTATE_LOCAL;
++    UINT er = ::MsiSetFeatureState(hInstall, pwzFeature, iState );
++    dbstrs << L"MsiSetFeatureState (" << pwzFeature << "," << iState << ") ret=" << er << std::endl;
++    Log_Str(dbstrs);
++  }    
+ 
+   }
+   if (hr == E_NOMOREITEMS)
+@@ -1505,69 +1943,69 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE
+   hr = S_OK;
+ 
+ LExit:
+-	ReleaseStr(pwzTablePropertyValue);
+-	ReleaseStr(pwzFeature);
+-	ReleaseStr(pwzState);
+-	ReleaseStr(pwzCondition);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzTablePropertyValue);
++  ReleaseStr(pwzFeature);
++  ReleaseStr(pwzState);
++  ReleaseStr(pwzCondition);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessPropTable(MSIHANDLE hInstall)
+ {
+-	const LPCWSTR vcsCfgTableQuery = L"SELECT `Property`, `Value`, `Prop_Entry_Flags`, `Prop_Condition` FROM `";
+-	
+-	#define PROPNAMESEPERATOR ';'
++  const LPCWSTR vcsCfgTableQuery = L"SELECT `Property`, `Value`, `Prop_Entry_Flags`, `Prop_Condition` FROM `";
++  
++  #define PROPNAMESEPERATOR ';'
+ 
+-	enum eCfgQuery
+-	{
+-		cn_Property = 1,
+-		cn_Value,
+-		cn_Prop_Entry_Flags,
+-		cn_Prop_Condition,
+-	};
++  enum eCfgQuery
++  {
++    cn_Property = 1,
++    cn_Value,
++    cn_Prop_Entry_Flags,
++    cn_Prop_Condition,
++  };
+ 
+-	bool fl_ifempty = false;
++  bool fl_ifempty = false;
+ 
+-	LPWSTR pwzProperty = NULL, pwzValue = NULL, pwzProp_Entry_Flags = NULL, pwzCondition = NULL;
++  LPWSTR pwzProperty = NULL, pwzValue = NULL, pwzProp_Entry_Flags = NULL, pwzCondition = NULL;
+ 
+-	PMSIHANDLE hView, hRec;
++  PMSIHANDLE hView, hRec;
+ 
+-	std::wstringstream dbstrs;
++  std::wstringstream dbstrs;
+ 
+-	std::wstring sql_gen_select;
++  std::wstring sql_gen_select;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
+ 
+-	hr = WcaInitialize(hInstall, "CA_ProcessPropTable");
+-	dbstrs << L"MSI SETUP CA_ProcessPropTable: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  hr = WcaInitialize(hInstall, "CA_ProcessPropTable");
++  dbstrs << L"MSI SETUP CA_ProcessPropTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzTablePropertyValue = NULL;
++  LPWSTR pwzTablePropertyValue = NULL;
+ 
+-	hr = WcaGetProperty(L"PROP_TABLE_PROP", &pwzTablePropertyValue);
+-	ExitOnFailure(hr, "Failed to get PROP_TABLE_PROP property value");
+-	dbstrs << "MSI SETUP CA_ProcessPropTable: Read PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
++  hr = WcaGetProperty(L"PROP_TABLE_PROP", &pwzTablePropertyValue);
++  ExitOnFailure(hr, "Failed to get PROP_TABLE_PROP property value");
++  dbstrs << "MSI SETUP CA_ProcessPropTable: Read PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
+ 
+-	if (S_OK != WcaTableExists(pwzTablePropertyValue))
+-	{
+-		dbstrs << "MSI SETUP CA_ProcessPropTable: Skipping CA_ProcessPropTable() because PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
+-		Log_Str(dbstrs);
++  if (S_OK != WcaTableExists(pwzTablePropertyValue))
++  {
++    dbstrs << "MSI SETUP CA_ProcessPropTable: Skipping CA_ProcessPropTable() because PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++    Log_Str(dbstrs);
+ 
+-		hr = S_FALSE;
+-		ExitOnFailure(hr, "Skipping CA_ProcessPropTable()");
+-	}
++    hr = S_FALSE;
++    ExitOnFailure(hr, "Skipping CA_ProcessPropTable()");
++  }
+ 
+-	sql_gen_select.assign(vcsCfgTableQuery);
+-	sql_gen_select.append(pwzTablePropertyValue);
+-	sql_gen_select.append(L"`");
+-	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+-	ExitOnFailure(hr, "Failed to open view on [PROP_TABLE_PROP] table");
++  sql_gen_select.assign(vcsCfgTableQuery);
++  sql_gen_select.append(pwzTablePropertyValue);
++  sql_gen_select.append(L"`");
++  hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++  ExitOnFailure(hr, "Failed to open view on [PROP_TABLE_PROP] table");
+ 
+-	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
+   {
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Prop_Condition, &pwzCondition);
+@@ -1590,52 +2028,52 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessPropTable(MSIHANDLE hIn
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Property, &pwzProperty);
+     ExitOnFailure(hr, "failed to get Propertyname from [PROP_TABLE_PROP] table");
+-	std::wstring wstrPropname(pwzProperty);
+-	size_t cutPos = wstrPropname.rfind(PROPNAMESEPERATOR);
+-	if(cutPos!=std::wstring::npos) wstrPropname=wstrPropname.erase(cutPos);
+-	dbstrs << L"Propertyname from [PROP_TABLE_PROP] Feature=" << pwzProperty << std::endl;
+-	Log_Str(dbstrs);
++  std::wstring wstrPropname(pwzProperty);
++  size_t cutPos = wstrPropname.rfind(PROPNAMESEPERATOR);
++  if(cutPos!=std::wstring::npos) wstrPropname=wstrPropname.erase(cutPos);
++  dbstrs << L"Propertyname from [PROP_TABLE_PROP] Feature=" << pwzProperty << std::endl;
++  Log_Str(dbstrs);
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Value, &pwzValue);
+     ExitOnFailure(hr, "failed to get Value from [PROP_TABLE_PROP] table");
+-	std::wstring wstrValue(pwzValue);
+-	dbstrs << L"Value from [PROP_TABLE_PROP] Feature=" << pwzValue << std::endl;
+-	Log_Str(dbstrs);
++  std::wstring wstrValue(pwzValue);
++  dbstrs << L"Value from [PROP_TABLE_PROP] Feature=" << pwzValue << std::endl;
++  Log_Str(dbstrs);
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Prop_Entry_Flags, &pwzProp_Entry_Flags);
+-	if(pwzProp_Entry_Flags)
+-	{
+-		dbstrs << L"Prop_Entry_Flags from [FEATURE_TABLE_PROP] Flags=" << pwzProp_Entry_Flags << std::endl;
+-		Log_Str(dbstrs);
+-	}
+-	if (pwzProperty && *pwzProperty && pwzValue)
+-	{
+-		std::wstring strFlags(pwzProp_Entry_Flags);
+-		if(strFlags.find(L"escapeforcfgvalues")!=std::wstring::npos)
+-			wstrValue=escape_str(wstrValue);
+-		if(strFlags.find(L"ifempty")!=std::wstring::npos)
+-			fl_ifempty=true;
+-
+-		bool setit=true;
+-		if(fl_ifempty)
+-		{
+-			if(WcaIsPropertySetW(pwzProperty))
+-			{
+-				setit = false;
+-			}
+-		}
+-
+-		if(setit)
+-		{
+-			HRESULT er = WcaSetProperty(pwzProperty,pwzValue);
+-			dbstrs << L"WcaSetProperty (" << pwzProperty << "," << pwzValue << ") ret=" << er << std::endl;
+-			Log_Str(dbstrs);
+-		}
+-		else
+-		{
+-			dbstrs << L"WcaSetProperty not set (" << pwzProperty << ") ifempty=" << fl_ifempty << std::endl;
+-			Log_Str(dbstrs);
+-		}
++  if(pwzProp_Entry_Flags)
++  {
++    dbstrs << L"Prop_Entry_Flags from [FEATURE_TABLE_PROP] Flags=" << pwzProp_Entry_Flags << std::endl;
++    Log_Str(dbstrs);
++  }
++  if (pwzProperty && *pwzProperty && pwzValue)
++  {
++    std::wstring strFlags(pwzProp_Entry_Flags);
++    if(strFlags.find(L"escapeforcfgvalues")!=std::wstring::npos)
++      wstrValue=escape_str(wstrValue);
++    if(strFlags.find(L"ifempty")!=std::wstring::npos)
++      fl_ifempty=true;
++
++    bool setit=true;
++    if(fl_ifempty)
++    {
++      if(WcaIsPropertySetW(pwzProperty))
++      {
++        setit = false;
++      }
++    }
++
++    if(setit)
++    {
++      HRESULT er = WcaSetProperty(pwzProperty,pwzValue);
++      dbstrs << L"WcaSetProperty (" << pwzProperty << "," << pwzValue << ") ret=" << er << std::endl;
++      Log_Str(dbstrs);
++    }
++    else
++    {
++      dbstrs << L"WcaSetProperty not set (" << pwzProperty << ") ifempty=" << fl_ifempty << std::endl;
++      Log_Str(dbstrs);
++    }
+ 
+ }    
+ 
+@@ -1647,68 +2085,68 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessPropTable(MSIHANDLE hIn
+   hr = S_OK;
+ 
+ LExit:
+-	ReleaseStr(pwzTablePropertyValue);
+-	ReleaseStr(pwzProperty);
+-	ReleaseStr(pwzValue);
+-	ReleaseStr(pwzProp_Entry_Flags);
+-	ReleaseStr(pwzCondition);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzTablePropertyValue);
++  ReleaseStr(pwzProperty);
++  ReleaseStr(pwzValue);
++  ReleaseStr(pwzProp_Entry_Flags);
++  ReleaseStr(pwzCondition);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessSetCfgTableTable(MSIHANDLE hInstall)
+ {
+-	const LPCWSTR vcsCfgTableTableQuery = L"SELECT `TableName`, `TableExec_Condition` FROM `";
+-	
+-	#define CA_NAMESETCFGTAB L"CA_GLOBAL_PROCESS_SETCFGTAB"
++  const LPCWSTR vcsCfgTableTableQuery = L"SELECT `TableName`, `TableExec_Condition` FROM `";
++  
++  #define CA_NAMESETCFGTAB L"CA_GLOBAL_PROCESS_SETCFGTAB"
+ 
+-	enum eCfgTableQuery
+-	{
+-		cn_TableName = 1,
+-		cn_TableExec_Condition,
+-	};
++  enum eCfgTableQuery
++  {
++    cn_TableName = 1,
++    cn_TableExec_Condition,
++  };
+ 
+-	bool fl_ifempty = false;
++  bool fl_ifempty = false;
+ 
+-	LPWSTR pwzTableName = NULL, pwzTE_Condition = NULL;
++  LPWSTR pwzTableName = NULL, pwzTE_Condition = NULL;
+ 
+-	PMSIHANDLE hView, hRec;
++  PMSIHANDLE hView, hRec;
+ 
+-	std::wstringstream dbstrs;
++  std::wstringstream dbstrs;
+ 
+-	std::wstring sql_gen_select;
++  std::wstring sql_gen_select;
+ 
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
+ 
+-	hr = WcaInitialize(hInstall, "CA_ProcessSetCfgTableTable");
+-	dbstrs << L"MSI SETUP CA_ProcessSetCfgTableTable: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
++  hr = WcaInitialize(hInstall, "CA_ProcessSetCfgTableTable");
++  dbstrs << L"MSI SETUP CA_ProcessSetCfgTableTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzTablePropertyValue = NULL;
++  LPWSTR pwzTablePropertyValue = NULL;
+ 
+-	hr = WcaGetProperty(L"TABLE_TABLE_PROP", &pwzTablePropertyValue);
+-	ExitOnFailure(hr, "Failed to get TABLE_TABLE_PROP property value");
+-	dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Read TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
++  hr = WcaGetProperty(L"TABLE_TABLE_PROP", &pwzTablePropertyValue);
++  ExitOnFailure(hr, "Failed to get TABLE_TABLE_PROP property value");
++  dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Read TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++  Log_Str(dbstrs);
+ 
+-	if (S_OK != WcaTableExists(pwzTablePropertyValue))
+-	{
+-		dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Skipping CA_ProcessPropTable() because TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
+-		Log_Str(dbstrs);
++  if (S_OK != WcaTableExists(pwzTablePropertyValue))
++  {
++    dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Skipping CA_ProcessPropTable() because TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++    Log_Str(dbstrs);
+ 
+-		hr = S_FALSE;
+-		ExitOnFailure(hr, "Skipping CA_ProcessSetCfgTableTable()");
+-	}
++    hr = S_FALSE;
++    ExitOnFailure(hr, "Skipping CA_ProcessSetCfgTableTable()");
++  }
+ 
+-	sql_gen_select.assign(vcsCfgTableTableQuery);
+-	sql_gen_select.append(pwzTablePropertyValue);
+-	sql_gen_select.append(L"`");
+-	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+-	ExitOnFailure(hr, "Failed to open view on [TABLE_TABLE_PROP] table");
++  sql_gen_select.assign(vcsCfgTableTableQuery);
++  sql_gen_select.append(pwzTablePropertyValue);
++  sql_gen_select.append(L"`");
++  hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++  ExitOnFailure(hr, "Failed to open view on [TABLE_TABLE_PROP] table");
+ 
+-	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
+   {
+     hr = WcaGetRecordFormattedString(hRec, cn_TableExec_Condition, &pwzTE_Condition);
+     ExitOnFailure(hr, "failed to get TableExec_Condition from [TABLE_TABLE_PROP] table");
+@@ -1730,19 +2168,19 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessSetCfgTableTable(MSIHAN
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_TableName, &pwzTableName);
+     ExitOnFailure(hr, "failed to get Propertyname from [TABLE_TABLE_PROP] table");
+-	std::wstring wstrPropname(pwzTableName);
+-	dbstrs << L"Propertyname from [TABLE_TABLE_PROP] Feature=" << pwzTableName << std::endl;
+-	Log_Str(dbstrs);
++  std::wstring wstrPropname(pwzTableName);
++  dbstrs << L"Propertyname from [TABLE_TABLE_PROP] Feature=" << pwzTableName << std::endl;
++  Log_Str(dbstrs);
+ 
+-	if (pwzTableName && *pwzTableName )
+-	{
+-		HRESULT er = WcaSetProperty(L"CFG_TABLE_PROP",pwzTableName);
+-		dbstrs << L"WcaSetProperty (" << L"CFG_TABLE_PROP" << "," << pwzTableName << ") ret=" << er << std::endl;
+-		Log_Str(dbstrs);
+-	}
+-	else
+-		continue;
+-	::MsiDoAction(hInstall,CA_NAMESETCFGTAB);
++  if (pwzTableName && *pwzTableName )
++  {
++    HRESULT er = WcaSetProperty(L"CFG_TABLE_PROP",pwzTableName);
++    dbstrs << L"WcaSetProperty (" << L"CFG_TABLE_PROP" << "," << pwzTableName << ") ret=" << er << std::endl;
++    Log_Str(dbstrs);
++  }
++  else
++    continue;
++  ::MsiDoAction(hInstall,CA_NAMESETCFGTAB);
+ 
+   }
+   if (hr == E_NOMOREITEMS)
+@@ -1752,280 +2190,280 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessSetCfgTableTable(MSIHAN
+   hr = S_OK;
+ 
+ LExit:
+-	ReleaseStr(pwzTablePropertyValue);
+-	ReleaseStr(pwzTableName);
+-	ReleaseStr(pwzTE_Condition);
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzTablePropertyValue);
++  ReleaseStr(pwzTableName);
++  ReleaseStr(pwzTE_Condition);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ void fetchJavaVersions(TUNIQUESET& RegJavaVersionList)
+ {
+-	const TCHAR* java_Registry_Path = L"Software\\JavaSoft\\Java Runtime Environment";
+-	const int MAX_KEY_LENGTH = 255;
+-	const int MAX_VALUE_NAME = 16383;
++  const TCHAR* java_Registry_Path = L"Software\\JavaSoft\\Java Runtime Environment";
++  const int MAX_KEY_LENGTH = 255;
++  const int MAX_VALUE_NAME = 16383;
+ 
+-	HKEY hkey=0;
++  HKEY hkey=0;
+ 
+-	RegJavaVersionList.clear();
++  RegJavaVersionList.clear();
+     if(RegOpenKeyEx(HKEY_LOCAL_MACHINE,java_Registry_Path,0,KEY_READ | KEY_WOW64_32KEY,&hkey) == ERROR_SUCCESS)
+-	{
+-		TCHAR    achKey[MAX_KEY_LENGTH+1];   // buffer for subkey name
+-		DWORD    cbName;                   // size of name string 
+-		TCHAR    achClass[MAX_PATH+1] = TEXT("");  // buffer for class name 
+-		DWORD    cchClassName = MAX_PATH;  // size of class string 
+-		DWORD    cSubKeys=0;               // number of subkeys 
+-		DWORD    cbMaxSubKey;              // longest subkey size 
+-		DWORD    cchMaxClass;              // longest class string 
+-		DWORD    cValues;              // number of values for key 
+-		DWORD    cchMaxValue;          // longest value name 
+-		DWORD    cbMaxValueData;       // longest value data 
+-		DWORD    cbSecurityDescriptor; // size of security descriptor 
+-		FILETIME ftLastWriteTime;      // last write time 
++  {
++    TCHAR    achKey[MAX_KEY_LENGTH+1];   // buffer for subkey name
++    DWORD    cbName;                   // size of name string 
++    TCHAR    achClass[MAX_PATH+1] = TEXT("");  // buffer for class name 
++    DWORD    cchClassName = MAX_PATH;  // size of class string 
++    DWORD    cSubKeys=0;               // number of subkeys 
++    DWORD    cbMaxSubKey;              // longest subkey size 
++    DWORD    cchMaxClass;              // longest class string 
++    DWORD    cValues;              // number of values for key 
++    DWORD    cchMaxValue;          // longest value name 
++    DWORD    cbMaxValueData;       // longest value data 
++    DWORD    cbSecurityDescriptor; // size of security descriptor 
++    FILETIME ftLastWriteTime;      // last write time 
+  
+-		DWORD i, retCode; 
++    DWORD i, retCode; 
+  
+-		DWORD cchValue = MAX_VALUE_NAME; 
++    DWORD cchValue = MAX_VALUE_NAME; 
+  
+-		retCode = RegQueryInfoKey(
+-			hkey,                    // key handle 
+-			achClass,                // buffer for class name 
+-			&cchClassName,           // size of class string 
+-			NULL,                    // reserved 
+-			&cSubKeys,               // number of subkeys 
+-			&cbMaxSubKey,            // longest subkey size 
+-			&cchMaxClass,            // longest class string 
+-			&cValues,                // number of values for this key 
+-			&cchMaxValue,            // longest value name 
+-			&cbMaxValueData,         // longest value data 
+-			&cbSecurityDescriptor,   // security descriptor 
+-			&ftLastWriteTime);       // last write time 
++    retCode = RegQueryInfoKey(
++      hkey,                    // key handle 
++      achClass,                // buffer for class name 
++      &cchClassName,           // size of class string 
++      NULL,                    // reserved 
++      &cSubKeys,               // number of subkeys 
++      &cbMaxSubKey,            // longest subkey size 
++      &cchMaxClass,            // longest class string 
++      &cValues,                // number of values for this key 
++      &cchMaxValue,            // longest value name 
++      &cbMaxValueData,         // longest value data 
++      &cbSecurityDescriptor,   // security descriptor 
++      &ftLastWriteTime);       // last write time 
+     
+-		if (cSubKeys)
+-		{
+-			for (i=0; i<cSubKeys; i++) 
+-			{ 
+-				cbName = MAX_KEY_LENGTH;
+-				retCode = RegEnumKeyEx(hkey, i,
+-						 achKey, 
+-						 &cbName, 
+-						 NULL, 
+-						 NULL, 
+-						 NULL, 
+-						 &ftLastWriteTime); 
+-				if (retCode == ERROR_SUCCESS) 
+-				{
+-					std::wstring strkeyPathBuf(java_Registry_Path);
+-					strkeyPathBuf.append(L"\\").append(achKey);
+-					RegJavaVersionList.insert(strkeyPathBuf);
+-				}
+-			}
+-		} 
+-		RegCloseKey(hkey);
+-	}
++    if (cSubKeys)
++    {
++      for (i=0; i<cSubKeys; i++) 
++      { 
++        cbName = MAX_KEY_LENGTH;
++        retCode = RegEnumKeyEx(hkey, i,
++             achKey, 
++             &cbName, 
++             NULL, 
++             NULL, 
++             NULL, 
++             &ftLastWriteTime); 
++        if (retCode == ERROR_SUCCESS) 
++        {
++          std::wstring strkeyPathBuf(java_Registry_Path);
++          strkeyPathBuf.append(L"\\").append(achKey);
++          RegJavaVersionList.insert(strkeyPathBuf);
++        }
++      }
++    } 
++    RegCloseKey(hkey);
++  }
+ 
+ }
+ 
+ void fetchjavaHomePaths(TUNIQUESET& JavaHomes, const TUNIQUESET& RegJavaVersionList)
+ {
+-	DWORD cbData;
+-	HKEY hkey=0;
+-	std::wstringstream dbstrs;
++  DWORD cbData;
++  HKEY hkey=0;
++  std::wstringstream dbstrs;
+ 
+-	const TCHAR* strJavaHome = L"JavaHome";
++  const TCHAR* strJavaHome = L"JavaHome";
+ 
+-	JavaHomes.clear();
+-	if(!RegJavaVersionList.empty())
+-	{
+-		for(std::set<std::wstring>::iterator it=RegJavaVersionList.begin(); it!=RegJavaVersionList.end();++it)
+-		{
+-			if(RegOpenKeyEx(HKEY_LOCAL_MACHINE,(*it).c_str(),0,KEY_READ | KEY_WOW64_32KEY,&hkey) == ERROR_SUCCESS)
+-			{
+-				if(    
+-					RegQueryValueEx( hkey,
+-						strJavaHome,
+-						NULL,
+-						NULL,
+-						NULL,
+-						&cbData ) == ERROR_SUCCESS
+-					)
+-				{
+-					TCHAR* wValBuffer = new TCHAR[cbData+1];
+-					wcsncpy_s(wValBuffer,cbData,L"",wcslen(L"")+1);
+-					if(    
+-						RegQueryValueEx( hkey,
+-							strJavaHome,
+-							NULL,
+-							NULL,
+-							(LPBYTE)wValBuffer,
+-							&cbData ) == ERROR_SUCCESS
+-						)
+-					{
+-						if(wcslen(wValBuffer))
+-							JavaHomes.insert(std::wstring(wValBuffer));
+-					}
+-					delete[] wValBuffer;
+-				}
+-				RegCloseKey(hkey);
+-			}
+-		}
+-	}
++  JavaHomes.clear();
++  if(!RegJavaVersionList.empty())
++  {
++    for(std::set<std::wstring>::iterator it=RegJavaVersionList.begin(); it!=RegJavaVersionList.end();++it)
++    {
++      if(RegOpenKeyEx(HKEY_LOCAL_MACHINE,(*it).c_str(),0,KEY_READ | KEY_WOW64_32KEY,&hkey) == ERROR_SUCCESS)
++      {
++        if(    
++          RegQueryValueEx( hkey,
++            strJavaHome,
++            NULL,
++            NULL,
++            NULL,
++            &cbData ) == ERROR_SUCCESS
++          )
++        {
++          TCHAR* wValBuffer = new TCHAR[cbData+1];
++          wcsncpy_s(wValBuffer,cbData,L"",wcslen(L"")+1);
++          if(    
++            RegQueryValueEx( hkey,
++              strJavaHome,
++              NULL,
++              NULL,
++              (LPBYTE)wValBuffer,
++              &cbData ) == ERROR_SUCCESS
++            )
++          {
++            if(wcslen(wValBuffer))
++              JavaHomes.insert(std::wstring(wValBuffer));
++          }
++          delete[] wValBuffer;
++        }
++        RegCloseKey(hkey);
++      }
++    }
++  }
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ModifyJavaPolicy(MSIHANDLE hInstall)
+ {
+-	const TCHAR* strJavaSubPath = L"\\lib\\security\\java.policy";
+-
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	TUNIQUESET sJavaVersions;
+-	TUNIQUESET sJavaHomes;
+-	std::string strJavaPolicy;
+-	std::string strJavaPolicySM;
+-
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-
+-	hr = WcaInitialize(hInstall, "CA_ModifyJavaPolicy");
+-	dbstrs << L"MSI SETUP CA_ModifyJavaPolicy: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
+-
+-	LPWSTR pwzJPPropertyValue = NULL;
+-	LPWSTR pwzJPSPropertyValue = NULL;
+-	LPWSTR pwzJPSBackupFValue = NULL;
+-
+-	hr = WcaGetFormattedProperty(L"JAVA_POLICY_ADD", &pwzJPPropertyValue);
+-	ExitOnFailure(hr, "Failed to get JAVA_POLICY_ADD property value");
+-	dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read JAVA_POLICY_ADD [" << pwzJPPropertyValue << "]";
+-	Log_Str(dbstrs);
+-	hr = WcaGetFormattedProperty(L"JAVA_POLICY_SEARCH_MASK", &pwzJPSPropertyValue);
+-	ExitOnFailure(hr, "Failed to get JAVA_POLICY_SEARCH_MASK property value");
+-	dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read JAVA_POLICY_SEARCH_MASK [" << pwzJPSPropertyValue << "]";
+-	Log_Str(dbstrs);
+-
+-	hr = WcaGetFormattedProperty(L"PROP_ProductCode", &pwzJPSBackupFValue);
+-	ExitOnFailure(hr, "Failed to get PROP_ProductCode property value");
+-	dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read PROP_ProductCode [" << pwzJPSBackupFValue << "]";
+-	Log_Str(dbstrs);
+-
+-	fetchJavaVersions(sJavaVersions);
+-	fetchjavaHomePaths(sJavaHomes,sJavaVersions);
+-	dbstrs << "Javahomes:" << std::endl;
+-	for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
+-	{
+-		dbstrs << (*it).c_str() << std::endl;
+-	}
+-	Log_Str(dbstrs);
++  const TCHAR* strJavaSubPath = L"\\lib\\security\\java.policy";
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++  TUNIQUESET sJavaVersions;
++  TUNIQUESET sJavaHomes;
++  std::string strJavaPolicy;
++  std::string strJavaPolicySM;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_ModifyJavaPolicy");
++  dbstrs << L"MSI SETUP CA_ModifyJavaPolicy: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  LPWSTR pwzJPPropertyValue = NULL;
++  LPWSTR pwzJPSPropertyValue = NULL;
++  LPWSTR pwzJPSBackupFValue = NULL;
++
++  hr = WcaGetFormattedProperty(L"JAVA_POLICY_ADD", &pwzJPPropertyValue);
++  ExitOnFailure(hr, "Failed to get JAVA_POLICY_ADD property value");
++  dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read JAVA_POLICY_ADD [" << pwzJPPropertyValue << "]";
++  Log_Str(dbstrs);
++  hr = WcaGetFormattedProperty(L"JAVA_POLICY_SEARCH_MASK", &pwzJPSPropertyValue);
++  ExitOnFailure(hr, "Failed to get JAVA_POLICY_SEARCH_MASK property value");
++  dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read JAVA_POLICY_SEARCH_MASK [" << pwzJPSPropertyValue << "]";
++  Log_Str(dbstrs);
++
++  hr = WcaGetFormattedProperty(L"PROP_ProductCode", &pwzJPSBackupFValue);
++  ExitOnFailure(hr, "Failed to get PROP_ProductCode property value");
++  dbstrs << "MSI SETUP CA_ModifyJavaPolicy: Read PROP_ProductCode [" << pwzJPSBackupFValue << "]";
++  Log_Str(dbstrs);
++
++  fetchJavaVersions(sJavaVersions);
++  fetchjavaHomePaths(sJavaHomes,sJavaVersions);
++  dbstrs << "Javahomes:" << std::endl;
++  for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
++  {
++    dbstrs << (*it).c_str() << std::endl;
++  }
++  Log_Str(dbstrs);
+ 
+-	strJavaPolicy = ToNarrow(pwzJPPropertyValue);
+-	strJavaPolicySM = ToNarrow(pwzJPSPropertyValue);
++  strJavaPolicy = ToNarrow(pwzJPPropertyValue);
++  strJavaPolicySM = ToNarrow(pwzJPSPropertyValue);
+ 
+-	bool bFoundMask;
+-	if(!sJavaHomes.empty())
+-	{
+-		for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
+-		{
+-			bFoundMask = false;
+-			std::ifstream fPolicyFile(ToNarrow(std::wstring(*it).append(strJavaSubPath).c_str()));
+-			if(fPolicyFile)
+-			{
++  bool bFoundMask;
++  if(!sJavaHomes.empty())
++  {
++    for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
++    {
++      bFoundMask = false;
++      std::ifstream fPolicyFile(ToNarrow(std::wstring(*it).append(strJavaSubPath).c_str()));
++      if(fPolicyFile)
++      {
+                 std::string s;
+                 if(fPolicyFile.good())
+-				{
+-					while (getline(fPolicyFile, s))
+-					{
+-						if(s.find(strJavaPolicySM) != std::string::npos)
+-						{
+-							dbstrs << "Found Searchmask [" << pwzJPSPropertyValue << "] in JavaPolicy [" << std::wstring(*it).append(strJavaSubPath).c_str() <<"] - no Changes applied" << std::endl;
+-							Log_Str(dbstrs);
+-							bFoundMask = true;
+-							break;						}
+-						}
+-				}
+-				if(!bFoundMask)
+-				{
+-					fPolicyFile.seekg(std::ios::beg);
+-					std::ofstream cpPolicy(ToNarrow(std::wstring(*it).append(strJavaSubPath).append(L"_back_").append(pwzJPSBackupFValue).c_str()), std::ios::out);
+-					if(cpPolicy)
+-					{
+-						if(cpPolicy.good())
+-						{
+- 							cpPolicy << fPolicyFile.rdbuf();
+- 							cpPolicy.flush();
+-						}
+-						cpPolicy.close();
+-					}
+-					fPolicyFile.close();
+-					std::ofstream fWPolicyFile(ToNarrow(std::wstring(*it).append(strJavaSubPath).c_str()), std::ios::out | std::ios::app | std::ios::binary);
+-					if(fWPolicyFile && fWPolicyFile.good())
+-					{
+-						fWPolicyFile << strJavaPolicy << std::endl;
+-						fWPolicyFile.flush();
+-						fWPolicyFile.close();
+-						dbstrs << "Appended Massai Permissions to [" << std::wstring(*it).append(strJavaSubPath).c_str() <<"]" << std::endl;
+-						Log_Str(dbstrs);
+-
+-					}
+-				} else
+-					fPolicyFile.close();
+-			}
+-		}
+-	}
++        {
++          while (getline(fPolicyFile, s))
++          {
++            if(s.find(strJavaPolicySM) != std::string::npos)
++            {
++              dbstrs << "Found Searchmask [" << pwzJPSPropertyValue << "] in JavaPolicy [" << std::wstring(*it).append(strJavaSubPath).c_str() <<"] - no Changes applied" << std::endl;
++              Log_Str(dbstrs);
++              bFoundMask = true;
++              break;            }
++            }
++        }
++        if(!bFoundMask)
++        {
++          fPolicyFile.seekg(std::ios::beg);
++          std::ofstream cpPolicy(ToNarrow(std::wstring(*it).append(strJavaSubPath).append(L"_back_").append(pwzJPSBackupFValue).c_str()), std::ios::out);
++          if(cpPolicy)
++          {
++            if(cpPolicy.good())
++            {
++               cpPolicy << fPolicyFile.rdbuf();
++               cpPolicy.flush();
++            }
++            cpPolicy.close();
++          }
++          fPolicyFile.close();
++          std::ofstream fWPolicyFile(ToNarrow(std::wstring(*it).append(strJavaSubPath).c_str()), std::ios::out | std::ios::app | std::ios::binary);
++          if(fWPolicyFile && fWPolicyFile.good())
++          {
++            fWPolicyFile << strJavaPolicy << std::endl;
++            fWPolicyFile.flush();
++            fWPolicyFile.close();
++            dbstrs << "Appended Massai Permissions to [" << std::wstring(*it).append(strJavaSubPath).c_str() <<"]" << std::endl;
++            Log_Str(dbstrs);
++
++          }
++        } else
++          fPolicyFile.close();
++      }
++    }
++  }
+ LExit:
+-	ReleaseStr(pwzJPPropertyValue);
+-	ReleaseStr(pwzJPSPropertyValue);
+-	ReleaseStr(pwzJPSBackupFValue);
+-	
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  ReleaseStr(pwzJPPropertyValue);
++  ReleaseStr(pwzJPSPropertyValue);
++  ReleaseStr(pwzJPSBackupFValue);
++  
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+ extern "C" _declspec(dllexport) UINT __stdcall CA_GetJavaHome(MSIHANDLE hInstall)
+ {
+-	std::wstringstream dbstrs;
+-	std::wstring verbuf;
+-	TUNIQUESET sJavaVersion;
+-	TUNIQUESET sJavaHomes;
+-
+-	HRESULT hr = S_OK;
+-	UINT er = ERROR_SUCCESS;
+-
+-	hr = WcaInitialize(hInstall, "CA_GetJavaHome");
+-	dbstrs << L"CA_GetJavaHome: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
+-
+-	LPWSTR pwzJVPropertyValue = NULL;
+-
+-	hr = WcaGetProperty(L"JAVAVERSION", &pwzJVPropertyValue);
+-	ExitOnFailure(hr, "Failed to get JAVAVERSION property value");
+-	dbstrs << "CA_GetJavaHome: Read JAVAVERSION (" << pwzJVPropertyValue << ")" << std::endl;
+-	Log_Str(dbstrs);
+-
+-	verbuf.assign(L"Software\\JavaSoft\\Java Runtime Environment\\");
+-	verbuf.append(pwzJVPropertyValue);
+-	sJavaVersion.insert(verbuf);
+-	fetchjavaHomePaths(sJavaHomes,sJavaVersion);
+-	dbstrs << "Javahome:" << std::endl;
+-	for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
+-	{
+-		dbstrs << (*it).c_str() << std::endl;
+-	}
+-	Log_Str(dbstrs);
++  std::wstringstream dbstrs;
++  std::wstring verbuf;
++  TUNIQUESET sJavaVersion;
++  TUNIQUESET sJavaHomes;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_GetJavaHome");
++  dbstrs << L"CA_GetJavaHome: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  LPWSTR pwzJVPropertyValue = NULL;
++
++  hr = WcaGetProperty(L"JAVAVERSION", &pwzJVPropertyValue);
++  ExitOnFailure(hr, "Failed to get JAVAVERSION property value");
++  dbstrs << "CA_GetJavaHome: Read JAVAVERSION (" << pwzJVPropertyValue << ")" << std::endl;
++  Log_Str(dbstrs);
++
++  verbuf.assign(L"Software\\JavaSoft\\Java Runtime Environment\\");
++  verbuf.append(pwzJVPropertyValue);
++  sJavaVersion.insert(verbuf);
++  fetchjavaHomePaths(sJavaHomes,sJavaVersion);
++  dbstrs << "Javahome:" << std::endl;
++  for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
++  {
++    dbstrs << (*it).c_str() << std::endl;
++  }
++  Log_Str(dbstrs);
+ 
+-	if(!sJavaHomes.empty())
+-	{
+-		hr = WcaSetProperty(L"JAVAHOME", (*(sJavaHomes.begin())).c_str());
+-		dbstrs << "MSI SETUP CA_GetJavaHome: SetProperty JAVAHOME (" << (*(sJavaHomes.begin())).c_str() << ") Result:" << hr << std::endl;
+-		Log_Str(dbstrs);
+-		ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
+-	}
++  if(!sJavaHomes.empty())
++  {
++    hr = WcaSetProperty(L"JAVAHOME", (*(sJavaHomes.begin())).c_str());
++    dbstrs << "MSI SETUP CA_GetJavaHome: SetProperty JAVAHOME (" << (*(sJavaHomes.begin())).c_str() << ") Result:" << hr << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
++  }
+ LExit:
+-	ReleaseStr(pwzJVPropertyValue);
++  ReleaseStr(pwzJVPropertyValue);
+ 
+-	
+-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index 1f136d12..cea43551 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -1,9 +1,9 @@
+ ﻿LIBRARY MConfig_CustomAction
+ EXPORTS
+-    CA_NextDialog
+-    CA_PrevDialog
+-    CA_FillPrinterListbox
+-    CA_DirBrowser
++  CA_NextDialog
++  CA_PrevDialog
++  CA_FillPrinterListbox
++  CA_DirBrowser
+ 	CA_ProcessCFGTable
+ 	CA_ModifyJavaPolicy
+ 	CA_MutuallyExclusive
+@@ -13,4 +13,10 @@ EXPORTS
+ 	CA_ProcessSetCfgTableTable
+ 	CA_GetJavaHome
+ 	CA_ClearTmpCfgfiles
+-    CA_WriteSNMPConfigFile
++  CA_WriteSNMPConfigFile
++  WriteSNMPConfigFile
++  PrepareAddressValues
++  CA_SearchTextInFile
++  CA_ReplaceTextInFile
++  CA_ReplaceBSlash
++  CA_AppendToFile
+-- 
+2.41.0.windows.1
+

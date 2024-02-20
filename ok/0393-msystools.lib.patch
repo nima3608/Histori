@@ -1,0 +1,364 @@
+From 4d203e40f55a0d3a46f9e2680b965ae0bb926243 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 4 Sep 2013 17:48:41 +0000
+Subject: [PATCH 0393/1000] msystools.lib V1.0.0.9 Mantis 0028873: GPPDev:
+ Custom KPM150H RFID added rfidUSBPrinter (find USB device by printe port
+ name)
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@574 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/rfidUSBPrinter.h  |  17 +
+ .../Massai/cpp/Systools/makefile.mak          |   1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     |   2 +-
+ .../cpp/Systools/src/rfidUSBPrinter.cpp       | 290 ++++++++++++++++++
+ 4 files changed, 309 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h b/SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h
+new file mode 100644
+index 00000000..7cfe13fe
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h
+@@ -0,0 +1,17 @@
++// USB; printer helper functions
++
++#ifndef RFID_USBPRINTER_H_INCLUDED
++#define RFID_USBPRINTER_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include "tools/TraceInterface.h"
++
++namespace mGPPCustom
++{
++  std::string getUSBPrinterDevice(const std::string& printerPort, MASSAI::trace::TraceInterface& trc);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 24ffdc54..ff3ec155 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -47,6 +47,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysEventW32.obj \
+ #                        $(_OBJ)\mSysHotKeyW32.obj \
+                         $(_OBJ)\mSysIOW32.obj \
++                        $(_OBJ)\rfidUSBPrinter.obj \
+ 
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 1dafb1fa..bc9c3a59 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -9,7 +9,7 @@ VERSION_ID_DT(systools, 1, 0, 0, 9);
+ \li V1.0.0.9
+ \li Mantis 0028873: GPPDev: Custom KPM150H RFID
+ added mSysIO (timed io)
+-
++added rfidUSBPrinter (find USB device by printe port name)
+ 
+ \date 15.08.2013
+ \li V1.0.0.8
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp
+new file mode 100644
+index 00000000..5b0211df
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp
+@@ -0,0 +1,290 @@
++// USB; printer helper functions
++
++#include "systools/rfidUSBPrinter.h"
++#include <windows.h>
++#include <setupapi.h>
++
++using MASSAI::trace::TraceInterface;
++
++namespace
++{
++  const GUID printerGUID = {0x28D78FAD, 0x5A12, 0x11D1, {0xAE, 0x5B, 0x00, 0x00, 0xF8, 0x03, 0xA8, 0xC2} };
++  const char* usbEnumerator = "USB";
++  const char* usbPrintPortNumber = "Port Number";
++  const char* usbPrintBaseName = "Base Name";
++
++  std::string getErrorText(unsigned long errorCode);
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, unsigned long errorCode);
++
++  bool startsWith(const std::string& text, const std::string& prefix);
++
++
++  class FindPrinterDevice
++  {
++    public:
++      FindPrinterDevice(const std::string& printerPort, TraceInterface& trc);
++      ~FindPrinterDevice();
++
++      std::string getDevice();
++
++    private:
++      bool openPrinterDevs();
++      void closePrinterDevs();
++      bool readDevData(DWORD index);
++      bool openDevRegistry();
++      void closeDevRegistry();
++      bool portNumberMatches();
++      DWORD readPortNumber();
++      std::string readPortBaseName();
++      std::string getDeviceName();
++
++      HDEVINFO m_devInfo;
++      const std::string& m_printerPort;
++      TraceInterface& m_trc;
++      SP_DEVICE_INTERFACE_DATA m_devData;
++      HKEY m_devKey;
++  };
++}
++
++namespace
++{
++  std::string getErrorText(unsigned long errorCode)
++  {
++    std::string result;
++    if(errorCode != 0)
++    {
++      LPVOID buf;
++      FormatMessage
++      (
++        FORMAT_MESSAGE_ALLOCATE_BUFFER
++          | FORMAT_MESSAGE_FROM_SYSTEM
++          | FORMAT_MESSAGE_IGNORE_INSERTS,
++        0,
++        errorCode & 0xFFFF,
++        0,
++        reinterpret_cast<LPTSTR>(&buf),
++        0,
++        0
++      );
++      if(buf != 0)
++      {
++        result= reinterpret_cast<const char*>(buf);
++      }
++      LocalFree(buf);
++    }
++    return result;
++  }
++
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, unsigned long errorCode)
++  {
++    trc.writeTrace(level, file, line, function,
++      "(%.200s) failed: (%d), (%.1000s)",
++      where, errorCode, getErrorText(errorCode).c_str());
++  }
++
++  bool startsWith(const std::string& text, const std::string& prefix)
++  {
++    return text.compare(0, prefix.size(), prefix) == 0;
++  }
++
++  FindPrinterDevice::FindPrinterDevice(const std::string& printerPort, TraceInterface& trc):
++    m_devInfo(INVALID_HANDLE_VALUE),
++    m_printerPort(printerPort),
++    m_trc(trc),
++    m_devData(),
++    m_devKey((HKEY)INVALID_HANDLE_VALUE)
++  {}
++
++  FindPrinterDevice::~FindPrinterDevice()
++  {}
++
++  std::string FindPrinterDevice::getDevice()
++  {
++    std::string result;
++    if(openPrinterDevs())
++    {
++      for(DWORD i = 0;; i++)
++      {
++        if(!readDevData(i))
++        {
++          break;
++        }
++        else if(portNumberMatches())
++        {
++          result = getDeviceName();
++          break;
++        }
++      }
++    }
++    closePrinterDevs();
++    return result;
++  }
++
++  std::string FindPrinterDevice::getDeviceName()
++  {
++    std::string result;
++    DWORD devDataDetailSize;
++    SetupDiGetDeviceInterfaceDetail(m_devInfo, &m_devData, 0, 0, &devDataDetailSize, 0);
++    DWORD resultCode = GetLastError();
++    if(resultCode != ERROR_INSUFFICIENT_BUFFER)
++    {
++      traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", resultCode);
++    }
++    else if(devDataDetailSize == 0)
++    {
++      m_trc.writeTrace(MajorError_HERE, "SetupDiGetDeviceInterfaceDetail no data");
++    }
++    else
++    {
++      unsigned char* buffer = new unsigned char[devDataDetailSize];
++      SP_DEVICE_INTERFACE_DETAIL_DATA& devDataDetail = *reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA*>(buffer);
++      devDataDetail.cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
++      SP_DEVINFO_DATA devInfoData;
++      devInfoData.cbSize = sizeof(devInfoData);
++      if(!SetupDiGetDeviceInterfaceDetail(m_devInfo, &m_devData, &devDataDetail, devDataDetailSize, &devDataDetailSize, &devInfoData))
++      {
++        traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
++      }
++      else
++      {
++        result = devDataDetail.DevicePath;
++      }
++      delete[] buffer;
++    }
++    return result;
++  }
++
++  bool FindPrinterDevice::portNumberMatches()
++  {
++    bool result = false;
++    if(openDevRegistry())
++    {
++      DWORD portNumber = readPortNumber();
++      std::string baseName = readPortBaseName();
++      if(startsWith(m_printerPort, baseName))
++      {
++        DWORD devicePort = atoi(m_printerPort.c_str() + baseName.size());
++        if(portNumber == devicePort)
++        {
++          result = true;
++        }
++      }
++    }
++    closeDevRegistry();
++    return result;
++  }
++
++  DWORD FindPrinterDevice::readPortNumber()
++  {
++    DWORD result = -1;
++    DWORD portSize = sizeof(result);
++    LONG resultCode = RegQueryValueEx(m_devKey, usbPrintPortNumber, 0, 0, reinterpret_cast<LPBYTE>(&result), &portSize);
++    if(resultCode != ERROR_SUCCESS)
++    {
++      traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
++    }
++    return result;
++  }
++
++  std::string FindPrinterDevice::readPortBaseName()
++  {
++    std::string result;
++    DWORD bufferSize = m_printerPort.size() + 1;
++    char* buffer = new char[bufferSize];
++    LONG resultCode = RegQueryValueEx(m_devKey, usbPrintBaseName, 0, 0, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
++    if(resultCode != ERROR_SUCCESS)
++    {
++      traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
++    }
++    else if(bufferSize > m_printerPort.size())
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "name too long to match");
++    }
++    else
++    {
++      result = buffer;
++    }
++    delete[] buffer;
++    return result;
++  }
++
++  bool FindPrinterDevice::openDevRegistry()
++  {
++    bool result = true;
++    m_devKey = SetupDiOpenDeviceInterfaceRegKey(m_devInfo, &m_devData, 0, KEY_QUERY_VALUE);
++    if(m_devKey == INVALID_HANDLE_VALUE)
++    {
++      traceLastError(m_trc, MajorError_HERE, "SetupDiOpenRegKey", GetLastError());
++      result = false;
++    }
++    return result;
++  }
++
++  void FindPrinterDevice::closeDevRegistry()
++  {
++    if(m_devKey != INVALID_HANDLE_VALUE)
++    {
++      LONG resultCode = RegCloseKey(m_devKey);
++      if(resultCode != ERROR_SUCCESS)
++      {
++        traceLastError(m_trc, MajorError_HERE, "RegCloseKey", resultCode);
++      }
++    }
++  }
++
++  bool FindPrinterDevice::readDevData(DWORD index)
++  {
++    bool result = true;
++    m_devData.cbSize = sizeof(m_devData);
++    if(!SetupDiEnumDeviceInterfaces(m_devInfo, 0, &printerGUID, index, &m_devData))
++    {
++      DWORD resultCode = GetLastError();
++      if(resultCode == ERROR_NO_MORE_ITEMS)
++      {
++        traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
++      }
++      else
++      {
++        traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
++      }
++      result = false;
++    }
++    return result;
++  }
++
++  bool FindPrinterDevice::openPrinterDevs()
++  {
++    bool result = true;
++    m_devInfo = SetupDiGetClassDevs(&printerGUID, 0, 0, DIGCF_PRESENT | DIGCF_INTERFACEDEVICE);
++    if(m_devInfo == INVALID_HANDLE_VALUE)
++    {
++      traceLastError(m_trc, MajorError_HERE, "SetupDiGetClassDevs", GetLastError());
++      result = false;
++    }
++    return result;
++  }
++
++  void FindPrinterDevice::closePrinterDevs()
++  {
++    if(m_devInfo != INVALID_HANDLE_VALUE)
++    {
++      if(!SetupDiDestroyDeviceInfoList(m_devInfo))
++      {
++        traceLastError(m_trc, MajorError_HERE, "SetupDiDestroyDeviceInfoList", GetLastError());
++      }
++    }
++  }
++}
++
++namespace mGPPCustom
++{
++  std::string getUSBPrinterDevice(const std::string& printerPort, TraceInterface& trc)
++  {
++    FindPrinterDevice find(printerPort, trc);
++    return find.getDevice();
++  }
++}
+-- 
+2.41.0.windows.1
+

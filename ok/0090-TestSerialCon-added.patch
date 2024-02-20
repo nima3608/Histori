@@ -1,0 +1,666 @@
+From df6cc595663d56a48fda091c00051a9441080d87 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 21 Jan 2011 14:06:50 +0000
+Subject: [PATCH 0090/1077] TestSerialCon added
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@115 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/Console.h         |   1 +
+ .../Interfaces/inc/text/textTools.h           |   2 +
+ .../Massai/cpp/AEAParser/makefile.mak         |   2 +-
+ .../Massai/cpp/SerialCon/makefile.mak         |  14 +
+ .../cpp/SerialCon/src/TestSerialCon.cpp       | 434 ++++++++++++++++++
+ .../Massai/cpp/Systools/src/Console.cpp       |   6 +
+ .../Massai/cpp/Text/src/textTools.cpp         | 103 +++++
+ 7 files changed, 561 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/Console.h b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+index add3aa44..9e3b52e5 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/Console.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+@@ -42,6 +42,7 @@ namespace Console
+   {
+     IT_IGNORE,
+     IT_INPUT,
++    IT_HEXINPUT,
+     IT_FILENAME,
+     IT_SELECTION
+   };
+diff --git a/SelfServiceCommon/Interfaces/inc/text/textTools.h b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+index 29cb44a0..d5e7dae7 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/textTools.h
++++ b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+@@ -31,6 +31,8 @@ namespace MASSAI
+           delimiterList: ":", ";",  ";",  ";"
+     */
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList);
++
++    std::string fromHex(const std::string& hexdata);
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+index 7fbb6cd7..77cdfee5 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+@@ -36,7 +36,7 @@ MY_LIB1_OBJS =  $(_OBJ)\local_def.obj \
+ 
+ MY_BIN1 =               $(_BIN)\TestAEASimulator.exe
+ 
+-MY_BIN1_USER_LIBS =     $(_LIB)\aeaParser.lib $(LIB_TRACEHDL) $(LIB_TOOLS) $(LIB_SYSTOOLS)
++MY_BIN1_USER_LIBS =     $(_LIB)\aeaParser.lib $(LIB_TRACEHDL) $(LIB_TOOLS) $(LIB_SYSTOOLS) $(LIB_TEXT)
+ 
+ MY_BIN1_OBJS =          $(_OBJ)\TestAEASimulator.obj
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+index e8f18850..44c904d5 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+@@ -24,4 +24,18 @@ MY_LIB1_OBJS = \
+ 
+ ######################################################################
+ 
++MY_BIN1 = \
++    $(_BIN)\TestSerialCon.exe
++
++MY_BIN1_OBJS = \
++    $(_OBJ)\TestSerialCon.obj
++
++MY_BIN1_USER_LIBS = \
++    $(LIB_SERIALCON) \
++    $(LIB_TOOLS) \
++    $(LIB_SYSTOOLS) \
++    $(LIB_TEXT)
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
+new file mode 100644
+index 00000000..b4467230
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/TestSerialCon.cpp
+@@ -0,0 +1,434 @@
++#pragma warning(disable:4786)
++
++#include "Console.h"
++#include "cfgUART.hpp"
++#include "matAsync.h"
++#include "localTrace.h"
++#include "mSysThread.hpp"
++#include "mEventSem.hpp"
++#include "mArgScan.hpp"
++#include <string>
++#include <iostream>
++#include <map>
++
++
++using namespace::MASSAI::localtrace;
++
++namespace
++{
++  matAsync comport;
++
++  enum CONSTS
++  {
++    ERROR_BUFFER_SIZE= 2048,
++    READ_BUFFER_SIZE= 256,
++    READ_CONFIG_BUFFER_SIZE= 256,
++  };
++  std::string matRCToText(MATRC code)
++  {
++    switch(code)
++    {
++      case MATRC_OK:                          return "MATRC_OK";
++      case MATRC_ERROR:                       return "MATRC_ERROR";
++      case MATRC_ERROR_RESPONSE:              return "MATRC_ERROR_RESPONSE";
++      case MATRC_NO_DATA:                     return "MATRC_NO_DATA";
++      case MATRC_BUFFER_TOO_SMALL:            return "MATRC_BUFFER_TOO_SMALL";
++      case MATRC_TIMEOUT:                     return "MATRC_TIMEOUT";
++      case MATRC_IGNORED:                     return "MATRC_IGNORED";
++      case MATRC_11:                          return "MATRC_11";
++      case MATRC_12:                          return "MATRC_12";
++      case MATRC_BUSY:                        return "MATRC_BUSY";
++      case MATRC_OFFLINE:                     return "MATRC_OFFLINE";
++      case MATRC_NOT_ACCEPTED:                return "MATRC_NOT_ACCEPTED";
++      case MATRC_NO_ACCEPTANCE:               return "MATRC_NO_ACCEPTANCE";
++      case MATRC_PARAMETER_ERROR:             return "MATRC_PARAMETER_ERROR";
++      case MATRC_PARAMETER_STRING_TOO_LONG:   return "MATRC_PARAMETER_STRING_TOO_LONG";
++      case MATRC_PARAMETER_STRING_TOO_SHORT:  return "MATRC_PARAMETER_STRING_TOO_SHORT";
++      default:                                return "Unknown MAT_RC";
++    }
++  }
++  const unsigned char* unsign(const char* buf)
++  {
++    return reinterpret_cast<const unsigned char*>(buf);
++  }
++  unsigned char* unsign(char* buf)
++  {
++    return reinterpret_cast<unsigned char*>(buf);
++  }
++  void traceComportResult(MATRC result, const std::string& command)
++  {
++    if(result == MATRC_OK)
++    {
++      wrtTrace(BasicRuntime_HERE, "COM-PORT (%.500s) success", command.c_str());
++    }
++    else if(result == MATRC_ERROR)
++    {
++      char errorBuffer[ERROR_BUFFER_SIZE];
++      comport.get(MATKEY_ERROR_LAST, errorBuffer, sizeof(errorBuffer));
++      wrtTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)(%.500s)", command.c_str(), matRCToText(result).c_str(), result, errorBuffer);
++    }
++    else
++    {
++      wrtTrace(MajorError_HERE, "COM-PORT (%.500s) failed: (%.500s)(%d)", command.c_str(), matRCToText(result).c_str(), result);
++    }
++  }
++  class Listener: public mSysThread::thread, public Console::SelectionCommandBase
++  {
++    public:
++      Listener():
++        thread(0),
++        m_stopped(false)
++      {}
++      void stop()
++      {
++        m_stopped= true;
++        m_startRead.post();
++      }
++      void startReading()
++      {
++        m_startRead.post();
++      }
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        startReading();
++        return Console::RC_SUCCESS;
++      }
++    private:
++      bool m_stopped;
++      Materna::MSSD::eventSemaphore m_startRead;
++      void function()
++      {
++        while(!m_stopped)
++        {
++          m_startRead.wait();
++          m_startRead.reset();
++          char buffer[READ_BUFFER_SIZE];
++          unsigned short size= READ_BUFFER_SIZE;
++          writeTraceText(BasicRuntime_HERE, "reading...");
++          MATRC rc= comport.read(unsign(buffer), size);
++          traceComportResult(rc, "read");
++          if(rc == MATRC_OK)
++          {
++            dumpTrace(MajorError_HERE, size, buffer);
++          }
++        }
++      }
++  };
++  Listener listener;
++
++  class Send: public Console::SelectionCommandBase
++  {
++    public:
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        Console::ResultCode rc= Console::RC_FAILED;
++        if(parameterList.size() > 0)
++        {
++          unsigned short size= parameterList[0].size();
++          MATRC matrc= comport.write(unsign(parameterList[0].data()), size);
++          traceComportResult(matrc, "write");
++          rc= Console::RC_SUCCESS;
++        }
++        return rc;
++      }
++  };
++  enum ConnectionAction
++  {
++    CONNECTION_OPEN,
++    CONNECTION_CLOSE
++  };
++  class Connection: public Console::SelectionCommandBase
++  {
++    public:
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        Console::ResultCode rc= Console::RC_FAILED;
++        switch(parameter)
++        {
++          case CONNECTION_OPEN:
++          {
++            MATRC matrc= comport.open();
++            traceComportResult(matrc, "open");
++            rc= Console::RC_SUCCESS;
++            break;
++          }
++          case CONNECTION_CLOSE:
++          {
++            MATRC matrc= comport.close();
++            traceComportResult(matrc, "close");
++            rc= Console::RC_SUCCESS;
++            break;
++          }
++        }
++        return rc;
++      }
++  };
++  enum ConfigKey
++  {
++    CFG_ASYNC_TRACEFILE,
++    CFG_PORT,
++    CFG_BITRATE,
++    CFG_DTR,
++    CFG_RTS,
++    CFG_PARITY,
++    CFG_DATABITS,
++    CFG_STOPBITS,
++    CFG_RX_TIME,
++    CFG_RX_BLOCK_TIME,
++    CFG_TX_TIME,
++  };
++  typedef std::map<ConfigKey, std::string> ConfigMap;
++  ConfigMap configMap;
++
++  const char* configKey(ConfigKey key)
++  {
++    switch(key)
++    {
++      case CFG_ASYNC_TRACEFILE: return MATKEY_ASYNC_TRACEFILE;
++      case CFG_PORT:            return MATKEY_PORT;
++      case CFG_BITRATE:         return MATKEY_BITRATE;
++      case CFG_DTR:             return MATKEY_DTR;
++      case CFG_RTS:             return MATKEY_RTS;
++      case CFG_PARITY:          return MATKEY_PARITY;
++      case CFG_DATABITS:        return MATKEY_DATABITS;
++      case CFG_STOPBITS:        return MATKEY_STOPBITS;
++      case CFG_RX_TIME:         return MATKEY_RX_TIME;
++      case CFG_RX_BLOCK_TIME:   return MATKEY_RX_BLOCK_TIME;
++      case CFG_TX_TIME:         return MATKEY_TX_TIME;
++      default:                  return "unknown config key";
++    }
++  }
++  void setConfig(ConfigKey key, const std::string& value)
++  {
++    MATRC matrc= comport.set(configKey(key), value.c_str());
++    traceComportResult(matrc, "set");
++    if(matrc == MATRC_OK)
++    {
++      configMap[key]=  value;
++    }
++  }
++
++  class Config: public Console::SelectionCommandBase
++  {
++    public:
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        Console::ResultCode rc= Console::RC_FAILED;
++        if(parameterList.size() > 0)
++        {
++          setConfig(ConfigKey(parameter), parameterList[0]);
++          rc= Console::RC_SUCCESS;
++        }
++        return rc;
++      }
++  };
++
++  class Status: public Console::SelectionCommandBase
++  {
++    public:
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        readStatus(MATKEY_ERROR_LAST);
++        readStatus(MATKEY_DSR);
++        readStatus(MATKEY_CTS);
++
++        unsigned char status;
++        MATRC matrc= comport.readStatus(status);
++        traceComportResult(matrc, "readStatus");
++        if(matrc == MATRC_OK)
++        {
++          wrtTrace(MajorError_HERE, "Status(x%x)", status);
++        }
++        return Console::RC_SUCCESS;
++      }
++    private:
++      void readStatus(const char* key)
++      {
++        char buffer[READ_CONFIG_BUFFER_SIZE];
++        MATRC matrc= comport.get(key, buffer, READ_CONFIG_BUFFER_SIZE);
++        traceComportResult(matrc, "get");
++        if(matrc == MATRC_OK)
++        {
++          wrtTrace(BasicRuntime_HERE, "(%s): (%s)", key, buffer);
++        }
++      }
++  };
++
++  class ReadConfig: public Console::SelectionCommandBase
++  {
++    public:
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        readStatus(CFG_ASYNC_TRACEFILE);
++        readStatus(CFG_PORT);
++        readStatus(CFG_BITRATE);
++        readStatus(CFG_DTR);
++        readStatus(CFG_RTS);
++        readStatus(CFG_PARITY);
++        readStatus(CFG_DATABITS);
++        readStatus(CFG_STOPBITS);
++        readStatus(CFG_RX_TIME);
++        readStatus(CFG_RX_BLOCK_TIME);
++        readStatus(CFG_TX_TIME);
++        return Console::RC_SUCCESS;
++      }
++    private:
++      void readStatus(ConfigKey key)
++      {
++        wrtTrace(BasicRuntime_HERE, "(%s): (%s)", configKey(key), configMap[key].c_str());
++      }
++  };
++  void ignoredOptions(const char * option)
++  {
++    std::cout << "option ignored: " << option << std::endl;
++  }
++  class SerialConArgScan: public argScan
++  {
++    public:
++      SerialConArgScan(int argc, char** argv):
++        argScan(argc, argv)
++      {
++        tellIgnored(ignoredOptions);
++      }
++      const char* getOption(const char* key, const char* defaultValue)
++      {
++        const char* result= option(key);
++        if(result == 0)
++        {
++          result= defaultValue;
++        }
++        return result;
++      }
++  };
++}
++
++
++
++int main(int argc, char** argv)
++{
++  std::cout << "TestSerialCon: communication with com port" << std::endl;
++  std::cout << "Usage: TestSerialCon: [-PORT:<PORT>] [-BITRATE:<BITRATE>] [-DTR:0|1|H] [-RTS:0|1|H] [-PARITY:<N|O|E>] [-DATABITS:<7|8>] [-STOPBITS:<1|5|2>] [-RECEIVE_TIMEOUT:<timeout in ms>] [-RECEIVE_BLOCK_TIMEOUT:<timeout in ms>] [-TRANSMIT_TIMEOUT:<timeout in ms>] [-TRACEFILE:<filename>]" << std::endl;
++
++  openTrace(argv[0]);
++  {
++    SerialConArgScan args(argc, argv);
++    setConfig(CFG_PORT,            args.getOption("PORT",                  "COM1"));
++    setConfig(CFG_BITRATE,         args.getOption("BITRATE",               "0"));
++    setConfig(CFG_DTR,             args.getOption("DTR",                   "1"));
++    setConfig(CFG_RTS,             args.getOption("RTS",                   "H"));
++    setConfig(CFG_PARITY,          args.getOption("PARITY",                "N"));
++    setConfig(CFG_DATABITS,        args.getOption("DATABITS",              "8"));
++    setConfig(CFG_STOPBITS,        args.getOption("STOPBITS",              "1"));
++    setConfig(CFG_RX_TIME,         args.getOption("RECEIVE_TIMEOUT",       "I"));
++    setConfig(CFG_RX_BLOCK_TIME,   args.getOption("RECEIVE_BLOCK_TIMEOUT", ""));
++    setConfig(CFG_TX_TIME,         args.getOption("TRANSMIT_TIMEOUT",      ""));
++    const char* tracefile= args.option("TRACEFILE");
++    if(tracefile != 0)
++    {
++      setConfig(CFG_ASYNC_TRACEFILE, tracefile);
++    }
++    std::cout << std::endl;
++  }
++
++
++  Console::ConsoleSelection selection;
++  Connection connection;
++  Send send;
++  Config config;
++  Status status;
++  ReadConfig readconfig;
++
++  selection.addSimple(&selection,  "h", "help", Console::ConsoleSelection::P_HELP);
++  selection.addSimple(&selection,  "q\x03", "quit", Console::ConsoleSelection::P_QUIT);
++  selection.addSimple(&connection, "o", "open connection", CONNECTION_OPEN);
++  selection.addSimple(&connection, "c", "close connection", CONNECTION_CLOSE);
++
++  selection.addSimple(&listener, "l", "start reading");
++  selection.addSimple(&status, "g", "get status");
++  selection.addSimple(&readconfig, "G", "get configuration");
++
++  Console::Selection sendData=
++    {&send, "w", "write data", {Console::IT_INPUT, "enter data"}};
++  selection.add(sendData);
++
++  Console::Selection sendHexData=
++    {&send, "x", "write hexadecimal data", {Console::IT_HEXINPUT, "enter data in hexadecimal"}};
++  selection.add(sendHexData);
++
++  Console::Selection sendFile=
++    {&send, "W", "write file", {Console::IT_FILENAME, "enter filename"}};
++  selection.add(sendFile);
++
++  Console::Selection configPort=
++    {&config, "f", "config port", {Console::IT_INPUT, "enter port"}, CFG_PORT};
++  selection.add(configPort);
++
++  Console::Selection configBitrate=
++    {&config, "b", "config bit rate", {Console::IT_INPUT, "enter bit rate(9600, 19200, ...)"}, CFG_BITRATE};
++  selection.add(configBitrate);
++
++  Console::Selection configDataBits=
++    {&config, "d", "config data bits", {Console::IT_INPUT, "enter data bits(7, 8)"}, CFG_DATABITS};
++  selection.add(configDataBits);
++
++  Console::Selection configParity= {&config,   "p", "config parity",
++    {Console::IT_SELECTION,
++        "N: None\n"
++        "E: Even\n"
++        "O: Odd\n"
++     }, CFG_PARITY};
++  selection.add(configParity);
++
++  Console::Selection configStopBits= {&config,   "s", "config stop bits",
++    {Console::IT_SELECTION,
++        "1: 1\n"
++        "5: 1.5\n"
++        "2: 2\n"
++     }, CFG_STOPBITS};
++  selection.add(configStopBits);
++
++/*
++  // Damit kommt mein Compiler nicht klar!? cl V6), daher verwende ich stattdessen ein define
++  Console::InputList handshakeSelection= {{Console::IT_SELECTION,
++        "0: Off\n"
++        "1: On\n"
++        "H: Handshake\n"
++     }};
++*/
++#define handshakeSelection {{Console::IT_SELECTION, \
++        "0: Off\n" \
++        "1: On\n" \
++        "H: Handshake\n" \
++     }}
++
++  Console::Selection configDTR= {&config, "D", "config DTR", handshakeSelection, CFG_DTR};
++  selection.add(configDTR);
++  Console::Selection configRTS= {&config, "R", "config RTS", handshakeSelection, CFG_RTS};
++  selection.add(configRTS);
++
++  Console::Selection configReceiveTimeout=
++    {&config, "v", "config receive timeout", {Console::IT_INPUT, "enter timeout(I for immediate)"}, CFG_RX_TIME};
++  selection.add(configReceiveTimeout);
++
++  Console::Selection configReceiveBlockTimeout=
++    {&config, "V", "config receive block timeout", {Console::IT_INPUT, "enter timeout"}, CFG_RX_BLOCK_TIME};
++  selection.add(configReceiveBlockTimeout);
++
++  Console::Selection configTransmitTimeout=
++    {&config, "t", "config transmit timeout", {Console::IT_INPUT, "enter timeout"}, CFG_TX_TIME};
++  selection.add(configTransmitTimeout);
++
++  Console::Selection configTraceFile=
++    {&config, "F", "config trace file", {Console::IT_INPUT, "enter filename"}, CFG_ASYNC_TRACEFILE};
++  selection.add(configTraceFile);
++
++
++  listener.start();
++  selection.loop();
++
++  comport.close();
++  listener.stop();
++  listener.waitTerminated();
++  closeTrace();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+index 9697b926..359931f4 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include "Console.h"
+ #include "mInFile.hpp"
++#include "textTools.h"
+ #include <conio.h>
+ #include <iostream>
+ 
+@@ -172,6 +173,11 @@ namespace Console
+             parameterList[i]= getLine(input.prompt);
+             break;
+           }
++          case IT_HEXINPUT:
++          {
++            parameterList[i]= MASSAI::text::fromHex(getLine(input.prompt));
++            break;
++          }
+           case IT_SELECTION:
+           {
+             std::cout << input.prompt << std::endl;
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+index 46ed03e9..23064296 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+@@ -14,6 +14,70 @@
+ #include <list>
+ #include <stddef.h>
+ 
++
++namespace
++{
++  bool _isHex(char in)
++  {
++    switch(in)
++    {
++      case '0':
++      case '1':
++      case '2':
++      case '3':
++      case '4':
++      case '5':
++      case '6':
++      case '7':
++      case '8':
++      case '9':
++      case 'A':
++      case 'B':
++      case 'C':
++      case 'D':
++      case 'E':
++      case 'F':
++      case 'a':
++      case 'b':
++      case 'c':
++      case 'd':
++      case 'e':
++      case 'f':
++        return true;
++    }
++    return false;
++  }
++  int _fromHex(char in)
++  {
++    switch(in)
++    {
++      case '0': return 0;
++      case '1': return 1;
++      case '2': return 2;
++      case '3': return 3;
++      case '4': return 4;
++      case '5': return 5;
++      case '6': return 6;
++      case '7': return 7;
++      case '8': return 8;
++      case '9': return 9;
++      case 'A': return 10;
++      case 'B': return 11;
++      case 'C': return 12;
++      case 'D': return 13;
++      case 'E': return 14;
++      case 'F': return 15;
++      case 'a': return 10;
++      case 'b': return 11;
++      case 'c': return 12;
++      case 'd': return 13;
++      case 'e': return 14;
++      case 'f': return 15;
++    }
++    return -1;
++  }
++}
++
+ namespace MASSAI
+ {
+   namespace text
+@@ -50,6 +114,45 @@ namespace MASSAI
+         }
+       }
+     }
++    std::string fromHex(const std::string& hexdata)
++    {
++      std::string result;
++      result.reserve(hexdata.size() / 2 + 1);
++      int nibble_count= 0;
++      unsigned char out= 0;
++      for(size_t i= 0; i < hexdata.size(); i++)
++      {
++        int in= hexdata[i];
++        if(_isHex(in))
++        {
++          out<<= 4;
++          out+= _fromHex(in);
++          nibble_count++;
++          if(nibble_count == 2)
++          {
++            result.append(1, out);
++            out= 0;
++            nibble_count= 0;
++          }
++        }
++        else
++        {
++          if(nibble_count > 0)
++          {
++            result.append(1, out);
++            out= 0;
++            nibble_count= 0;
++          }
++        }
++      }
++      if(nibble_count > 0)
++      {
++        result.append(1, out);
++        out= 0;
++        nibble_count= 0;
++      }
++      return result;
++    }
+   }
+ }
+ 
+-- 
+2.41.0.windows.1
+

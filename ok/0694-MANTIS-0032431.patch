@@ -1,0 +1,230 @@
+From e23053d654a3906fd5c33243fc47acdc37477d3c Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 20 Jul 2016 11:50:11 +0000
+Subject: [PATCH 0694/1000] MANTIS 0032431 -added error catching and tracing
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1050 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/src/ScheduledTask.cpp    | 36 ++++++--
+ .../cpp/Tools/src/SchedulerInterface.cpp      | 85 ++++++++++++-------
+ 2 files changed, 83 insertions(+), 38 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+index ad57acc9..5e77a534 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+@@ -53,7 +53,7 @@ namespace MASSAI
+       }
+       else
+       { 
+-        m_executionTime = boost::posix_time::time_duration(boost::posix_time::special_values::not_a_date_time);
++        m_executionTime = boost::posix_time::time_duration(boost::posix_time::not_a_date_time);
+       }
+     
+     
+@@ -66,20 +66,44 @@ namespace MASSAI
+           //last day of month
+           if( scheduleFrequency == "last" )
+           {
+-              m_scheduleMonthly = MASSAI::DateTimeTools::getActualSystemDate().end_of_month().day();
+-              ssScheduleInfo  << "last day of month (" << m_scheduleMonthly << ".)";
++              try
++              {
++                boost::gregorian::date* actualDate = MASSAI::DateTimeTools::getActualSystemDate();
++
++                if( actualDate != NULL )
++                {
++                  TRACE(HERE, "Actual system time date: %d.%d.%d", actualDate->year(), actualDate->month(), actualDate->day());
++                
++                  m_scheduleMonthly = actualDate->end_of_month().day();
++                }
++                else
++                {
++                  TRACE(MajorWarning_HERE, "WARNING: scheduleMonthly default set to 30. [NULLPOINTER]");
++                  m_scheduleMonthly = 30;
++                }
++          
++              }
++              catch( std::exception & X )
++              {
++                  TRACE( MajorError_HERE, "EXCEPTION: %s", X.what() );
++              }
++          
++              ssScheduleInfo  << "last day of month (" << m_scheduleMonthly << ".)"; 
+           }
+           else 
+           {
+               //a day of month
+               try
+               {
++                  //if(scheduleFrequency.back() == '.')
++                  //  scheduleFrequency.substr (0, scheduleFrequency.size() - 1);
++              
+                   m_scheduleMonthly = stoi (scheduleFrequency);
+                   ssScheduleInfo  << "every " << m_scheduleMonthly << "." << "of month";
+               }
+               catch (const std::invalid_argument& ia) 
+               {
+-                  TRACE(MajorWarning_HERE, "WARNING: INVALID ARGUMENT - %s", ia.what());
++                  TRACE(MajorWarning_HERE, "WARNING: INVALID ARGUMENT - %s. argument=[%s]", ia.what(), scheduleFrequency.c_str());
+                   m_scheduleMonthly = -1;
+                   
+                   //a day of weak [mon;|tue;|wed;|thu;|fri;|sat;|sun;]
+@@ -131,8 +155,6 @@ namespace MASSAI
+         //Correct the day
+         if( m_scheduleMonthly > -1 )
+         {
+-          long day = MASSAI::DateTimeTools::getActualSystemDate().end_of_month().day();
+-          
+           if(m_scheduleMonthly < 31)
+           {
+             m_scheduleMonthly++;
+@@ -189,7 +211,7 @@ namespace MASSAI
+       {
+         TRACE(MajorWarning_HERE, "WARNING: Hour or Minute out of range");
+       
+-        m_delayExecutionTime = boost::posix_time::time_duration(boost::posix_time::special_values::not_a_date_time);
++        m_delayExecutionTime = boost::posix_time::time_duration(boost::posix_time::not_a_date_time);
+ 
+         TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d], Frequency[%s], Task-Command[%s], Task-User[%s]\n",
+           m_executionTime.hours(), 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+index 73eb8427..b297ab3e 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+@@ -30,8 +30,20 @@ namespace MASSAI
+         m_wait(m_wait),
+         m_localQueue(localQueue),
+         m_taskList(),
+-        m_startTime(MASSAI::DateTimeTools::getActualSystemTime())
++        m_startTime()
+     {
++      boost::posix_time::time_duration* actualTime = MASSAI::DateTimeTools::getActualSystemTime();
++      
++      if(actualTime != NULL)
++      {      
++        m_startTime = *actualTime;
++      }
++      else
++      {
++        TRACE(MajorWarning_HERE, "WARNING: startTime default set to 12:00:00");
++        
++        m_startTime = boost::posix_time::time_duration(12, 0, 0, 0);
++      }
+     }
+ 
+ 
+@@ -96,15 +108,17 @@ namespace MASSAI
+     //TODO: test week and month border with delay
+     void SchedulerInterface::scheduleTasks()
+     {
++      long error = 0;
++    
+       list<ScheduledTask *>::iterator  taskIterator;
+ 
+-      boost::posix_time::time_duration currentTime;
+-      boost::gregorian::date           currentDate;
++      boost::posix_time::time_duration* currentTime;
++      boost::gregorian::date*           currentDate;
+       
+       bool scheduleNow;
+       bool scheduleToday;
+       bool isOldSchedule;
+-
++      
+       for( taskIterator = m_taskList.begin(); taskIterator != m_taskList.end(); taskIterator++ )
+       {
+         if( !(*taskIterator)->getTime().is_not_a_date_time() && !(*taskIterator)->getDelayTime().is_not_a_date_time())
+@@ -112,39 +126,46 @@ namespace MASSAI
+           scheduleNow   = false;
+           scheduleToday = false;
+           isOldSchedule = false;
+-          
+-          currentTime = boost::posix_time::time_duration ( MASSAI::DateTimeTools::getActualSystemTime() );
++
++          currentTime = MASSAI::DateTimeTools::getActualSystemTime();
+           currentDate = MASSAI::DateTimeTools::getActualSystemDate();
+ 
+-          unsigned long minutes_of_start    = m_startTime.hours()*60 +
+-                                              m_startTime.minutes();
+-          
+-          unsigned long minutes_of_now      = currentTime.hours()*60 +
+-                                              currentTime.minutes();
+-
+-          unsigned long minutes_of_task     = (*taskIterator)->getTime().hours() *60 + 
+-                                              (*taskIterator)->getTime().minutes();
+-                                          
+-          unsigned long minutes_to_schedule = (*taskIterator)->getDelayTime().hours() *60 + 
+-                                              (*taskIterator)->getDelayTime().minutes();
+-               
+-          //Time of the task before the start of the platfrom?
+-          if( minutes_of_start > minutes_of_task )
++          if( currentTime != NULL && currentDate != NULL)
+           {
+-            isOldSchedule = true;
+-          }
++            unsigned long minutes_of_start    = m_startTime.hours()*60 +
++                                                m_startTime.minutes();
++            
++            unsigned long minutes_of_now      = (*currentTime).hours()*60 +
++                                                (*currentTime).minutes();
++
++            unsigned long minutes_of_task     = (*taskIterator)->getTime().hours() *60 + 
++                                                (*taskIterator)->getTime().minutes();
++                                            
++            unsigned long minutes_to_schedule = (*taskIterator)->getDelayTime().hours() *60 + 
++                                                (*taskIterator)->getDelayTime().minutes();
++                 
++            //Time of the task before the start of the platfrom?
++            if( minutes_of_start > minutes_of_task )
++            {
++              isOldSchedule = true;
++            }
+ 
+-          //Correct time to Schedule?
+-          scheduleNow = minutes_of_now == minutes_to_schedule;
+-                                              
+-          //Correct day for schedule?
+-          scheduleToday = 
+-            (*taskIterator)->getScheduleMonthly() == currentDate.year_month_day().day   ||
+-            (*taskIterator)->getScheduleWeekly()  == currentDate.day_of_week()          ||
+-            (*taskIterator)->getScheduleDaily();
++            //Correct time to Schedule?
++            scheduleNow = minutes_of_now == minutes_to_schedule;
++                                                
++            //Correct day for schedule?
++            scheduleToday = 
++              (*taskIterator)->getScheduleMonthly() == (*currentDate).year_month_day().day   ||
++              (*taskIterator)->getScheduleWeekly()  == (*currentDate).day_of_week()          ||
++              (*taskIterator)->getScheduleDaily(); 
++          }
++          else
++          {
++            TRACE(MajorWarning_HERE, "WARNING: Task can't be executet. NULLPOINTER at actual systeme date-time");
++          }
+             
+             //TODO:delete
+-          TRACE(HERE, "\minutes_of_now[%d], minutes_to_schedule[%d], minutes_of_task[%d], Delay-Hour[%d], Delay-Minutes[%d], Hour[%d], Minutes[%d], ScheduleMonthly[%d], ScheduleWeekly[%d], ScheduleDaily[%d], CurrentDay[%d], CurrentDayofWeek[%d],scheduleToday[%d], scheduleNow[%d], !isOldSchedule[%d], Cmd[%s]",
++          /*TRACE(HERE, "minutes_of_now[%d], minutes_to_schedule[%d], minutes_of_task[%d], Delay-Hour[%d], Delay-Minutes[%d], Hour[%d], Minutes[%d], ScheduleMonthly[%d], ScheduleWeekly[%d], ScheduleDaily[%d], CurrentDay[%d], CurrentDayofWeek[%d],scheduleToday[%d], scheduleNow[%d], !isOldSchedule[%d], Cmd[%s]",
+             minutes_of_now,
+             minutes_to_schedule,
+             minutes_of_task,
+@@ -161,6 +182,7 @@ namespace MASSAI
+             scheduleNow,
+             !isOldSchedule,
+             (*taskIterator)->getTask()->getCmd().c_str());
++            */
+             
+           //Schedule the task if all conditions are correct
+           if( scheduleToday && scheduleNow && !isOldSchedule)
+@@ -203,6 +225,7 @@ namespace MASSAI
+     
+     void SchedulerInterface::executeTask(MASSAI::Scheduler::Task* task)
+     {
++      UNREFERENCED_PARAMETER(task);
+     }
+ 
+ 
+-- 
+2.41.0.windows.1
+

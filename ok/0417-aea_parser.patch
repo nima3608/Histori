@@ -1,0 +1,438 @@
+From 7db0f690da989cfccd546ba57ba41dbc1f39fbc2 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 26 Jun 2013 19:45:37 +0000
+Subject: [PATCH 0417/1077] aea_parser V1.0.0.2 Mantis 0027739: AEASimulation:
+ use load order for id enumeration
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@510 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/AEAParser/inc/aeaContext.h     | 11 +++
+ .../Massai/cpp/AEAParser/src/aeaContext.cpp   | 69 +++++++++++++++----
+ .../Massai/cpp/AEAParser/src/local_def.cpp    | 30 ++++----
+ 3 files changed, 85 insertions(+), 25 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+index d1df497e..afefa6bb 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+@@ -23,12 +23,16 @@
+ #include "AEAParser/aeaBoardingPassPectab.h"
+ #include "AEAParser/aeaBoardingPassTemplate.h"
+ #include "AEAParser/aeaResponse.h"
++#include <list>
+ #include <string>
+ 
+ namespace MASSAI
+ {
+   namespace AEA
+   {
++    typedef std::list<std::string> Order;
++
++
+     class AEAPrintProcessorContext;
+     class AEAContextBase
+     {
+@@ -47,6 +51,8 @@ namespace MASSAI
+         void logostatus(std::string& logos);
+ 
+         Logos m_logos;
++        Order m_logoOrder;
++
+         std::string m_contextId;
+         std::string m_transactionCode;
+     };
+@@ -64,6 +70,8 @@ namespace MASSAI
+         void pectabstatus(std::string& pectabs);
+ 
+         BagTagPectabDatas m_pectabs;
++
++        Order m_pectabOrder;
+     };
+ 
+     class BoardingAEAContext: public AEAContextBase
+@@ -86,6 +94,9 @@ namespace MASSAI
+ 
+         Pectabs m_pectabs;
+         Templates m_templates;
++
++        Order m_pectabOrder;
++        Order m_templateOrder;
+     };
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+index d7d27d43..eb6d1238 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+@@ -36,7 +36,6 @@ namespace
+   const char* RETURN_FORMATERROR=       "ERR8";
+   const char* RETURN_LOADLOGOERROR=     "ERRL";
+   const char* RETURN_LOADTEMPLATEERROR= "ERRT";
+-
+ }
+ 
+ namespace MASSAI
+@@ -47,6 +46,7 @@ namespace MASSAI
+       m_contextId(contextId),
+       m_transactionCode(transactionCode)
+     {}
++
+     bool AEAContextBase::inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+@@ -68,6 +68,7 @@ namespace MASSAI
+       }
+       return acceptInput;
+     }
++
+     bool AEAContextBase::inputTransactionCode(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isTransactionCodeRequest= false;
+@@ -81,6 +82,7 @@ namespace MASSAI
+       }
+       return isTransactionCodeRequest;
+     }
++
+     bool AEAContextBase::clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isClearLogo= false;
+@@ -100,6 +102,7 @@ namespace MASSAI
+             processor.processClear(it->second);
+           }
+           m_logos.clear();
++          m_logoOrder.clear();
+         }
+         else
+         {
+@@ -117,6 +120,7 @@ namespace MASSAI
+             {
+               trace.writeTrace(BasicRuntime_HERE, "ClearLogos (%.1000s)", std::string(logoBegin, logoEnd).c_str());
+               processor.processClear(logoIt->second);
++              m_logoOrder.remove(logoIt->first);
+               m_logos.erase(logoIt);
+             }
+           }
+@@ -127,6 +131,7 @@ namespace MASSAI
+       }
+       return isClearLogo;
+     }
++
+     bool AEAContextBase::loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isLoadLogo= true;
+@@ -138,6 +143,8 @@ namespace MASSAI
+         {
+           processor.processLoad(lg);
+           m_logos[lg.logoId()]= lg;
++          m_logoOrder.remove(lg.logoId());
++          m_logoOrder.push_back(lg.logoId());
+           std::string response= m_transactionCode + LOGO_LOAD + RETURN_OK;
+           logostatus(response);
+           rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
+@@ -157,6 +164,7 @@ namespace MASSAI
+       }
+       return isLoadLogo;
+     }
++
+     bool AEAContextBase::getLogoStatus(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isLogoStatusRequest= false;
+@@ -172,15 +180,17 @@ namespace MASSAI
+       }
+       return isLogoStatusRequest;
+     }
++
+     void AEAContextBase::logostatus(std::string& logos)
+     {
+-      Logos::iterator it= m_logos.begin();
+-      Logos::iterator end= m_logos.end();
++      Order::iterator it= m_logoOrder.begin();
++      Order::iterator end= m_logoOrder.end();
+       for(; it != end; ++it)
+       {
+-        logos+= (*it).first;
++        logos+= (*it);
+       }
+     }
++
+     const LogoData* AEAContextBase::logo(const std::string& logoId) const
+     {
+       Logos::const_iterator it= m_logos.find(logoId);
+@@ -201,10 +211,12 @@ namespace MASSAI
+         return &((*it).second);
+       }
+     }
++
+     const std::string& AEAContextBase::contextId() const
+     {
+       return m_contextId;
+     }
++
+     const std::string& AEAContextBase::transactionCode() const
+     {
+       return m_transactionCode;
+@@ -214,6 +226,7 @@ namespace MASSAI
+     BagtagAEAContext::BagtagAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
++
+     bool BagtagAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+@@ -243,6 +256,7 @@ namespace MASSAI
+       }
+       return acceptInput;
+     }
++
+     const BagTagPectabData* BagtagAEAContext::pectab(const std::string& pectabId, const std::string& pectabVersion) const
+     {
+       BagTagPectabDatas::const_iterator it= m_pectabs.find(std::make_pair(pectabId, pectabVersion));
+@@ -255,6 +269,7 @@ namespace MASSAI
+         return &((*it).second);
+       }
+     }
++
+     bool BagtagAEAContext::clearPectabs(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isClearPectab= false;
+@@ -274,6 +289,7 @@ namespace MASSAI
+             processor.processClear(it->second);
+           }
+           m_pectabs.clear();
++          m_pectabOrder.clear();
+         }
+         else
+         {
+@@ -294,6 +310,7 @@ namespace MASSAI
+               trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", pectabId.c_str(), pectabIt->second.version());
+               processor.processClear(pectabIt->second);
+               m_pectabs.erase(pectabIt);
++              m_pectabOrder.remove(pectabId + pectabVersion);
+             }
+           }
+         }
+@@ -303,6 +320,7 @@ namespace MASSAI
+       }
+       return isClearPectab;
+     }
++
+     bool BagtagAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isLoadPectab= true;
+@@ -314,6 +332,8 @@ namespace MASSAI
+         {
+           processor.processLoad(pt);
+           m_pectabs[std::make_pair(pt.pectabId(), pt.pectabVersion())]= pt;
++          m_pectabOrder.remove(pt.pectabId() + pt.pectabVersion());
++          m_pectabOrder.push_back(pt.pectabId() + pt.pectabVersion());
+           std::string response= transactionCode() + PECTAB_LOAD + RETURN_OK;
+           pectabstatus(response);
+           rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
+@@ -332,8 +352,8 @@ namespace MASSAI
+         trace.writeTrace(MajorWarning_HERE, "ParseException: (%.4000s)", ex.what());
+       }
+       return isLoadPectab;
+-
+     }
++
+     bool BagtagAEAContext::getPectabStatus(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isPectabStatusRequest= false;
+@@ -349,6 +369,7 @@ namespace MASSAI
+       }
+       return isPectabStatusRequest;
+     }
++
+     void BagtagAEAContext::pectabstatus(std::string& pectabs)
+     {
+       BagTagPectabDatas::iterator it= m_pectabs.begin();
+@@ -360,9 +381,11 @@ namespace MASSAI
+       }
+     }
+ 
++
+     BoardingAEAContext::BoardingAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
++
+     bool BoardingAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+@@ -424,6 +447,7 @@ namespace MASSAI
+             processor.processClear(it->second);
+           }
+           m_pectabs.clear();
++          m_pectabOrder.clear();
+         }
+         else
+         {
+@@ -441,6 +465,7 @@ namespace MASSAI
+             {
+               trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
+               processor.processClear(pectabIt->second);
++              m_pectabOrder.remove(pectabIt->first);
+               m_pectabs.erase(pectabIt);
+             }
+             else
+@@ -455,6 +480,7 @@ namespace MASSAI
+       }
+       return isClearPectab;
+     }
++
+     bool BoardingAEAContext::getPectabStatus(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isPectabStatusRequest= false;
+@@ -470,6 +496,7 @@ namespace MASSAI
+       }
+       return isPectabStatusRequest;
+     }
++
+     bool BoardingAEAContext::loadPectab(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isLoadPectab= true;
+@@ -481,6 +508,8 @@ namespace MASSAI
+         {
+           processor.processLoad(pt);
+           m_pectabs[pt.pectabId()]= pt;
++          m_pectabOrder.remove(pt.pectabId());
++          m_pectabOrder.push_back(pt.pectabId());
+           std::string response= transactionCode() + PECTAB_LOAD + RETURN_OK;
+           pectabstatus(response);
+           rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
+@@ -500,16 +529,22 @@ namespace MASSAI
+       }
+       return isLoadPectab;
+     }
++
+     void BoardingAEAContext::pectabstatus(std::string& pectabs)
+     {
+-      Pectabs::iterator it= m_pectabs.begin();
+-      Pectabs::iterator end= m_pectabs.end();
++      Order::iterator it= m_pectabOrder.begin();
++      Order::iterator end= m_pectabOrder.end();
+       for(; it != end; ++it)
+       {
+-        pectabs+= (*it).first;
+-        (*it).second.getVersion(pectabs);
++        Pectabs::const_iterator pecIt = m_pectabs.find(*it);
++        if(pecIt != m_pectabs.end())
++        {
++          pectabs+= (*pecIt).first;
++          (*pecIt).second.getVersion(pectabs);
++        }
+       }
+     }
++
+     bool BoardingAEAContext::clearTemplates(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isClearTemplate= false;
+@@ -529,6 +564,7 @@ namespace MASSAI
+             processor.processClear(it->second);
+           }
+           m_templates.clear();
++          m_templateOrder.clear();
+         }
+         else
+         {
+@@ -544,8 +580,9 @@ namespace MASSAI
+             }
+             else
+             {
+-              trace.writeTrace(BasicRuntime_HERE, "ClearTemplates (%.1000s)", std::string(templateBegin, templateEnd).c_str());
++              trace.writeTrace(BasicRuntime_HERE, "ClearTemplates (%.1000s)", templateIt->first.c_str());
+               processor.processClear(templateIt->second);
++              m_templateOrder.remove(templateIt->first);
+               m_templates.erase(templateIt);
+             }
+           }
+@@ -556,6 +593,7 @@ namespace MASSAI
+       }
+       return isClearTemplate;
+     }
++
+     bool BoardingAEAContext::loadTemplate(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool isLoadTemplate= true;
+@@ -567,6 +605,8 @@ namespace MASSAI
+         {
+           processor.processLoad(td);
+           m_templates[td.templateId()]= td;
++          m_templateOrder.remove(td.templateId());
++          m_templateOrder.push_back(td.templateId());
+           std::string response= transactionCode() + TEMPLATE_LOAD + RETURN_OK;
+           templatestatus(response);
+           rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
+@@ -586,6 +626,7 @@ namespace MASSAI
+       }
+       return isLoadTemplate;
+     }
++
+     bool BoardingAEAContext::getTemplateStatus(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isTemplateStatusRequest= false;
+@@ -601,13 +642,14 @@ namespace MASSAI
+       }
+       return isTemplateStatusRequest;
+     }
++
+     void BoardingAEAContext::templatestatus(std::string& templates)
+     {
+-      Templates::iterator it= m_templates.begin();
+-      Templates::iterator end= m_templates.end();
++      Order::iterator it= m_templateOrder.begin();
++      Order::iterator end= m_templateOrder.end();
+       for(; it != end; ++it)
+       {
+-        templates+= (*it).first;
++        templates+= (*it);
+       }
+     }
+ 
+@@ -623,6 +665,7 @@ namespace MASSAI
+         return &((*it).second);
+       }
+     }
++
+     const TemplateData* BoardingAEAContext::template_(const std::string& templateId) const
+     {
+       Templates::const_iterator it= m_templates.find(templateId);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
+index 41356afd..e76bcb52 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
+@@ -1,14 +1,20 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-/*! \page aea_parser aea_parser - Release Notes
+- *
+- *
+- *  \date 19.10.2010 \li V1.0.0.1
+- *                   \li JK Moved to SelfServiceCommon, changing #include lines
+- *
+- *  \date 19.10.2010 \li V1.0.0.0
+- *                   \li SteT Initial Version
+- *
+- */
+-
+-VERSION_ID_DT(aea_parser, 1, 0, 0, 1);
++/*!
++\page aea_parser aea_parser - Release Notes
++
++\date 26.06.2013
++\li V1.0.0.2
++\li Mantis 0027739: AEASimulation: use load order for id enumeration
++
++\date 19.10.2010
++\li V1.0.0.1
++\li JK Moved to SelfServiceCommon, changing #include lines
++
++\date 19.10.2010
++\li V1.0.0.0
++\li SteT Initial Version
++
++*/
++
++VERSION_ID_DT(aea_parser, 1, 0, 0, 3);
+-- 
+2.41.0.windows.1
+

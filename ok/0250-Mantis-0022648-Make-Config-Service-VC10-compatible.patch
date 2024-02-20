@@ -1,0 +1,555 @@
+From 4407aa9df09a1486418c47851e94110077666076 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 7 Mar 2012 11:20:45 +0000
+Subject: [PATCH 0250/1076] Mantis 0022648: Make Config-Service VC10-compatible
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@303 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |   8 +-
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   | 481 ++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |   8 +-
+ 3 files changed, 495 insertions(+), 2 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 25abf491..495c1741 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -6,6 +6,12 @@
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
++!ifdef VC_COMPILER_VC10
++XERCES_IFOBJ=$(_OBJ)\cfgFromXML_Xerces3.obj
++!else
++XERCES_IFOBJ=$(_OBJ)\cfgFromXML.obj
++!endif
++
+ MY_CFLAGS = \
+     -DSTD_IOS \
+     -DUSE_XML_FILE \
+@@ -30,7 +36,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
+     $(_OBJ)\cfgEntity.obj \
+-    $(_OBJ)\cfgFromXML.obj \
++    $(XERCES_IFOBJ) \
+     $(_OBJ)\cfgMeta.obj \
+     $(_OBJ)\cfgMetaNumber.obj \
+     $(_OBJ)\cfgMetaSelection.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+new file mode 100644
+index 00000000..3d1a13dd
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -0,0 +1,481 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgFromXML.cpp
++ *
++ * Implementation file for cfgFromXML.hpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2008 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exports
++#include "cfgFromXML.hpp"
++
++// Local header
++#include "cfgToken.h"
++
++// Common header
++#include "cfgMetaNumber.hpp"
++#include "cfgMetaSelection.hpp"
++#include "cfgMetaText.hpp"
++#include "cfgMetaTextlist.hpp"
++#include "trc/TraceClt.h"
++
++// Xerces stuff
++#include "xercesc/parsers/XercesDOMParser.hpp"
++#include "xercesc/dom/DOM.hpp"
++#include "xercesc/sax/HandlerBase.hpp"
++#include "xercesc/util/XMLString.hpp"
++#include "xercesc/util/PlatformUtils.hpp"
++#include "xercesc/framework/MemBufInputSource.hpp"
++
++// Compiler lib
++#include <sstream>
++
++using namespace xercesc;
++ 
++#if 0
++
++
++
++#include "dom\dom.hpp"
++#include "util\platformutils.hpp"
++#include "parsers\domparser.hpp"
++#include "sax\ErrorHandler.hpp"
++#include "sax\SAXParseException.hpp"
++
++
++#endif
++
++
++namespace
++{
++
++
++/**
++ *
++ * Node attribute getter.
++ *
++ * @param Attribs:           Attribute node.
++ *
++ * @param AttribName:        Attribute name.
++ *
++ * @param AttribDest:        Attribute destination.
++ *
++**/
++void getAttribute
++(
++   DOMNamedNodeMap const *      Attribs,
++   std::string const &          AttribName,
++   std::string &                AttribDest
++)
++{
++   DOMNode const * Node
++      = Attribs->getNamedItem( XMLString::transcode( AttribName.c_str() ) );
++   if( !Node )
++      AttribDest.erase();
++   else
++      AttribDest.assign( XMLString::transcode( Node->getNodeValue() ) );
++}
++
++
++
++/**
++ *
++ * Read node meta data to the database.
++ *
++ * @param Node:              The DOM node.
++ *
++ * @param Dst:               The data back-end destination.
++ *
++**/
++void document2Meta
++(
++   DOMNode const *      Node,
++   cfgEntity &          Dst
++)
++{
++   if( Node )
++   {
++      if
++      (
++         ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
++         !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_META )
++      )
++      {
++         DOMNamedNodeMap const * Attribs = Node->getAttributes();
++
++         std::string NRef;
++         getAttribute( Attribs, CFGTOKEN_META_REF, NRef );
++
++         std::string NType;
++         getAttribute( Attribs, CFGTOKEN_TYPE, NType );
++
++         std::string NRights;
++         getAttribute( Attribs, CFGTOKEN_RIGHTS, NRights );
++
++         std::string NExpl;
++         getAttribute( Attribs, CFGTOKEN_EXPLANATION, NExpl );
++
++         try
++         {
++
++            if( !strcmp( NType.c_str(), CFGTOKEN_TYPE_NUMBER ) )
++            {
++               std::string NMin;
++               getAttribute( Attribs, CFGTOKEN_MINIMUM, NMin );
++               std::string NMax;
++               getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               cfgMetaNumber Meta
++                              (
++                                 NRights, NExpl,
++                                 atoi(NMin.c_str()),
++                                 atoi(NMax.c_str())
++                              );
++               Dst.itemCreate( Meta, 0, 0, false );
++            }
++
++            else if( !strcmp( NType.c_str(), CFGTOKEN_TYPE_SELECTION ) )
++            {
++               DOMNode const * SubNode = Node->getFirstChild();
++               char const * const StrValue
++                  = XMLString::transcode( SubNode->getNodeValue() );
++               cfgMetaSelection Meta( NRights, NExpl, StrValue );
++               Dst.itemCreate( Meta, 0, 0, false );
++            }
++
++            else if( !strcmp( NType.c_str(), CFGTOKEN_TYPE_TEXT ) )
++            {
++               std::string NMax;
++               getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               cfgMetaText
++                  Meta
++                  (
++                     NRights, NExpl,
++                     static_cast<unsigned>( atoi(NMax.c_str()) )
++                  );
++               Dst.itemCreate( Meta, 0, 0, false );
++            }
++
++            else if( !strcmp( NType.c_str(), CFGTOKEN_TYPE_TEXTLIST ) )
++            {
++               std::string NMax;
++               getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               cfgMetaTextlist
++                  Meta
++                  (
++                     NRights, NExpl,
++                     static_cast<unsigned>( atoi(NMax.c_str()) )
++                  );
++               Dst.itemCreate( Meta, 0, 0, false );
++            }
++
++         }
++         catch( ... )
++         {
++         }
++
++      }
++   }
++}
++
++
++
++/**
++ *
++ * Read node value data to the database.
++ *
++ * @param Node:              The DOM node.
++ *
++ * @param Dst:               The data back-end destination.
++ *
++ * @param Path:              Configuration item path.
++ *
++ * @param Level:             Hierarchy.
++ *
++**/
++void document2Value
++(
++   DOMNode const *      Node,
++   cfgEntity &          Dst,
++   std::string const &  Path,
++   int                  Level
++)
++{
++   while( Node )
++   {
++      if
++      (
++         ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
++         !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_VALUE )
++      )
++      {
++         DOMNamedNodeMap const * Attribs = Node->getAttributes();
++
++         std::string NKey;
++         getAttribute( Attribs, CFGTOKEN_ITEM_NAME, NKey );
++
++         std::string NRef;
++         getAttribute( Attribs, CFGTOKEN_META_REF, NRef );
++
++         std::string XPath;
++         if( Path.size() )
++            XPath = Path + "." + NKey;
++         else
++            XPath = NKey;
++
++         DOMNode const * SubNode = Node->getFirstChild();
++         cfgEntity::reference const Ref =
++            static_cast<unsigned>( atoi( NRef.c_str() ) );
++         if( Ref )
++         {
++            try
++            {
++               cfgFlatZ Flat;
++               if( SubNode )
++               {
++                  Flat.setAndOwn( XMLString::transcode( SubNode->getNodeValue() ) );
++               }
++               cfgMeta const * const Meta
++                  = Dst.getMeta( "", cfgEntity::PURP_TYPEGET, Ref );
++               if( Meta )
++               {
++                  cfgValue * const Value = Meta->valueFactory( Flat );
++                  if( Value )
++                  {
++                     writeTrace
++                     (
++                        BasicRuntime_HERE,
++                        "cfgFromXML: create(%s)",
++                        XPath.c_str()
++                     );
++                     Dst.itemCreate( *Meta, XPath.c_str(), Value, false );
++                  }
++               }
++            }
++            catch( ... )
++            {
++            }
++         }
++
++         document2Value( SubNode, Dst, XPath, Level + 1 );
++
++      }
++      Node = Node->getNextSibling();
++   }
++}
++
++
++
++/**
++ *
++ * Read node map data to the database.
++ *
++ * @param Node:      The DOM node.
++ *
++ * @param Dst:       The data back-end destination.
++ *
++**/
++void document2Map( DOMNode const * Node, cfgEntity & Dst )
++{
++   while( Node )
++   {
++      if( Node->getNodeType() == DOMNode::ELEMENT_NODE )
++      {
++         if( !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_META ) )
++         {
++            document2Meta( Node, Dst );
++         }
++         else if
++         (
++            !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_VALUE )
++         )
++         {
++            std::string Path( "" );
++            document2Value( Node, Dst, Path, 1 );
++         }
++      }
++      Node = Node->getNextSibling();
++   }
++}
++
++
++
++/**
++ *
++ * Read root node data to the database.
++ *
++ * @param Node:              The DOM node.
++ *
++ * @param Dst:               The data back-end destination.
++ *
++**/
++void document2Root( DOMNode const * Node, cfgEntity & Dst )
++{
++   if
++   (
++      Node &&
++      ( Node->getNodeType() == DOMNode::ELEMENT_NODE ) &&
++      !strcmp( XMLString::transcode( Node->getNodeName() ), CFGTOKEN_MAP )
++   )
++   {
++      document2Map( Node->getFirstChild(), Dst );
++   }
++}
++
++
++
++/**
++ *
++ * Error handling callback class.
++ *
++**/
++class cfgFileErrorHandler : public ErrorHandler
++{
++
++public:
++
++   /**
++   *********************************************************************
++   * Default constructor.
++   */
++   cfgFileErrorHandler() :
++      ErrorHandler()
++   {
++   }
++
++   /**
++   *********************************************************************
++   * Receive notification of a warning.
++   */
++   virtual void warning( const SAXParseException & )
++   {
++   }
++
++   /**
++   *********************************************************************
++   * Receive notification of a recoverable error.
++   */
++   virtual void error ( const SAXParseException & )
++   {
++   }
++
++   /**
++   *********************************************************************
++   * Receive notification of a non-recoverable error.
++   */
++   virtual void fatalError( const SAXParseException & X )
++      throw( std::exception )
++   {
++      std::ostringstream E;
++      E  << "Exception parsing XML map: Line "
++         << X.getLineNumber() << ":" << X.getColumnNumber();
++      throw std::exception( E.str().c_str() );
++   }
++
++   /**
++   *********************************************************************
++   * Reset internal data
++   */
++   virtual void resetErrors()
++   {
++   }
++
++private:
++
++   //! Copy constructor - intentionally not implemented.
++   cfgFileErrorHandler( cfgFileErrorHandler const & Src );
++
++   //! Assignment - intentionally not implemented.
++   cfgFileErrorHandler & operator=( cfgFileErrorHandler const & Src );
++
++};
++
++
++
++} // namespace
++
++
++
++/**
++ *
++ * Read the configuration database mapping from a string.
++ *
++ * @param Dst:          The destination map.
++ *
++ * @param Src:          The source string.
++ *
++**/
++void cfgFromXML_readMap( cfgEntity & Dst, std::string const & Src )
++   throw( std::exception )
++{
++   try
++   {
++      XMLPlatformUtils::Initialize();
++   }
++   catch( XMLException & InX )
++   {
++      char * message = XMLString::transcode( InX.getMessage() );
++      std::string ex( "Exception initializing Xerces XML platform:\n" );
++      ex += message;
++      XMLString::release( &message );
++      throw std::exception( ex.c_str() );
++   }
++
++   cfgFileErrorHandler ErrHdl;
++   
++   XercesDOMParser * parser = new XercesDOMParser();
++   parser->setErrorHandler( &ErrHdl );
++
++   try
++   {
++      MemBufInputSource source
++      (
++         reinterpret_cast<XMLByte const *>( Src.c_str() ),
++         Src.length(),
++         ""
++      );
++
++      parser->parse(source);
++
++      DOMDocument * document = parser->getDocument();
++
++      DOMTreeWalker * tree = document->createTreeWalker
++                              (
++                                 document->getDocumentElement(),
++                                 0,
++                                 0,
++                                 false
++                              );
++
++      document2Root( tree->getCurrentNode(), Dst );
++
++   }
++   catch( XMLException & InX )
++   {
++      std::string ex( "Exception parsing XML map:\n" );
++      ex += XMLString::transcode( InX.getMessage() );
++      throw std::exception( ex.c_str() );
++   }
++
++   try
++   {
++      delete parser;
++   }
++   catch( ... )
++   {
++   }
++
++}
++
++
++
++/**
++ *
++ * End of file
++ *
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index b46d9aa6..96d906bb 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -6,6 +6,12 @@
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
++!ifdef VC_COMPILER_VC10
++XERCES_IFOBJ=$(_OBJ)\cfgFromXML_Xerces3.obj
++!else
++XERCES_IFOBJ=$(_OBJ)\cfgFromXML.obj
++!endif
++
+ MY_CFLAGS = \
+     -DSTD_IOS \
+     -DUSE_XML_FILE \
+@@ -36,7 +42,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
+     $(_OBJ)\cfgEntity.obj \
+-    $(_OBJ)\cfgFromXML.obj \
++    $(XERCES_IFOBJ) \
+     $(_OBJ)\cfgMeta.obj \
+     $(_OBJ)\cfgMetaNumber.obj \
+     $(_OBJ)\cfgMetaSelection.obj \
+-- 
+2.41.0.windows.1
+

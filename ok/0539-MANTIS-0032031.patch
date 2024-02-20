@@ -1,0 +1,145 @@
+From 6dcd972c9b2660a3cd1f0bcaa6a9f1037a0c69c4 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 28 Apr 2014 15:15:24 +0000
+Subject: [PATCH 0539/1077] MANTIS 0032031 Platformsetup: CA Check for old
+ installation ALLUSER mode
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@670 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |  4 +-
+ .../src/MConfig_CustomAction.cpp              | 66 +++++++++++++++++--
+ .../src/MConfig_CustomAction.def              |  2 +
+ 3 files changed, 64 insertions(+), 8 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index 6015b8d2..9bb69b75 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,8
+-#define FILE_VER_STR     "FileVersion", "1.0.0.8\0"
++#define FILE_VER_BIN     1,0,0,9
++#define FILE_VER_STR     "FileVersion", "1.0.0.9\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 09db3497..b73e60db 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -868,6 +868,60 @@ LExit:
+   return WcaFinalize(er);
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_SetPreviousInstallMode(MSIHANDLE hInstall)
++{
++  std::wstringstream dbstrs;
++  LPWSTR pwzPropertyValue = NULL;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_SetPreviousInstallMode");
++  dbstrs << L"CA_SetPreviousInstallMode: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(L"UpgradeCode", &pwzPropertyValue);
++  ExitOnFailure(hr, "Failed to get UpgradeCode property value");
++  dbstrs << L"MSI SETUP CA_SetPreviousInstallMode: Read UpgradeCode (" << pwzPropertyValue << L")";
++  Log_Str(dbstrs);
++  
++  if ( hr == ERROR_SUCCESS )
++  {
++    TCHAR szProductCode[64];
++    DWORD dwIndex=0;
++    BOOL fPerMachine = FALSE;
++
++    while (::MsiEnumRelatedProducts(pwzPropertyValue,0,dwIndex,szProductCode) == ERROR_SUCCESS )
++    {
++      TCHAR szAssignmentType[10] = {0};
++      DWORD cchAssignmentType = sizeof(szAssignmentType)/sizeof(szAssignmentType[0]);
++
++      if (ERROR_SUCCESS == MsiGetProductInfo(szProductCode,INSTALLPROPERTY_ASSIGNMENTTYPE,szAssignmentType,&cchAssignmentType))
++      {
++        // 0=>Per user, 1=> per machine..
++        if ('1' == szAssignmentType[0])
++                fPerMachine = TRUE;
++      }
++      dwIndex++;
++    }
++
++    if ( fPerMachine )
++    {
++      hr = WcaSetProperty(L"ALLUSERS", L"1");
++      dbstrs << L"MSI SETUP CA_SetPreviousInstallMode: Set ALLUSERS to: 1" << std::endl;
++    } else
++    {
++      hr = WcaSetProperty(L"ALLUSERS", L"");
++      dbstrs << L"MSI SETUP CA_SetPreviousInstallMode: Clear ALLUSERS " << std::endl;
++    }
++  }
++
++LExit:
++  if(pwzPropertyValue) ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++} 
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_SetPredefinedUserFolder(MSIHANDLE hInstall)
+ {
+   std::wstringstream dbstrs;
+@@ -888,33 +942,33 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_SetPredefinedUserFolder(MSIHAN
+   if(SHGetSpecialFolderPath(NULL,buff,CSIDL_DESKTOPDIRECTORY,false))
+   {
+     hr = WcaSetProperty(USERDESKTOPFOLDER_PROP_NAME, buff);
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERDESKTOPFOLDER_PROP_NAME << L" to: " << buff << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERDESKTOPFOLDER_PROP_NAME << L" to: " << buff << std::endl;
+   } else
+   {
+     hr = WcaSetProperty(USERDESKTOPFOLDER_PROP_NAME, L"");
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERDESKTOPFOLDER_PROP_NAME << L" to: \"\"" << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERDESKTOPFOLDER_PROP_NAME << L" to: \"\"" << std::endl;
+   }
+   Log_Str(dbstrs);
+ 
+   if(SHGetSpecialFolderPath(NULL,buff,CSIDL_STARTUP,false))
+   {
+     hr = WcaSetProperty(USERSTARTUPFOLDER_PROP_NAME, buff);
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTUPFOLDER_PROP_NAME << L" to: " << buff << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTUPFOLDER_PROP_NAME << L" to: " << buff << std::endl;
+   } else
+   {
+     hr = WcaSetProperty(USERSTARTUPFOLDER_PROP_NAME, L"");
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTUPFOLDER_PROP_NAME << L" to: \"\"" << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTUPFOLDER_PROP_NAME << L" to: \"\"" << std::endl;
+   }
+   Log_Str(dbstrs);
+ 
+   if(SHGetSpecialFolderPath(NULL,buff,CSIDL_STARTMENU,false))
+   {
+     hr = WcaSetProperty(USERSTARTMENUFOLDER_PROP_NAME, buff);
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTMENUFOLDER_PROP_NAME << L" to: " << buff << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTMENUFOLDER_PROP_NAME << L" to: " << buff << std::endl;
+   } else
+   {
+     hr = WcaSetProperty(USERSTARTMENUFOLDER_PROP_NAME, L"");
+-    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTMENUFOLDER_PROP_NAME << L" to: \"\"" << std::endl;;
++    dbstrs << L"MSI SETUP CA_SetPredefinedUserFolder: Set " << USERSTARTMENUFOLDER_PROP_NAME << L" to: \"\"" << std::endl;
+   }
+   Log_Str(dbstrs);    
+   
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index 8bca9814..994c5642 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -22,4 +22,6 @@ EXPORTS
+   CA_AppendToFile
+   CA_CheckFileInPath
+   CA_SetPredefinedUserFolder
++  CA_SetPreviousInstallMode
++
+ 
+-- 
+2.41.0.windows.1
+

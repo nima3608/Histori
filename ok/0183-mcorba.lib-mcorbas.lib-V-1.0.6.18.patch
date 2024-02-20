@@ -1,0 +1,966 @@
+From 6b8b8e361d2086063d69dbe117ca696276367bc3 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 23 Mar 2012 18:09:02 +0000
+Subject: [PATCH 0183/1000] mcorba.lib, mcorbas.lib V 1.0.6.18 Mantis 0018942:
+ mCorba: creation order of servant orb and client orb and synchronization
+ problems
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@312 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/MassaiCorba/inc/tools.h        |   3 +
+ .../Massai/cpp/MassaiCorba/src/corbaorbEx.cpp | 716 ------------------
+ .../cpp/MassaiCorba/src/corbaorbcfg.cpp       | 174 -----
+ .../Massai/cpp/MassaiCorba/src/tools.cpp      |  10 +-
+ 4 files changed, 8 insertions(+), 895 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbEx.cpp
+ delete mode 100644 SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbcfg.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tools.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tools.h
+index f54f4d6c..50219b8b 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tools.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tools.h
+@@ -26,6 +26,9 @@ namespace massaiCorba
+       char** argv;
+ 
+     private:
++      int argcAllocated;
++      char** argvAllocated;
++
+       Arguments(const Arguments&);
+       Arguments& operator=(const Arguments&);
+   };
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbEx.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbEx.cpp
+deleted file mode 100644
+index 37ec4669..00000000
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbEx.cpp
++++ /dev/null
+@@ -1,716 +0,0 @@
+-/**
+- *  @file      corbaorbEx.cpp
+- *
+- *  @brief     Extensions for servants hosting lots of clients
+- *
+- *  @date      19.12.2003
+- *
+- *  @author    Materna Information & Communications (AGe)
+- *
+- ************************************************************************/
+-
+-#include <list>
+-
+-#include "massaiCorba/corbaorbEx.h"
+-#include "massaiCorba/corbacfg.h"
+-#include "massaidll/mThreadEx.h"
+-#include "tracedef.h"
+-#include "systools/mSysException.hpp"
+-
+-extern void killClientOrb();
+-
+-namespace
+-{
+-  mThreadMutex sem;
+-
+-  void enableTAO_Logging(int& argc, char **argv)
+-  {
+-    argv[argc++] = "-ORBDebug";
+-
+-    argv[argc++] = "-ORBDebugLevel";
+-    argv[argc++] = "10";
+-
+-    argv[argc++] = "-ORBVerboseLogging";
+-    argv[argc++] = "2";
+-  }
+-
+-  //---------------------------------------------------------------------------
+-  //
+-  //  function:   static char *getHostName()
+-  //
+-  //  purpose:    get the TCPIP name of this machine
+-  //
+-  //  date:       03.12.2001, 13:27
+-  //
+-  //  author:     Materna Information & Communications (AGe)
+-  //
+-  //---------------------------------------------------------------------------
+-
+-  static char *getHostName()
+-  {
+-    static char szTmp[256];
+-
+-    memset(szTmp,0,sizeof(szTmp));
+-
+-    gethostname(szTmp,sizeof(szTmp) -1);
+-
+-    if(!*szTmp)
+-    {
+-      WSADATA wsaData;
+-      WORD    wVersionRequested = MAKEWORD(1,1);
+-
+-      WSAStartup(wVersionRequested,&wsaData);
+-
+-      gethostname(szTmp,sizeof(szTmp));
+-    }
+-
+-    return(szTmp);
+-  }
+-
+-  struct orbInterface { CORBA::ORB *orb; char szIF[256]; };
+-
+-  class orbList
+-  {
+-    private:
+-
+-      std::list<orbInterface *> oList;
+-
+-    public:
+-
+-      long addOrb(CORBA::ORB_var o, char *pszInterface)
+-      {
+-        orbInterface *p  = NULL;
+-        long          rc = 0;
+-
+-          if(!pszInterface || !o.in())
+-            return(-1);
+-
+-          p = (orbInterface*) malloc(sizeof(orbInterface));
+-
+-          if(p)
+-          {
+-            // setup struct members
+-
+-            strcpy(p->szIF,pszInterface);
+-            p->orb = o.in();
+-
+-            // and add to end of list
+-
+-            mThreadAutoMutex protect(&sem);
+-            oList.push_back(p);
+-          }
+-          else
+-            rc = -2;
+-
+-          trace(_HERE,"current number of ORBs: %d",oList.size());
+-
+-          return(rc);
+-      }
+-
+-      CORBA::ORB *findOrb(char *pszInterface)
+-      {
+-        std::list<orbInterface *>::iterator i;
+-
+-        CORBA::ORB *o = NULL;
+-        bool fFound;
+-
+-          mThreadAutoMutex protect(&sem);
+-
+-          for(fFound = false, i = oList.begin(); !fFound && i != oList.end(); i++)
+-          {
+-            if(!strcmp((*i)->szIF,pszInterface))
+-            {
+-              fFound = true;
+-              o = (*i)->orb;
+-            }
+-          }
+-
+-          return(o);
+-      }
+-
+-     ~orbList()
+-      {
+-        std::list<orbInterface *>::iterator i;
+-
+-        orbInterface *p  = NULL;
+-
+-          mThreadAutoMutex protect(&sem);
+-
+-          while(!oList.empty())
+-          {
+-            i = oList.begin();
+-
+-            p = (*i);
+-
+-            free(p);
+-
+-            oList.erase(i);
+-          }
+-      }
+-  };
+-
+-  long lOrbCnt = 0;
+-  orbList _orbs;
+-}
+-
+-
+-
+-class threadPool : public mThreadEx
+-{
+-private:
+-
+-    CORBA::ORB_var orb;
+-
+-    long function()
+-    {
+-       if(orb.in())
+-       {
+-          mSysException::standardException Guard;
+-          try
+-          {
+-            orb->run();
+-          }
+-          catch(CORBA::SystemException & e)
+-          {
+-            trace(_HERE,"ORB: terminated due to CORBA::SystemException: %s",e._message());
+-          }
+-          catch(std::exception& e)
+-          {
+-            trace(_HERE,"ORB: terminated due to Exception: %s",e.what());
+-          }
+-          catch(char *szException)
+-          {
+-            trace(_HERE,"ORB: terminated due to Exception: %s",szException);
+-          }
+-          catch(...)
+-          {
+-            trace(_HERE,"ORB: terminated due to unknown exception.");
+-          }
+-       }
+-
+-       return(-1);
+-    }
+-
+-public:
+-
+-    threadPool(CORBA::ORB_var o, long lThreads) : mThreadEx(lThreads)
+-    {
+-       orb = o;
+-    }
+-};
+-
+-
+-
+-//------------------------------------------------------------------------
+-/**
+- *  @fn        long corbaOrbEx::createOrb()
+- *
+- *  @brief     creates an orb with specific properties
+- *
+- *  @date      08.01.2004
+- *
+- *  @author    Materna Information & Communications (AGe)
+- */
+-//------------------------------------------------------------------------
+-
+-long corbaOrbEx::createOrb()
+-{
+-    long rc;
+-    int         argc;
+-    char       *argv       [20];
+-    char        szArgs1    [256];
+-
+-
+-    killClientOrb();
+-
+-    ++lOrbCnt;
+-
+-    if(CORBA::is_nil(_orbSrvr))
+-    {
+-      argc    = 0;
+-      argv[argc++] = "exefile";
+-
+-#if defined(_TAO_1_5_)
+-       argv[argc++] = "-ORBKeepalive";
+-       argv[argc++] = "1";
+-#endif
+-
+-      if(getenv("TAO_ENABLE_LOGGING"))
+-      {
+-        enableTAO_Logging(argc, argv);
+-      }
+-      // provide different orb names if we have more than one orb in one process !!!
+-
+-      sprintf(szOrbName,"ORB$%04x$%d",GetCurrentThreadId(),lOrbCnt);
+-
+-      if(lPort > 0)
+-      {
+-        if(*szHostName && (strcmp(szHostName, "127.0.0.1") != 0))
+-        {
+-          // bind TAO-ORB to the specified port and the specified hostname
+-
+-          sprintf(szArgs1,"iiop://%s:%d", szHostName, lPort);
+-        }
+-        else
+-        {
+-          // bind TAO-ORB to the port and the hostname of this machine
+-
+-          //sprintf(szArgs1,"iiop://%s:%d",getHostName(),lPort);
+-          if (strlen(szIORName)>0)
+-            sprintf(szArgs1,"iiop://:%d/hostname_in_ior=%s", lPort,szIORName);
+-          else
+-            sprintf(szArgs1,"iiop://:%d", lPort);
+-
+-          //strcpy(szHostName, "0.0.0.0");
+-          //strcpy(szHostName,getHostName());
+-
+-          // trace(_HERE,"getHostName() = %s",szHostName);
+-        }
+-
+-        if(getenv("TAO_NUMERIC_ORB"))
+-        {
+-          trace(_HERE,"TAO_NUMERIC_ORB is set in the environment.");
+-
+-          argv[argc++] = "-ORBEndpoint";
+-          argv[argc++] = szArgs1;
+-          argv[argc++] = "-ORBDottedDecimalAddresses";
+-          argv[argc++] = "1";
+-        }
+-        else
+-        {
+-          argv[argc++] = "-ORBEndpoint";
+-          argv[argc++] = szArgs1;
+-        }
+-      }
+-
+-      // check if we already have an orb for this interface
+-
+-      _orb = _orbs.findOrb(szArgs1);
+-
+-      if(!_orb.in())
+-      {
+-        // create the new ORB ...
+-
+-        for(long i = 0; i < argc; i++)
+-          trace(_HERE,"argv[%d] = %s",i,argv[i]);
+-
+-        trace(_HERE,"binding new ORB [%s] to [%s]",szOrbName,szArgs1);
+-
+-        _orb = CORBA::ORB_init(argc,argv,szOrbName);
+-
+-#if defined (_TAO_1_4_)
+-        long lto = -1;
+-        if(getenv("CORBA_INVOCATION_TIMEOUT"))
+-        {
+-            lto = atoi(getenv("CORBA_INVOCATION_TIMEOUT"));
+-        }
+-        if( lto > 0)
+-            SetInvocationTimeout( _orb, lto, false);
+-        else
+-            SetInvocationTimeout( _orb, CORBA_INVOCATION_TIMEOUT_DEFAULT, false);
+-#endif // _TAO_1_4_
+-
+-        trace(_HERE,"new ORB [%s] bound to [%s]",szOrbName,szArgs1);
+-
+-        _orbs.addOrb(_orb,szArgs1);
+-
+-      }
+-      else
+-        trace(_HERE,"ORB [%s] already bound to [%s]",szOrbName,szArgs1);
+-
+-      _orbSrvr = _orb;
+-
+-      rc = 0;
+-    }
+-    else
+-      rc = 1;
+-
+-    return(rc);
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   char *corbaOrbEx::bindingID(const char *pszServantName)
+-//
+-//  purpose:    create a binding name that works for all ORBs
+-//
+-//  date:       22.11.2001, 15:10
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-char *corbaOrbEx::bindingID(const char *pszServantName)
+-{
+-static char szBindingName[1024];
+-
+-    *szBindingName = '\0';
+-
+-    if(pszServantName)
+-    {
+-#if defined(_MICO_)
+-
+-      sprintf(szBindingName,"massai.materna.com/POA_%s/%s",pszServantName,pszServantName);
+-
+-#else
+-
+-      sprintf(szBindingName,"%s",pszServantName);
+-
+-#endif
+-    }
+-
+-    return(szBindingName);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   CORBA::ORB_ptr corbaOrbEx::orb()
+-//
+-//  purpose:    returns pointer to orb
+-//
+-//  date:       24.01.2002, 16:27
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-CORBA::ORB_ptr corbaOrbEx::orb()
+-{
+-    return(_orb);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void corbaOrbEx::createRootPOA()
+-//
+-//  purpose:    helper for servants and clients
+-//
+-//  date:       22.11.2001, 09:12
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-void corbaOrbEx::createRootPOA()
+-{
+-    if(!CORBA::is_nil(_orb))
+-    {
+-      poaObj  = _orb->resolve_initial_references("RootPOA");
+-      rootPoa = PortableServer::POA::_narrow(poaObj);
+-
+-      // Get a reference to the POA manager
+-
+-      poaManager = rootPoa->the_POAManager();
+-    }
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   PortableServer::POA *corbaOrbEx::createPOA(const char *pszServantName)
+-//
+-//  purpose:    create a new POA with standard policies
+-//
+-//  date:       22.11.2001, 09:38
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-PortableServer::POA *corbaOrbEx::createPOA(const char *pszServantName)
+-{
+-char szPoaName[512];
+-
+-    policies.length(3);
+-
+-    policies[0]= rootPoa->create_lifespan_policy(PortableServer::PERSISTENT);
+-    policies[1]= rootPoa->create_id_assignment_policy(PortableServer::USER_ID);
+-    policies[2]= rootPoa->create_implicit_activation_policy(PortableServer::NO_IMPLICIT_ACTIVATION);
+-
+-    if(pszServantName)
+-      sprintf(szPoaName,"POA_%s",pszServantName);
+-    else
+-      sprintf(szPoaName,"POA_%08x",this);
+-
+-    trace(_HERE,"new POA: %s",szPoaName);
+-
+-    try
+-    {
+-      return(rootPoa->create_POA(szPoaName,poaManager,policies));
+-    }
+-    catch(CORBA::SystemException & e)
+-    {
+-      trace(_HERE,"CORBA::SystemException: %s",e._message());
+-    }
+-    catch(...)
+-    {
+-      trace(_HERE,"POA: %s not created.",szPoaName);
+-    }
+-
+-    return(NULL);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long corbaOrbEx::activateCallback()
+-//
+-//  purpose:    simply activate the POA manager to have callback facilities
+-//
+-//  date:       22.11.2001, 09:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long corbaOrbEx::activateCallback()
+-{
+-    // just do the same as for normal servers
+-
+-    return(activateServer());
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long corbaOrbEx::activateServer()
+-//
+-//  purpose:    simply activate the POA manager to enable callees
+-//
+-//  date:       22.11.2001, 09:23
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long corbaOrbEx::activateServer()
+-{
+-long rc = 0;
+-
+-   try
+-   {
+-     // activate the POA
+-
+-     poaManager->activate();
+-   }
+-   catch(CORBA::SystemException & e)
+-   {
+-     trace(_HERE,"CORBA::SystemException: %s",e._message());
+-
+-     rc = -1;
+-   }
+-
+-   return(rc);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void corbaOrbEx::run()
+-//
+-//  purpose:    start the thread(s)
+-//
+-//  date:       21.11.2001, 10:03
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-void corbaOrbEx::start()
+-{
+-    if(workers)
+-    {
+-      trace(_HERE,"starting worker %d thread(s) for %s ...",lWorkers,szOrbName);
+-
+-      //trace(_HERE,"starting worker %d threads for %s, 0x%08lx, 0x%08lx ...",
+-      //            lWorkers,szOrbName,&workers,workers);
+-
+-      workers->run();
+-    }
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void corbaOrbEx::initialize(const char * pszHostName, long port, long lThreads, const char *pszHostname_in_ior)
+-//
+-//  purpose:    initializes corbaOrbEx, use once in constructor
+-//
+-//  date:       26.06.2007
+-//
+-//  author:     Materna Information & Communications (SteT)
+-//
+-//---------------------------------------------------------------------------
+-
+-void corbaOrbEx::initialize(const char * pszHostName, long port, long lThreads, const char *pszHostname_in_ior)
+-{
+-long rc = 0;
+-
+-    _orb     = NULL;
+-    _orbSrvr = NULL;
+-    workers  = NULL;
+-
+-    lPort    = port;
+-    lWorkers = lThreads;
+-
+-    if (pszHostname_in_ior)
+-      strcpy(szIORName, pszHostname_in_ior);
+-    else
+-      strcpy(szIORName, "");
+-
+-    if(pszHostName)
+-      strcpy(szHostName,pszHostName);
+-    else
+-      strcpy(szHostName, "");
+-
+-    rc = createOrb();
+-
+-    workers = new threadPool(_orbSrvr,lThreads);
+-
+-    //trace(_HERE,"worker threads, 0x%08lx, 0x%08lx ...",&workers,workers);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   corbaOrbEx::corbaOrbEx()
+-//
+-//  purpose:    class constructor for servants
+-//
+-//  date:       09.08.2007
+-//
+-//  author:     Materna Information & Communications (SteT)
+-//
+-//---------------------------------------------------------------------------
+-
+-corbaOrbEx::corbaOrbEx()
+-{
+-    long port = 0;
+-    if(getenv("ORBENDPOINT_PORT"))
+-    {
+-      port = atoi(getenv("ORBENDPOINT_PORT"));
+-    }
+-    initialize("", port, 1, "");
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   corbaOrbEx::corbaOrbEx(long port, long lThreads, const char *pszHostname_in_ior)
+-//
+-//  purpose:    class constructor for servants
+-//
+-//  date:       30.05.2007
+-//
+-//  author:     Materna Information & Communications (PtM)
+-//
+-//---------------------------------------------------------------------------
+-
+-corbaOrbEx::corbaOrbEx(long port, long lThreads, const char *pszHostname_in_ior)
+-{
+-    initialize("", port, lThreads, pszHostname_in_ior);
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   corbaOrbEx::corbaOrbEx(long port)
+-//
+-//  purpose:    class constructor for servants
+-//
+-//  date:       21.11.2001, 09:26
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-corbaOrbEx::corbaOrbEx(long port, long lThreads)
+-{
+-    initialize("", port, lThreads, "");
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   corbaOrbEx::corbaOrbEx(const char * pszHostName, long port)
+-//
+-//  purpose:    class constructor for servants
+-//
+-//  date:       21.11.2001, 09:26
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-corbaOrbEx::corbaOrbEx(const char *pszHostName, long port, long lThreads)
+-{
+-    initialize(pszHostName, port, lThreads, "");
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   corbaOrbEx::~corbaOrbEx()
+-//
+-//  purpose:    class destructor
+-//
+-//  date:       21.11.2001, 09:26
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-corbaOrbEx::~corbaOrbEx()
+-{
+-    if(!CORBA::is_nil(_orb))
+-    {
+-      try
+-      {
+-        _orb->shutdown(0);  // returns threads from run() method.
+-      }
+-      catch(...) { }
+-
+-      try
+-      {
+-        _orb->destroy(); // destroy the ORB
+-      }
+-      catch(...) { }
+-    }
+-
+-    if(workers)
+-    {
+-      // wait for worker threads to terminate
+-
+-      workers->wait();
+-
+-      delete workers;
+-    }
+-
+-    _orb = NULL;
+-}
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbcfg.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbcfg.cpp
+deleted file mode 100644
+index d948eb70..00000000
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorbcfg.cpp
++++ /dev/null
+@@ -1,174 +0,0 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       corbaorbcfg.cpp
+-//
+-//  purpose:    split of CFGMGR part
+-//
+-//  date:       19.02.2002, 16:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-#include "massaiCorba/corbaorb.h"
+-#include "massaiCorba/corbacfg.h"
+-#include "tracedef.h"
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   static char *getHostName()
+-//
+-//  purpose:    get the TCPIP name of this machine
+-//
+-//  date:       03.12.2001, 13:27
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-static char *getHostName()
+-{
+-static char szTmp[256];
+-
+-    gethostname(szTmp,sizeof(szTmp));
+-
+-    return(szTmp);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long corbaOrb::createObject(const char *pszIOR,
+-//                                          CORBA::Object_var& obj)
+-//
+-//  purpose:    helper function for clients/servants
+-//
+-//  date:       21.11.2001, 16:02
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long corbaOrb::createObject(const char *pszIOR,CORBA::Object_var& obj)
+-{
+-  bool local;
+-  std::string name;
+-  return createObject(pszIOR, obj, local, name);
+-}
+-
+-long corbaOrb::createObject(const char *pszIOR, CORBA::Object_var& obj, bool& local, std::string& name)
+-{
+-char szIOR [1024];
+-char szTmp [1024];
+-char szHost[256];
+-long rc = 0;
+-local= false;
+-
+-    if(pszIOR)
+-    {
+-      strcpy(szTmp,pszIOR);
+-      strlwr(szTmp);
+-
+-      if(strstr(szTmp,"corbaloc:") != szTmp && strstr(szTmp,"ior:") != szTmp)
+-      {
+-        // servant name only ?? -> build corbaloc ior
+-
+-        strcpy(szHost,getConfigHost(pszIOR).c_str());
+-        strlwr(szHost);
+-
+-        if(!strcmp(szHost,"localhost") || !strcmp(szHost,"127.0.0.1"))
+-        {
+-          // use the IP host name instead of localhost or 127.0.0.1
+-          local= true;
+-          strcpy(szHost,getHostName());
+-        }
+-
+-        sprintf(szIOR,"corbaloc:iiop:%s:%5d/%s",szHost,getConfigPort(pszIOR),pszIOR);
+-      }
+-      else
+-        strcpy(szIOR,pszIOR);
+-
+-      name= szIOR;
+-      obj = orb()->string_to_object(szIOR);
+-
+-      if(CORBA::is_nil(obj))
+-        rc = -1;
+-    }
+-    else
+-      rc = -1;
+-
+-    return(rc);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long corbaOrb::createObject(const char *pszHost,
+-//                                          long port,
+-//                                          const char* pszServant,
+-//                                          CORBA::Object_var& obj)
+-//
+-//  purpose:    helper function for clients/servants
+-//
+-//  date:       21.11.2001, 16:02
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long corbaOrb::createObject(const char *pszHost,
+-                            long port,
+-                            const char* pszServant,
+-                            CORBA::Object_var& obj)
+-{
+-  bool local;
+-  std::string name;
+-  return createObject(pszHost, port, pszServant, obj, local, name);
+-}
+-
+-long corbaOrb::createObject(const char *pszHost,
+-                            long port,
+-                            const char* pszServant,
+-                            CORBA::Object_var& obj,
+-                            bool& local,
+-                            std::string& name)
+-{
+-char szIOR [1024];
+-char szHost[256];
+-long rc = 0;
+-local= false;
+-
+-    if(port > 0 && pszServant)
+-    {
+-      if(pszHost && !*pszHost)
+-      {
+-        local= true;
+-        sprintf(szIOR,"corbaloc:iiop:%s:%5d/%s",getHostName(),port,pszServant);
+-      }
+-      else
+-      {
+-        strcpy(szHost,pszHost);
+-        strlwr(szHost);
+-
+-        if(!strcmp(szHost,"localhost") || !strcmp(szHost,"127.0.0.1"))
+-        {
+-          // use the IP host name instead of localhost or 127.0.0.1
+-
+-          local= true;
+-          strcpy(szHost,getHostName());
+-          pszHost = szHost;
+-        }
+-
+-        sprintf(szIOR,"corbaloc:iiop:%s:%5d/%s",pszHost,port,pszServant);
+-      }
+-
+-      name= szIOR;
+-      obj = orb()->string_to_object(szIOR);
+-
+-      if(CORBA::is_nil(obj))
+-        rc = -1;
+-    }
+-    else
+-      rc =  -1;
+-
+-    return(rc);
+-}
+-
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
+index 0708eeff..2d79ab89 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/tools.cpp
+@@ -64,8 +64,8 @@ namespace massaiCorba
+ 
+   Arguments::Arguments(const ParameterList& parameterList)
+   {
+-    argc = parameterList.size();
+-    argv = new char*[argc];
++    argcAllocated = argc = parameterList.size();
++    argvAllocated = argv = new char*[argc];
+     ParameterList::const_iterator it = parameterList.begin();
+     ParameterList::const_iterator end = parameterList.end();
+     for(int i = 0; i < argc && it != end; i++, it++)
+@@ -80,11 +80,11 @@ namespace massaiCorba
+ 
+   Arguments::~Arguments()
+   {
+-    for(int i = 0; i < argc; i++)
++    for(int i = 0; i < argcAllocated; i++)
+     {
+-      delete[] argv[i];
++      delete[] argvAllocated[i];
+     }
+-    delete[] argv;
++    delete[] argvAllocated;
+   }
+ }
+ 
+-- 
+2.41.0.windows.1
+

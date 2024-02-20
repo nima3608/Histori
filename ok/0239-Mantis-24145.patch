@@ -1,0 +1,532 @@
+From fc39d6adad755beb997c3901b7f5b857a83fbaef Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 10 Aug 2012 14:31:52 +0000
+Subject: [PATCH 0239/1000] Mantis 24145
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@382 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/serviceMap.hpp  |  93 +++++
+ .../Massai/cpp/Controller/makefile.mak        |   3 +-
+ .../cpp/Controller/src/mstarter_config.cpp    |  12 +-
+ .../Massai/cpp/Controller/src/serviceMap.cpp  | 344 ++++++++++++++++++
+ 4 files changed, 447 insertions(+), 5 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp b/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
+new file mode 100644
+index 00000000..7447a079
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
+@@ -0,0 +1,93 @@
++/**
++ **************************************************************************
++ *
++ * @file serviceMap.hpp
++ *
++ * Contains class serviceMap.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef SERVICEMAP_HPP
++#define SERVICEMAP_HPP
++
++
++#include <list>
++#include <string>
++
++
++/**
++ *
++ * Assemble a set of services and assign port numbers from a given range.
++ *
++**/
++class serviceMap
++{
++
++   //! Implementation class.
++   class impl;
++
++   //! Implementation reference.
++   impl * m_impl;
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param first:             The first portnumber of the usable
++    *                           port range.
++    *
++    * @param last:              The last portnumber of the range.
++    *
++   **/
++   serviceMap( unsigned first, unsigned last );
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   virtual ~serviceMap() throw();
++
++   /**
++    *
++    * Replace macros $SERVANTPORT and $SERVANTPORT_LIST in a given
++    * input list of strings.
++    *
++    * @param in:                The input list of strings.
++    *
++    * @return:                  The strings with macros replaced.
++    *
++   **/
++   std::list<std::string> substPortMacros
++      (
++         std::list<std::string> const & in
++      );
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   serviceMap();
++
++   //! Copy constructor - intentionally not implemented.
++   serviceMap( serviceMap const & src );
++
++   //! Assignment - intentionally not implemented.
++   serviceMap & operator=( serviceMap const & src );
++
++};
++
++
++#endif // #ifndef SERVICEMAP_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index bf71910b..83af9210 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -100,7 +100,8 @@ MY_BIN4_OBJS = \
+     $(_OBJ)\mstarter.obj\
+     $(_OBJ)\mstarter_config.obj\
+     $(_OBJ)\mstarter_notify.obj\
+-    $(_OBJ)\mstarter_args.obj
++    $(_OBJ)\mstarter_args.obj \
++    $(_OBJ)\serviceMap.obj
+ 
+ MY_BIN4_USER_LIBS = \
+     $(LIB_TEXT) \
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+index 22671a67..cdbbed53 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+@@ -7,6 +7,7 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "mstarter_config.h"
++#include "serviceMap.hpp"
+ #include "cfgclnt/nConfigSelection.hpp"
+ #include "cfgclnt/nConfigNumber.hpp"
+ #include "cfgclnt/nConfigTextList.hpp"
+@@ -95,7 +96,7 @@ namespace
+       TextList getValue() const;
+       virtual void valueChanged();
+     private:
+-      void create(const char const*& rights, const char*& explanation, TextList& defaultValue, long& max);
++      void create(const char *& rights, const char*& explanation, TextList& defaultValue, long& max);
+   };
+   typedef boost::shared_ptr<ConfigExec> ConfigExecPtr;
+   typedef std::map<std::string, ConfigExecPtr> ExecMap;
+@@ -138,7 +139,7 @@ namespace
+   {
+     configChanged();
+   }
+-  void ConfigExec::create(const char*& rights, const char*& explanation, TextList& defaultValue, long& max)
++  void ConfigExec::create(const char*& rights, const char*& explanation, TextList&, long& max)
+   {
+     rights = "rwl";
+     max= 9000;
+@@ -369,7 +370,7 @@ namespace mStarter
+   {
+     return getIndex() == 1;
+   }
+-  void ConfigListenOnChange::create(const char const*& rights, const char*& explanation,
++  void ConfigListenOnChange::create(const char *& rights, const char*& explanation,
+     long& defaultIndex, const selection*& begin, const selection*& end)
+   {
+     rights = "rwl";
+@@ -422,7 +423,10 @@ namespace mStarter
+       ptr->setConfig(getConfig());
+       it= m_execMap.insert(ExecMap::value_type(item, ptr)).first;
+     }
+-    return m_substituteEnv.substEnvList(it->second->getValue());
++    serviceMap service_map( 20010, 20099 ); //TODO configurable
++    TextList const subst_temp =
++        service_map.substPortMacros(it->second->getValue());
++    return m_substituteEnv.substEnvList(subst_temp);
+   }
+   /*
+     access configuration items for mstarter
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
+new file mode 100644
+index 00000000..cc2332a8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
+@@ -0,0 +1,344 @@
++/**
++ **************************************************************************
++ *
++ * @file serviceMap.cpp
++ *
++ * Implements class serviceMap.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#define SETUP_CORBA_SERVANTS
++
++// Exported
++#include "serviceMap.hpp"
++
++#ifdef SETUP_CORBA_SERVANTS
++#include "cfgclnt/nConfigBasicText.hpp"
++#endif
++
++// Compiler lib
++#include <map>
++#include <sstream>
++
++
++
++namespace
++{
++
++
++   char const c_servantport[] = "$SERVANTPORT/";
++
++
++   char const c_servantlist[] = "$SERVANTPORT_LIST";
++
++
++} // namespace
++
++
++
++
++
++
++/**
++ *
++ * Assemble a set of services and assign port numbers from a given range.
++ *
++**/
++class serviceMap::impl
++{
++
++
++#ifdef SETUP_CORBA_SERVANTS
++   nConfig::basicText                           m_config;
++#endif
++
++
++   unsigned                                     m_port_last;
++
++
++   unsigned                                     m_port_next;
++
++
++   typedef std::map< std::string, std::string > ports;
++
++
++   ports                                        m_ports;
++
++
++public:
++
++
++   /**
++    *
++    * Constructor.
++    *
++   **/
++   impl( unsigned first, unsigned last ) :
++#ifdef SETUP_CORBA_SERVANTS
++      m_config( "serviceMap" ),
++#endif
++      m_port_last( last ),
++      m_port_next( first ),
++      m_ports()
++   {
++   }
++
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~impl() throw()
++   {
++   }
++
++
++   std::string genPort( std::string const & servant )
++   {
++      std::string dst;
++      ports::const_iterator it = m_ports.find( servant );
++      if( it != m_ports.end() )
++      {
++         dst = it->second;
++      }
++      else
++      {
++         if( m_port_next > m_port_last )
++         {
++            dst = "0";
++         }
++         else
++         {
++            std::ostringstream oss;
++            oss << m_port_next++;
++            dst = oss.str();
++            m_ports[servant] = dst;
++#ifdef SETUP_CORBA_SERVANTS
++            std::string item = "CORBA.SERVANTS.";
++            item += servant;
++            try
++            {
++               m_config.set( item.c_str(), dst.c_str() );
++            }
++            catch( ... )
++            {
++               try
++               {
++                  m_config.create
++                     (
++                        item.c_str(),   // Config item.
++                        "r",            // Read-only
++                        "",             // No explanation
++                        dst.c_str(),    // Value
++                        10              // Max string length
++                     );
++               }
++               catch( ... )
++               {
++                  //TODO?
++               }
++            }
++#endif
++         }
++      }
++      return dst;
++   }
++
++
++   std::string genPorts()
++   {
++      std::string dst;
++      bool first( true );
++      for(
++            ports::const_iterator it = m_ports.begin();
++            it != m_ports.end();
++            ++it
++         )
++      {
++         if( first )
++         {
++            first = false;
++         }
++         else
++         {
++            dst += ",";
++         }
++         dst += it->second;
++         dst += "/";
++         dst += it->first;
++      }
++      return dst;
++   }
++
++
++   typedef std::string (impl::*substL)( std::string const & );
++
++
++   std::string s1( std::string const & src )
++   {
++      std::string dst;
++      size_t src_offset_from( 0 );
++      bool m = true;
++      do
++      {
++         size_t src_offset_found =
++            src.find( c_servantport, src_offset_from );
++         if( src_offset_found == std::string::npos )
++         {
++            m = false;
++         }
++         else
++         {
++            // We can append the prolog to the result.
++            dst += src.substr
++                     (
++                        src_offset_from,
++                        src_offset_found - src_offset_from
++                     );
++            // Generate replacement
++            std::string servant;
++            size_t src_offset_servant_beg =
++               src_offset_found + sizeof(c_servantport) - 1;
++            size_t src_offset_servant_end =
++               src.find_first_of( " ;:,", src_offset_servant_beg );
++            if( src_offset_servant_end != std::string::npos )
++            {
++               servant = src.substr
++                  (
++                     src_offset_servant_beg,
++                     src_offset_servant_end - src_offset_servant_beg
++                  );
++            }
++            else
++            {
++               servant = src.substr( src_offset_servant_beg );
++               m = false;
++            }
++            dst += genPort( servant );
++            dst += '/';
++            dst += servant;
++            // Offset for next find()
++            src_offset_from = src_offset_servant_end;
++         }
++      } while( m );
++      if( src_offset_from != std::string::npos )
++      {
++         dst += src.substr( src_offset_from );
++      }
++      return dst;
++   }
++
++
++   std::string s2( std::string const & src )
++   {
++      std::string dst;
++      size_t src_offset_from( 0 );
++      bool m = true;
++      do
++      {
++         size_t src_offset_found =
++            src.find( c_servantlist, src_offset_from );
++         if( src_offset_found == std::string::npos )
++         {
++            m = false;
++         }
++         else
++         {
++            // We can append the prolog to the result.
++            dst += src.substr
++                     (
++                        src_offset_from,
++                        src_offset_found - src_offset_from
++                     );
++            // Generate replacement
++            dst += genPorts();
++            // Offset for next find()
++            src_offset_from = src_offset_found + sizeof(c_servantlist) - 1;
++         }
++      } while( m );
++      if( src_offset_from != std::string::npos )
++      {
++         dst += src.substr( src_offset_from );
++      }
++      return dst;
++   }
++
++
++   /**
++    *
++    * Replace macros $SERVANTPORT and $SERVANTPORT_LIST.
++    *
++    * @param Src:               The input list of strings.
++    *
++    * @return:                  The strings with macros replaced.
++    *
++   **/
++   std::list<std::string> sList
++      (
++         std::list<std::string> const & src,
++         substL                         fun
++      )
++   {
++      std::list<std::string> dst;
++      for(
++            std::list<std::string>::const_iterator it = src.begin();
++            it != src.end();
++            ++it
++         )
++      {
++         dst.push_back( (*this.*fun)( *it ) );
++      }
++      return dst;
++   }
++
++
++}; // class serviceMap::impl
++
++
++
++
++serviceMap::serviceMap( unsigned first, unsigned last ) :
++   m_impl( new serviceMap::impl( first, last ) )
++{
++}
++
++
++
++serviceMap::~serviceMap() throw()
++{
++   try
++   {
++      delete m_impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++std::list<std::string> serviceMap::substPortMacros
++   (
++      std::list<std::string> const & in
++   )
++{
++   std::list<std::string> tmp = m_impl->sList( in, &serviceMap::impl::s1 );
++   tmp = m_impl->sList( tmp, &serviceMap::impl::s2 );
++   return tmp;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

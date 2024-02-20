@@ -1,0 +1,331 @@
+From 4d68261a92974db87eba74cc671dd950149c8bb7 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 10 Jul 2015 10:17:25 +0000
+Subject: [PATCH 181/462] MANTIS0037021: Build: email; add errors of unit
+ tests, warnings of compile and link
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@273 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/checkForErrors.pl           | 310 ++++++++++++++++++
+ 1 file changed, 310 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/checkForErrors.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/checkForErrors.pl b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+new file mode 100644
+index 0000000..53e625b
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+@@ -0,0 +1,310 @@
++#!/usr/bin/perl -w
++#
++
++use strict;
++our $VERSION="0.0.0.1";
++
++use File::Copy;
++use Getopt::Long;
++use MIME::Lite;
++use File::Basename;
++use Archive::Zip;
++
++my $mailserver = "mail.materna.de";
++my $def_log_extension = ".log";
++
++my $logfile;
++my $buildname;
++my $recipients;
++my $help = 0;
++
++my $argv_count = $#ARGV+1;
++
++GetOptions ("logfile=s"   => \$logfile,
++            "recipients=s" => \$recipients,
++            "buildname=s" => \$buildname,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count != 3 or $help )
++{
++  print STDERR "usage: $0 --logfile=\"PATH\\filename\" --recipients=\"user1\@test.com,user2\@test.com\" --buildname=name \n" ;
++  exit 0;
++}
++
++my @search_warning_str = (
++  qq{: warning L}, "link warnings",
++  qq{: warning [^L]}, "general warnings"
++  );
++  
++my @search_error_str = (
++  qq{fatal}, "fatal",
++  qq{BUILD FAILURE}, "BUILD FAILURE",
++  qq{BUILD FAILED}, "BUILD FAILED",
++  qq{BUILD ERROR}, "BUILD ERROR",
++  qq{FAILED}, "FAILED",
++  qq{cannot find symbol}, "cannot find symbol",
++  qq{^Das System kann die angegebene Datei nicht finden}, "Das System kann die angegebene Datei nicht finden",
++  qq{\\[ERROR\\]}, "[ERROR]"
++  );
++
++my @search_juerror_str = (
++  qq{Tests run: \\d+, Failures: ([^0]\\d*, Errors: \\d+|\\d+, Errors: [^0]\\d*)}, "unit-tests"
++  );
++  
++my @search_jutests_str = (
++  qq{Tests run: (\\d+), Failures: (\\d+), Errors: (\\d+)}, "unit-tests"
++  );
++
++my($lfilename, $ldirs, $lsuffix) = fileparse($logfile,qr/\.[^.]*/);
++my $tlogfile = $logfile;
++if(lc $lsuffix ne lc $def_log_extension && lc $lsuffix ne ".txt")
++{
++  $tlogfile = $ldirs.$lfilename;
++}
++
++(-e $logfile) or die "failed to open logfile: $logfile ($!)";
++local_unzip($logfile,$def_log_extension) if(lc $lsuffix eq ".zip");
++
++open LOG_FILE, $tlogfile or die "failed to open logfile: tlogfile ($!)";
++my @lf = <LOG_FILE>;
++close LOG_FILE;
++
++my @summary;
++push @summary,"Build overview:\n";
++my $warnings_found = count_in_log(1,\@search_warning_str,\@lf,\@summary);
++push @summary, "All warnings: $warnings_found\n\n";
++my $errors_found = count_in_log(0,\@search_error_str,\@lf,\@summary);
++push @summary, "error count: $errors_found\n\n";
++my $junit_errors_found = count_jutests_in_log(\@search_jutests_str,\@lf,\@summary);
++push @summary, "unit-tests error count: $junit_errors_found\n";
++
++push @summary, "\n___________________________________\n";
++my @search_all_errors = (@search_error_str,@search_juerror_str);
++push @summary,@{&search_in_log("testfilename.txt",\@search_all_errors,\@lf)};
++
++my $subject = get_subject($warnings_found+$errors_found+$junit_errors_found);
++my $mimetype = get_mimetype($lsuffix);
++send_info_mail($subject,join("",@summary),$logfile,$mimetype,$recipients);
++
++exit(0);
++
++sub local_unzip
++{
++  my $zipfilename = shift;
++  my $mask = shift;
++  my $zip = Archive::Zip->new($zipfilename);
++  foreach my $member ($zip->members)
++  {
++      next if $member->isDirectory;
++      my $blub=$member->fileName;
++      (my $extractName = $member->fileName) =~ s{.*/}{};
++      next if $extractName !~ /$mask$/g;
++      $member->extractToFileNamed("$ldirs"."$extractName");
++  } 
++}
++
++sub get_subject
++{
++  my $count = shift;
++  my $subject;
++  if($count>0)
++  {
++    $subject = "Build failed";
++  } else
++  {
++    $subject = "Build success";
++  }
++  $subject .= " - $buildname";
++  return $subject;
++}
++
++sub get_mimetype
++{
++  my $suffix = shift;
++
++  my $mimetype = "AUTO";
++  $mimetype = "TEXT" if(lc $suffix eq "log" || lc $suffix eq "txt");
++  $mimetype = "application/zip" if(lc $suffix eq "zip");  
++
++  return $mimetype;
++}
++
++sub send_info_mail
++{
++  my ($subject,$mailbody,$attachment,$attachment_type,$recipients) = @_;
++  my $msg = MIME::Lite->new(
++               From     =>'nobody@materna.de',
++               To       =>$recipients,
++               Subject  =>$subject,
++               Type     =>'multipart/mixed'
++               );
++    $msg->attach(Type     =>'TEXT',
++                 Data     =>$mailbody
++                 );
++    $msg->attach(Type     =>$attachment_type,
++                 Path     =>$attachment,
++                 Filename =>basename($attachment),
++                 Disposition => 'attachment'
++                 );
++    $msg->send("smtp",$mailserver);
++}
++
++sub print_warning
++{
++  my $found = shift;
++  my $text = shift;
++  my @summary;
++  if($found)
++  {
++    push @summary, "-----------------------------------\n";
++    push @summary, "$text found: $found\n";
++    push @summary, "-----------------------------------\n";
++  } else
++  {
++    push @summary, "No $text found\n";
++  }
++  return \@summary;
++}
++
++sub print_error
++{
++  my $found = shift;
++  my $error_pattern = shift;
++  my $text = shift;
++  my @summary;
++  if($found)
++  {                 
++    push @summary, "###################################\n";
++    push @summary, qq{"$text" errors: $found\n};
++    push @summary, "###################################\n";
++  } else
++  {
++    push @summary, qq{No "$text" errors found\n};
++  }
++  return \@summary;
++}
++
++sub print_jutestresult
++{
++  my $found = shift;
++  my $failures = shift;
++  my $errors = shift;
++  my $text = shift;
++  my @summary;
++  
++  push @summary,"Executed $found useless $text\n";
++  if( $failures == 0)
++  {
++    push @summary, "No $text failures\n";
++  }
++  else
++  {
++    push @summary, "###################################\n";
++    push @summary, qq{$text failures: $failures\n};
++    push @summary, "###################################\n";
++  };
++  if( $errors == 0)
++  {
++    push @summary, "No $text errors\n";
++  }
++  else
++  {
++    push @summary, "###################################\n";
++    push @summary, qq{$text errors: $errors\n};
++    push @summary, "###################################\n";
++  }
++  return \@summary;
++}
++
++sub count_in_log
++{
++  my $warning = shift;
++  my ($searchlistpara,$lfp,$summary) = @_;
++  my @searchlist = @$searchlistpara;
++
++  my $count = 0;
++  my $found = 0;
++  my $regex = "";
++  while(my($regex,$text)=splice(@searchlist,0,2))
++  {
++    $found = scalar grep { $_ =~ /$regex/ } @$lfp;
++    $count=$count+$found;
++    if($warning)
++    {
++      push @$summary,@{print_warning($found,$text)};
++    } else
++    {
++      push @$summary,@{print_error($found,$regex,$text)};
++    }
++  }
++  return $count;
++}
++
++sub count_jutests_in_log
++{
++  my ($searchlistpara,$lfp,$summary) = @_;
++  my @searchlist = @$searchlistpara;
++  
++  my $ju_failures = 0;
++  my $ju_errors = 0;
++  my $ju_tests = 0;
++  
++  while(my($regex,$text)=splice(@searchlist,0,2))
++  {
++    foreach(@$lfp)
++    {
++      if ($_ =~ /$regex/g)
++      {
++        $ju_tests += $1;
++        $ju_failures += $2;  
++        $ju_errors += $3;
++      };
++    }
++     push @$summary,@{print_jutestresult($ju_tests,$ju_failures,$ju_errors,$text)};
++  }
++  return $ju_failures+$ju_errors;
++}
++
++sub search_in_log
++{
++  my $summary_filename = shift;
++  my ($searchlistpara,$lfp,$summary) = @_;
++  my @searchlist = @$searchlistpara;
++  
++  my $max_lines_before = 10;
++  my $max_lines_after = 5;
++  my @akt_line = ("")x$max_lines_before;
++  my $akt_line_pos = 0;
++  my @summary = ();
++  my $lines_past_found;
++ 
++  while(my($regex,$text)=splice(@searchlist,0,2))
++  {
++    $lines_past_found = 0;
++    foreach(@$lfp)
++    {
++      $akt_line[$akt_line_pos] = $_;
++      if($lines_past_found > 0)
++      {
++        push @summary,$akt_line[$akt_line_pos];
++        if(--$lines_past_found <= 0)
++        {
++          last;
++        }
++      } 
++      elsif ( $akt_line[$akt_line_pos] =~ /$regex/g )
++      {
++        push @summary, "$text :\n";
++        for(my $i = $max_lines_before-1; $i >= 0; $i--)
++        {
++          push @summary,$akt_line[(($akt_line_pos - $i)%$max_lines_before)];
++        }
++        $lines_past_found = $max_lines_after;
++      };
++      $akt_line_pos = (++$akt_line_pos)%$max_lines_before;
++    }
++    #print qq{$regex $text :\n};
++  }
++  return \@summary;
++}
+-- 
+2.41.0.windows.1
+

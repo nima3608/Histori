@@ -1,0 +1,410 @@
+From be905e320f698294988a60510a996aa64e751554 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 14 Feb 2020 12:38:00 +0000
+Subject: [PATCH 1004/1077] MANTIS 57395 massaiCfgXB.exe version 2.4.2 - MANTIS
+ 57395: Config service startup issue - Indicate a start-pending time of 30
+ seconds, rather than 15 seconds. - More loggings.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1551 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  16 ++-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp | 120 ++++++++++--------
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp |  34 +++--
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |  30 -----
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |   6 +-
+ 5 files changed, 102 insertions(+), 104 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 92c086ff..8c26b3c7 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -590,13 +590,23 @@
+ // #define FILE_VER_DTS "2.4.0.0"
+ //
+ //! @version 2.4.1
+-//! @date    23.11.2020
++//! @date    23.01.2020
+ //! @author  JK
+ //! @par     Change:
+ //! - MANTIS 57154: Import of an item with path of exiting node kills node
+ //! - Do not allow to create a new item overwriting a directory node.
+-#define FILE_VER_BIN 2,4,1,0
+-#define FILE_VER_DTS "2.4.1.0"
++// #define FILE_VER_BIN 2,4,1,0
++// #define FILE_VER_DTS "2.4.1.0"
++//
++//! @version 2.4.2
++//! @date    14.02.2020
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 57395: Config service startup issue
++//! - Indicate a start-pending time of 30 seconds, rather than 15 seconds.
++//! - More loggings.
++#define FILE_VER_BIN 2,4,2,0
++#define FILE_VER_DTS "2.4.2.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index 478725cf..b440b3c2 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2014 MATERNA Information & Communications
++ * Copyright (c) 2002-2020 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -31,7 +31,6 @@ namespace
+     */
+ 
+ 
+-
+    /**
+     *
+     * Protect change listeners against mutual access.
+@@ -41,21 +40,25 @@ namespace
+ 
+ 
+    // a helper function
+-  std::vector<std::string> getPathPraefixList(const std::string &text, const char sep)
+-  {
+-    std::vector<std::string> ergList;
+-    ergList.push_back("");
+-    int start = 0, end = 0;
+-    while ((end = text.find(sep, start)) != std::string::npos)
+-    {
+-      if(end)
+-        ergList.push_back(text.substr(0, end));
+-      start = end + 1;
+-    }
+-    if(text.length())
+-      ergList.push_back(text);
+-    return ergList;
+-  }   
++   std::vector<std::string> getPathPrefixList
++      (
++         std::string const & text, char sep
++      )
++   {
++      std::vector<std::string> ergList;
++      ergList.push_back("");
++      int start = 0, end = 0;
++      while ((end = text.find(sep, start)) != std::string::npos)
++      {
++         if(end)
++            ergList.push_back(text.substr(0, end));
++         start = end + 1;
++      }
++      if(text.length())
++         ergList.push_back(text);
++      return ergList;
++   }
++
+ 
+    /*
+     * End of module-privates
+@@ -78,8 +81,8 @@ bool cfgCorba_Base::valChgListener::mListenRetry
+ 
+ void cfgCorba_Base::valChgListener::mSendIndication
+    (
+-      Config::changeListener_ptr & Listener,
+-      char const * const & Event
++      Config::changeListener_ptr &      Listener,
++      char const * const &              Event
+    )
+ {
+    try
+@@ -102,8 +105,9 @@ void cfgCorba_Base::valChgListener::mSendIndication
+       writeTrace
+          (
+             SecondaryRuntime_HERE,
+-            "valChgListener:mSendIndication"
++            "valChgListener:mSendIndication( %s )"
+             " CORBA::SystemException( %s )",
++            Event ? Event : "<null>",
+             e._info().c_str()
+          );
+       // Re-throw to remove listener
+@@ -114,8 +118,9 @@ void cfgCorba_Base::valChgListener::mSendIndication
+       writeTrace
+          (
+             SecondaryRuntime_HERE,
+-            "valChgListener:mSendIndication"
++            "valChgListener:mSendIndication( %s )"
+             " CORBA::UserException( %s )",
++            Event ? Event : "<null>",
+             e._info().c_str()
+          );
+       // Re-throw to remove listener
+@@ -219,6 +224,8 @@ void cfgCorba_Base::removeChangeListenerItem
+    }
+ }
+ 
++
++
+ /**
+  *
+  * Method implementation (see cfgCorba_Base.hpp)
+@@ -229,32 +236,46 @@ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+    Materna::MSSD::autoMutex OnlyOne( Mutex );
+    try
+    {
+-     std::vector<std::string> ppl;
+-     valChgListeners::iterator It;
+-     ppl = getPathPraefixList( ItemPath.c_str() , '.' );
+-     std::vector< std::string >::iterator pplIt;
+-   
+-     for( pplIt = ppl.begin(); pplIt != ppl.end(); ++pplIt)
+-     {
+-       It = M_ValChgListeners.find( (*pplIt).c_str() );
+-       if( It != M_ValChgListeners.end() )
+-       {
+-          writeTrace( SecondaryRuntime_HERE, "valueChanged(%s) - indicate to %s ...", ItemPath.c_str(),(*pplIt).c_str() );
+-          valChgListener * const ValChgListener = It->second;
+-          try
+-          {
+-            ValChgListener->mBroadcastIndication( ItemPath.c_str() );
+-          }
+-          catch( ... )
+-          {
+-            writeTrace( SecondaryRuntime_HERE, "valueChanged(%s) - exception", ItemPath.c_str() );
+-          }
+-       }
+-     }
++      std::vector<std::string> ppl;
++      valChgListeners::iterator It;
++      ppl = getPathPrefixList( ItemPath.c_str() , '.' );
++      std::vector< std::string >::iterator pplIt;
++      for( pplIt = ppl.begin(); pplIt != ppl.end(); ++pplIt)
++      {
++         It = M_ValChgListeners.find( (*pplIt).c_str() );
++         if( It != M_ValChgListeners.end() )
++         {
++            writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  "valueChanged(%s) - indicate to %s ...",
++                  ItemPath.c_str(),
++                  (*pplIt).c_str()
++               );
++            valChgListener * const ValChgListener = It->second;
++            try
++            {
++               ValChgListener->mBroadcastIndication( ItemPath.c_str() );
++            }
++            catch( ... )
++            {
++               writeTrace
++                  (
++                     SecondaryRuntime_HERE,
++                     "valueChanged(%s) - exception",
++                     ItemPath.c_str()
++                  );
++            }
++         }
++      }
+    }
+    catch(...)
+    {
+-      writeTrace( SecondaryRuntime_HERE, "Error: unknown exception in valueChanged");
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "Error: unknown exception in valueChanged"
++         );
+    }
+ }
+ 
+@@ -285,17 +306,6 @@ void cfgCorba_Base::verifyAccess
+       );
+       throw Config::Node::wrongParam();
+    }
+-#if 0
+-   if( !Access.Authorization || !Access.Authorization[0] )
+-   {
+-      writeTrace
+-      (
+-         SecondaryRuntime_HERE, "%s - Authorization not given!",
+-         Function
+-      );
+-      throw Config::Node::notAuthorized();
+-   }
+-#endif
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
+index 3e70c907..16337260 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2008 MATERNA Information & Communications
++ * Copyright (c) 2002-2020 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -51,11 +51,18 @@ void serviceCfg_Node::addChangeListener
+ )
+ {
+    writeTrace
+-           (
+-              BasicRuntime_HERE,
+-              SC_N "addChangeListener(%s)", access2Str(Acc).c_str()
+-           );
++         (
++            BasicRuntime_HERE,
++            SC_N "addChangeListener(%s) ...",
++            access2Str(Acc).c_str()
++         );
+    cfgCorba_Base::addChangeListener( Acc, L );
++   writeTrace
++         (
++            BasicRuntime_HERE,
++            SC_N "addChangeListener(%s).",
++            access2Str(Acc).c_str()
++         );
+ }
+ 
+ 
+@@ -68,10 +75,10 @@ void serviceCfg_Node::addChangeListener
+ void serviceCfg_Node::removeChangeListener( Config::changeListener * L )
+ {
+    writeTrace
+-           (
+-              BasicRuntime_HERE,
+-              SC_N "removeChangeListener"
+-           );
++         (
++            BasicRuntime_HERE,
++            SC_N "removeChangeListener()"
++         );
+    cfgCorba_Base::removeChangeListener( L );
+ }
+ 
+@@ -87,10 +94,11 @@ void serviceCfg_Node::removeChangeListenerItem
+      )
+ {
+    writeTrace
+-           (
+-              BasicRuntime_HERE,
+-              SC_N "removeChangeListenerItem(%s)", I
+-           );
++         (
++            BasicRuntime_HERE,
++            SC_N "removeChangeListenerItem(%s)",
++            I
++         );
+    cfgCorba_Base::removeChangeListenerItem( L, I );
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index 60ffb5ab..27e77d3b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -42,11 +42,6 @@ cfgMetaText::cfgMetaText( char const * auth ) :
+    m_regex(),
+    m_semantic( 0 )
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::cfgMetaText( A )"
+-      );
+ }
+ 
+ 
+@@ -67,11 +62,6 @@ cfgMetaText::cfgMetaText
+    m_regex(),
+    m_semantic( 0 )
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::cfgMetaText( REL )"
+-      );
+ }
+ 
+ 
+@@ -94,11 +84,6 @@ cfgMetaText::cfgMetaText
+    m_regex( regex ),
+    m_semantic( semantic )
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::cfgMetaText( RELLRS )"
+-      );
+ }
+ 
+ 
+@@ -115,11 +100,6 @@ cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
+    m_regex( src.m_regex ),
+    m_semantic( src.m_semantic )
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::cfgMetaText( cfgMetaText )"
+-      );
+ }
+ 
+ 
+@@ -131,11 +111,6 @@ cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
+ **/
+ cfgMetaText::~cfgMetaText()
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::~cfgMetaText()"
+-      );
+ }
+ 
+ 
+@@ -190,11 +165,6 @@ void cfgMetaText::save
+    std::string const &          Indent
+ ) const
+ {
+-   writeTrace
+-      (
+-         SecondaryRuntime_HERE,
+-         "cfgMetaText::save"
+-      );
+    Dst << Indent << "<" CFGTOKEN_META;
+    cfgMeta::saveCommon( Dst, Ref );
+    Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length << "\"";
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index bb983e4c..d3cb3854 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2019 MATERNA Information & Communications
++ * Copyright (c) 2003-2020 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -128,9 +128,9 @@ int main( int argc, char ** argv )
+ int mDaemon_main( int argc, char const * const * argv )
+ {
+    //
+-   // Signal "I need some time" (15 seconds max).
++   // Signal "I need some time" (30 seconds max).
+    //
+-   if( mDaemon_indInitializing( 15000 ) )
++   if( mDaemon_indInitializing( 30000 ) )
+       return 1;
+ 
+    //
+-- 
+2.41.0.windows.1
+

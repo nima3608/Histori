@@ -1,0 +1,187 @@
+From 0f92666ae62b823f4c28a15066ec50352cd8d685 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Sep 2016 11:28:26 +0000
+Subject: [PATCH 0794/1077] MANTIS 0042566 -implemented shutdown() in
+ mSysProcess::child
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1087 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |  10 ++
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 117 +++++++++++++++++-
+ 2 files changed, 124 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index c306fd93..b961966f 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -226,6 +226,16 @@ namespace mSysProcess
+       **/
+       virtual child & kill() = 0;
+ 
++      /**
++      *
++      * Initiate the shutdown of the process. First call sendBreak(),
++      * then sendCtrC() and at last kill()
++      *
++      * @return                true on success
++      *
++      **/
++      virtual bool shutdown() = 0;
++
+       /**
+        *
+        * get internal process representation
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index afbcaa37..9ddb2d79 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -137,8 +137,7 @@ namespace
+ 
+    /**
+     *
+-    * Called upon windows function failure this will trace the last
+-    * error.
++    * Called upon windows function failure this will trace the last error.
+     *
+    **/
+    void logLastError
+@@ -164,6 +163,34 @@ namespace
+    }
+ 
+ 
++   /**
++   *
++   * Used for print out warnings via the specified Logging-Object
++   *
++   **/
++   void logWarning
++   (
++     mSysProcess::callBack const * Logging,
++     std::string warning
++   )
++   {
++     if (Logging)
++     {
++       DWORD errorCode = GetLastError();
++       std::ostringstream format;
++       format << "WARNING: " << warning;
++       try
++       {
++          Logging->lineOut(format.str().c_str());
++       }
++       catch (...)
++       {
++         printf("Unknown Exception. (Maybe it's a write-permission-failure) \n");
++       }
++     }
++   }
++
++
+    std::string getStatusText(mSysProcess::status status)
+    {
+      switch(status)
+@@ -499,9 +526,10 @@ namespace
+       mSysProcess::child& stdIn(char const * Input);
+       mSysProcess::child& closeStdIn();
+       mSysProcess::child& kill();
+-
++      
+       bool sendBreak();
+       bool sendCtrlC();
++      bool shutdown();
+ 
+       std::string getProcessInformation() const;
+       std::string getShortProcessInformation() const;
+@@ -1435,6 +1463,89 @@ namespace
+   }
+ 
+ 
++  /**
++  *
++  * Initiate the termination of the process
++  *
++  **/
++  bool myChild::shutdown()
++  {
++    bool isTerminated = false;
++
++    std::stringstream infoStream("");
++    infoStream << "Initiate shutdown of process=[" << this->getProgram()
++               << "] with processId=["             << this->getProcessId();
++
++    if(M_Logging)
++      M_Logging->lineOut(infoStream.str().c_str());
++
++    try
++    {
++      this->sendBreak();
++
++      mSysTime::sleep(100);
++
++      this->sendBreak();
++
++      mSysTime::sleep(900);
++
++      if (this->getStatus() == mSysProcess::STATUS_RUNNING)
++      {
++        this->sendCtrlC();
++
++        mSysTime::sleep(100);
++
++        this->sendCtrlC();
++
++        mSysTime::sleep(900);
++
++        if (this->getStatus() == mSysProcess::STATUS_RUNNING)
++        {
++          this->kill();
++
++          mSysTime::sleep(1000);
++
++          if (this->getStatus() == mSysProcess::STATUS_RUNNING)
++          {
++            infoStream.clear();
++            infoStream << "WARNING: Could not terminate process=[" << this->getProgram()
++                       << "] with processId=[" << this->getProcessId();
++            if (M_Logging)
++              M_Logging->lineOut(infoStream.str().c_str());
++          }
++          else
++          {
++            infoStream.clear();
++            infoStream << "Successfully terminated process=[" << this->getProgram()
++                       << "] with processId=[" << this->getProcessId();
++
++            if (M_Logging)
++              M_Logging->lineOut(infoStream.str().c_str());
++
++            isTerminated = true;
++          }
++        }
++      }
++    }
++    catch (std::exception &exeception)
++    {
++      infoStream.clear();
++      infoStream << "std::exeception:" << exeception.what();
++
++      logLastError(M_Logging, infoStream.str().c_str());
++    }
++    catch (...)
++    {
++      infoStream.clear();
++      infoStream << "unknown execption";
++
++      logLastError(M_Logging, infoStream.str().c_str());
++    }
++
++    return isTerminated;
++  }
++
++
+   /**
+    *
+    * send BREAK/CTRL-C to the process
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,201 @@
+From a1aa3c18f117d36facb724f658ebb217c26892a8 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 29 Oct 2018 15:13:31 +0000
+Subject: [PATCH 0851/1000] MANTIS 0052260 CfgValues: Bugfix removefromlist
+ willfull ignored more than one operation
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1388 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgValues_def.h   | 13 ++-
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 99 ++++++++++---------
+ 2 files changed, 62 insertions(+), 50 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 784c3ab4..6882a745 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -84,13 +84,18 @@
+ //
+ // 24.10.2017  GiT      - Mantis 0048136: CfgValues: command REMOVEFROMLIST does not remove values if escaped chars are included
+ //
+-//#define FILE_VER_BIN 1,1,6,0
+-//#define FILE_VER_DTS "1.1.6.0\0"
++//#define FILE_VER_BIN 1,2,0,0
++//#define FILE_VER_DTS "1.2.0.0\0"
+ //
+ // 06.07.2018  Sven     - Mantis 0044960: Extend CfgValuesS by list operations through configuration file (and more)
+ //
+-#define FILE_VER_BIN 1,2,0,0
+-#define FILE_VER_DTS "1.2.0.0\0"
++//#define FILE_VER_BIN 1,2,1,0
++//#define FILE_VER_DTS "1.2.1.0\0"
++//
++// 29.10.2018  GiT     - Mantis 0052260: CfgValues: Bugfix removefromlist willfull ignored more than one operation
++//
++#define FILE_VER_BIN 1,2,1,0
++#define FILE_VER_DTS "1.2.1.0\0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index 84e41a8d..5ededbcb 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -465,13 +465,13 @@ bool checkComment
+    {
+       if( input_char == CCHR_CR || input_char == CCHR_COMMENT1  || input_char == CCHR_COMMENT2)
+       {
+-		// Forward to next line
+-		while(input_char != CCHR_CR) {
+-			// Next character
+-			input_char = static_cast<char>( input_stream.get() );
+-		}
+-		return true;
+-	  }
++    // Forward to next line
++    while(input_char != CCHR_CR) {
++      // Next character
++      input_char = static_cast<char>( input_stream.get() );
++    }
++    return true;
++    }
+    }
+ 
+    input_stream.seekg( pos_rewind );
+@@ -735,9 +735,9 @@ int erase(char const * Host, const char* DelItem)
+ }
+ 
+ int removeFromList(char const * Host,
+-	const char* RemItem,
+-	const char* RemValue
+-	)
++  const char* RemItem,
++  const char* RemValue
++  )
+ {
+     Config::access SAcc;
+     Config::description CDescr;
+@@ -1044,10 +1044,10 @@ int main( int argc, char ** argv )
+          cfgValuesFStatus sta_fst, sta_nxt;
+          while( input_stream.good() )
+          {
+-			while(checkComment(input_stream)){};
+-			if(!input_stream.good()) {
+-				continue;
+-			}
++            while(checkComment(input_stream)){};
++            if(!input_stream.good()) {
++              continue;
++            }
+ 
+             cfgValuesFRead( FItm, sta_fst, input_stream, CFGTOKEN_ITEM_NAME );
+             cfgValuesFRead( FTyp, sta_nxt, input_stream, CFGTOKEN_TYPE );
+@@ -1068,23 +1068,30 @@ int main( int argc, char ** argv )
+               CDescr.Explanation = CORBA::string_dup( FDescr.c_str() );
+             }
+ 
+-			if(FAction.size() > 0 && FAction != "erase" && FAction != "delete" && FAction != "addtolist" && FAction != "addtolistunique" && FAction != "removefromlist") {
+-                std::cout
+-                << DSPLERR "Invalid action value '" << FAction << "' for item " << FItm
+-                << std::endl;
+-                return c_exit_wrong_parameter;
+-			}
+-
+-			if(FAction == "erase" || FAction == "delete") {
+-				erase(Host, FItm.c_str());
+-				continue;
+-			}
+-
+-			if(FAction == "removefromlist") {
+-			  return removeFromList(Host, 
+-					FItm.c_str(),
+-					FVal.c_str());
+-			}
++            if(FAction.size() > 0 && FAction != "erase" && FAction != "delete" && FAction != "addtolist" && FAction != "addtolistunique" && FAction != "removefromlist") {
++                      std::cout
++                      << DSPLERR "Invalid action value '" << FAction << "' for item " << FItm
++                      << std::endl;
++                      return c_exit_wrong_parameter;
++            }
++
++            if(FAction == "erase" || FAction == "delete")
++            {
++              if(erase(Host, FItm.c_str()) == c_exit_good)
++                ++SetRecordsTotal;
++              else
++                ++SetRecordsFailed;
++              continue;
++            }
++
++            if(FAction == "removefromlist")
++            {
++              if( removeFromList(Host, FItm.c_str(), FVal.c_str()) == c_exit_good)
++                ++SetRecordsTotal;
++              else
++                ++SetRecordsFailed;
++              continue;
++            }
+ 
+             if( ( FItm.size() > 0 ) && ( FTyp.size() > 0 ) )
+             {
+@@ -1327,7 +1334,7 @@ int main( int argc, char ** argv )
+                   }
+                   //
+                   //-------------------------------------------------------
+-			   }
++         }
+                else if( !FTyp.compare( CFGTOKEN_TYPE_NUMBER ) )
+                {
+                   //-------------------------------------------------------
+@@ -1575,7 +1582,7 @@ int main( int argc, char ** argv )
+       char const * const DelItem = Arg.option( "ERASE" );
+       if( DelItem )
+       {
+-		return erase(Host, DelItem);
++    return erase(Host, DelItem);
+       }
+       //
+       // Then try, if the REMOVEFROMLIST-option is given
+@@ -1584,9 +1591,9 @@ int main( int argc, char ** argv )
+       char const * const RemValue = Arg.option( "VALUE" );
+       if( RemItem && RemValue)
+       {
+-		  return removeFromList(Host, 
+-					RemItem,
+-					RemValue);
++      return removeFromList(Host, 
++          RemItem,
++          RemValue);
+       }
+       //
+       // No explicit command - invalid syntax!
+@@ -1610,16 +1617,16 @@ int main( int argc, char ** argv )
+             HINDENT2 "   |\n"
+             HINDENT2 "   -REMOVEFROMLIST:<Config-listitem> -value:<listentry_to_remove>\n"
+             HINDENT2 "}\n"
+-			"Config file line format:\n"
+-			"\n"
+-			"[-|#]itm=\"<path-to-item>\" typ=\"TEXT|TEXTLIST|NUMBER|SELECTION\" val=\"<value>\" [action=\"addtolist|addtolistunique|removefromlist|delete\"]\n"
+-			"\n"
+-			"Example: itm=\"SERVICES.UPDATE.LoginName\" typ=\"TEXT\" val=\"gate-update\"\n"
+-			"\n"
+-			"Action 'addtolist', 'addtolistunique' and 'removefromlist' are only applicable for items of type TEXTLIST.\n"
+-			"A leading '-' or '#' disables processing for this line (can also be used for comments).\n"
+-			"Deleting an item via action=\"delete\" requires empty value (val=\"\")!\n"
+-			<< std::endl;
++      "Config file line format:\n"
++      "\n"
++      "[-|#]itm=\"<path-to-item>\" typ=\"TEXT|TEXTLIST|NUMBER|SELECTION\" val=\"<value>\" [action=\"addtolist|addtolistunique|removefromlist|delete\"]\n"
++      "\n"
++      "Example: itm=\"SERVICES.UPDATE.LoginName\" typ=\"TEXT\" val=\"gate-update\"\n"
++      "\n"
++      "Action 'addtolist', 'addtolistunique' and 'removefromlist' are only applicable for items of type TEXTLIST.\n"
++      "A leading '-' or '#' disables processing for this line (can also be used for comments).\n"
++      "Deleting an item via action=\"delete\" requires empty value (val=\"\")!\n"
++      << std::endl;
+       if( Arg.option( "HIDDEN" ) )
+          std::cout
+             << "\n"
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,78 @@
+From 4e0528ca96bcba07ce35915411cf1d84831cd9a2 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Thu, 10 Oct 2013 17:04:15 +0000
+Subject: [PATCH 122/462] MANTIS	0022072: Build: automatic one click build
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@183 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/revision_tag.pl             | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/revision_tag.pl b/SelfServiceBuild/Build/scripts/revision_tag.pl
+index 902d67d..9ed3ee4 100644
+--- a/SelfServiceBuild/Build/scripts/revision_tag.pl
++++ b/SelfServiceBuild/Build/scripts/revision_tag.pl
+@@ -1,5 +1,6 @@
+ #!/usr/bin/perl -w
+ #
++
+ use strict;
+ our $VERSION="0.0.0.2";
+ 
+@@ -13,16 +14,22 @@ my $SVN_COMMAND = "svn.exe";
+ my $help = 0;
+ my $argv_count = $#ARGV+1;
+ 
++my $release=0;
++my $dev_str = "Development Build";
++
+ GetOptions ("repo=s"   => \$reposPath,
+             "version=s"   => \$RVersion,
++            "release|r" => \$release,
+             "help!"     => \$help
+             )  or die "Invalid commmand line options. Try --help\n";
+ 
+-if( $argv_count != 2 or $help )
++if( $argv_count < 2 or $argv_count > 3 or $help )
+ {
+-  print STDERR "usage: $0 --repo=\"PATH\" --version=0.0.0.0\n" ;
++  print STDERR "usage: $0 --repo=\"PATH\" --version=0.0.0.0 [--release]\n" ;
+   exit 0;
+ }
++$dev_str="" if( $release );
++
+ die "No build version set. Pre build functions not activated. Skipping\n" if (not $RVersion  or ! defined($RVersion));
+ die "No Repository path set. Pre build functions not activated. Skipping\n" if (not $reposPath  or ! defined($reposPath)) ;
+ die "SVN exe not found. Pre build functions not activated. Skipping\n" if (! &check_svn($SVN_COMMAND)) ;
+@@ -30,7 +37,8 @@ die "SVN exe not found. Pre build functions not activated. Skipping\n" if (! &ch
+ my $REVISION = join(".",((split(/\./,$RVersion))[0..2])).".".&get_revision($SVN_COMMAND,$reposPath);
+ 
+ my %subst_params = (
+-  qq{#define\\s+PRODUCT\\s+\"ProductName\",\\s*\"MASSAI-Platform} => qq{#define PRODUCT         "ProductName", "MASSAI-Platform $REVISION"\n},
++  qq{#define\\s+PRODUCT\\s+\"ProductName\",\\s*\"MASSAI-Platform} => qq{#define PRODUCT         "ProductName", "MASSAI-Platform $dev_str $REVISION"\n},
++  qq{#define\\s+PRODUCT\\s+\"ProductName\",\\s*\"MASSAI-COMMON} => qq{#define PRODUCT         "ProductName", "MASSAI-Common $dev_str $REVISION"\n},
+   qq{#define\\s+PROD_VERSIONSTR\\s+\".*\"} => qq{#define PROD_VERSIONSTR "$REVISION\\0"\n},
+   qq{#define\\s+PROD_VERSION_NO} => qq{#define PROD_VERSION_NO }.&get_ver_part($REVISION,0)."\n",
+   qq{#define\\s+PROD_RELEASE_NO} => qq{#define PROD_RELEASE_NO }.&get_ver_part($REVISION,1)."\n",
+@@ -52,7 +60,8 @@ if ( -e $reposPath."\\SelfServiceCommon\\Interfaces\\inc\\Global_def.h")
+ 
+ %subst_params = (
+   qq{ProductVersion\\s*=\\s*} => qq{ProductVersion = $REVISION\n},
+-  qq{ProductName\\s*=\\s*MASSAI-Platform} => qq{ProductName    = MASSAI-Platform $REVISION\n}
++  qq{ProductName\\s*=\\s*MASSAI-Platform} => qq{ProductName    = MASSAI-Platform $dev_str $REVISION\n},
++  qq{ProductName\\s*=\\s*MASSAI\\s*\\(Common\\)} => qq{ProductName    = MASSAI Common $dev_str $REVISION\n}
+   );
+ if ( -e $reposPath."\\Build\\java\\project.properties")
+ {
+@@ -74,7 +83,7 @@ my $formatted_update_str = sprintf("%d%02d%02d%05d", &get_ver_part($REVISION,0),
+   qq{<[?]define\\s*BuildVersion=\".*\"\\s*} => qq{<?define BuildVersion="}.&get_ver_part($REVISION,2).qq{" ?>\n},
+   qq{<[?]define\\s*Revision=\".*\"\\s*} => qq{<?define Revision="}.&get_ver_part($REVISION,3).qq{" ?>\n},
+   qq{<[?]define\\s*MASSAI_UPDATE_VER=\".*\"\\s*} => qq{<?define MASSAI_UPDATE_VER="$formatted_update_str" ?>\n},
+-  qq{<[?]define\\s*DevelopmentStr=\"Development\\s*Build\(.*\)\"\\s*} => qq{<?define DevelopmentStr="" ?>\n}
++  qq{<[?]define\\s*DevelopmentStr=\"Development\\s*Build\(.*\)\"\\s*} => qq{<?define DevelopmentStr="$dev_str" ?>\n}
+   );
+ if ( -e $reposPath."\\Build\\installer\\release_def.wxi")
+ {
+-- 
+2.41.0.windows.1
+

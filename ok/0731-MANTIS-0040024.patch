@@ -1,0 +1,127 @@
+From 7d1dcac812cf45812f30c866dcb869bfe8b4936f Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 29 Jan 2016 17:39:38 +0000
+Subject: [PATCH 0731/1077] MANTIS 0040024 bugfix: Process-Control: Kiosk boots
+ at platform shutdown
+
+massai_systools.lib
+V1.0.0.33
+
+- fixed getStatus for child in mSysProcess\n
+  if CreateProcess failed the status did not return STATUS_FAILED (and the pid was set to 0)
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@979 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 ++++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 40 +++++++++----------
+ 2 files changed, 28 insertions(+), 22 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index b3cf6c06..a61bbad6 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 32);
++VERSION_ID_DT(systools, 1, 0, 0, 33);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 32);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.32
++@version 1.0.0.33
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.33
++\li 29.01.2016
++\li bugfix SteT Mantis 0040024: Process-Control: Kiosk boots at platform shutdown
++- fixed getStatus for child in mSysProcess\n
++  if CreateProcess failed the status did not return STATUS_FAILED (and the pid was set to 0)
++
+ \version 1.0.0.32
+ \li 25.01.2016
+ \li extension SteT Mantis 0039813: Billing Data not available
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 9c6b7521..a33c250d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -67,7 +67,7 @@ namespace mSysProcess
+ 
+ namespace
+ {
+-   
++
+ 
+ 
+    /**
+@@ -239,7 +239,7 @@ namespace
+      return result;
+    }
+ 
+-   
++
+   /**
+    *
+    * Streaming stderr or stdout.
+@@ -1281,31 +1281,31 @@ namespace
+   **/
+   mSysProcess::status myChild::getStatus() const
+   {
+-    if( canWait() )
++    if( M_Started )
+     {
+-      if( M_Started )
++      if( canWait() )
+       {
+-        DWORD result= WaitForSingleObject( M_HandleProcess, 0 );
+-        if(result == WAIT_TIMEOUT)
+-           return mSysProcess::STATUS_RUNNING;
+-        else if(result == WAIT_OBJECT_0)
+-           return mSysProcess::STATUS_TERMINATED;
+-        else
+-           return mSysProcess::STATUS_UNKNOWN;
++          DWORD result= WaitForSingleObject( M_HandleProcess, 0 );
++          if(result == WAIT_TIMEOUT)
++             return mSysProcess::STATUS_RUNNING;
++          else if(result == WAIT_OBJECT_0)
++             return mSysProcess::STATUS_TERMINATED;
++          else
++             return mSysProcess::STATUS_UNKNOWN;
+       }
+       else
+-        return mSysProcess::STATUS_FAILED;
+-    }
+-    else
+-    {
+-      if( M_Logging )
+       {
+-        std::string errorString = "ProcID=[" + getProcessId() + "] getStatus - wait not allowed";
+-        M_Logging->lineOut( errorString.c_str() );
+-      }
++        if( M_Logging )
++        {
++          std::string errorString = "ProcID=[" + getProcessId() + "] getStatus - wait not allowed";
++          M_Logging->lineOut( errorString.c_str() );
++        }
+ 
+-      return mSysProcess::STATUS_UNKNOWN;
++        return mSysProcess::STATUS_UNKNOWN;
++      }
+     }
++    else
++      return mSysProcess::STATUS_FAILED;
+   }
+ 
+ 
+-- 
+2.41.0.windows.1
+

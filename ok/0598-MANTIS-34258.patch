@@ -1,0 +1,189 @@
+From 8b402798079913bfeb5ddbb69b84f1adfb63473a Mon Sep 17 00:00:00 2001
+From: vjudin <vjudin@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 3 Nov 2014 13:47:27 +0000
+Subject: [PATCH 0598/1076] MANTIS 34258 test tool
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@751 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/SerialCon/makefile.mak         |  17 ++-
+ .../Massai/cpp/SerialCon/src/phoenixtest.cpp  | 132 ++++++++++++++++++
+ 2 files changed, 148 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+index 8b67934c..5fea6876 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+@@ -24,7 +24,8 @@ MY_LIB1_OBJS = \
+ ######################################################################
+ 
+ MY_BIN1 = \
+-    $(_BIN)\TestSerialCon.exe
++    $(_BIN)\TestSerialCon.exe	
++	
+ 
+ MY_BIN1_OBJS = \
+     $(_OBJ)\TestSerialCon.obj
+@@ -34,6 +35,20 @@ MY_BIN1_USER_LIBS = \
+     $(LIB_TOOLS) \
+     $(LIB_SYSTOOLS) \
+     $(LIB_TEXT)
++	
++MY_BIN2 = \
++    $(_BIN)\phoenixtest.exe	
++	
++
++MY_BIN2_OBJS = \
++    $(_OBJ)\phoenixtest.obj
++	
++MY_BIN2_USER_LIBS = \
++    $(LIB_SERIALCON) \
++    $(LIB_TOOLS) \
++    $(LIB_SYSTOOLS) \
++    $(LIB_TEXT)
++	
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
+new file mode 100644
+index 00000000..f1f61c50
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/phoenixtest.cpp
+@@ -0,0 +1,132 @@
++#include <windows.h>
++#include "systools/Console.h"
++#include "serialCon/cfgUART.hpp"
++#include "serialCon/matAsync.h"
++#include "Tools/localtrace.h"
++#include "systools/mSysThread.hpp"
++#include "systools/mEventSem.hpp"
++#include "text/mArgScan.hpp"
++
++#include <stdio.h>
++#include <stdarg.h>
++#include <string>
++#include <iostream>
++#include <io.h>
++#include <fcntl.h>
++#include  <sys\types.h>
++#include  <sys\stat.h>
++#include <time.h>
++#include <map>
++
++
++
++int trcFd = -1;
++void
++TRACE( const char *format, ...)
++{
++    	char buf[ 4096 ];
++		va_list         debugargs;
++		va_start( debugargs, format);
++		vsnprintf( buf, sizeof( buf ), format, debugargs);
++		_write( trcFd, buf, strlen( buf ));
++		va_end(debugargs);
++ }
++
++
++int main( int argc, char** argv )
++{
++	matAsync *pmta = new matAsync;
++	MATRC mrc ;
++    std::string strComPort = argc > 1 ? argv[ 1 ] : "COM3";
++	std::string strTrcFile = argc > 2 ? argv[ 2 ] : "vcom.log";
++	trcFd = _open( strTrcFile.c_str(), O_CREAT|O_TRUNC|O_RDWR );
++	char szMsg[ 4096 ];
++	if( trcFd < 0 )
++	{
++		trcFd = 0;// use cout;
++	}
++	
++    mrc = pmta->set( MATKEY_PORT, strComPort.c_str() );
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: setting com port failed\n",__FUNCTION__, __LINE__ );
++		exit( -1 );
++    }
++    mrc = pmta->set( MATKEY_BITRATE, "9600" );
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: setting bitrate failed" ,__FUNCTION__, __LINE__ );
++		exit( -1 );
++    }
++    mrc = pmta->set( MATKEY_PARITY, MATKEY_NONE );
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: setting (no) parity  failed", __FUNCTION__, __LINE__ );
++		exit( -1 );
++    }
++    mrc = pmta->set( MATKEY_DATABITS,   "8" );
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: setting 8bits/char  failed", __FUNCTION__, __LINE__ );
++        exit( -1 );
++    }
++    mrc = pmta->set( MATKEY_STOPBITS,   "1" );
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: setting 1stopbit  failed", __FUNCTION__, __LINE__ );
++        exit( -1 );
++    }
++    mrc = pmta->open();
++    if( mrc != MATRC_OK )
++    {
++        TRACE( "%s:%d: failed 2 open mta", __FUNCTION__, __LINE__ );
++        exit( -1 );
++    }
++    TRACE( "%s:%d: mta opened", __FUNCTION__, __LINE__ );
++	const auto ESC = (char)0x1B;
++	const auto ACK = (char)0x06;
++    const char inMsg[] = { ESC, '!', ACK };
++	char outMsg[ 256 ];
++    mtLen mtlen;
++	time_t	t0, t1, t2;
++	
++	for( unsigned long i = 0;; ++i)
++	{
++		t0 = time( NULL );
++		mtlen = sizeof( inMsg );
++		TRACE( "%d)before write()\n", i ); 
++        mrc = pmta->write( (mtDta*)inMsg, mtlen );
++		t1 = time( NULL );
++		
++		if( mrc == MATRC_OK )
++		{
++			TRACE( "\twrite() OK; elapsed %d seconds\n", t1 - t0 );
++			t2 = time( NULL );
++			memset( outMsg, '\0', sizeof( outMsg ));
++			if( mrc == MATRC_OK )
++			{
++				mtlen = sizeof( outMsg );
++				mrc = pmta->read( (mtDta*)outMsg, mtlen );			
++				TRACE( "\t read OK %s; elapsed %d seconds \n", outMsg, t2 - t1  );
++			}
++			else
++			{
++				TRACE( "\t read failed %d; elapsed %d seconds \n", mrc, t2 - t1  );
++			}
++		}
++		else
++		{
++			TRACE( "\twrite() failed: mrc = %d; elapsed %d seconds\n", mrc, t1 - t0 );
++		}
++		if( mrc != MATRC_OK )
++		{
++			pmta->close();
++			delete pmta;
++			break;
++		}
++		
++		Sleep( 100 );
++	}
++	
++	return 0;
++}
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

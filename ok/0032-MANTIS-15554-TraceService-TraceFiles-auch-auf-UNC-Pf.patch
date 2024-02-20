@@ -1,0 +1,137 @@
+From eb3f4ada7568734a722aa99c7d4bce547392fb69 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 10 Aug 2010 15:18:25 +0000
+Subject: [PATCH 0032/1076] MANTIS 15554: TraceService, TraceFiles auch auf
+ UNC-Pfaden verschieben
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@34 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Services/cpp/TrcServ/inc/TrcServ_def.h    |  8 ++++---
+ .../Services/cpp/TrcServ/src/TraceFile.cpp    | 22 ++++++++++++++-----
+ .../Services/cpp/TrcServ/src/TrcServ.cpp      |  3 ++-
+ 3 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+index 677d6ee0..66c9058b 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+@@ -12,10 +12,12 @@
+ 
+ /*! \mainpage TrcServ
+  *
+- *  @version V 2.3.17.0
++ *  @version V 2.3.18.0
+  *
+  *  \section change1 Change history
+  *
++ *  \date 10.08.2010 \li V 2.3.18.0 SteT MANTIS 15554: allow unc path for trace directories
++ *
+  *  \date 26.09.2007 \li V 2.3.17.0 SteT EDB 27828: bugfix access violation in string handling
+  *
+  *  \date 20.09.2007 \li V 2.3.16.0 SteT EDB 27720: PCI (Kreditkartensicherheitsrichtlinien) implemented, special function for writing tracks
+@@ -39,8 +41,8 @@
+  *
+  */
+ 
+-#define FILE_VER_BIN     2,3,17,0
+-#define FILE_VER_STR     "FileVersion", "2.3.17.0\0"
++#define FILE_VER_BIN     2,3,18,0
++#define FILE_VER_STR     "FileVersion", "2.3.18.0\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Trace Service\0"
+ #define INTERNALNAME     "InternalName"     ,"TrcServ.exe\0"
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
+index 287063f2..4833a81a 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
+@@ -99,6 +99,8 @@ class _traceFile
+ static void FileNameWoEnding(char *pFileNameWoEnding, const char* pFileName);
+ static void FileVersion(char *pFileVersion, long lVersion);
+ static void checkPathName(char* pszPath);
++static bool renameFile(const char* pSource, const char* pDest);
++static bool makeDirectory(const char* pPath);
+ 
+ /***************************************************************************
+ 
+@@ -430,6 +432,16 @@ char* fullName(const char* pszPath, const char* pszFileName)
+   return result;
+ }
+ 
++
++static bool renameFile(const char* pSource, const char* pDest)
++{
++  return (MoveFile(pSource, pDest) == 0);
++}
++static bool makeDirectory(const char* pPath)
++{
++  return (CreateDirectory(pPath, 0) == 0);
++}
++
+ static void checkPathName(char* pszPath)
+ {
+   char *pFileName;
+@@ -447,7 +459,7 @@ static void checkPathName(char* pszPath)
+         {
+           if(pFileName > pStart && *(pFileName-1) != ':')    // ts 03.09.2001 do not create devices(in MS stat return != 0 for devices)
+           {
+-            if(mkdir(pStart) != 0)
++            if(makeDirectory(pStart) != 0)
+             {
+               *pFileName = cBackSlash;
+               break;        // directory does not exists and could not be created, do not continue
+@@ -598,7 +610,7 @@ void traceFile::storeGeneration(int append, int newDay)
+     char* pDestPath= fullName(handle->pszPath, date);
+     char* pDestFile= fullName(pDestPath, pDest);
+     checkPathName(pDestFile);
+-    if(rename(handle->pszFileName, pDestFile) != 0)
++    if(renameFile(handle->pszFileName, pDestFile) != 0)
+     {
+       remove(handle->pszFileName);
+     }
+@@ -643,11 +655,11 @@ void traceFile::storeGeneration(int append, int newDay)
+               lVersion--;
+               pSrc[lLengthWoEnding] = 0;
+               FileVersion(pSrc, lVersion);
+-              rename (pSrc, pDest);       // rename Fileversions File.i => File.i+1
++              renameFile (pSrc, pDest);       // rename Fileversions File.i => File.i+1
+               pDest[lLengthWoEnding] = 0;
+               FileVersion(pDest, lVersion);
+             }
+-            rename (pFileName, pDest);
++            renameFile (pFileName, pDest);
+             // here compress msDest
+           }
+           else
+@@ -824,7 +836,7 @@ void traceFile::setPath(const char* pszPath)
+     handle->pszPath = fullName(pszPath, "");
+     checkPath();
+     close();
+-    if(rename(oldName, handle->pszFileName) != 0)
++    if(renameFile(oldName, handle->pszFileName) != 0)
+     {
+       remove(handle->pszFileName);
+     }
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
+index 0ed639df..850a26a0 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
+@@ -53,6 +53,7 @@
+             06.09.2007 2.3.15 SteT EDB 27720: PCI (Kreditkartensicherheitsrichtlinien) implemented, track data not written (really not written, even not encrypted!)
+             20.09.2007 2.3.16 SteT EDB 27720: PCI (Kreditkartensicherheitsrichtlinien) implemented, special function for writing tracks
+             26.09.2007 2.3.17 SteT EDB 27828: TraceHDL.DLL Absturz beim writeTrace
++            10.08.2010 2.3.18 SteT MANTIS 15554: TraceService, TraceFiles auch auf UNC-Pfaden verschieben
+ 
+ 
+ ****************************************************************************/
+@@ -101,7 +102,7 @@
+ // #define WAITBEFORECXDELETE
+ 
+ 
+-VERSION_ID_DT( 02, 03, 17 );
++VERSION_ID_DT( 02, 03, 18 );
+ 
+ 
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,237 @@
+From e9090cb5af0c321c7967c819fd176e5d48effd4f Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 13 Mar 2014 15:10:51 +0000
+Subject: [PATCH 0525/1076] MANTIS 0031488 PlatformSettings: support platform
+ program path and platform data path to platform components
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@656 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/cEnvSubst.hpp         |  10 ++
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |  10 +-
+ .../Massai/cpp/Controller/makefile.mak        |   1 +
+ .../Massai/cpp/Text/src/cEnvSubst.cpp         | 123 +++++++++++++++++-
+ 4 files changed, 137 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+index 18fb2e98..69a417ee 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+@@ -30,9 +30,19 @@
+ 
+ class CEnvSubst
+ {
++public:
++  enum ROOT_KEY
++  {
++    HKLM,
++    HKCU
++  };
+ private:
+   std::map<std::string,std::string> env;
+ 
++  bool regReadSZ(ROOT_KEY keyHandle, const std::string& subKey, const std::string& valueName, bool expand, std::string& result);
++  bool getPlfPath(int csidl, std::string& path);  
++  std::string stripFN(const std::string & str);
++  
+ public:
+   CEnvSubst();
+   void SetBaseEnvVars();
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index f6890751..5afc1e8c 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,8 +9,8 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,14
+-#define FILE_VER_STR     "FileVersion", "1.0.2.14\0"
++#define FILE_VER_BIN     1,0,2,15
++#define FILE_VER_STR     "FileVersion", "1.0.2.15\0"
+ 
+ /*!
+ \file
+@@ -18,12 +18,16 @@
+ 
+ \page mControl.exe Release Notes - mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+ 
+-@version 1.0.2.13
++@version 1.0.2.15
+ 
+ \section change1 Change history
+ 
+ mControl.exe
+ 
++\date 13.03.2014 \li V1.0.2.15
++                 \li modification - GiT Mantis 0031488: PlatformSettings: support platform program path and platform data path to platform components
++
++                 
+ \date 10.01.2014 \li V1.0.2.14
+                  \li modification - GiT Mantis 0030362: MControl Change working dir to user local path
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index d8409be2..5e936145 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -27,6 +27,7 @@ STDLINKLIBS = \
+     $(SYS_GDI32) \
+     $(SYS_SHELL32) \
+     $(SYS_USER32) \
++    $(SYS_SHLWAPI) \
+     $(SYS_VERSION)
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+index a362dfb0..400dabef 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+@@ -17,9 +17,112 @@
+ #include "boost/regex.hpp"
+ #include "trc/trace.h"
+ 
++#include <windows.h>
++#include <Shlobj.h>
++#include <Shlwapi.h>
++
+ CEnvSubst::CEnvSubst()
+ {}
+ 
++std::string CEnvSubst::stripFN(const std::string & str)
++{
++  std::string ret(str);
++  if(str.size())
++  {
++    char lch;
++    while(ret.size() && (lch=ret[ret.size()-1]) && (lch == '\n' || lch == '\t' || lch == '\\' ))
++    {
++      ret.erase(ret.size()-1, 1);
++    }
++  }
++  return ret;
++}
++  
++bool CEnvSubst::regReadSZ(CEnvSubst::ROOT_KEY keyHandle, const std::string& subKey, const std::string& valueName, bool expand, std::string& result)
++{
++#define MAX_STR_LENGTH (1024*32)
++#define MAX_EXPSTR_LENGTH (MAX_STR_LENGTH+1024*8)
++  HKEY key;
++  switch(keyHandle)
++  {
++    case HKLM:
++      key = HKEY_LOCAL_MACHINE;
++      break;
++    case HKCU:
++      key = HKEY_CURRENT_USER;
++      break;
++    default:
++      key = HKEY_LOCAL_MACHINE;
++      break;
++  }
++  bool ret = false;
++  LONG res=RegOpenKeyEx(key, subKey.c_str(), 0, KEY_READ, &key);
++  DWORD valuetype;
++  char buf[MAX_STR_LENGTH];
++  if(!expand)
++    valuetype = REG_SZ;
++  else
++    valuetype = REG_EXPAND_SZ;
++  if(ERROR_SUCCESS == res)
++  {
++    DWORD slen=MAX_STR_LENGTH;
++    res=RegQueryValueEx( key, valueName.c_str(), NULL, (LPDWORD) &valuetype, (LPBYTE)buf, (LPDWORD) &slen);
++    switch(res)
++    {
++        case ERROR_SUCCESS:
++          ret = true;
++          break;
++        case ERROR_MORE_DATA:
++          /* ignore strings that are too long */
++        case ERROR_FILE_NOT_FOUND:
++        default:
++          break;
++    }
++    RegCloseKey(key);
++  }
++  if(ret)
++  {
++    result.assign(buf);
++  }
++  else
++    result.assign("");
++  return ret;
++}
++
++bool CEnvSubst::getPlfPath(int csidl, std::string& path)
++{
++    path.assign("c:\\tmp");
++    bool ret = false;
++    try
++    {
++      TCHAR buff_path[MAX_PATH] = {0};
++      if(SHGetSpecialFolderPath(NULL, buff_path, csidl, FALSE))
++      {
++        path.assign(buff_path);
++        PathAddBackslash(reinterpret_cast<LPTSTR>(buff_path));
++        std::string buf(buff_path); buf.append("Materna\\MIPS");
++        if(PathIsDirectory(buf.c_str()))
++        {
++          path.assign(buf);
++          ret = true;
++        } else
++        {
++          buf.assign(buff_path); buf.append("Materna");
++          if(PathIsDirectory(buf.c_str()))
++          {
++            path.assign(buf);
++            ret = true;
++          }
++        }
++      }
++    }
++    catch(...)
++    {
++      path.assign("c:\\tmp");
++    }
++    return ret;
++}
++
+ void CEnvSubst::SetBaseEnvVars()
+ {
+   env["PROGRAMFILES"] = "c:\\Program Files";
+@@ -32,17 +135,29 @@ void CEnvSubst::SetBaseEnvVars()
+   if (strDummy) env["SYSTEMROOT"]= strDummy;
+   strDummy = getenv("SystemDrive");
+   if (strDummy) env["SYSTEMDRIVE"]= strDummy;
++  
++  std::string dummy;
+ 
++  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Path",false,dummy))
++    env["PLFINSTALLPATH"]= stripFN(dummy);
++  else
++    if(getPlfPath(CSIDL_PROGRAM_FILESX86,dummy))
++      env["PLFINSTALLPATH"]= stripFN(dummy);
++    
++  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Data_Path",false,dummy))
++    env["PLFINSTALLDATAPATH"]= stripFN(dummy);
++  else
++    if(getPlfPath(CSIDL_LOCAL_APPDATA,dummy))
++      env["PLFINSTALLDATAPATH"]= stripFN(dummy);   
++  
+   try
+   {
+-    boost::regex ReplaceStr1( "\\\\",
+-           boost::regex::normal | boost::regbase::icase
++    boost::regex ReplaceStr1( "\\\\", boost::regex::normal | boost::regbase::icase
+ #if BOOST_VERSION == 103100
+ 		   | boost::regbase::escape_in_lists
+ #endif
+ 		   );
+-    boost::regex ReplaceStr2( "\\$",
+-           boost::regex::normal | boost::regbase::icase
++    boost::regex ReplaceStr2( "\\$", boost::regex::normal | boost::regbase::icase
+ #if BOOST_VERSION == 103100
+ 		   | boost::regbase::escape_in_lists
+ #endif
+-- 
+2.41.0.windows.1
+

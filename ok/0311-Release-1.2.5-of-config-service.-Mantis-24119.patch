@@ -1,0 +1,521 @@
+From 6eda9c2b0214c1f385d71e62361c9d6829f7d6cb Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 7 Aug 2012 12:00:25 +0000
+Subject: [PATCH 0311/1077] Release 1.2.5 of config service. Mantis 24119.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@376 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  16 ++-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  16 ++-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp |  24 ++--
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     | 115 ++++++++++++++----
+ 4 files changed, 127 insertions(+), 44 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 7a8c1049..5c688282 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -310,7 +310,7 @@
+ //#define FILE_VER_DTS "1.2.2.0"
+ //
+ //! @version 1.2.3
+-//! @date    13.02.2011
++//! @date    13.Feb.2012
+ //! @author  GiT
+ //! @par     Change:
+ //! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional
+@@ -319,7 +319,7 @@
+ // #define FILE_VER_DTS "1.2.3.0"
+ //
+ //! @version 1.2.4
+-//! @date    13.04.2011
++//! @date    13.Apr.2012
+ //! @author  JK
+ //! @par     Change:
+ //! - MANTIS 22956
+@@ -328,8 +328,16 @@
+ //!   - Changed access rights for "setInitial"-ed values. Previously
+ //!     the had just "c", now it is "c,<authorization>:clr"
+ //!     <authorization> usually would be "CfgValues.exe"
+-#define FILE_VER_BIN 1,2,4,0
+-#define FILE_VER_DTS "1.2.4.0"
++// #define FILE_VER_BIN 1,2,4,0
++// #define FILE_VER_DTS "1.2.4.0"
++//
++//! @version 1.2.5
++//! @date    07.Aug.2012
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 24119, protect access to values and meta maps.
++#define FILE_VER_BIN 1,2,5,0
++#define FILE_VER_DTS "1.2.5.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 3d6cb32a..7ad3190a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -301,7 +301,7 @@
+ //#define FILE_VER_DTS "1.2.2.0"
+ //
+ //! @version 1.2.3
+-//! @date    13.02.2011
++//! @date    13.Feb.2012
+ //! @author  GiT
+ //! @par     Change:
+ //! - MANTIS 0022407: SelfServiceCommon CfgXMgrB implementation optional
+@@ -310,7 +310,7 @@
+ // #define FILE_VER_DTS "1.2.3.0"
+ //
+ //! @version 1.2.4
+-//! @date    13.04.2011
++//! @date    13.Apr.2012
+ //! @author  JK
+ //! @par     Change:
+ //! - MANTIS 22956
+@@ -319,8 +319,16 @@
+ //!   - Changed access rights for "setInitial"-ed values. Previously
+ //!     the had just "c", now it is "c,<authorization>:clr"
+ //!     <authorization> usually would be "CfgValues.exe"
+-#define FILE_VER_BIN 1,2,4,0
+-#define FILE_VER_DTS "1.2.4.0"
++// #define FILE_VER_BIN 1,2,4,0
++// #define FILE_VER_DTS "1.2.4.0"
++//
++//! @version 1.2.5
++//! @date    07.Aug.2012
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 24119, protect access to values and meta maps.
++#define FILE_VER_BIN 1,2,5,0
++#define FILE_VER_DTS "1.2.5.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index 30f60cd6..cd8bd836 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -7,14 +7,14 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
+ #include "cfgCorba_Base.hpp"
+ 
+-#include "systools/mMutexSem.hpp"
++#include "systools/mAutoMutex.hpp"
+ 
+ #include <map>
+ #include <string>
+@@ -72,10 +72,10 @@ void cfgCorba_Base::valChgListener::mSendIndication
+ 
+ void cfgCorba_Base::valChgListener::trace
+    (
+-      long           TraceLevel,
+-      char const *   File,
+-      short          Line,
+-      char const *   Function,
++      long           /* TraceLevel */,
++      char const *   /* File */,
++      short          /* Line */,
++      char const *   /* Function */,
+       char const *   Text
+    )
+ {
+@@ -124,7 +124,7 @@ void cfgCorba_Base::addChangeListener
+ )
+ {
+    std::string ItemKey( Acc.Item );
+-   Mutex.request();
++   Materna::MSSD::autoMutex OnlyOne( Mutex );
+    valChgListeners::iterator It( M_ValChgListeners.find( ItemKey ) );
+    valChgListener * ValChgListener;
+    if( It == M_ValChgListeners.end() )
+@@ -137,7 +137,6 @@ void cfgCorba_Base::addChangeListener
+       ValChgListener = It->second;
+    }
+    ValChgListener->set( Listener->_duplicate( Listener ) );
+-   Mutex.release();
+ }
+ 
+ 
+@@ -152,14 +151,13 @@ void cfgCorba_Base::removeChangeListener
+    Config::changeListener * Listener
+ )
+ {
+-   Mutex.request();
++   Materna::MSSD::autoMutex OnlyOne( Mutex );
+    valChgListeners::iterator I;
+    for( I = M_ValChgListeners.begin(); I != M_ValChgListeners.end(); ++I )
+    {
+       valChgListener * const Lst = I->second;
+       Lst->clr( Listener );
+    }
+-   Mutex.release();
+ }
+ 
+ 
+@@ -175,14 +173,13 @@ void cfgCorba_Base::removeChangeListenerItem
+    char const *              Item
+ )
+ {
+-   Mutex.request();
++   Materna::MSSD::autoMutex OnlyOne( Mutex );
+    valChgListeners::iterator It( M_ValChgListeners.find( Item ) );
+    if( It != M_ValChgListeners.end() )
+    {
+       valChgListener * const ValChgListener = It->second;
+       ValChgListener->clr( Listener );
+    }
+-   Mutex.release();
+ }
+ 
+ 
+@@ -194,7 +191,7 @@ void cfgCorba_Base::removeChangeListenerItem
+ **/
+ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+ {
+-   Mutex.request();
++   Materna::MSSD::autoMutex OnlyOne( Mutex );
+    char const * const ItemC = ItemPath.c_str();
+    valChgListeners::iterator It( M_ValChgListeners.find( ItemC ) );
+    if( It != M_ValChgListeners.end() )
+@@ -223,7 +220,6 @@ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+          ItemC
+       );
+    }
+-   Mutex.release();
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index 6873b5ff..a1853b4b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -32,6 +32,7 @@
+ #include "Tools/mInFile.hpp"
+ #include "systools/mSysThread.hpp"
+ #include "mWarning.hpp"
++#include "systools/mAutoMutex.hpp"
+ #include "systools/software_error.h"
+ 
+ #include <fstream>
+@@ -86,7 +87,14 @@ class cfgEntityMeta
+     * List of meta entries object.
+     *
+    **/
+-   metaMap M_Map;
++   metaMap                              M_Map;
++
++   /**
++    *
++    * Protect M_Map against concurrent access.
++    *
++   **/
++   Materna::MSSD::mutexSemaphore        M_Mutex;
+ 
+ public:
+ 
+@@ -114,7 +122,7 @@ public:
+       char const *              Auth,
+       cfgEntity::purpose        Purp,
+       cfgEntity::reference      Ref
+-   ) const;
++   );
+ 
+    /**
+     *
+@@ -128,14 +136,15 @@ public:
+     * Save the map to an ostream.
+     *
+    **/
+-   void cemSave( std::ostream &, std::string const & ) const;
++   void cemSave( std::ostream &, std::string const & );
+ 
+ };
+ 
+ 
+ 
+ cfgEntityMeta::cfgEntityMeta() :
+-   M_Map()
++   M_Map(),
++   M_Mutex()
+ {
+ }
+ 
+@@ -152,11 +161,15 @@ cfgMeta * cfgEntityMeta::cemFromRef
+    char const *              Auth,
+    cfgEntity::purpose        Purp,
+    cfgEntity::reference      Ref
+-) const
++)
+ {
+    //-std::cout << "cfgEntityMeta::cemFromRef( Purp="
+    //-          << Purp << " Ref=" << Ref << " ) ..." << std::endl;
+    //
++   // Protect M_Map
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    // Vector index is reference - 1
+    //
+    if( ( Ref != 0 ) && ( M_Map.size() > (Ref - 1) ) )
+@@ -233,6 +246,11 @@ cfgMeta * cfgEntityMeta::cemFromRef
+ cfgEntity::reference cfgEntityMeta::cemFromMeta( cfgMeta const & Meta )
+ {
+    //-std::cout << "cfgEntityMeta::cemFromMeta ..." << std::endl;
++   //
++   // Protect M_Map
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgEntity::reference const IEnd = M_Map.size();
+    for( cfgEntity::reference I = 0; I < IEnd; ++I )
+    {
+@@ -259,8 +277,13 @@ void cfgEntityMeta::cemSave
+ (
+    std::ostream &       Dst,
+    std::string const &  Indent
+-) const
++)
+ {
++   //
++   // Protect M_Map
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgEntity::reference const IEnd = M_Map.size();
+    for( cfgEntity::reference I = 0; I < IEnd; ++I )
+    {
+@@ -281,12 +304,19 @@ void cfgEntityMeta::cemSave
+ class cfgEntityValue
+ {
+ 
++   /**
++    *
++    * Protect M_Root against concurrent access.
++    *
++   **/
++   Materna::MSSD::mutexSemaphore        M_Mutex;
++
+    /**
+     *
+     * Root node
+     *
+    **/
+-   cfgValueNode M_Root;
++   cfgValueNode                         M_Root;
+ 
+ public:
+ 
+@@ -327,9 +357,9 @@ public:
+    cfgValue const * cevGetNrm
+    (
+       char const *              Auth,
+-      cfgEntityMeta const *     Meta,
++      cfgEntityMeta *           Meta,
+       char const *              Path
+-   ) const;
++   );
+ 
+    /**
+     *
+@@ -338,7 +368,7 @@ public:
+     * @param Path:      Item name.
+     *
+    **/
+-   cfgValue const * cevGetRaw( char const * Path ) const;
++   cfgValue const * cevGetRaw( char const * Path );
+ 
+    /**
+     *
+@@ -347,7 +377,7 @@ public:
+     * @param Path:      Item name.
+     *
+    **/
+-   cfgEntity::reference cevGetRef( char const * Path ) const;
++   cfgEntity::reference cevGetRef( char const * Path );
+ 
+    /**
+     *
+@@ -358,7 +388,7 @@ public:
+     * @param Indent:    Indentation constant
+     *
+    **/
+-   void cevSave( std::ostream & Dst, std::string const & Indent ) const;
++   void cevSave( std::ostream & Dst, std::string const & Indent );
+ 
+    /**
+     *
+@@ -948,6 +978,7 @@ namespace
+ 
+ 
+ cfgEntityValue::cfgEntityValue() :
++   M_Mutex(),
+    M_Root()
+ {
+ }
+@@ -963,6 +994,11 @@ cfgEntityValue::~cfgEntityValue()
+ void cfgEntityValue::cevDelete( char const * Item )
+ {
+    cfgPath Path( Item );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    node_delete( M_Root, Path );
+ }
+ 
+@@ -971,13 +1007,18 @@ void cfgEntityValue::cevDelete( char const * Item )
+ cfgValue const * cfgEntityValue::cevGetNrm
+ (
+    char const *                 Auth,
+-   cfgEntityMeta const *        EMeta,
++   cfgEntityMeta *              EMeta,
+    char const *                 Item
+-) const
++)
+ {
+    //-std::cout << "cfgEntityValue::cevGetNrm(" << Item << ") ..."
+    //-          << std::endl;
+    cfgPath Path( Item );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgValueNode const * const N = node_find_const( M_Root, Path );
+    cfgEntity::reference const R = N->reference();
+    if( EMeta->cemFromRef( Auth, cfgEntity::PURP_VALUEGET, R ) )
+@@ -1000,7 +1041,7 @@ cfgValue const * cfgEntityValue::cevGetNrm
+ 
+ 
+ 
+-cfgValue const * cfgEntityValue::cevGetRaw( char const * Item ) const
++cfgValue const * cfgEntityValue::cevGetRaw( char const * Item )
+ {
+    //-std::cout << "cfgEntityValue::cevGetRaw(" << Item << ") ..."
+    //-          << std::endl;
+@@ -1008,6 +1049,11 @@ cfgValue const * cfgEntityValue::cevGetRaw( char const * Item ) const
+    cfgValue const * Ret = 0;
+    try
+    {
++      //
++      // Protect M_Root
++      //
++      Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++      //
+       cfgValueNode const * const N = node_find_const( M_Root, Path );
+       Ret = N->get();
+    }
+@@ -1024,11 +1070,16 @@ cfgValue const * cfgEntityValue::cevGetRaw( char const * Item ) const
+ 
+ 
+ 
+-cfgEntity::reference cfgEntityValue::cevGetRef( char const * Path ) const
++cfgEntity::reference cfgEntityValue::cevGetRef( char const * Path )
+ {
+    //-std::cout << "cfgEntityValue::cevGetRef(" << Path << ") ..."
+    //-          << std::endl;
+    cfgPath const CfgPath( Path );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgValueNode const * const N = node_find_const( M_Root, CfgPath );
+    cfgEntity::reference const R = N->reference();
+    //-std::cout << "cfgEntityValue::cevGetRef(" << Path << ") = " << R
+@@ -1042,8 +1093,13 @@ void cfgEntityValue::cevSave
+ (
+    std::ostream &               Dst,
+    std::string const &          Indent
+-) const
++)
+ {
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    M_Root.saveDir( Dst, Indent );
+ }
+ 
+@@ -1062,6 +1118,11 @@ void cfgEntityValue::cevSetValue
+ {
+    //-std::cout << "cfgEntityValue::cevSetValue ..." << std::endl;
+    cfgPath Path( Item );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgValueNode * const N = node_find_or_throw( M_Root, Path );
+    N->update( Value );
+    //-std::cout << "cfgEntityValue::cevSetValue." << std::endl;
+@@ -1082,6 +1143,11 @@ void cfgEntityValue::cevUpdate
+ {
+    //-std::cout << "cfgEntityValue::cevUpdate__2 ..." << std::endl;
+    cfgPath Path( Item );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgValueNode * const N = node_find_or_creat( M_Root, Path );
+    N->update( Metaref );
+    //-std::cout << "cfgEntityValue::cevUpdate__2." << std::endl;
+@@ -1103,6 +1169,11 @@ void cfgEntityValue::cevUpdate
+ {
+    //-std::cout << "cfgEntityValue::cevUpdate__3 ..." << std::endl;
+    cfgPath Path( Item );
++   //
++   // Protect M_Root
++   //
++   Materna::MSSD::autoMutex OnlyOne( M_Mutex );
++   //
+    cfgValueNode * const N = node_find_or_creat( M_Root, Path );
+    N->update( Metaref );
+    N->update( Value );
+@@ -1166,8 +1237,8 @@ namespace
+    bool allSaveToFile
+          (
+             std::string const &         File,
+-            cfgEntityMeta const *       Meta,
+-            cfgEntityValue const *      Value
++            cfgEntityMeta *             Meta,
++            cfgEntityValue *            Value
+          )
+    {
+       //
+@@ -1986,8 +2057,8 @@ void cfgEntity::itemCreate
+                                          );
+                if( !Meta )
+                {
+-                  //-std::cout << "cfgEntity::itemSet - X:NotFound (no meta)"
+-                  //-          << std::endl;
++                  //-std::cout << "cfgEntity::itemSet - "
++                  //-          "X:NotFound (no meta)" << std::endl;
+                   throw cfgEntity_NotFound();
+                }
+                if( !Meta->valueAllow( *RawValue ) )
+-- 
+2.41.0.windows.1
+

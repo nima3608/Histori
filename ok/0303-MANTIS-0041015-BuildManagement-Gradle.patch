@@ -1,0 +1,122 @@
+From 7bbe442d903ae8cb4f915d8fcfbbffc9fd02af58 Mon Sep 17 00:00:00 2001
+From: mbrinkma <mbrinkma@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 18 May 2018 10:07:26 +0000
+Subject: [PATCH 303/462] MANTIS 0041015 BuildManagement: Gradle
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@514 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ SelfServiceBuild/Build/release/makefile-svn     | 17 +++++++++++------
+ .../Build/scripts/gradle-build-all.bat          | 15 +++++++++++++--
+ 2 files changed, 24 insertions(+), 8 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/release/makefile-svn b/SelfServiceBuild/Build/release/makefile-svn
+index 69a4432..b526125 100644
+--- a/SelfServiceBuild/Build/release/makefile-svn
++++ b/SelfServiceBuild/Build/release/makefile-svn
+@@ -92,7 +92,7 @@ clean_except_log: $(SELF)
+                - rd $(LOCALSTORE)\SelfServiceBuild\Build\output\jar /s /q
+                - rd $(LOCALSTORE)\SelfServiceBuild\Build\output\lib /s /q
+ 
+-                                                                    
++
+ checkout:      $(SELF)
+                svn co $(REPO_PATH) $(LOCALSTORE) --ignore-externals || echo BUILD ERR^OR - svn checkout failed
+ 
+@@ -112,6 +112,11 @@ build_maven:   $(SELF)
+                setenv.bat && \
+                xmk maven
+ 
++build_gradle:  $(SELF)
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               gradle-build-all.bat
++
+ build_installer:    $(SELF)
+                - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
+                setenv.bat && \
+@@ -121,7 +126,7 @@ build_driver:    $(SELF)
+                - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
+                setenv.bat && \
+                xmk driver
+-               
++
+ build_cpp:     $(SELF)
+                - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\revision_tag.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\revision_tag.pl" --repo="$(LOCALSTORE)" --version=$(BUILD_VERSION) $(RELEASE_FLAG) )
+                - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
+@@ -173,18 +178,18 @@ nb_application:     build_cpp sendMailZip
+ 
+ nb_Platform:        clean init checkout set_props update build_cpp sendMailZip
+ nb_Platform_java:   clean init checkout set_props update build_java sendMailZip
+-nb_Platform_full:   clean init checkout set_props update build_cpp build_java build_maven build_installer kidlist idllist sendMailZip
++nb_Platform_full:   clean init checkout set_props update build_cpp build_java build_maven build_gradle build_installer kidlist idllist sendMailZip
+ 
+ build_mavenQBG:     $(SELF)
+                     - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\java && \
+                     mv.cmd && ccc.cmd && \
+                     mvn -fn -e install
+-zip_QBG:            $(SELF)             
++zip_QBG:            $(SELF)
+                     cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
+                     $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
+                     mv.cmd && ccc.cmd && \
+                     xmk zip /I
+-installer_QBG:      $(SELF)             
++installer_QBG:      $(SELF)
+                     cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
+                     $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
+                     mv.cmd && ccc.cmd && \
+@@ -199,7 +204,7 @@ msi_AirlineApps:    $(SELF)
+                     cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
+                     $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
+                     xmk msi-installer /I
+-                     
++
+ 
+ #===================================================================
+ #  End of File
+diff --git a/SelfServiceBuild/Build/scripts/gradle-build-all.bat b/SelfServiceBuild/Build/scripts/gradle-build-all.bat
+index 60de6bd..808ca3c 100644
+--- a/SelfServiceBuild/Build/scripts/gradle-build-all.bat
++++ b/SelfServiceBuild/Build/scripts/gradle-build-all.bat
+@@ -1,10 +1,14 @@
+-rem @echo off
++@echo off
+ rem
+ rem Build all components which are to be created with "gradle".
+ rem
+ rem After doing the build, some build-results (currently: illumination-device-sim) are copied to Build\output\jar.
+ rem
+ rem @history
++rem
++rem 2018-05-18 mbrinkma
++rem - include Toronto AirCanada-BIWIS components
++rem
+ rem 2017-03-17 mbrinkma
+ rem - creation
+ rem
+@@ -15,6 +19,8 @@ set BUILD_ARGS=clean build
+ 
+ call :callGradle %BASE_DIR%\DeviceSimulation\illumination-device-sim -copyResult illumination-device-sim-all-*.jar %BUILD_ARGS%
+ call :callGradle %BASE_DIR%\DeviceSimulation\device-reg-test %BUILD_ARGS%
++call :callGradle %BASE_DIR%\BaggageCommunicationLib %BUILD_ARGS%
++call :callGradle %BASE_DIR%\AirCanadaBIWIS\BiwisHandler %BUILD_ARGS%
+ 
+ goto :eof
+ 
+@@ -27,7 +33,12 @@ goto :eof
+     set RESULT_FILE=%1
+     shift
+   :no_copy_result  
+-  call gradlew -c %TOP_DIR%\settings.gradle %1 %2 %3 %4
++  echo building %TOP_DIR%
++  if exist %TOP_DIR%\settings.gradle (
++    call gradlew -c %TOP_DIR%\settings.gradle %1 %2 %3 %4
++  ) else (
++    call gradlew -b %TOP_DIR%\build.gradle %1 %2 %3 %4
++  )
+   if "%RESULT_FILE%" == "" goto :eof
+     copy %TOP_DIR%\build\libs\%RESULT_FILE% ..\output\jar
+ goto :eof
+-- 
+2.41.0.windows.1
+

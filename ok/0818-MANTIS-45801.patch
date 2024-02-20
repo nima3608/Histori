@@ -1,0 +1,245 @@
+From 74f59f0090e7dbde912f522c77dcd3880508e3b6 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 16 Jan 2018 12:21:10 +0000
+Subject: [PATCH 0818/1000] MANTIS 45801 MANTIS 45801: MassaiCfgxB: many trace
+ files Re-design tracesFiler to: - Not change files, just because a previous
+ write failed - Write an opening and closing entry for each file - Create the
+ a directory, if not exists
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1306 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/src/tracesFiler.cpp      | 114 ++++++++++--------
+ 1 file changed, 65 insertions(+), 49 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+index 3b1397ad..0f91d591 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+@@ -12,8 +12,10 @@
+ 
+ #include "Tools/tracesFiler.hpp"
+ 
++#include <boost/filesystem.hpp>
++
+ #include <fstream>
+-#include <iostream>
++//#include <iostream>
+ #include <string>
+ 
+ // For SYSTEMTIME
+@@ -30,25 +32,26 @@ namespace
+ {
+ 
+ 
+-   void createDir( char const * target_path )
++   std::string const sep = "================";
++
++
++   /**
++    *
++    * Produce a time stamp string.
++    *
++    * @param stim:              A reference for the current time.
++    *
++    * @return:                  The time stamp.
++    *
++   **/
++   std::string timeNow( SYSTEMTIME const & stim )
+    {
+-      char  path_buf[1024];
+-      char *path_ptr = path_buf;
+-      char del= 0;
+-      if( !target_path )
+-         return;
+-      strcpy( path_buf, target_path );
+-      do
+-      {
+-         while( *path_ptr != 0 && *path_ptr != '/' && *path_ptr != '\\' )
+-            ++path_ptr;
+-         del = *path_ptr;
+-         *path_ptr = 0;
+-         // Ok, if it already exists. Other errors are ignored.
+-         (void)_mkdir(path_buf);
+-         *path_ptr = del;
+-         ++path_ptr;
+-       } while( del != 0 );
++      return
++         (
++            boost::format( "%02d:%02d:%02d.%1d " )
++            % stim.wHour % stim.wMinute % stim.wSecond
++            % ( stim.wMilliseconds / 100 )
++         ).str();
+    }
+ 
+ 
+@@ -95,7 +98,7 @@ namespace traces
+        *
+        * Constructor.
+        *
+-       * @param base_file_name:           The name of the trace file, which
++       * @param base_file_name:         The name of the trace file, which
+        *                                will be extended for different
+        *                                generations. Do not provide an
+        *                                extension like e.g. ".trc".
+@@ -103,9 +106,9 @@ namespace traces
+        * @param path:                   Traces root path. The actual path
+        *                                will be extended with date info.
+        *
+-       * @param sub_dir_mode:             Do we use trace sub-directories?
++       * @param sub_dir_mode:           Do we use trace sub-directories?
+        *
+-       * @param max_file_size:            The maximum size a trace file is
++       * @param max_file_size:          The maximum size a trace file is
+        *                                to grow, before a new file is used.
+        *
+       **/
+@@ -126,14 +129,33 @@ namespace traces
+       {
+       }
+ 
++      ~impl()
++      {
++         try
++         {
++            if( m_open )
++            {
++               SYSTEMTIME stim;
++               GetLocalTime( &stim );
++               m_ostream
++                  << timeNow( stim )
++                  << sep << " Terminating - close trace file "
++                  << sep << std::endl;
++            }
++         }
++         catch( ... )
++         {
++         }
++      }
++
+       /**
+        *
+        * Open a new trace file for writing.
+        *
+-       * @param T:              A reference for the current time.
++       * @param stim:                   A reference for the current time.
+        *
+       **/
+-      void openNewFile( SYSTEMTIME const & T )
++      void openNewFile( SYSTEMTIME const & stim )
+       {
+          std::string new_file_name = m_path;
+          if( m_sub_dir_mode != Subdir_None )
+@@ -145,7 +167,7 @@ namespace traces
+                new_file_name +=
+                   (
+                      boost::format( "%02d_%02d" )
+-                     % T.wMonth % T.wDay
++                     % stim.wMonth % stim.wDay
+                   ).str();
+             }
+             else
+@@ -154,11 +176,14 @@ namespace traces
+                new_file_name +=
+                   (
+                      boost::format( "%02d%02d" )
+-                     % T.wDay % T.wMonth
++                     % stim.wDay % stim.wMonth
+                   ).str();
+             }
+-            createDir( new_file_name.c_str() );
+          }
++         // Path is nearly complete - create the directory, if needed
++         boost::filesystem::path dir( new_file_name );
++         boost::filesystem::create_directories( dir );
++         //
+          new_file_name += "\\";
+          new_file_name += m_base_file_name;
+          if( m_sub_dir_mode != Subdir_None )
+@@ -168,7 +193,7 @@ namespace traces
+             new_file_name +=
+                (
+                   boost::format( "_%02d%02d%02d.trc" )
+-                  % T.wHour % T.wMinute % T.wSecond
++                  % stim.wHour % stim.wMinute % stim.wSecond
+                ).str();
+          }
+          else
+@@ -178,12 +203,12 @@ namespace traces
+             new_file_name +=
+                (
+                   boost::format( "_%04d%02d%02d_%02d%02d%02d.trc" )
+-                  % T.wYear % T.wMonth % T.wDay
+-                  % T.wHour % T.wMinute % T.wSecond
++                  % stim.wYear % stim.wMonth % stim.wDay
++                  % stim.wHour % stim.wMinute % stim.wSecond
+                ).str();
+          }
+          m_ostream.open( new_file_name.c_str() );
+-         m_open_day = T.wDay;
++         m_open_day = stim.wDay;
+       }
+ 
+       /**
+@@ -198,50 +223,41 @@ namespace traces
+          try
+          {
+             // Time stamp
+-            SYSTEMTIME T;
+-            GetLocalTime( &T );
+-            std::string const sep = "================";
+-            std::string const ts =
+-               (
+-                  boost::format( "%02d:%02d:%02d.%1d " )
+-                  % T.wHour % T.wMinute % T.wSecond
+-                  % ( T.wMilliseconds / 100 )
+-               ).str();
++            SYSTEMTIME stim;
++            GetLocalTime( &stim );
++            std::string const ts = timeNow( stim );
+             // Check status
+             if( !m_open )
+             {
+                // First call to write - open a new trace file.
+-               openNewFile( T );
++               openNewFile( stim );
+                m_ostream
+                   << ts << sep << " First trace file "
+                   << sep << std::endl;
+                m_open = true;
+             }
+-            else if
+-               (
+-                  static_cast<unsigned int>( m_ostream.tellp() ) >
+-                  m_max_file_size
+-               )
++            else if( m_ostream.tellp() > m_max_file_size )
+             {
+                // File size exceeds maximum allowed - new trace file.
++               // Error -1 returned by tellp() will not go here.
+                m_ostream
+                   << ts << sep
+                   << " File size limit reached - close trace file "
+                   << sep << std::endl;
+                m_ostream.close();
+-               openNewFile( T );
++               openNewFile( stim );
+                m_ostream
+                   << ts << sep << " Follow-up trace file "
+                   << sep << std::endl;
+             }
+-            else if( T.wDay != m_open_day )
++            else if( stim.wDay != m_open_day )
+             {
+                // Date changed - new trace file.
+                m_ostream
+                   << ts << sep << " New day - close trace file "
+                   << sep << std::endl;
+                m_ostream.close();
+-               openNewFile( T );
++               openNewFile( stim );
+                m_ostream
+                   << ts << sep << " Follow-up trace file "
+                   << sep << std::endl;
+-- 
+2.41.0.windows.1
+

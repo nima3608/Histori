@@ -1,0 +1,659 @@
+From dbabc8138481c5748c58e20e05683494aef43fb1 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 29 Jun 2011 13:16:30 +0000
+Subject: [PATCH 0050/1000] LogService.exe; massaiSNMP.dll; V1.0.3.18 Mantis
+ 0007390: use more tolerant parser for compDefinition (spaces) Mantis 0007391:
+ change initial status from "Started" to "NOT_AVAILABLE" Mantis 0007424:
+ LoggingService: FTP-Transfer - rename fails if file old file does not exist
+ Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read
+ configuration
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@157 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/LogService/inc/LogService_def.h       |  13 +-
+ .../cpp/LogService/inc/cfgTextListGCL.h       |  41 ++---
+ .../Massai/cpp/LogService/inc/component.h     |   2 +-
+ .../Massai/cpp/LogService/inc/configSNMP.h    |   1 +
+ .../cpp/LogService/inc/eventConfiguration.h   |  16 ++
+ .../cpp/LogService/inc/massaiSNMP_def.h       |  12 +-
+ .../Massai/cpp/LogService/makefile.mak        |  17 +-
+ .../cpp/LogService/src/cfgTextListGCL.cpp     |  30 ++--
+ .../cpp/LogService/src/componentTable.cpp     |  22 +--
+ .../Massai/cpp/LogService/src/configSNMP.cpp  | 159 ++++++++++--------
+ .../cpp/LogService/src/configStatistics.cpp   |   6 +-
+ .../Massai/cpp/LogService/src/convert.sed     |   4 +
+ .../Massai/cpp/LogService/src/distributor.cpp |  39 +----
+ .../Massai/cpp/LogService/src/mlog.cpp        |   5 +-
+ 14 files changed, 210 insertions(+), 157 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/LogService/inc/eventConfiguration.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/LogService/src/convert.sed
+
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+index 73ddc469..4679ab76 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+@@ -13,12 +13,19 @@
+  *                         writes logging\svc.log logging\platform*.log logging\statistics*.log
+  *                         alternativ solution: massaiSNMP.dll
+  *
+- *  @version 1.0.3.17
++ *  @version 1.0.3.18
+  *
+  *  !!! immer auch wenn nötig massaiSNMP_def.h pflegen !!!
+  *
+  *  \section change1 Change history
+  *
++ *  \date 27.06.2011 \li V1.0.3.18
++ *                   \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
++ *                   \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
++ *                   \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
++ *                   \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
++ *
++ *
+  *  \date 27.06.2011 \li V1.0.3.17
+  *                   \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
+  *
+@@ -123,8 +130,8 @@
+ 
+ #include "Tools/VERSION.H"
+ 
+-#define FILE_VER_BIN     1,0,3,17
+-#define FILE_VER_STR     "FileVersion", "1.0.3.17\0"
++#define FILE_VER_BIN     1,0,3,18
++#define FILE_VER_STR     "FileVersion", "1.0.3.18\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Log Service (Ex)\0"
+ #define INTERNALNAME     "InternalName"     ,"Log Service (Ex)\0"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/cfgTextListGCL.h b/SelfServiceCommon/Massai/cpp/LogService/inc/cfgTextListGCL.h
+index 7f1c1a8c..4e578750 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/cfgTextListGCL.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/cfgTextListGCL.h
+@@ -20,27 +20,30 @@
+ #include "asso/Asso.h"
+ #include "cfgclnt/nConfigTextList.hpp"
+ 
+-class cfgTextListGCL : public nConfig::gcTextList
++class TextList
+ {
+-  aMap data;
+-
+-  virtual void writeToMap(std::string const & Str) = NULL;
+-
+-protected:
+-
+-  mutexSemaphore protection;
+-
+-  void saveList(nConfig::gcTextList & Var);
+-
+-  aMap& getData();
+-
+-public:
+-
+-  cfgTextListGCL(char const * Item, char const * Client);
+-
+-  virtual void valueChanged();
++  public:
++    TextList();
++    virtual ~TextList();
++    mutexSemaphore& getProtection();
++
++  protected:
++    mutexSemaphore protection;
++    aMap& getData();
++    virtual void writeToMap(const std::string& Str) = 0;
++
++  private:
++    aMap data;
++};
+ 
+-  mutexSemaphore& getProtection();
++class cfgTextListGCL : public nConfig::gcTextList, public virtual TextList
++{
++  public:
++    cfgTextListGCL(const char* Item, const char* Client);
++    virtual void valueChanged();
++  protected:
++    void saveList(nConfig::gcTextList& Var);
+ };
+ 
++
+ #endif //CFGTEXTLISTGCL_H_
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/component.h b/SelfServiceCommon/Massai/cpp/LogService/inc/component.h
+index 8be60386..2e4b6420 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/component.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/component.h
+@@ -16,7 +16,7 @@
+ class statusCriteria;
+ 
+ #define ST_UNKNOWN "UNKNOWN"
+-#define ST_STARTED "STARTED"
++#define ST_STARTED "NOT_AVAILABLE"
+ #define ST_STARTUP "STARTUP"
+ #define ST_SHUTDOWN "SHUTDOWN"
+ #define ST_NEWDAY "NEWDAY"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/configSNMP.h b/SelfServiceCommon/Massai/cpp/LogService/inc/configSNMP.h
+index 86715cb1..a6920c88 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/configSNMP.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/configSNMP.h
+@@ -31,6 +31,7 @@ namespace configSNMP
+ 
+   void initialize();
+   void initialize(const std::string& trapDef);
++  void initializeHardcoded();
+   void cleanUp();
+ 
+   bool trapDefinition(const std::string& trap,
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/eventConfiguration.h b/SelfServiceCommon/Massai/cpp/LogService/inc/eventConfiguration.h
+new file mode 100644
+index 00000000..2a737283
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/eventConfiguration.h
+@@ -0,0 +1,16 @@
++#ifndef EVENTCONFIGURATION_H_
++#define EVENTCONFIGURATION_H_
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++
++
++class EventDefinition
++{
++  public:
++    virtual ~EventDefinition() {};
++    virtual void add(const char* line)= 0;
++};
++void initializeEventConfiguration(EventDefinition& def);
++
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h b/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
+index 1001603a..1e8b142a 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/massaiSNMP_def.h
+@@ -16,10 +16,16 @@
+  *
+  *  !!! immer auch wenn nötig logService_def.h pflegen !!!
+  *
+- *  @version 1.0.3.17
++ *  @version 1.0.3.18
+  *
+  *  \section change1 Change history
+  *
++ *  \date 27.06.2011 \li V1.0.3.18
++ *                   \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
++ *                   \li enhancement - SteT Mantis 0007391: change initial status from "Started" to "NOT_AVAILABLE"
++ *                   \li bugfix      - SteT Mantis 0007424: LoggingService: FTP-Transfer - rename fails if file old file does not exist
++ *                   \li enhancement - SteT Mantis 0016439: LoggingService: use hardcoded eventConfiguration, do not read configuration
++ *
+  *  \date 27.06.2011 \li V1.0.3.17
+  *                   \li extension - SteT Mantis 0019796: CompConfiguration for OS_CKI
+  *
+@@ -115,8 +121,8 @@
+ 
+ #include "Tools/VERSION.H"
+ 
+-#define FILE_VER_BIN     1,0,3,17
+-#define FILE_VER_STR     "FileVersion", "1.0.3.17\0"
++#define FILE_VER_BIN     1,0,3,18
++#define FILE_VER_STR     "FileVersion", "1.0.3.18\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Massai SNMP (ex)\0"
+ #define INTERNALNAME     "InternalName"     ,"Massai SNMP (ex)\0"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+index f67f2c68..2e97b872 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+@@ -30,7 +30,8 @@ STATLOG_OBJS = \
+     $(_OBJ)\statLog.obj \
+     $(_OBJ)\distributor.obj \
+     $(_OBJ)\tcpcomm.obj \
+-    $(_OBJ)\statusCriteria.obj
++    $(_OBJ)\statusCriteria.obj \
++    $(_OBJ)\eventConfiguration.obj
+ 
+ STDUSERLIBS= \
+     $(LIB_MASSAI) \
+@@ -293,7 +294,8 @@ MY_BIN8_OBJS = \
+     $(_OBJ)\configSNMP.obj \
+     $(_OBJ)\dataID.obj \
+     $(_OBJ)\SnmpCfgCreate.obj \
+-    $(_OBJ)\traceMap.obj
++    $(_OBJ)\traceMap.obj \
++    $(_OBJ)\eventConfiguration.obj
+ 
+ MY_BIN8_USER_LIBS = \
+     $(STDUSERLIBS) \
+@@ -309,3 +311,14 @@ MY_BIN8_RES = \
+ ######################################################################
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
++
++
++.SUFFIXES : .txt
++
++# txt => cpp => obj
++{.}.txt{$(_OBJ)}.obj:
++    echo #include "eventConfiguration.h" > $(_OBJ)\$(@B).cpp 
++    echo void initializeEventConfiguration(EventDefinition^& def) { >> $(_OBJ)\$(@B).cpp 
++    sed -f $(_SRC)\convert.sed $< >> $(_OBJ)\$(@B).cpp 
++    echo } >> $(_OBJ)\$(@B).cpp 
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $(_OBJ)\$(@B).cpp -Fo$@
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/cfgTextListGCL.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/cfgTextListGCL.cpp
+index 9e6249a0..0675c6e0 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/cfgTextListGCL.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/cfgTextListGCL.cpp
+@@ -20,10 +20,28 @@
+ 
+ #include "cfgTextListGCL.h"
+ 
++
++TextList::TextList()
++{}
++
++TextList::~TextList()
++{}
++
++aMap& TextList::getData()
++{
++  return data;
++}
++
++mutexSemaphore& TextList::getProtection()
++{
++  return protection;
++}
++
++
+ void cfgTextListGCL::saveList(nConfig::gcTextList & Var)
+ {
+   protection.request();
+-  data.clr();
++  getData().clr();
+   try
+   {
+     std::list<std::string> List = Var.get();
+@@ -40,11 +58,6 @@ void cfgTextListGCL::saveList(nConfig::gcTextList & Var)
+   protection.release();
+ }
+ 
+-aMap& cfgTextListGCL::getData()
+-{
+-  return data;
+-}
+-
+ cfgTextListGCL::cfgTextListGCL(char const * Item, char const * Client)
+  : nConfig::gcTextList(Item, Client/*, &std::cout*/)
+ {
+@@ -54,8 +67,3 @@ void cfgTextListGCL::valueChanged()
+ {
+   saveList(*this);
+ }
+-
+-mutexSemaphore& cfgTextListGCL::getProtection()
+-{
+-  return protection;
+-}
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/componentTable.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/componentTable.cpp
+index 08fb3528..18466bc8 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/componentTable.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/componentTable.cpp
+@@ -238,21 +238,21 @@ bool componentTable::parseConfigLine(const std::string& s)
+ {
+   uint_parser<unsigned long> event_p;
+ 
+-  rule<> separator     = ch_p(';'),
+-         attributeList = ch_p('(') >> *((+alnum_p)[fnAttribute(components)] >> *(separator >> (+alnum_p)[fnAttribute(components)])) >> ch_p(')'),
+-         flagList      = ch_p('(') >> *((+alnum_p)[fnFlag(components)] >> *(separator >> (+alnum_p)[fnFlag(components)])) >> ch_p(')'),
+-         component     = (+(alnum_p | '_' | '.'))[fnComponent(components)] >> !attributeList,
+-         statusArg     = (alnum_p >> *(alnum_p | '_') >> '.' >> alnum_p >> *(alnum_p | '_'))[fnStatusArg(components)] >> !flagList,
+-         status        = (+(alnum_p | '_' | '.'))[fnStatus(components)] >> ch_p('='),
+-         defaultStatus = (+(alnum_p | '_' | '.'))[fnDefaultStatus(components)],
+-         eventArg      = event_p[fnEventArg(components)],
+-         opOr          = *blank_p >> ch_p('|') >> *blank_p,
+-         opAnd         = *blank_p >> ch_p('&') >> *blank_p,
++  rule<> separator     = ch_p(';') >> *blank_p,
++         attributeList = ch_p('(') >> *blank_p >> *((+alnum_p)[fnAttribute(components)] >> *blank_p >> *(separator >> (+alnum_p)[fnAttribute(components)])) >> *blank_p >> ch_p(')') >> *blank_p,
++         flagList      = ch_p('(') >> *blank_p >> *((+alnum_p)[fnFlag(components)] >> *(separator >> (+alnum_p)[fnFlag(components)])) >> *blank_p >> ch_p(')') >> *blank_p,
++         component     = (+(alnum_p | '_' | '.'))[fnComponent(components)] >> *blank_p >> !attributeList,
++         statusArg     = (alnum_p >> *(alnum_p | '_') >> '.' >> alnum_p >> *(alnum_p | '_'))[fnStatusArg(components)] >> *blank_p >> !flagList,
++         status        = (+(alnum_p | '_' | '.'))[fnStatus(components)] >> *blank_p >> ch_p('=') >> *blank_p,
++         defaultStatus = (+(alnum_p | '_' | '.'))[fnDefaultStatus(components)] >> *blank_p,
++         eventArg      = event_p[fnEventArg(components)] >> *blank_p,
++         opOr          = ch_p('|') >> *blank_p,
++         opAnd         = ch_p('&') >> *blank_p,
+          eventList     = eventArg >> *(opOr >> eventArg),
+          statusOp      = (opAnd[fnOpAnd(components)] | opOr[fnOpOr(components)]),
+          statusList    = statusArg >> *(statusOp >> statusArg),
+          statusDef     = (status >> (eventList | statusList)) | defaultStatus,
+-         componentDef  = component >> separator >> statusDef >> (*(separator >> statusDef) | !separator);
++         componentDef  = *blank_p >> component >> separator >> statusDef >> (*(separator >> statusDef) | !separator);
+ 
+   rule<> ignoreLine   = *blank_p >> ((str_p("//") >> *anychar_p) | end_p);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/configSNMP.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/configSNMP.cpp
+index 553e93e4..71fffd14 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/configSNMP.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/configSNMP.cpp
+@@ -11,7 +11,7 @@
+  *
+  **************************************************************************
+ **/
+-#pragma warning (disable : 4786)
++#pragma warning(disable: 4786 4250)
+ 
+ #include <fstream>
+ 
+@@ -23,65 +23,23 @@
+ #include "asso/traceMap.h"
+ #include "trace.h"
+ #include "dataid.h"
++#include "eventConfiguration.h"
+ 
+ const char szSection[] = "SERVICES.LOGGING.";
+ 
+ namespace configSNMP
+ {
+ 
+-class trapList : public cfgTextListGCL
+-{
+-  std::list<std::string> defaultList;
+-  std::string trapDefinitionFile;
+-
+-  void readDefaults()
+-  {
+-    std::ifstream i(trapDefinitionFile.c_str());
+-    char szLine[1024];
+-    while(i.good() && !i.eof())
+-    {
+-      i.getline(szLine, sizeof(szLine));
+-      std::string line(szLine);
+-      int nonWhiteSpace = line.find_first_not_of(" ");
+-      if(nonWhiteSpace != line.npos)
+-      {
+-        if(line.compare(nonWhiteSpace, 2, "//"))
+-        {
+-          //check for trapd.conf generator extensions
+-          int sepPos = line.npos;
+-          for(int i = 0; i < 4; ++i)
+-          {
+-            if(sepPos == line.npos)
+-              sepPos = line.find_first_of(';');
+-            else
+-              sepPos = line.find_first_of(';', ++sepPos);
+-          }
+ 
+-          defaultList.insert(defaultList.end(), line.substr(nonWhiteSpace, sepPos - nonWhiteSpace));
+-        }
+-      }
+-    }
+-  }
+-
+-  void create(char const * & Rights,
+-              char const * & Explanation,
+-              std::list<std::string> & Default)
++class trapList: public virtual TextList, public EventDefinition
++{
++  void add(const char* line)
+   {
+-    Rights = 0;         // Use the default
+-    Explanation = "List of trap configuration entries.<br>"
+-                  "Entry format: trapID;trapMessage;transmitThreshold;trap description<br>"
+-                  "Where<br>"
+-                  "<li>trapID is the trap ID string (nLastMessageID)"
+-                  "<li>trapMessage is the trap message string (nLastMessageText)"
+-                  "<li>transmitThreshold defines the number of traps that are cumulated<br>"
+-                  "before a single trap is transmitted to the management system.<br>"
+-                  "A zero value means that this trap in not transmitted at all."
+-                  "<li>trap description is a textual description transmitted to the management system"
+-                  "Example: 2001;30101,ATB2PRINTER;1;ATB2PRINTER component is unavailable (MEDIA_JAMMED)";
+-    Default = defaultList;
++    writeToMap(line);
+   }
+ 
+-  virtual void writeToMap(std::string const & str)
++protected:
++  virtual void writeToMap(const std::string & str)
+   {
+     static char szLong[256], szShort[256];
+ 
+@@ -168,7 +126,7 @@ class trapList : public cfgTextListGCL
+ 
+     if(map.get(SNMP_REPEAT).getTag() == OBJ_STR)
+     {
+-			int iRepeat = atoi(map.get(SNMP_REPEAT).strObject());
++   int iRepeat = atoi(map.get(SNMP_REPEAT).strObject());
+ 
+       map.set(SNMP_REPEAT, iRepeat);
+     }
+@@ -178,20 +136,6 @@ class trapList : public cfgTextListGCL
+   }
+ 
+ public:
+-  trapList(char const * Item, char const * Client)
+-   : cfgTextListGCL(Item, Client)
+-  {
+-    saveList( *this );
+-    traceMap(TOP_CFG, getData(), Item);
+-  }
+-
+-  void setValue(const std::string& defFile)
+-  {
+-    trapDefinitionFile.assign(defFile);
+-    readDefaults();
+-    set(defaultList);
+-  }
+-
+   long getTrapData(const std::string& trap,
+                    long& trapID,
+                    long& trapThreshold,
+@@ -233,15 +177,96 @@ public:
+     return fRet;
+ 
+   }
++  virtual void setValue(const std::string& defFile)
++  {}
++
++};
++
++
++class cfgTrapList : public cfgTextListGCL, public trapList
++{
++  std::list<std::string> defaultList;
++  std::string trapDefinitionFile;
++
++  void readDefaults()
++  {
++    std::ifstream i(trapDefinitionFile.c_str());
++    char szLine[1024];
++    while(i.good() && !i.eof())
++    {
++      i.getline(szLine, sizeof(szLine));
++      std::string line(szLine);
++      int nonWhiteSpace = line.find_first_not_of(" ");
++      if(nonWhiteSpace != line.npos)
++      {
++        if(line.compare(nonWhiteSpace, 2, "//"))
++        {
++          //check for trapd.conf generator extensions
++          int sepPos = line.npos;
++          for(int i = 0; i < 4; ++i)
++          {
++            if(sepPos == line.npos)
++              sepPos = line.find_first_of(';');
++            else
++              sepPos = line.find_first_of(';', ++sepPos);
++          }
++
++          defaultList.insert(defaultList.end(), line.substr(nonWhiteSpace, sepPos - nonWhiteSpace));
++        }
++      }
++    }
++  }
++
++  void create(char const * & Rights,
++              char const * & Explanation,
++              std::list<std::string> & Default)
++  {
++    Rights = 0;         // Use the default
++    Explanation = "List of trap configuration entries.<br>"
++                  "Entry format: trapID;trapMessage;transmitThreshold;trap description<br>"
++                  "Where<br>"
++                  "<li>trapID is the trap ID string (nLastMessageID)"
++                  "<li>trapMessage is the trap message string (nLastMessageText)"
++                  "<li>transmitThreshold defines the number of traps that are cumulated<br>"
++                  "before a single trap is transmitted to the management system.<br>"
++                  "A zero value means that this trap in not transmitted at all."
++                  "<li>trap description is a textual description transmitted to the management system"
++                  "Example: 2001;30101,ATB2PRINTER;1;ATB2PRINTER component is unavailable (MEDIA_JAMMED)";
++    Default = defaultList;
++  }
++
++
++public:
++  cfgTrapList(char const * Item, char const * Client)
++   : cfgTextListGCL(Item, Client)
++  {
++    saveList( *this );
++    traceMap(TOP_CFG, getData(), Item);
++  }
++
++  void setValue(const std::string& defFile)
++  {
++    trapDefinitionFile.assign(defFile);
++    readDefaults();
++    set(defaultList);
++  }
++
+ };
+ 
+ trapList* pTrapList = 0;
+ 
++
++void initializeHardcoded()
++{
++  pTrapList = new trapList();
++  initializeEventConfiguration(*pTrapList);
++}
++
+ void initialize()
+ {
+   std::string item(szSection);
+   item.append("eventDefinition");
+-  pTrapList = new trapList(item.c_str(), "logSNMP");
++  pTrapList = new cfgTrapList(item.c_str(), "logSNMP");
+ }
+ 
+ void initialize(const std::string& trapDef)
+@@ -268,7 +293,7 @@ bool trapDefinition(const std::string& trap,
+                     long &lRepetitionInterval)
+ {
+   if(pTrapList)
+-    return pTrapList->getTrapData(trap, trapID, trapThreshold, trapDescription, targets, lRepetitionInterval);
++    return (pTrapList->getTrapData(trap, trapID, trapThreshold, trapDescription, targets, lRepetitionInterval) != 0);
+ 
+   trapID = 0;
+   trapThreshold = 0;
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/configStatistics.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/configStatistics.cpp
+index 93f7929b..ecc6ef4e 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/configStatistics.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/configStatistics.cpp
+@@ -552,10 +552,10 @@ class statusFileTargets : public cfgTextListGCL
+                   "  - file://...    folder only\n"
+                   "  - telnet://...  file contents are sent as raw data via TCP/IP connection\n"
+                   "* option=value:   optional configuration, valid options are:\n"
+-                  "  - zip           0|1 transferred file will be zipped (defautl:0)\n"
+-                  "  - ts            0|1 transferred file will be renamed (defautl:0)\n"
++                  "  - zip           0|1 transferred file will be zipped (default:0)\n"
++                  "  - ts            0|1 transferred file will be renamed (default:0)\n"
+                   "                      to status.yyyymmdd-hhmmss-msec.log (originator local time)\n"
+-                  "  - kioskName     0|1 transferred file will be renamed (defautl:0)\n"
++                  "  - kioskName     0|1 transferred file will be renamed (default:0)\n"
+                   "                      to status.kioskName.log (may be combined with ts)\n"
+                   "  - xslt          full path to xslt-file\n"
+                   "  - minInterval   minimum send interval (default:0, always send immediately)\n"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/convert.sed b/SelfServiceCommon/Massai/cpp/LogService/src/convert.sed
+new file mode 100644
+index 00000000..7bab23bc
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/convert.sed
+@@ -0,0 +1,4 @@
++s/\\/\\\\/g
++s/"/\\"/g
++s/^/def.add("/
++s/$/");/
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/distributor.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/distributor.cpp
+index e0228a20..fb8a4269 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/distributor.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/distributor.cpp
+@@ -389,42 +389,9 @@ private:
+             }
+             tgtName.append(dataFileExt);
+ 
+-            switch(target.getUrlType())
+-            {
+-            case configStatistics::statusTarget::URL_FTP:
+-              {
+-                /* specify target */
+-                std::string tmpName(dataFileName);
+-                tmpName.append(".");
+-                tmpName.append(systemName);
+-                tmpName.append(".tmp");
+-
+-                tgtUrl.append(tmpName);
+-                curl_easy_setopt(C_U_R_L,CURLOPT_URL, tgtUrl.c_str());
+-
+-                /* pass in that last of FTP commands to run after the transfer */
+-                std::string fileCmd("DELE ");
+-                fileCmd.append(tgtName);
+-                headerlist = curl_slist_append(headerlist, fileCmd.c_str());
+-
+-                fileCmd.assign("RNFR ");
+-                fileCmd.append(tmpName);
+-                headerlist = curl_slist_append(headerlist, fileCmd.c_str());
+-
+-                fileCmd.assign("RNTO ");
+-                fileCmd.append(tgtName);
+-                headerlist = curl_slist_append(headerlist, fileCmd.c_str());
+-                curl_easy_setopt(C_U_R_L, CURLOPT_POSTQUOTE, headerlist);
+-              }
+-              break;
+-
+-            case configStatistics::statusTarget::URL_FILE:
+-              {
+-                tgtUrl.append(tgtName);
+-                curl_easy_setopt(C_U_R_L,CURLOPT_URL, tgtUrl.c_str());
+-              }
+-              break;
+-            }
++            tgtUrl.append(tgtName);
++
++            curl_easy_setopt(C_U_R_L,CURLOPT_URL, tgtUrl.c_str());
+             /* enable uploading */
+             curl_easy_setopt(C_U_R_L, CURLOPT_UPLOAD, TRUE) ;
+             /* specify the file size */
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+index 286a760d..5babdbb3 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+@@ -10,6 +10,9 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++#pragma warning(disable: 4786)
++
++
+ #include <signal.h>
+ #include <fstream>
+ #include <list>
+@@ -482,7 +485,7 @@ void mLog::runService(bool fSNMPDll = false)
+   char szPrivateSection[128];
+   sprintf(szPrivateSection, "SERVICES.%s", szClient);
+ 
+-  configSNMP::initialize();
++  configSNMP::initializeHardcoded();
+   writeTrace(BasicRuntime_HERE, "configSNMP::initialize() done.");
+ 
+   char hostName[MAXHOSTNAMESIZE+1];
+-- 
+2.41.0.windows.1
+

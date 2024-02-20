@@ -1,0 +1,130 @@
+From a858ae18475e9f9ab245e2d23e3e78ee26e25651 Mon Sep 17 00:00:00 2001
+From: mbrinkma <mbrinkma@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 18 May 2017 13:23:08 +0000
+Subject: [PATCH 0769/1000] MANTIS 0045976 Devices-MR: HRS: Iris: progress
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1205 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/SynchronizedDequeue.h      | 110 ++++++++++++++++++
+ 1 file changed, 110 insertions(+)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/SynchronizedDequeue.h
+
+diff --git a/SelfServiceCommon/Interfaces/inc/SynchronizedDequeue.h b/SelfServiceCommon/Interfaces/inc/SynchronizedDequeue.h
+new file mode 100644
+index 00000000..9c1cac1f
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/SynchronizedDequeue.h
+@@ -0,0 +1,110 @@
++#pragma once
++
++#include <boost/thread/locks.hpp>
++#include <boost/thread.hpp>
++#include <boost/thread/mutex.hpp>
++#include <deque>
++
++template <class T>
++class SynchronizedDequeue
++{
++    mutable boost::mutex m_mutex;
++    std::deque<T> m_queue;
++    boost::condition_variable m_cond;
++    unsigned int max_queue_size;
++
++public:
++    bool write(T pkt)
++    {
++        boost::mutex::scoped_lock lock(m_mutex);
++        if(m_queue.size()>max_queue_size)
++            m_queue.clear();
++        m_queue.push_back(pkt);
++        lock.unlock();
++        m_cond.notify_one();
++        return true;
++    }
++    
++    bool try_read(T& pkt)
++    {
++      boost::mutex::scoped_lock lock(m_mutex);
++      if (!m_queue.size())
++      {
++          return false;
++      }
++      pkt = m_queue.front();
++      m_queue.pop_front();
++      return true;
++    }
++
++    bool read(T& pkt)
++    {
++      boost::mutex::scoped_lock lock(m_mutex);
++      while(!m_queue.size())
++      {
++        m_cond.wait(lock);
++      }
++      pkt = m_queue.front();
++      m_queue.pop_front();
++      return true;
++    }
++    
++    bool read(T& pkt, boost::posix_time::time_duration& timeout_)
++    {
++      boost::system_time const timeout=boost::get_system_time()+timeout_;
++      boost::mutex::scoped_lock lock(m_mutex);
++      if(!m_queue.size())
++      {
++        if(!m_cond.timed_wait(lock,timeout))
++        {
++            return false;
++        }
++      }
++      if (!m_queue.size())
++      {
++          return false;
++      }
++      pkt = m_queue.front();
++      m_queue.pop_front();
++      return true;
++    }
++
++    bool peek(T& pkt)
++    {
++      boost::mutex::scoped_lock lock(m_mutex);
++      if (!m_queue.size())
++      {
++          return false;
++      }
++      pkt = m_queue.front();
++      return true;
++    }
++
++    bool empty(T& pkt)
++    {
++      boost::mutex::scoped_lock lock(m_mutex);
++      return m_queue.empty();
++    }
++
++    bool clear()
++    {
++      boost::mutex::scoped_lock lock(m_mutex);
++      m_queue.clear();
++      return true;
++    }
++    
++    bool reset()
++    { 
++      boost::mutex::scoped_lock lock(m_mutex);
++      m_queue.clear();
++      m_cond.notify_all();
++      return true;
++    }
++    
++    SynchronizedDequeue() : m_mutex(), m_queue(), m_cond(), max_queue_size(0)
++    {};
++    
++    SynchronizedDequeue(int size) : m_mutex(), m_queue(), m_cond(), max_queue_size(size)
++    {};
++};
++
+-- 
+2.41.0.windows.1
+

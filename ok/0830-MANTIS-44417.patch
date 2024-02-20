@@ -1,0 +1,154 @@
+From 35b796c280146b8d6f821b89dce79c269fc515b2 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 15 Mar 2017 11:57:15 +0000
+Subject: [PATCH 0830/1076] MANTIS 44417 CfgXMgrB.exe version 1.7.0 - MANTIS
+ 44417: Config process does not handle Windows reboot ... - Use new method
+ setShutdownHook() to control termination.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1174 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++--
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |  3 +-
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      | 36 +++++++++++++++++--
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |  3 +-
+ 4 files changed, 49 insertions(+), 6 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index a40546c1..89870a76 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -505,8 +505,17 @@
+ //! - MANTIS 44373: Config-error files format
+ //! - The config files were written in "cooked" mode. This lead
+ //!   to additional newline characters. Now they are written "binary".
+-#define FILE_VER_BIN 1,6,5,0
+-#define FILE_VER_DTS "1.6.5.0"
++// #define FILE_VER_BIN 1,6,5,0
++// #define FILE_VER_DTS "1.6.5.0"
++//
++//! @version 1.7.0
++//! @date    15.03.2017
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 44417: Config process does not handle Windows reboot ...
++//! - Use new method setShutdownHook() to control termination.
++#define FILE_VER_BIN 1,7,0,0
++#define FILE_VER_DTS "1.7.0.0"
+ //
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index da361b5f..5e988711 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -80,7 +80,8 @@ MY_BIN1_USER_LIBS= \
+     $(STDUSERLIBS)
+ 
+ MY_BIN1_LINKLIBS = \
+-    $(STDLINKLIBS)
++    $(STDLINKLIBS) \
++    User32.lib
+ 
+ MY_BIN1_RES = \
+     $(_OBJ)\CfgXMgrB.res
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index 0a91da5a..ddecf88c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2014 MATERNA Information & Communications
++ * Copyright (c) 2003-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,7 +29,12 @@
+ #include "traceLocal.hpp"
+ 
+ // Common header
++#ifdef USE_SYSSIGNAL_FOR_TERMINATION
+ #include "systools/mSysSignal.hpp"
++#else
++#include "tools/TraceLocal.h"
++#include "systools/mSysProcessTerminate.h"
++#endif
+ #include "text/mArgScan.hpp"
+ #include "trc/TraceClt.h"
+ 
+@@ -70,8 +75,23 @@ int main( int argc, char ** argv )
+    //
+    // First register for asynchroneous signals
+    //
++#ifdef USE_SYSSIGNAL_FOR_TERMINATION
+    Materna::MSSD::sysSignal SysSignal;
+    SysSignal.registerForAll();
++#else
++   //
++   MASSAI::trace::TraceLocal term_tracer( "CfgXmgrB" );
++   //
++   Materna::MSSD::eventSemaphore terminate;
++   setShutdownHook
++      (
++         mSysProcessTerminate::SHUTDOWN_NORMAL,
++         &terminate,
++         "MIPS Configuration Service",
++         L"save configuration",
++         &term_tracer
++      );
++#endif
+    //
+    // Commandline arguments.
+    //
+@@ -148,8 +168,11 @@ int main( int argc, char ** argv )
+       //
+       // Wait ...
+       //
++#ifdef USE_SYSSIGNAL_FOR_TERMINATION
+       SysSignal.wait();
+-
++#else
++      terminate.wait();
++#endif
+       //
+       // Production objects die here.
+       //
+@@ -157,11 +180,20 @@ int main( int argc, char ** argv )
+    //
+    // Exit program
+    //
++#ifdef USE_SYSSIGNAL_FOR_TERMINATION
+    writeTrace
+    (
+       5, "", 0, "",
+       "CfgXMgrB - terminated with signal %s.", SysSignal.event()
+    );
++#else
++   mSysProcessTerminate::resetShutdownHook();
++   writeTrace
++   (
++      5, "", 0, "",
++      "CfgXMgrB - terminated"
++   );
++#endif
+    return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index de991b05..ad249002 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -89,7 +89,8 @@ MY_BIN1_USER_LIBS= \
+ 
+ MY_BIN1_LINKLIBS = \
+     $(STDLINKLIBS) \
+-    $(SYS_ADVAPI32)
++    $(SYS_ADVAPI32) \
++    User32.lib
+ 
+ MY_BIN1_RES = \
+     $(_OBJ)\CfgXMgrB.res
+-- 
+2.41.0.windows.1
+

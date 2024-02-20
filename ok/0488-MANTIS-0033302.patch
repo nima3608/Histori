@@ -1,0 +1,351 @@
+From 606bf70d66dde358f588e24b721f516c220828cb Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 12 Aug 2014 19:24:00 +0000
+Subject: [PATCH 0488/1000] MANTIS 0033302 change mstarter: use only defined
+ system environment variables for substitution
+
+massai_text.lib
+V1.0.0.6
+
+- use these system environment variables
+   -ALLUSERSPROFILE
+   -APPDATA
+   -COMPUTERNAME
+   -ComSpec
+   -CommonProgramFiles
+   -CommonProgramW6432
+   -HOMEDRIVE
+   -HOMEPATH
+   -HOMESHARE
+   -LOCALAPPDATA
+   -LOGONSERVER
+   -PROGRAMFILES
+   -PSModulePath
+   -PUBLIC
+   -Path
+   -ProgramData
+   -ProgramFiles
+   -ProgramW6432
+   -SYSTEMDRIVE
+   -SYSTEMROOT
+   -TEMP
+   -TMP
+   -USERDNSDOMAIN
+   -USERDOMAIN
+   -USERNAME
+   -USERPROFILE
+   -windir
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@708 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Text/src/local_def.cpp         |  36 +++-
+ .../Massai/cpp/Text/src/readEnv.cpp           | 169 +++++++++---------
+ 2 files changed, 115 insertions(+), 90 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 9aca4014..82877681 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,50 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 5);
++VERSION_ID_DT(text, 1, 0, 0, 6);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-@version 1.0.0.3
++\version 1.0.0.6
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.6
++\li 12.08.2014
++\li change - SteT Mantis 0033302: mstarter: use only defined system environment variables for substitution
++- use these system environment variables
++   -ALLUSERSPROFILE
++   -APPDATA
++   -COMPUTERNAME
++   -ComSpec
++   -CommonProgramFiles
++   -CommonProgramW6432
++   -HOMEDRIVE
++   -HOMEPATH
++   -HOMESHARE
++   -LOCALAPPDATA
++   -LOGONSERVER
++   -PROGRAMFILES
++   -PSModulePath
++   -PUBLIC
++   -Path
++   -ProgramData
++   -ProgramFiles
++   -ProgramW6432
++   -SYSTEMDRIVE
++   -SYSTEMROOT
++   -TEMP
++   -TMP
++   -USERDNSDOMAIN
++   -USERDOMAIN
++   -USERNAME
++   -USERPROFILE
++   -windir
++
+ \version 1.0.0.5
+ \li 16.09.2013
+ \li Mantis 0028903: MR: MCR Sankyo ICM 350
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+index 4b9e4794..2ab873c1 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+@@ -3,14 +3,44 @@
+ #include "text/readEnv.h"
+ #include "cfgclnt/nConfigTextList.hpp"
+ #include <windows.h>
++#include <stdlib.h>
+ 
+ using nConfig::gcTextList;
+ using MASSAI::trace::TraceInterface;
+ using namespace mText;
+ 
+-
+ namespace
+ {
++  const char* systemVariables[]= {
++    "ALLUSERSPROFILE",
++    "APPDATA",
++    "COMPUTERNAME",
++    "ComSpec",
++    "CommonProgramFiles",
++    "CommonProgramW6432",
++    "HOMEDRIVE",
++    "HOMEPATH",
++    "HOMESHARE",
++    "LOCALAPPDATA",
++    "LOGONSERVER",
++    "PROGRAMFILES",
++    "PSModulePath",
++    "PUBLIC",
++    "Path",
++    "ProgramData",
++    "ProgramFiles",
++    "ProgramW6432",
++    "SYSTEMDRIVE",
++    "SYSTEMROOT",
++    "TEMP",
++    "TMP",
++    "USERDNSDOMAIN",
++    "USERDOMAIN",
++    "USERNAME",
++    "USERPROFILE",
++    "windir"
++  };
++
+   typedef std::list<std::string> TextList;
+ 
+   class EnvironmentConfiguration: public gcTextList
+@@ -21,32 +51,11 @@ namespace
+         std::list<std::string>& defaultValue);
+   };
+ 
+-  class ReadConfig: public ReadEnvironment
+-  {
+-    public:
+-      ReadConfig(const std::string& authentification, TraceInterface& trc);
+-      virtual ~ReadConfig();
+-      virtual Environment getEnv();
+-    private:
+-      EnvironmentConfiguration m_env;
+-      TraceInterface& m_trc;
+-  };
+-
+-  class ReadEnvVariables: public ReadEnvironment
+-  {
+-    public:
+-      ReadEnvVariables(TraceInterface& trc);
+-      void init();
+-      virtual ~ReadEnvVariables();
+-      virtual Environment getEnv();
+-
+-    private:
+-      Environment m_env;
+-      TraceInterface& m_trc;
+-  };
+-
+   void add(Environment& env, const std::string& variable, TraceInterface& trc, const char* what);
++}
+ 
++namespace
++{
+   EnvironmentConfiguration::EnvironmentConfiguration(const std::string& authentification):
+    gcTextList("PLATFORM.ENVIRONMENT.Variables", authentification.c_str())
+   {}
+@@ -57,47 +66,59 @@ namespace
+     explanation = "substitution variables; format variablename=value";
+   }
+ 
+-  ReadConfig::ReadConfig(const std::string& authentification, TraceInterface& trc):
+-    m_env(authentification),
+-    m_trc(trc)
+-  {}
+-
+-  ReadConfig::~ReadConfig()
+-  {}
++  void add(Environment& env, const std::string& variable, TraceInterface& trc, const char* what)
++  {
++    if(variable.size() == 0)
++    {
++      trc.writeTrace(MajorWarning_HERE, "(%s): ignore()", what);
++    }
++    else
++    {
++      size_t delimiter = variable.find('=', 1);
++      if(delimiter != std::string::npos)
++      {
++        std::string key = std::string(variable, 0, delimiter);
++        std::string value = std::string(variable, delimiter + 1);
++        env[key] = value;
++        trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->(%.1000s)", what, key.c_str(), value.c_str());
++      }
++      else
++      {
++        env[variable] = "";
++        trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->()", what, variable.c_str());
++      }
++    }
++  }
++}
+ 
+-  Environment ReadConfig::getEnv()
++namespace mText
++{
++  // typedef std::map<std::string, std::string> Environment;
++  Environment getConfigVariables(const std::string& authentification, TraceInterface& trc)
+   {
++    EnvironmentConfiguration config(authentification);
+     Environment result;
+     try
+     {
+-      TextList env = m_env.get();
++      TextList env = config.get();
+       TextList::const_iterator it = env.begin();
+       TextList::const_iterator end = env.end();
+       for(; it != end; it++)
+       {
+-        add(result, *it, m_trc, "config");
++        add(result, *it, trc, "config");
+       }
+     }
+     catch(const nConfig::exception& e)
+     {
+-      m_trc.writeTrace(MajorError_HERE, "read env variables from config failed: (%s)", e.what());
++      trc.writeTrace(MajorError_HERE, "read env variables from config failed: (%s)", e.what());
+     }
+     return result;
+   }
+ 
+-  ReadEnvVariables::ReadEnvVariables(TraceInterface& trc):
+-    m_env(),
+-    m_trc(trc)
+-  {}
+-
+-  ReadEnvVariables::~ReadEnvVariables()
+-  {}
+-
+-  void ReadEnvVariables::init()
++  Environment getFullEnvironment(TraceInterface& trc)
+   {
+-    // Var1=Value1\0
+-    //  ...
+-    // VarN=ValueN\0\0
++    Environment result;
++    // Var1=Value1\0  ... VarN=ValueN\0\0
+     char* env = GetEnvironmentStrings();
+     const char* var = env;
+     while(var)
+@@ -106,63 +127,35 @@ namespace
+       if(length == 0)
+       {
+         var = 0;
++        break;
+       }
+       else
+       {
+-        add(m_env, std::string(var, length), m_trc, "env");
++        add(result, std::string(var, length), trc, "env");
+         var += length + 1;
+       }
+     }
+     FreeEnvironmentStrings(env);
++    return result;
+   }
+ 
+-  Environment ReadEnvVariables::getEnv()
+-  {
+-    return m_env;
+-  }
+-
+-  void add(Environment& env, const std::string& variable, TraceInterface& trc, const char* what)
++  Environment getSystemEnvironment(TraceInterface& trc)
+   {
+-    if(variable.size() == 0)
+-    {
+-      trc.writeTrace(MajorWarning_HERE, "(%s): ignore()", what);
+-    }
+-    else
++    Environment result;
++    for(int i = 0; i < sizeof(systemVariables)/sizeof(*systemVariables); i++)
+     {
+-      size_t delimiter = variable.find('=', 1);
+-      if(delimiter != std::string::npos)
++      const char* key = systemVariables[i];
++      const char* value = getenv(key);
++      if(value)
+       {
+-        std::string key = std::string(variable, 0, delimiter);
+-        std::string value = std::string(variable, delimiter + 1);
+-        env[key] = value;
+-        trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->(%.1000s)", what, key.c_str(), value.c_str());
++        trc.writeTrace(SecondaryRuntime_HERE, "env: (%.100s)->(%.1000s)", key, value);
++        result[key] = value;
+       }
+       else
+       {
+-        env[variable] = "";
+-        trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->()", what, variable.c_str());
++        trc.writeTrace(SecondaryRuntime_HERE, "env: (%.100s) not set", key);
+       }
+     }
+-  }
+-
+-}
+-
+-namespace mText
+-{
+-  // typedef std::map<std::string, std::string> Environment;
+-  ReadEnvironment::~ReadEnvironment()
+-  {}
+-
+-  ReadEnvironment* getConfigReader(const std::string& authentification, TraceInterface& trc)
+-  {
+-    ReadConfig* result = new ReadConfig(authentification, trc);
+-    return result;
+-  }
+-
+-  ReadEnvironment* getEnvironmentVariablesReader(TraceInterface& trc)
+-  {
+-    ReadEnvVariables* result = new ReadEnvVariables(trc);
+-    result->init();
+     return result;
+   }
+ }
+-- 
+2.41.0.windows.1
+

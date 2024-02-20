@@ -1,0 +1,201 @@
+From fd726ec2c53166613c3425fec28777ef050b27c0 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Mon, 8 Jul 2013 13:20:20 +0000
+Subject: [PATCH 114/462] Added maven and wix for platform builds
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@167 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             |  2 +
+ SelfServiceBuild/Build/cpp/makefile.mak       | 47 +++++++++++++++++--
+ SelfServiceBuild/Build/scripts/setenv.bat     | 35 +++++++++-----
+ 3 files changed, 69 insertions(+), 15 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index 81f5b32..1934dec 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -13,6 +13,7 @@ DEL              = del
+ LB               = lib.exe
+ LD               = link.exe
+ MAKE             = mk.bat
++MAKECMD          = mk.cmd
+ MKDIR            = mkdir
+ RC               = rc.exe
+ RMDIR            = rmdir
+@@ -21,6 +22,7 @@ PERL             = ccperl.exe
+ !else
+ PERL             = perl.exe
+ !endif
++MAVEN            = mvn
+ 
+ ######################################################################
+ # TAO
+diff --git a/SelfServiceBuild/Build/cpp/makefile.mak b/SelfServiceBuild/Build/cpp/makefile.mak
+index 44832a7..6d75647 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.mak
+@@ -45,6 +45,21 @@ ICA_DIRECTORIES = \
+   Massai\cpp\Installer_CustomAction
+ !endif
+ 
++!if "$(VC_COMPILER_VC6)" == "6" 
++INSTALLER_DIRECTORIES = 
++!else
++INSTALLER_DIRECTORIES = \
++  Build\installer
++!endif
++
++!if "$(VC_COMPILER_VC6)" == "6" 
++APPLICATION_DIRECTORIES = 
++!else
++APPLICATION_DIRECTORIES = \
++  Applications\CLA
++!endif
++
++
+ COMMON_DIRECTORIES= \
+  Massai\cpp\GracefullyCrash \
+  $(ICA_DIRECTORIES) \
+@@ -136,8 +151,14 @@ PLATFORM_DIRECTORIES= \
+  Massai\cpp\devAEA \
+  Massai\cpp\Door \
+  Massai\cpp\LogService \
+- Massai\cpp\cussMIB
+-
++ Massai\cpp\cussMIB \
++ 
++PLATFORM_INSTALLER_DIRECTORIES= \
++ $(INSTALLER_DIRECTORIES)
++ 
++PLATFORM_MVN_DIRECTORIES= \
++ $(APPLICATION_DIRECTORIES)
++ 
+ ABLS_DIRECTORIES= \
+  Massai\idl\Massai \
+  Services\cpp\msABLSController
+@@ -205,7 +226,7 @@ cuss-lint:
+ 
+ platform-lint:
+     for %%i in ($(PLATFORM_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKE) lint
+-
++    
+ abls-lint:
+     for %%i in ($(ABLS_DIRECTORIES)) do cd "$(ABLSROOT)\%%i" && $(MAKE) lint
+ 
+@@ -320,4 +341,24 @@ javadoc:
+     cd $(BUILDROOT)\Build\java
+     $(ANT) javadoc
+ 
++######################################################################
++# Maven
++######################################################################
++
++maven: 
++    for %%i in ($(PLATFORM_MVN_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAVEN) install
++
++maven-clean:
++    for %%i in ($(PLATFORM_MVN_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAVEN) clean
++    
++######################################################################
++# Installer
++######################################################################
++
++installer: 
++    for %%i in ($(PLATFORM_INSTALLER_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKECMD)
++
++installer-clean:
++    for %%i in ($(PLATFORM_INSTALLER_DIRECTORIES)) do cd "$(PLATFORMROOT)\%%i" && $(MAKECMD) clean
++    
+ 
+diff --git a/SelfServiceBuild/Build/scripts/setenv.bat b/SelfServiceBuild/Build/scripts/setenv.bat
+index 0f00954..c083eb2 100644
+--- a/SelfServiceBuild/Build/scripts/setenv.bat
++++ b/SelfServiceBuild/Build/scripts/setenv.bat
+@@ -78,6 +78,14 @@ if "%VC_COMPILER_VERSION%"=="VC10" (
+   set USE_EXTERNAL_THREADSAFE_STRING=TRUE
+ )
+ 
++rem ######################################################################
++rem # Maven
++rem ######################################################################
++
++set M2=%M2_HOME%\bin
++set MAVEN_OPTS=-Xmx1024m
++
++
+ rem ######################################################################
+ rem # ThirdParty-Software
+ rem ######################################################################
+@@ -167,15 +175,13 @@ goto END_USE_WIX
+   set DIR_WIX=%DIR_GLOBALSLIB%\WIX\3.7
+   set INC_WIX=-I"%DIR_WIX%\SDK\inc"
+   set LIB_WIX="%DIR_WIX%\sdk\vs2010\lib\x86\dutil.lib" "%DIR_WIX%\sdk\vs2010\lib\x86\wcautil.lib"
+-  set BIN_WIX=%DIR_WIX%
++  set BIN_WIX=%DIR_WIX%\bin
+ goto END_USE_WIX
+ :END_USE_WIX
+ 
+-
+-set DIR_AUTH=%DIR_GLOBALSLIB%\authenticator\0.9.9.9\win32
+-set INC_AUTH=-I%DIR_AUTH%\include
+-set LIB_AUTH=%DIR_AUTH%\lib\au_sdk.lib
+-
++rem ######################################################################
++rem # Boost
++rem ######################################################################
+ 
+ if "%USE_BOOST%"=="1.33" (
+   goto USE_BOOST_1.33
+@@ -224,6 +230,9 @@ rem set INC_REGEX=-I%DIR_REGEX%\include
+ rem set LIB_REGEX=%DIR_REGEX%\lib\vc6-re300l.lib
+ rem set DIR_REGEX=%DIR_BOOST%
+ 
++set DIR_AUTH=%DIR_GLOBALSLIB%\authenticator\0.9.9.9\win32
++set INC_AUTH=-I%DIR_AUTH%\include
++set LIB_AUTH=%DIR_AUTH%\lib\au_sdk.lib
+ 
+ set DIR_DIRECTOR=%DIR_GLOBALSLIB%\d7xdk\0.9.9.9
+ set INC_DIRECTOR=-I%DIR_DIRECTOR%\include
+@@ -465,7 +474,6 @@ set INC_HOSTIF_MSHOSTIF=-I%HOSTIFROOT%\Services\cpp\MSHostIF\inc
+ set INC_PLATFORM_INTER=-I%PLATFORMROOT%\Interfaces\inc
+ set INC_CUSS_INTER=-I%CUSSROOT%\Interfaces\inc
+ 
+-
+ rem ######  old references ##############################################
+ set INC_PLATFORM_CUSSIF=-I%CUSSROOT%\Massai\cpp\cussif\inc
+ set INC_PLATFORM_CUSS_IDL=-I%PLATFORMROOT%\Massai\idl\Cuss
+@@ -475,7 +483,6 @@ set INC_CUSS_CUSSIF=-I%CUSSROOT%\Massai\cpp\cussif\inc
+ set INC_CUSS_CUSS_IDL=-I%CUSSROOT%\Massai\idl\Cuss
+ set INC_CUSS_MASSAI_IDL=-I%CUSSROOT%\Massai\idl\Massai
+ 
+-
+ rem ######################################################################
+ rem # PATH
+ rem ######################################################################
+@@ -483,6 +490,7 @@ rem ######################################################################
+ set BUILDDIR=%BUILDROOT%\Build\scripts
+ set PATH=%TAO_ROOT%\bin;%DIR_XERCES%\bin;%PATH%
+ if "%TAO_VERSION%"=="2.0.0" set PATH=%ACE_ROOT%\bin;%ACE_ROOT%\lib;%PATH%
++set PATH=%M2%;%JAVA_HOME%;%PATH%
+ set PATH=%_BIN%;%_DLL%;%BUILDDIR%;%PATH%
+ set PATH=%BUILDROOT%\Build\cygwin\bin;%PATH%
+ 
+@@ -519,8 +527,11 @@ echo MFC_ROOT       = %MFC_ROOT%
+ echo BOOST_VERSION  = %BOOST_VERSION%
+ echo INC_SPIRIT     = %INC_SPIRIT%
+ echo JAVA_HOME      = %JAVA_HOME%
+-echo LIB_MFC		= %LIB_MFC%
+-echo LIB_ATL		= %LIB_ATL%
+-echo INC_WIX		= %INC_WIX%
+-echo LIB_WIX		= %LIB_WIX%
++echo LIB_MFC        = %LIB_MFC%
++echo LIB_ATL        = %LIB_ATL%
++echo INC_WIX        = %INC_WIX%
++echo LIB_WIX        = %LIB_WIX%
++echo BIN_WIX        = %BIN_WIX%
++echo M2_HOME        = %M2_HOME%
++echo M2             = %M2%
+ set ENVIRONMENT_CALLED=1
+-- 
+2.41.0.windows.1
+

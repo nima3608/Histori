@@ -1,0 +1,174 @@
+From 1e252aa902ec999fa75af7bfabb91f3db6bb9af3 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 16 Sep 2011 12:07:56 +0000
+Subject: [PATCH 0148/1077] mArgScan enhanced
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@183 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/mArgScan.hpp          |  4 ++
+ .../Massai/cpp/Text/src/mArgScan.cpp          | 54 ++++++++++++++-----
+ 2 files changed, 45 insertions(+), 13 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp b/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
+index 22d1253f..c20bb958 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
+@@ -173,6 +173,10 @@ public:
+     *         0, if option not found or
+     *         the "" string (length 0), if no option value is specified.
+     *
++    * @note:  In order to allow non-option arguments to start with e.g. '/'
++    *         the first occurence of '-' or '/' determines the special
++    *         charcter to mark an option. This means mixing of the two in
++    *         one commandline will get more non-option arguments.
+    **/
+    char const * option( char const * Key );
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/mArgScan.cpp b/SelfServiceCommon/Massai/cpp/Text/src/mArgScan.cpp
+index da2581b4..018a16f9 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/mArgScan.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/mArgScan.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009-2010 MATERNA Information & Communications
++ * Copyright (c) 2009-2011 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -32,8 +32,8 @@ namespace
+ 
+    //! Thus we store the argument vector.
+    typedef std::vector<std::string> stringvector;
+-   
+-   
++
++
+    /**
+     *
+     * Constructor helper.
+@@ -68,7 +68,7 @@ class argScan::impl
+ 
+ 
+    //! Copy of main-argc
+-   int const                    M_ArgC;
++   unsigned const                    M_ArgC;
+ 
+ 
+    //! Copy of main-argv
+@@ -91,6 +91,10 @@ class argScan::impl
+    std::set<std::string>        M_IgnoredSet;
+ 
+ 
++   //! The option character, may be '-' or '/', whatever comes first.
++   char                         M_OptionChar;
++
++
+    //! Removes an argument from the "ignored" set.
+    void hasNotBeenIgnored( char const * Param )
+    {
+@@ -105,6 +109,28 @@ class argScan::impl
+    }
+ 
+ 
++   bool isOption( char const * Arg )
++   {
++      char const Char = *Arg;
++      if( M_OptionChar )
++      {
++         return Char == M_OptionChar;
++      }
++      else
++      {
++         if( ( Char == '-' ) || ( Char == '/' ) )
++         {
++            M_OptionChar = Char;
++            return true;
++         }
++         else
++         {
++            return false;
++         }
++      }
++   }
++
++
+ public:
+ 
+ 
+@@ -114,12 +140,13 @@ public:
+     *
+    **/
+    impl( int argc, char * * argv ) :
+-      M_ArgC( argc ),
++      M_ArgC( static_cast<unsigned>( argc ) ),
+       M_ArgV( convert( argc, argv ) ),
+       M_Filename(),
+       M_HiddenSet(),
+       M_IgnoredFunction( 0 ),
+-      M_IgnoredSet()
++      M_IgnoredSet(),
++      M_OptionChar( 0 )
+    {
+       for( int I=1; I<argc; ++I )
+       {
+@@ -134,12 +161,13 @@ public:
+     *
+    **/
+    impl( int argc, char const * const * argv ) :
+-      M_ArgC( argc ),
++      M_ArgC( static_cast<unsigned>( argc ) ),
+       M_ArgV( convert( argc, argv ) ),
+       M_Filename(),
+       M_HiddenSet(),
+       M_IgnoredFunction( 0 ),
+-      M_IgnoredSet()
++      M_IgnoredSet(),
++      M_OptionChar( 0 )
+    {
+       for( int I=1; I<argc; ++I )
+       {
+@@ -181,14 +209,14 @@ public:
+    char const * argument( int Index )
+    {
+       int M_ArgCount = 0;           // Counts the non-special arguments
+-      int AllCount = 0;             // Counts all commandline arguments
++      unsigned AllCount = 0;        // Counts all commandline arguments
+       //
+       // Check the commandline parameters
+       //
+       while( AllCount < M_ArgC )
+       {
+          char const * Arg = M_ArgV[AllCount].c_str();
+-         if( (*Arg == '-') || (*Arg == '/') || isHidden( Arg ) )
++         if( isOption( Arg ) || isHidden( Arg ) )
+          {
+             //
+             // Skip special arguments
+@@ -275,7 +303,7 @@ public:
+    **/
+    char const * next( char const * Argument )
+    {
+-      int Cnt = 1;
++      unsigned Cnt = 1;
+       while( ( Cnt + 1 ) < M_ArgC )
+       {
+          char const * Arg = M_ArgV[Cnt].c_str();
+@@ -308,11 +336,11 @@ public:
+    **/
+    char const * option( char const * Key )
+    {
+-      int Cnt = 1;
++      unsigned Cnt = 1;
+       while( Cnt < M_ArgC )
+       {
+          char const *Arg = M_ArgV[Cnt].c_str();
+-         if( ( (*Arg == '-') || (*Arg == '/') ) && ( !isHidden( Arg ) ) )
++         if( isOption( Arg ) && ( !isHidden( Arg ) ) )
+          {
+ 
+             ++Arg;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,143 @@
+From 9711fe27c6af3e3c64467e789852c3460376414c Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 30 May 2011 10:06:22 +0000
+Subject: [PATCH 0115/1076] Mantis0019385: MControl - make MCC detection on
+ removable device configurable
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@144 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  | 11 +++++--
+ .../Massai/cpp/Controller/inc/serverwin.h     |  1 +
+ .../Massai/cpp/Controller/src/main.cpp        | 31 +++++++++++++++++++
+ .../Massai/cpp/Controller/src/serverwin.cpp   |  2 ++
+ 4 files changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index 7004eb04..2e3dfe17 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -12,10 +12,15 @@
+ 
+ /*! \page massaicontroller mControl - Release Notes
+  *
+- *  @version 1.0.1.4
++ *  @version 1.0.1.5
+  *
+  *  \section change1 Change history
+  *
++ *  \date 25.05.2009 \li V1.0.1.5
++ *                   \li GiT: Mantis0019385: MControl - make MCC detection on removable device configurable
++ *                   \li new commandline parameter:
++ *                   \li -enableportablemcc
++ *
+  *  \date 09.05.2009 \li V1.0.1.4
+  *                   \li GiT: Mantis0019075: Mcontrol should support background images for 1024 and 1280 screen resolution
+  *                   \li new bitmaps used:
+@@ -157,8 +162,8 @@
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+ 
+-#define FILE_VER_BIN     1,0,1,4
+-#define FILE_VER_STR     "FileVersion", "1.0.1.4\0"
++#define FILE_VER_BIN     1,0,1,5
++#define FILE_VER_STR     "FileVersion", "1.0.1.5\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"mcontrol\0"
+ #define INTERNALNAME     "InternalName"     ,"mcontrol\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+index 9f94155e..c04c1ced 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+@@ -40,5 +40,6 @@ HINSTANCE getInstance();    // from main.cpp
+ bool serverMode();          // from main.cpp
+ bool noLOG();               // from main.cpp
+ bool noSNMP();              // from main.cpp
++bool portableMCC();         // also from main.hpp .... sic ....
+ 
+ #endif //SERVERWIN_H
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index 8b520833..1ab547a2 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -41,6 +41,7 @@ static TCHAR     szAppName[] = TEXT ("MassaiController") ;
+ static bool      fServerMode = false;
+ static bool      fNoLOG      = false;
+ static bool      fNoSNMP     = false;
++static bool      bPortableMCC= false;
+ static HINSTANCE hInstance;
+ static HWND      hwnd= 0;
+ 
+@@ -114,6 +115,24 @@ bool serverMode()
+     return(fServerMode);
+ }
+ 
++//---------------------------------------------------------------------------
++//
++//  function:   bool portableMCC()
++//
++//  purpose:    enable check on removable devices for portable MCC
++//
++//  date:
++//
++//  author:     Materna Information & Communications (GiT)
++//
++//---------------------------------------------------------------------------
++
++bool portableMCC()
++{
++    return(bPortableMCC);
++}
++
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   bool noLOG()
+@@ -247,6 +266,17 @@ FILE        *fp;
+        }
+     }
+ 
++    if((pStr = strstr(szCmdLine,"-enableportablemcc")) != NULL)
++    {
++       bPortableMCC = true;
++
++       if(fp)
++       {
++         fprintf(fp,"%s found option [enableportablemcc], removable device check for mcc enabled\n",timeStamp());
++         fflush(fp);
++       }
++    }
++
+     if((pStr = strstr(szCmdLine,"-wait:")) != NULL)
+     {
+        pStr += 6;
+@@ -600,6 +630,7 @@ char const * mDaemon_help()
+          "-wait[:timeout]  set timeout in ms for initial waiting for dependencies, default 60000, -wait waits forever\n"
+          "-service:servicename  set dependency, default is massaiTrace\n"
+          "-server  run in server mode, default is kiosk mode\n"
++         "-enableportablemcc  enables the detection of a mcc on removable devices\n"
+          "-nolog  event logging disabled\n"
+          "-nosnmp  for event logging use logservice instead of massaisnmp: do not send start platform event\n";
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index bb0be830..a8b70795 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -1431,6 +1431,7 @@ INITCOMMONCONTROLSEX iccex;
+             For autostart MCC by USB (EgF)
+         */
+         case WM_DEVICECHANGE: // This message is broadcasted whenever something relevant occurs in a device
++        if(portableMCC())
+         {
+           //TRACE(HERE, "[WM_DEVICECHANGE] Hardware configuration changed");
+           TRACE(SecondaryRuntime_HERE,"WndProc WM_DEVICECHANGE");
+@@ -1687,6 +1688,7 @@ INITCOMMONCONTROLSEX iccex;
+ 
+           break;
+         }
++        break;
+      }
+ 
+      return(DefWindowProc(hwnd,message,wParam,lParam));
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,144 @@
+From 276577cd34495067dc215bb4c4761f3cf68a445a Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 30 Nov 2010 20:37:18 +0000
+Subject: [PATCH 0062/1077] =?UTF-8?q?MassaiTools=20-=20Events=20k=C3=B6nne?=
+ =?UTF-8?q?n=20aus=20einem=20Eventbuffer=20gel=C3=B6scht=20werden=20(Event?=
+ =?UTF-8?q?queue=20f=C3=BCr=20FSM)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@73 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/massaiTools/events.h       | 15 +++-
+ .../Massai/cpp/MassaiTools/src/events.cpp     | 83 +++++++++++++++++++
+ 2 files changed, 97 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/massaiTools/events.h b/SelfServiceCommon/Interfaces/inc/massaiTools/events.h
+index 12d0fc96..d5746f14 100644
+--- a/SelfServiceCommon/Interfaces/inc/massaiTools/events.h
++++ b/SelfServiceCommon/Interfaces/inc/massaiTools/events.h
+@@ -127,12 +127,25 @@ private:
+ 
+ public:
+ 
+-    /** Returns the nect available element in the buffer.
++    /** Returns the next available element in the buffer.
+         This is a blocking call, which returns only after a new element has been inserted.
+     */
+ 
+     eventType remove ();
+ 
++    /** Removes next read element in the buffer if the id equals the id of the parameter.
++        @return true if element was found and removed, false otherwise.
++        This is a non blocking call.
++    */
++    bool removeLastIfEq (const eventType& evt);
++
++    /** Removes all elements in the buffer if the id equals the id of the parameter.
++        @return true if one or more elements were found and removed, false otherwise.
++        This is a non blocking call.
++    */
++
++    bool removeIfEq (const eventType& evt);
++
+     /** Inserts a new element into the buffer.
+         @return 0 on success, -1 if an error ocurred
+     */
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiTools/src/events.cpp b/SelfServiceCommon/Massai/cpp/MassaiTools/src/events.cpp
+index 53c748c2..091669ea 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiTools/src/events.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiTools/src/events.cpp
+@@ -57,6 +57,89 @@ eventType val;
+     return(val);
+ }
+ 
++//---------------------------------------------------------------------------
++//
++//  function:   template<class T,long size> T eventBuffer<T,size>::removeIfEq(const T& evt)
++//
++//  purpose:    Removes all elements in the buffer if the id equals the id of the parameter.
++//
++//  date:       03.01.01, 07:50
++//
++//  author:     Dr. Materna GmbH (AGe)
++//
++//---------------------------------------------------------------------------
++
++bool eventBuffer::removeIfEq (const eventType& evt)
++{
++  bool rc = false;
++  if(read == write) return rc;
++  OS_RequestMutexSem(hMutex,-1L);
++/*  printf(">> read=%d,write=%d\n",read,write);
++  long ic=read;
++  printf("Events:\n");
++  while(ic!=write)
++  {
++    printf("    %d:%d\n",ic,buffer[ic].id());
++    ic=(ic+1)%EVTBUFSIZE;
++  }
++*/
++  long peek=read;
++  long deleted=0;
++  while((peek+deleted)%EVTBUFSIZE!=write)
++  {
++    if(buffer[(peek+deleted)%EVTBUFSIZE].id()==evt.id())
++    {
++      deleted++;
++    } else
++    {
++     if(deleted) buffer[peek]=buffer[(peek+deleted)%EVTBUFSIZE];
++     peek=(peek+1)%EVTBUFSIZE;
++    }
++  }
++  if(deleted) write=(write-deleted+EVTBUFSIZE)%EVTBUFSIZE;
++/*
++  printf(" ----- \nread=%d,write=%d\n",read,write);
++  printf("Events:\n");
++  ic=read;
++  while(ic!=write)
++  {
++    printf("    %d:%d\n",ic,buffer[ic].id());
++    ic=(ic+1)%EVTBUFSIZE;
++  }
++  printf("<<-\n");
++*/
++  OS_ReleaseMutexSem(hMutex);
++  return rc;
++}
++
++//---------------------------------------------------------------------------
++//
++//  function:   template<class T,long size> T eventBuffer<T,size>::removeLastIfEq(const T& evt)
++//
++//  purpose:    Removes next read element in the buffer if the id equals the id of the parameter.
++//
++//  date:       03.01.01, 07:50
++//
++//  author:     Dr. Materna GmbH (AGe)
++//
++//---------------------------------------------------------------------------
++
++bool eventBuffer::removeLastIfEq (const eventType& evt)
++{
++  bool rc = false;
++  if(read == write) return rc;
++  OS_RequestMutexSem(hMutex,-1L);
++  if(buffer[read].id()==evt.id())
++  {
++    read=(++read)%EVTBUFSIZE;
++    rc=true;
++  }
++  OS_ReleaseMutexSem(hMutex);
++  return rc;
++
++}
++
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   template<class T,long size>long eventBuffer<T,size>::insert(T& evt)
+-- 
+2.41.0.windows.1
+

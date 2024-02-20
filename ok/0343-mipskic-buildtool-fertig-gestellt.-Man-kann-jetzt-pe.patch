@@ -1,0 +1,245 @@
+From 367ec06eab96980b8e685cb95af4bb77355f07e7 Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 6 Sep 2012 17:03:56 +0000
+Subject: [PATCH 0343/1076] =?UTF-8?q?=20-=20mipskic=20&=20buildtool=20fert?=
+ =?UTF-8?q?ig=20gestellt.=20Man=20kann=20jetzt=20per=20Remote=20AIDA32=20I?=
+ =?UTF-8?q?nfos=20=C3=BCber=20einen=20Kiosk=20laden.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@410 90b65887-3827-0410-9a23-83215b262276
+---
+ SelfServiceCommon/Tools/MIPSKIC/build.bat     | 54 ++++++++++++++++
+ .../Tools/MIPSKIC/src/mipskic.bat             | 64 +++++++++++++++----
+ .../src/mipskic_remote/build_remote.bat       | 27 ++++++--
+ 3 files changed, 124 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/build.bat b/SelfServiceCommon/Tools/MIPSKIC/build.bat
+index e69de29b..ab2a7ee9 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/build.bat
++++ b/SelfServiceCommon/Tools/MIPSKIC/build.bat
+@@ -0,0 +1,54 @@
++@echo on
++
++rem ----------------------------------------------------------------------------
++rem MATERNA IPS Kiosk info collector - BUILD BAT
++rem
++rem Copyright (C) by MATERNA GmbH
++rem 
++rem $Id$
++rem 
++rem 
++rem Collect AIDA32 data of specified kiosk.
++rem Usage: 
++rem build.bat [output_path]
++rem ----------------------------------------------------------------------------
++
++set _output=%1
++set _src=%~dp0src\
++
++IF [%_output%] == [] set _output=build
++
++IF NOT EXIST "%_output%" mkdir "%_output%"
++
++rem IF NOT EXIST "%_src%mipskic_remote.exe" (
++    echo Build remote tool...
++    call "%_src%mipskic_remote\build_remote.bat"
++rem )
++
++echo Copy sources to output directory...
++
++echo Move remote tool...
++move /Y "%_src%mipskic_remote.exe" "%_output%"
++IF ERRORLEVEL 1 (
++    echo Fail to move mipskic_remote.exe
++)
++
++echo Copy mipskic.bat to output direcotry
++copy "%_src%mipskic.bat" "%_output%"
++IF ERRORLEVEL 1 (
++    echo Fail to copy mipskic.bat
++)
++
++echo Copy PsExec.exe to output direcotry
++copy "%_src%PsExec.exe" "%_output%"
++IF ERRORLEVEL 1 (
++    echo Fail to copy PsExec.exe
++)
++
++echo Copy PsList.exe to output direcotry
++copy "%_src%PsList.exe" "%_output%"
++IF ERRORLEVEL 1 (
++    echo Fail to copy PsList.exe
++)
++
++pause
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
+index 91e796f4..b2d7fa33 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
++++ b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic.bat
+@@ -1,22 +1,23 @@
+-@echo on
++@echo off
+ 
+ rem ----------------------------------------------------------------------------
+ rem MATERNA IPS Kiosk info collector
+ rem
+ rem Copyright (C) by MATERNA GmbH
+ rem 
+-rem Autor: Jan Schyra <jan.schyra@materna.de>
++rem $Id$
+ rem 
+ rem 
+ rem Collect AIDA32 data of specified kiosk.
+ rem Usage: 
+ rem mipskic.bat <kiosk_name> [output_path]
+ rem ----------------------------------------------------------------------------
+-
++ 
+ set _target=%1& shift
+ set _output=output
+ set _user=Administrator
+ set _passwd=massai
++set _path=%~dp0
+ 
+ rem test target...
+ if [%_target%] == [] (
+@@ -36,43 +37,78 @@ rem set global user and passwd, if exists
+ if NOT [%USER%] == [] set _user=%USER%
+ if NOT [%PASSWD%] == [] set _passwd=%PASSWD%
+ 
+-
+-ping -n 1 %_target% > NUL
++echo Test if %_target% is available
++ping -n 1 %_target% > NUL 2>&1
+ IF ERRORLEVEL 1 (
+     echo Fail to ping %_target%. Abort!
+     goto eof
+ )
+ 
+-net use \\%_target% /USER:%_target%\%_user% %_passwd%
++echo Identify user %_target%\%_user%
++net use \\%_target% /USER:%_target%\%_user% %_passwd% > NUL 2>&1
+ IF ERRORLEVEL 1 (
+     echo Fail to access %_target% with user %_user%... This could be a problem...
+ )
+ 
+-xcopy mipskic_remote.exe \\%_target%\c$\mipskic_remote.exe
++echo Change to directory \\%_target%\c$
++pushd \\%_target%\c$
++IF ERRORLEVEL 1 (
++    echo Fail to change to %_target% with user %_user%... Abort.
++    popd
++    goto eof
++)
++
++echo copy mipskic_remote.exe to target.
++copy "%_path%mipskic_remote.exe" mipskic_remote.exe > NUL 2>&1
+ IF ERRORLEVEL 1 (
+     echo Fail to copy mipskic_remote.exe to %_target% with user %_user%. Abort!
++    popd
+     goto eof
+ )
+ 
+-psexec \\%_target% C:\mipskic_remote.exe
++sleep 5
++echo Start AIDA32
++%_path%psexec \\%_target% -u %_user% -p %_passwd% C:\mipskic_remote.exe > NUL 2>&1
+ IF ERRORLEVEL 1 (
+     echo Fail to start mipskic_remote.exe on %_target% with user %_user%. Abort!
+     del /S /Q \\%_target%\c$\mipskic_remote.exe
++    popd
+     goto eof
+ )
+ rem test if aida is still in work...
++echo Wait until AIDA32 has been finished
+ :retry
+-pslist \\%_target% aida32.bin 2>&1 | grep -q -e "^aida32.*"
+-IF ERRORLEVEL 0 goto retry
++echo .
++sleep 5
++%_path%pslist \\%_target% aida32.bin > NUL 2>&1 
++IF %ERRORLEVEL% == 0 (
++    goto retry
++)
++echo Done.
+ 
+-del /S /Q \\%_target%\c$\mipskic_remote.exe
++IF NOT EXIST aida32_report.log (
++    echo Report not found. Abort
++    popd
++    goto eof
++)
+ 
+-xcopy \\%_target%\c$\aida32_report.log "%_output%\%_target%_report.log"
++echo Cleanup files...
++del /F /S /Q mipskic_remote.exe > NUL 2>&1
++
++Rem Allows for conditional operations in batch processing.
++echo Move report to "%_output%\%_target%_report.log"
++move /Y aida32_report.log "%_path%"
+ IF ERRORLEVEL 1 (
+-    echo Fail to copy mipskic_remote.exe to %_target% with user %_user%. Abort!
++    echo Fail to copy report from %_target%. Abort!
++    popd
+     goto eof
+ )
++popd
+ 
+-del /S /Q \\%_target%\c$\aida32_report.log
++move /Y aida32_report.log "%_output%\%_target%_report.log"
++IF ERRORLEVEL 1 (
++    echo Fail to move report to "%_output%\%_target%_report.log" 
++    goto eof
++)
+ 
+ :eof
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/build_remote.bat b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/build_remote.bat
+index 6cf73164..27566600 100644
+--- a/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/build_remote.bat
++++ b/SelfServiceCommon/Tools/MIPSKIC/src/mipskic_remote/build_remote.bat
+@@ -1,16 +1,29 @@
+ @echo off
+ 
++rem ----------------------------------------------------------------------------
++rem MATERNA IPS Kiosk info collector - BUILD_REMOT Tool BAT
++rem
++rem Copyright (C) by MATERNA GmbH
++rem 
++rem $Id$
++rem 
++rem 
++rem Collect AIDA32 data of specified kiosk.
++rem Usage: 
++rem mipskic.bat <kiosk_name> [output_path]
++rem ----------------------------------------------------------------------------
++
+ setlocal
+ path %~dp0;%PATH%
+ 
+-del /S /Q mipskic_remote.exe
++set _path=%~dp0
++
++del /S /Q %_path%..\mipskic_remote.exe
+ 
+-cd AIDA32
++cd %_path%AIDA32
+ 7zr.exe a ..\mipskic_remote.7z -r -m0=BCJ2 -m1=LZMA:d25:fb255 -m2=LZMA:d19 -m3=LZMA:d19 -mb0:1 -mb0s1:2 -mb0s2:3 -mx *.* 
+ cd ..
+-copy /b 7zSD.sfx + config.txt + mipskic_remote.7z mipskic_remote.exe
+-
+-del /S /Q mipskic_remote.7z
+-endlocal
++copy /b 7zSD.sfx + config.txt + mipskic_remote.7z %_path%..\mipskic_remote.exe
+ 
+-pause
+\ No newline at end of file
++del /S /Q %_path%mipskic_remote.7z
++endlocal
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

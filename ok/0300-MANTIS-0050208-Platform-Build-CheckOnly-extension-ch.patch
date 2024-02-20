@@ -1,0 +1,135 @@
+From b44235f2059f05e1ff5b22979c20c08753c75b7c Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Mon, 7 May 2018 11:38:41 +0000
+Subject: [PATCH 300/462] MANTIS	0050208: Platform Build: CheckOnly extension
+ checkForErrors Script
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@505 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/checkForErrors.pl           | 20 +++++--
+ SelfServiceBuild/Build/scripts/checkOnly.pl   | 57 +++++++++++++++++++
+ 2 files changed, 73 insertions(+), 4 deletions(-)
+ create mode 100644 SelfServiceBuild/Build/scripts/checkOnly.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/checkForErrors.pl b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+index 61af750..6e13102 100644
+--- a/SelfServiceBuild/Build/scripts/checkForErrors.pl
++++ b/SelfServiceBuild/Build/scripts/checkForErrors.pl
+@@ -2,7 +2,7 @@
+ #
+ 
+ use strict;
+-our $VERSION="0.0.0.7";
++our $VERSION="0.0.0.8";
+ 
+ use File::Copy;
+ use Getopt::Long;
+@@ -16,6 +16,7 @@ my $def_log_extension = ".log";
+ my $logfile;
+ my $buildname;
+ my $recipients;
++my $checkonly;
+ my $help = 0;
+ 
+ my $argv_count = $#ARGV+1;
+@@ -23,12 +24,12 @@ my $argv_count = $#ARGV+1;
+ GetOptions ("logfile=s"   => \$logfile,
+             "recipients=s" => \$recipients,
+             "buildname=s" => \$buildname,
++            "checkonly" => \$checkonly,
+             "help!"     => \$help
+             )  or die "Invalid commmand line options. Try --help\n";
+-
+-if( $argv_count != 3 or $help )
++if(($checkonly and $argv_count != 2) or (not $checkonly and $argv_count != 3) or $help)
+ {
+-  print STDERR "usage: $0 --logfile=\"PATH\\filename\" --recipients=\"user1\@test.com,user2\@test.com\" --buildname=name \n" ;
++  print STDERR "usage: $0 --logfile=\"PATH\\filename\" --recipients=\"user1\@test.com,user2\@test.com\" --buildname=name \nusage: $0 --logfile=\"PATH\\filename\" --checkonly \n";
+   exit 0;
+ }
+ 
+@@ -80,6 +81,17 @@ push @summary, "error count: $errors_found\n\n";
+ my $junit_errors_found = count_jutests_in_log(\@search_jutests_str,\@lf,\@summary);
+ push @summary, "unit-tests error count: $junit_errors_found\n";
+ 
++if($checkonly)
++{
++  if ($errors_found == 0 && $junit_errors_found == 0)
++  {
++    print "no error found\n";
++    exit(0);
++  }
++  print "errors found\n";
++  exit(-1);
++}
++
+ push @summary, "\n___________________________________\n";
+ my @search_all_errors = (@search_error_str,@search_juerror_str);
+ push @summary,@{&search_in_log("testfilename.txt",\@search_all_errors,\@lf)};
+diff --git a/SelfServiceBuild/Build/scripts/checkOnly.pl b/SelfServiceBuild/Build/scripts/checkOnly.pl
+new file mode 100644
+index 0000000..5756b2c
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/checkOnly.pl
+@@ -0,0 +1,57 @@
++#!/usr/bin/perl -w
++#
++
++use strict;
++our $VERSION="0.0.0.1";
++
++use Getopt::Long;
++use File::Basename;
++
++my $CHECKFORERRORS_FILE = "checkForErrors.pl";
++my $def_log_extension = ".log";
++
++my $logfile;
++my $help = 0;
++my @ret;
++my $result = -1;
++
++my $argv_count = $#ARGV+1;
++
++my $dirname = dirname(__FILE__);
++
++GetOptions ("logfile=s"   => \$logfile,
++            "help!"     => \$help
++            )  or $help = 1;
++
++if( $argv_count != 1 or $help )
++{
++  print STDERR "usage: $0 --logfile=\"PATH\\filename\"\n" ;
++  exit -1;
++}
++
++if ( ! -e $dirname."\\".$CHECKFORERRORS_FILE)
++{
++  print STDERR "missing file $dirname\\$CHECKFORERRORS_FILE\n";
++  exit -1;
++}
++
++{
++  my $exec = $dirname."\\".$CHECKFORERRORS_FILE." --logfile=$logfile --checkonly";
++  @ret = `$^X $exec 2>&1`;
++}
++
++if("@ret"=~/--help/)
++{
++  print STDERR "parameter failure while executing $dirname\\$CHECKFORERRORS_FILE : $@ -> IGNORED\n" ;
++  exit 0;
++} elsif ($@ or !@ret or !defined($ret[0]))
++{
++  print STDERR "failure while executing $dirname\\$CHECKFORERRORS_FILE : $@\n" ;
++  exit -1;
++}
++
++$result = 0 if($ret[0] =~ /no error found/);
++
++print "\nCheckOnly result: $result\n";
++
++exit $result;
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

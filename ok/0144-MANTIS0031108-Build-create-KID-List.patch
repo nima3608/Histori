@@ -1,0 +1,133 @@
+From e22e685e02d057f973753958ce699be4be33d229 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 28 Feb 2014 13:07:55 +0000
+Subject: [PATCH 144/462] MANTIS0031108: Build: create KID-List
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@212 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ SelfServiceBuild/Build/scripts/gen_kidlist.pl | 113 ++++++++++++++++++
+ 1 file changed, 113 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/gen_kidlist.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/gen_kidlist.pl b/SelfServiceBuild/Build/scripts/gen_kidlist.pl
+new file mode 100644
+index 0000000..d662cd7
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/gen_kidlist.pl
+@@ -0,0 +1,113 @@
++#!/usr/bin/perl -w
++#
++
++use strict;
++our $VERSION="0.0.0.1";
++
++use Win32::File::VersionInfo;
++use Jar::Manifest qw(Dump Load);
++use Archive::Zip;
++use Archive::Zip::MemberRead;
++use Getopt::Long;
++use DateTime;
++
++my $outputPath = "";
++my $kidlist = "kidlist.txt";
++my $testfiles = 1;
++my $listheader = "";
++
++my $binSubPath="bin";
++my $dllSubPath="dll";
++my $jarSubPath="jar";
++
++my $format="%-40s %s\n";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("outputpath=s"   => \$outputPath,
++            "kidlist:s" => \$kidlist,
++            "testfiles!" => \$testfiles,
++            "listheader:s" => \$listheader,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count < 1 or $argv_count > 3 or ($outputPath eq "") or $help )
++{
++  print STDERR "usage: $0 [--(no)testfiles] [--kidlist=\"filename\"] [--listheader=\"header text\">] --outputpath=\"PATH\" \n" ;
++  exit 0;
++}
++
++open KL, ">", $kidlist or die $!;
++my $dt = DateTime->now;
++print KL "Kidlist ";
++print KL join ' ', $dt->ymd, $dt->hms;
++print KL " ".$listheader,"\n";
++
++$testfiles = not $testfiles;
++
++print KL "\nExecutables:\n";
++&scandir($outputPath."\\".$binSubPath,$format,$testfiles);
++print KL "\nDLL\'s:\n";
++&scandir($outputPath."\\".$dllSubPath,$format,$testfiles);
++print KL "\nJAR's:\n";
++&scandir($outputPath."\\".$jarSubPath,$format,$testfiles);
++
++close KL;
++
++sub scandir
++{
++  my $aktdir = shift;
++  my $formatstr = shift;
++  my $excltest = shift;
++ 
++  if(!opendir(DIR, $aktdir))
++  {
++    print KL  $!."\n";
++    return;
++  }
++  while (my $file = readdir(DIR)) {
++
++    next if((!($file =~ m/.*\.exe$/) &&
++            !($file =~ m/.*\.dll$/) &&
++            !($file =~ m/.*\.jar$/) ) ||
++            (($file =~ m/^Test.*/) && $excltest)
++    );
++    
++    if( ($file =~ m/.*\.exe$/) ||
++        ($file =~ m/.*\.dll$/) )
++    {
++      my $fvi = GetFileVersionInfo ( $aktdir."\\".$file );
++      if ( $fvi )
++      {
++        printf KL $formatstr, $file, $fvi->{FileVersion};
++      } else
++      {
++        printf KL $formatstr, $file, "UNKNOWN";
++      }
++    }
++    elsif( ($file =~ m/.*\.jar$/) )
++    {
++      my $zip = Archive::Zip->new($aktdir."\\".$file);
++      my $fh  = Archive::Zip::MemberRead->new($zip, 'META-INF/MANIFEST.MF');
++      my $read = $fh->read(my $buffer, 32*1024);
++      my $manifest = Load($buffer);
++      my $mv="UNKNOWN";
++      foreach (@{$manifest->{entries}})
++      {
++        if( $_->{Name} =~ /Product/ )
++        {
++          if( defined($_->{'Module-Version'}))
++          {
++            $mv = $_->{'Module-Version'};
++          }
++        }
++      }
++      printf KL $formatstr,$file,$mv;
++      $fh->close();
++    }
++  }
++  closedir(DIR);
++}
++
++exit 0;
+-- 
+2.41.0.windows.1
+

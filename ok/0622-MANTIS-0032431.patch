@@ -1,0 +1,641 @@
+From 3dd9d2500736a4cc5224a97b2173618523bdcb2e Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Nov 2014 16:51:08 +0000
+Subject: [PATCH 0622/1076] MANTIS 0032431 Implemented correct functionality
+ of: -ScheduledTask:  -constructor
+
+-Scheduler:  -newList()
+             -deleteList()
+             -run()
+
+-Tools:      -getActualTimeDate()
+             -tokenize()
+             -getDayOfWeekAsNumber()
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@785 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/mControl/inc/mControl_scheduler.h     |  41 ++-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  26 +-
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |   2 +-
+ .../cpp/mControl/src/mControl_scheduler.cpp   | 331 +++++++++++++++---
+ .../cpp/mControl/src/mControl_tools.cpp       |  56 ++-
+ 5 files changed, 388 insertions(+), 68 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+index 50e9c89e..5b2e06ed 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+@@ -29,6 +29,9 @@
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Notification.h"
+ 
++//Boost includes
++#include "boost/date_time/gregorian/gregorian.hpp"
++#include "boost/date_time/posix_time/posix_time.hpp"
+ 
+ /**
+ * For the Date and Time configuration use mTime und mDate
+@@ -37,18 +40,49 @@
+ 
+ namespace mControl
+ {
++    class ScheduledTask
++    {
++    private:
++        std::string                 m_cmd;
++        long                        m_scheduleMonthly;
++        long                        m_scheduleWeekly;
++
++        boost::gregorian::date      m_creationDate;
++        boost::posix_time::ptime    m_executionTime;
++        cfgListScheduledCommands *  m_sysCmdlist;    
++
++    public:
++        /**
++        *   Constructor
++        */
++        ScheduledTask(long hour, long min, std::string cmd, std::string scheduleFrequency);
++
++        
++        /**
++        *   Getter Methods
++        **/
++        boost::posix_time::ptime    getTime(){ return m_executionTime; }
++        std::string                 getCmd(){ return m_cmd; }
++        long                        getScheduleMonthly(){ return m_scheduleMonthly; }
++        long                        getScheduleWeekly(){ return m_scheduleWeekly; }
++        long                        getHour(){ return m_executionTime.time_of_day().hours(); }
++        long                        getMinute(){ return m_executionTime.time_of_day().minutes(); }
++    };
++
++
+     class Scheduler : public Poco::Runnable
+     {
+       private:
+         Poco::NotificationQueue &   m_notificationQueue;      
+         GlobalConfig &              m_globalConfig;
+-        std::list<int>              m_cmdList;            //List of configuratoin items/applications
++        cfgListScheduledCommands *  m_sysCmdList;            //List of configuratoin items/applications
++        std::list<ScheduledTask *>  m_taskList;
+         
+ 
+         /**
+         * creates a new command List to get scheduled
+         */
+-        void initList();      
++        void newList();      
+ 
+ 
+         /**
+@@ -63,7 +97,6 @@ namespace mControl
+         void doTask();
+ 
+     public:
+-        //TODO: implement correct functionality
+         /**
+         * Needs to be implemented from the Runnable interface.
+         * Here the MCC processes are scheduled.
+@@ -76,7 +109,7 @@ namespace mControl
+         * getter Methods
+         */
+         Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-        std::list<int>& getCmdList(){ return m_cmdList; }
++
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 2b24a934..0b83c9ad 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -32,9 +32,18 @@
+ #include "logging/alertDef.h"
+ #include <sys\stat.h>
+ 
++//Boost includes
++#include "boost/date_time/gregorian/gregorian.hpp"
++#include "boost/date_time/posix_time/posix_time.hpp" 
++
+ //Windows includes
+ #include <string>
+-
++#include <iostream>
++#include <string>
++#include <list>
++#include <time.h>
++#include <vector>
++#include <sstream> 
+ 
+ namespace mControl
+ {
+@@ -134,6 +143,21 @@ namespace mControl
+         static long loadHostsFile();
+ 
+ 
++        /**
++        *   Returns the actual System Time.
++        */
++        static boost::posix_time::ptime getActualTimeDate();    
++
++        
++        /**
++        *   Tokenizes the string at the given delimiter
++        **/
++        static std::vector<std::string> tokenize(const std::string& str, char delimiter);
++
++
++        static long getDayOfWeekAsNumber(std::string sDay);
++        
++
+         static int traceCurrentDir();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 8b491ac4..3ff0b1d3 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -26,7 +26,7 @@
+     #define ORIGINALFILENAME "OriginalFilename" ,"mcontrol.exe\0"
+ 
+     #define REBOOT_FILE_NAME "mcontrol.reboot"
+-
++    #define RESTART "restart massai"
+ 
+     //Thread ID's
+     #define REBOOTER_ID     100
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index 768fc6c5..dc21662d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -13,81 +13,204 @@
+ //Project includes
+ #include "..\inc\mControl_scheduler.h"
+ #include "..\inc\mControl_notification.h"
++#include "..\inc\mControl_tools.h"
++#include "..\inc\mControl_worker.h"
+ 
+ //MATERNA includes
+ #include "trc/trace.h"
+ 
+-//Windows includes
++//Compiler includes
+ #include <string>
++#include <list>
++#include <ctime>
++#include <iostream>
++#include <vector>
+ 
+ 
+ using Poco::Runnable;
+-
++using namespace std;
+ 
+ namespace mControl
+ {
+-    Scheduler::Scheduler(NotificationQueue& queue, GlobalConfig & config) :
++//---------------------------------------------------------------------------
++// ScheduledTask implementation
++//
++    ScheduledTask::ScheduledTask(long hour, long min, std::string cmd, string scheduleFrequency) :
++        m_cmd(cmd),
++        m_creationDate( boost::gregorian::date( Tools::getActualTimeDate().date().year(),
++                                                Tools::getActualTimeDate().date().month(),
++                                                Tools::getActualTimeDate().date().day()
++                                              )
++        ),
++        m_executionTime( m_creationDate, 
++                         boost::posix_time::time_duration(hour,min,0,0) 
++        ),
++        m_sysCmdlist(NULL),
++        m_scheduleMonthly(-1),
++        m_scheduleWeekly(-1)
++    {
++
++        int day;
++        
++        if(scheduleFrequency != "" )
++        {
++            if( scheduleFrequency == "last" )
++            {
++                //TODO: richtigkeit überprüfen
++                m_scheduleMonthly = Tools::getActualTimeDate().date().end_of_month().day();
++            }
++            else 
++            {
++                try
++                {
++                    day = stoi (scheduleFrequency);
++                }
++                catch (const std::invalid_argument& ia) {
++                    day = 0;
++                } 
++
++                if( day == 0 )
++                {
++                    m_scheduleWeekly = Tools::getDayOfWeekAsNumber(scheduleFrequency);
++                }
++            }
++        }
++
++        TRACE( HERE,"New System-Command at %d:%d, Command =[%s]",
++            m_executionTime.time_of_day().hours(), 
++            m_executionTime.time_of_day().minutes(), 
++            m_cmd 
++        );
++    }
++
++// ScheduledTask end of implementation
++//
++//---------------------------------------------------------------------------
++    
++
++//---------------------------------------------------------------------------
++//
++// Scheduler implementation
++
++    Scheduler::Scheduler(Poco::NotificationQueue& queue, GlobalConfig & config) :
+         m_notificationQueue(queue),
+-        m_globalConfig(config)
++        m_globalConfig(config),
++        m_sysCmdList(NULL),
++        m_taskList(NULL)
+     {
+-        m_cmdList.clear();
+-        this->initList();
++        this->newList();
+     }
+ 
+ 
+     Scheduler::~Scheduler()
+     {
++        deleteList();
+     }
+ 
+ 
+-    void Scheduler::initList()
++    void Scheduler::newList()
+     {
+-        for(int index = WM_USER ; index < WM_USER + 7; index++)
++        list<string>::iterator  cmdIterator;
++        ScheduledTask          *newTaskPointer;
++        string                  actualSysCmd;
++
++
++        deleteList();
++
++        if (m_sysCmdList == NULL)
+         {
+-            switch ( index )
++            m_sysCmdList = new cfgListScheduledCommands
++                                (
++                                   "PLATFORM.SCHEDULED.SystemCommands"
++                                );
++        }
++
++        list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_sysCmdList->get());
++
++        for(cmdIterator = cmdlist.begin(); cmdIterator != cmdlist.end(); cmdIterator++)
++        {
++            actualSysCmd = *cmdIterator;
++
++            vector<string> actualConfiguration ( Tools::tokenize( (*cmdIterator), ';' ) );
++
++            //Get the Time
++            if( actualConfiguration.size() == 3)
+             {
+-            case WM_MASSAISTART:
+-                    TRACE(HERE,"WM_MASSAISTART command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            
+-            case WM_MASSAISTART_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISTART_REMOTE command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            
+-            case WM_MASSAIREBOOT_REMOTE:
+-                    TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            
+-            case WM_MASSAISHUTDOWN_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            
+-            case WM_MASSAISTOP_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISTOP_REMOTE command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            
+-            case WM_MASSAISTOP_SCHEDULER:
+-                    TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
++                //FORMAT: [dd;] | [last;] | [mon;|tue;|wed;|thu;|fri;|sat;|sun;]<hh:mm>;<command string>
++
++                vector<string> time( Tools::tokenize( actualConfiguration[1], ':' ) );
++                int hour, minute;
++
++                try
++                {
++                    hour    = stoi(time[0]);
++                    minute  = stoi(time[1]);
++                }
++                catch (const std::invalid_argument& ia) {
++	              std::cerr << "ERROR: failed to set Time" << ia.what() << '\n';
++                }
++
++                newTaskPointer = new ScheduledTask(
++                                        hour, 
++                                        minute, 
++                                        actualConfiguration[2],
++                                        actualConfiguration[0]
++                );
++            }
++            else if(actualConfiguration.size() == 2)
++            {
++                //FORMAT: <hh:mm>;<command string>
++
++                vector<string> time( Tools::tokenize( actualConfiguration[0], ':' ) );
++                int hour, minute;
++
++                try
++                {
++                    hour    = stoi(time[0]);
++                    minute  = stoi(time[1]);
++                }
++                catch (const std::invalid_argument& ia) {
++	              std::cerr << "ERROR: failed to set Time" << ia.what() << '\n';
++                }  
++
++                newTaskPointer = new ScheduledTask(
++                                        hour, 
++                                        minute, 
++                                        actualConfiguration[1],
++                                        ""
++                );
++            }
++            else
++                TRACE(HERE,"ERROR: System-Command with more than 2 configure Parameters");
++
+             
+-            case WM_MASSAISTART_SCHEDULER:
+-                    TRACE(HERE,"WM_MASSAISTART_SCHEDULER command in scheduler list enqueued");
+-                    m_cmdList.push_back( index );
+-                    break;
+-            }  
++            if( newTaskPointer != NULL )
++            {
++                m_taskList.push_back(newTaskPointer);
++            }
++            else
++                TRACE(HERE,"ERROR: nullpointer at newTaskPointer");
++
++            newTaskPointer = NULL;
+         }
+     }
+ 
+ 
+     void Scheduler::deleteList()
+     {
+-        m_cmdList.clear();
++        ScheduledTask *p;
++        list<ScheduledTask *>::iterator  taskIterator;
++
++        while(!m_taskList.empty())
++        {
++            taskIterator = m_taskList.begin();
++
++            p = *taskIterator;
++
++            delete p;
++
++            m_taskList.erase(taskIterator);
++        }
+     }
+ 
+ 
+@@ -95,29 +218,117 @@ namespace mControl
+     {
+         TRACE(HERE,"Scheduler-Thread run() started...");
+ 
+-        std::list<int>::iterator  cmdIterator;
+-        int i=0;
++        list<ScheduledTask *>::iterator  taskIterator;
++
++        boost::posix_time::ptime currentTime;
+ 
+         
+-        for(cmdIterator = getCmdList().begin(); cmdIterator != getCmdList().end(); cmdIterator++)
++
++        long rc;
++        long countRun = 0;
++
++        if(++countRun % 5 == 0)
++            newList();
++
++        for( taskIterator = m_taskList.begin(); taskIterator != m_taskList.end(); taskIterator++ )
+         {
+-            
+-            if( (*cmdIterator) == WM_MASSAISTART_SCHEDULER )
++            currentTime = boost::posix_time::ptime ( Tools::getActualTimeDate() );
++
++            if((*taskIterator)->getScheduleMonthly() >= 0)
++            {
++
++                long dayOfMonth = Tools::getActualTimeDate().date().year_month_day().month;
++
++                if( (*taskIterator)->getScheduleMonthly()   == dayOfMonth                           &&
++                    (*taskIterator)->getHour()              == currentTime.time_of_day().hours()    &&
++                    (*taskIterator)->getMinute()            == currentTime.time_of_day().minutes()      
++                )
++                {
++                    if( (*taskIterator)->getCmd() == RESTART )
++                    {
++                        TRACE(HERE,"scheduled restart, day: %d. of month at %02d:%02d",
++                                    (*taskIterator)->getScheduleMonthly(),
++                                    (*taskIterator)->getHour(),
++                                    (*taskIterator)->getMinute()
++                        );
++
++                        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_SCHEDULER", SCHEDULER_ID, WM_MASSAISTOP_SCHEDULER) );
++                    }
++                    else
++                    {
++                        TRACE(HERE,"scheduled exec [%s] day: %d. of month at %02d:%02d",
++                                    (*taskIterator)->getCmd(),
++                                    (*taskIterator)->getScheduleMonthly(),
++                                    (*taskIterator)->getHour(),
++                                    (*taskIterator)->getMinute());
++
++                        rc = m_globalConfig.getWorker()->mSystem((*taskIterator)->getCmd().c_str(),"scheduled");
++                    }
++                }
++            }
++            else if((*taskIterator)->getScheduleWeekly() >= 0)
+             {
+-                //scheduled restart, here the scheduler is restarted by adding a Notification to the Queue
+-                //TODO: restarting scheduler
+-                TRACE(HERE, "Command [ %d ] with ID[ %d ] in global MsgQueue enqueued", (*cmdIterator), SCHEDULER_ID);
+-                m_notificationQueue.enqueueNotification( new MControlNotification( "WM_MASSAISTART_SCHEDULER", SCHEDULER_ID, (*cmdIterator) ));
++                // check only if day has a valid value
++                long dayOfWeek = Tools::getActualTimeDate().date().day_of_week();
++
++                if( (*taskIterator)->getScheduleWeekly()    == dayOfWeek                            &&
++                    (*taskIterator)->getHour()              == currentTime.time_of_day().hours()    &&
++                    (*taskIterator)->getMinute()            == currentTime.time_of_day().minutes()     
++                )
++                {
++                    if( (*taskIterator)->getCmd() == RESTART )
++                    {
++                        TRACE(HERE,"scheduled restart, day: %d. of week at %02d:%02d",
++                                    (*taskIterator)->getScheduleWeekly(),
++                                    (*taskIterator)->getHour(),
++                                    (*taskIterator)->getMinute()
++                        );
++
++                        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_SCHEDULER", SCHEDULER_ID, WM_MASSAISTOP_SCHEDULER) );
++                    }
++                    else
++                    {
++                        TRACE(HERE,"scheduled exec [%s] day: %d. of month at %02d:%02d",
++                                    (*taskIterator)->getCmd(),
++                                    (*taskIterator)->getScheduleWeekly(),
++                                    (*taskIterator)->getHour(),
++                                    (*taskIterator)->getMinute());
++
++                        rc = m_globalConfig.getWorker()->mSystem((*taskIterator)->getCmd().c_str(),"scheduled");
++                    }
++                }
+             }
+             else
+             {
+-                //scheduled exec, here the cmd are started in mSysProcess's 
+-                //TODO: Replace the WorkNotification by cmd exec 
+-                TRACE(HERE, "Command [ %d ] with ID[ %d ] in global MsgQueue enqueued", (*cmdIterator), SCHEDULER_ID);
+-                m_notificationQueue.enqueueNotification( new MControlNotification( "default", SCHEDULER_ID, (*cmdIterator)) );
++                if( (*taskIterator)->getHour()              == currentTime.time_of_day().hours()    &&
++                    (*taskIterator)->getMinute()            == currentTime.time_of_day().minutes()  
++                )
++                {
++                    if((*taskIterator)->getCmd() == RESTART )
++                    {
++                        TRACE(HERE,"scheduled restart, daily at %02d:%02d",
++                                        (*taskIterator)->getCmd(),
++                                        (*taskIterator)->getHour(),
++                                        (*taskIterator)->getMinute());
++
++                        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_SCHEDULER", SCHEDULER_ID, WM_MASSAISTOP_SCHEDULER) );
++                    }
++                    else
++                    {
++                        TRACE(HERE,"scheduled exec [%s] daily at %02d:%02d",
++                                        (*taskIterator)->getCmd(),
++                                        (*taskIterator)->getHour(),
++                                        (*taskIterator)->getMinute());;
++
++                        rc = m_globalConfig.getWorker()->mSystem((*taskIterator)->getCmd().c_str(),"scheduled");
++                    }
++                }
+             }
+-            
++
+         }
++
++        //TODO: sleep, return mechanism
++        //return (0);
+     }
+ 
+ 
+@@ -133,4 +344,8 @@ namespace mControl
+         TRACE(HERE,"canceling %s...", name() );
+         */
+     }
++
++//
++// ScheduledTask end of implementation
++//---------------------------------------------------------------------------
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index ecb8a555..a714584d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -18,12 +18,8 @@
+ #include "massaidll/mTime.hpp"
+ 
+ //Windows includes
+-#include <string>
+-#include <list>
+-#include <time.h>
+ #include <sys/timeb.h>
+ #include "Commctrl.h"
+-
+ #include <direct.h>
+ 
+ using namespace std;
+@@ -589,6 +585,58 @@ namespace mControl
+     }
+ 
+ 
++    boost::posix_time::ptime Tools::getActualTimeDate()  
++    {
++        time_t t = time(0);   // get time now
++        struct tm * now = localtime( & t );
++
++        boost::gregorian::date actualDate( (now->tm_year + 1900), (now->tm_mon + 1), (now->tm_mday) );
++
++        boost::posix_time::ptime today( actualDate, boost::posix_time::time_duration(now->tm_hour,now->tm_min,now->tm_sec,0)  );
++
++        return today;
++    }
++
++
++    std::vector<std::string> Tools::tokenize(const std::string& str, char delim) 
++    {
++        std::vector<std::string> tokens;
++        std::stringstream mySstream(str);
++        std::string temp;
++
++        while(getline(mySstream, temp, delim))
++            tokens.push_back(temp);
++
++        return tokens;
++    }
++
++
++    long Tools::getDayOfWeekAsNumber(std::string sDay)
++    {
++        int  iDay;
++
++        if( sDay == "mon" )
++            iDay = 1;
++        else if( sDay == "tue" )
++            iDay = 2;
++        else if( sDay == "wed" )
++            iDay = 3;
++        else if( sDay == "thu" )
++            iDay = 4;
++        else if( sDay == "fri" )
++            iDay = 5;
++        else if( sDay == "sat" )
++            iDay = 6;
++        else if( sDay == "sun" )
++            iDay = 0;
++        else if( sDay == "" )
++            iDay = -1;
++       
++
++        return iDay;
++    }
++
++
+     int Tools::traceCurrentDir()
+     {
+ 
+-- 
+2.41.0.windows.1
+

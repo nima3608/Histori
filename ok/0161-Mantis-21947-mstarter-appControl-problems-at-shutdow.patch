@@ -1,0 +1,94 @@
+From 73b6995b42a1331c7f0bdf9cfefa84b8c4f71974 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 10 Feb 2012 13:02:42 +0000
+Subject: [PATCH 0161/1000] Mantis 21947: mstarter, appControl problems at
+ shutdown
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@289 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/inc/mSysSwitchWindowW32.h |  6 ++++--
+ .../cpp/Systools/src/mSysSwitchWindowW32.cpp      | 15 ++++++++++++++-
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp     |  2 +-
+ 3 files changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
+index be403a09..25a9c122 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
+@@ -4,7 +4,7 @@
+ #define MSYSSWITCHWINDOWW32_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+ #pragma message("including: " __FILE__)
+-#endif
++#endif //  SHOW_INCLUDE_FILES
+ 
+ #include <windows.h>
+ 
+@@ -12,10 +12,12 @@
+ extern "C" {
+ #endif
+ 
+-BOOL WINAPI SwitchToThisWindow(HWND hWnd, BOOL fAltTab);
++BOOL WINAPI SwitchToThisWindow_(HWND hWnd, BOOL fAltTab);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+ #endif
++
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
+index bc1440b6..495cbef5 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
+@@ -2,6 +2,9 @@
+ 
+ #include "mSysSwitchWindowW32.h"
+ 
++#ifdef _MSC_VER
++#if _MSC_VER <= 1200 // 1200 == VC6
++
+ namespace
+ {
+   typedef VOID (WINAPI *SwitchToThisWindowPtr)(HWND, BOOL);
+@@ -9,7 +12,7 @@ namespace
+   bool switchToThisWindowLoaded = false;
+ }
+ 
+-BOOL WINAPI SwitchToThisWindow(HWND hWnd, BOOL fAltTab)
++BOOL WINAPI SwitchToThisWindow_(HWND hWnd, BOOL fAltTab)
+ {
+   BOOL result= false;
+   if(!switchToThisWindowLoaded)
+@@ -25,3 +28,13 @@ BOOL WINAPI SwitchToThisWindow(HWND hWnd, BOOL fAltTab)
+   }
+   return result;
+ }
++#else
++
++BOOL WINAPI SwitchToThisWindow_(HWND hWnd, BOOL fAltTab)
++{
++  SwitchToThisWindow(hWnd, fAltTab);
++  return true;
++}
++
++#endif
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 4489266c..a40ef7c3 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -137,7 +137,7 @@ namespace
+   bool WindowW32::switchToWindow()
+   {
+     bool result = true;
+-    if(!SwitchToThisWindow(m_hwnd, false))
++    if(!SwitchToThisWindow_(m_hwnd, false))
+     {
+       traceLastError(MinorError_HERE, "SwitchToThisWindow", mSysError::getErrorCode());
+       result = false;
+-- 
+2.41.0.windows.1
+

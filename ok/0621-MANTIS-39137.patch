@@ -1,0 +1,355 @@
+From 329946607f28239c72020e47091a10a9080476c1 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 16 Nov 2015 11:25:13 +0000
+Subject: [PATCH 0621/1000] MANTIS 39137 - MANTIS 39137: Platform CfgXMgrB:
+ Introduce new command to set meta information for existing configuration
+ values. Config client interfaces - nConfigBasicText - nConfigBasicSelection
+ now with new method setMeta() The interfaces for text-list and number will be
+ done on-demand.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@925 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/cfgclnt/nConfigBasicSelection.hpp     |  28 ++++-
+ .../inc/cfgclnt/nConfigBasicText.hpp          |  25 ++++-
+ .../cpp/CfgClnt/src/nConfigBasicSelection.cpp | 105 +++++++++++++++++-
+ .../cpp/CfgClnt/src/nConfigBasicText.cpp      |  77 ++++++++++++-
+ 4 files changed, 231 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicSelection.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicSelection.hpp
+index 9a8b0d47..3823fd7b 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicSelection.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicSelection.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2011 MATERNA Information & Communications
++ * Copyright (c) 2007-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -183,6 +183,32 @@ namespace nConfig
+          )
+          throw( exception );
+ 
++      /**
++       *
++       * Update the selection configuration item's meta data.
++       *
++       * @param Item:           The name of the configuration item.
++       *
++       * @param Rights:         The rights assigned to this item for
++       *                        further access.
++       *
++       * @param Explanation:    An explanation for this item.
++       *
++       * @param Begin:          The begin of the selection vector.
++       *
++       * @param End:            The end of the selection vector.
++       *
++       */
++      void setMeta
++         (
++            char const *        Item,
++            char const *        Rights,
++            char const *        Explanation,
++            selection const *   Begin,
++            selection const *   End
++         )
++         throw( exception );
++
+    private:
+ 
+       //! Default constructor - intentionally not implemented.
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicText.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicText.hpp
+index 04ac99aa..75a9adba 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicText.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicText.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2005-2011 MATERNA Information & Communications
++ * Copyright (c) 2005-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -153,6 +153,29 @@ namespace nConfig
+       void setInitial( char const * Item, char const * Val )
+          throw( exception );
+ 
++      /**
++       *
++       * Update text configuration item's meta data.
++       *
++       * @param Item:           The name of the configuration item.
++       *
++       * @param Rights:         The rights assigned to this item for
++       *                        further access.
++       *
++       * @param Explanation:    An explanation for this item.
++       *
++       * @param MaxLength:      The maximum length of the value string.
++       *
++       */
++      void setMeta
++         (
++            char const *   Item,
++            char const *   Rights,
++            char const *   Explanation,
++            long           MaxLength
++         )
++         throw( exception );
++
+    private:
+ 
+       //! Default constructor - intentionally not implemented.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
+index b2073ab7..e46df384 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2013 MATERNA Information & Communications
++ * Copyright (c) 2007-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -28,6 +28,7 @@
+ #define CBSSIS  "nConfig::basicSelection::setInitialString"
+ #define CBSSTI  "nConfig::basicSelection::setIndex"
+ #define CBSSTS  "nConfig::basicSelection::setString"
++#define CBSSM   "nConfig::basicSelection::setMeta"
+ 
+ #define THROW_( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+@@ -415,6 +416,88 @@ namespace nConfig
+          }
+       }
+ 
++      /**
++       *
++       * Implementation class method.
++       *
++      **/
++      void setMeta
++         (
++            char const *           Item,
++            char const *           Rights,
++            char const *           Explanation,
++            selection const *      Begin,
++            selection const *      End
++         )
++         throw( exception )
++      {
++         if( M_pOS ) *M_pOS << CBSSM " ..." << std::endl;
++         try
++         {
++            Config::access Access;
++            Access.Item = CORBA::string_dup( Item );
++            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
++            Config::description Description;
++            Description.Rights = CORBA::string_dup( Rights );
++            Description.Explanation = CORBA::string_dup( Explanation );
++            //
++            Config::Selection::selectList List;
++            unsigned const Number = static_cast<unsigned>( End - Begin );
++            List.length( Number );
++            unsigned Index = 0;
++            while( Begin != End )
++            {
++               if( M_pOS )
++                  *M_pOS
++                     << CBSSM << " Item( " << Index << " )"
++                     << std::endl;
++               //
++               List[Index].selLong =
++                  Begin->index();
++               //
++               char const * Text = Begin->text();
++               if( !Text )
++               {
++                  Text = "(null)";
++               }
++               List[Index].selString = CORBA::string_dup( Text );
++               //
++               char const * Expl = Begin->explanation();
++               if( !Expl )
++               {
++                  Expl = "(null)";
++               }
++               List[Index].selExplanation = CORBA::string_dup( Expl );
++               //
++               ++Begin;
++               ++Index;
++            }
++            //
++            validProxy()->setMeta( Access, Description, List );
++            if( M_pOS ) *M_pOS << CBSSM "." << std::endl;
++         }
++         catch( Config::Node::alreadyExists & )
++         {
++            THROW_E( Item, CBSSM " - alreadyExists exception" );
++         }
++         catch( Config::Node::noConfiguration & )
++         {
++            THROW_S( Item, CBSSM " - noConfiguration exception" );
++         }
++         catch( Config::Node::notCreated & )
++         {
++            THROW_( Item, CBSSM " - notCreated exception" );
++         }
++         catch( CORBA::Exception & )
++         {
++            THROW_S( Item, CBSSM " - CORBA::Exception" );
++         }
++         catch( ... )
++         {
++            THROW_( Item, CBSSM " - Unknown exception" );
++         }
++      }
++
+    private:
+ 
+       //! Default constructor - intentionally not implemented.
+@@ -561,6 +644,26 @@ namespace nConfig
+ 
+ 
+ 
++   /*
++    *
++    * Public method - see nConfigBasicSelection.hpp
++    *
++    */
++   void basicSelection::setMeta
++      (
++         char const *           Item,
++         char const *           Rights,
++         char const *           Explanation,
++         selection const *      Begin,
++         selection const *      End
++      )
++      throw( exception )
++   {
++      M_Impl->setMeta( Item, Rights, Explanation, Begin, End );
++   }
++
++
++
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
+index 2cc2e0c6..05207237 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2005-2013 MATERNA Information & Communications
++ * Copyright (c) 2005-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -27,6 +27,7 @@
+ #define CBTGT "nConfig::basicText::get"
+ #define CBTSI "nConfig::basicText::setInitial"
+ #define CBTST "nConfig::basicText::set"
++#define CBTSM "nConfig::basicText::setMeta"
+ 
+ #define THROW_( I, S ) \
+       MULTILINE_MACRO_BEGIN() \
+@@ -313,6 +314,58 @@ namespace nConfig
+          }
+       }
+ 
++      /**
++       *
++       * Implementation class method.
++       *
++      **/
++      void setMeta
++      (
++         char const *   Item,
++         char const *   Rights,
++         char const *   Explanation,
++         long           MaxLength
++      )
++         throw( exception )
++      {
++         if( M_pOS ) *M_pOS << CBTSM " ..." << std::endl;
++         try
++         {
++            Config::access Access;
++            Access.Item = CORBA::string_dup( Item );
++            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
++            Config::description Description;
++            Description.Rights = CORBA::string_dup( Rights );
++            Description.Explanation = CORBA::string_dup( Explanation );
++            validProxy()->setMeta( Access, Description, MaxLength );
++            if( M_pOS ) *M_pOS << CBTSM "." << std::endl;
++         }
++         catch( Config::Node::noConfiguration & )
++         {
++            THROW_S( Item, CBTSM " - noConfiguration exception" );
++         }
++         catch( Config::Node::notAuthorized & )
++         {
++            THROW_( Item, CBTSM " - notAuthorized exception" );
++         }
++         catch( Config::Node::notFound & )
++         {
++            THROW_( Item, CBTSM " - notFound exception" );
++         }
++         catch( Config::Node::wrongParam & )
++         {
++            THROW_( Item, CBTSM " - wrongParam exception" );
++         }
++         catch( CORBA::Exception & )
++         {
++            THROW_S( Item, CBTSM " - CORBA::Exception" );
++         }
++         catch( ... )
++         {
++            THROW_( Item, CBTSM " - Unknown exception" );
++         }
++      }
++
+    private:
+ 
+       //! Default constructor - intentionally not implemented.
+@@ -423,6 +476,28 @@ namespace nConfig
+ 
+ 
+ 
++   /*
++    *
++    * Public method - see nConfigBasicText.hpp
++    *
++    */
++   void basicText::setMeta
++   (
++      char const *   Item,
++      char const *   Rights,
++      char const *   Explanation,
++      long           MaxLength
++   )
++      throw( exception )
++   {
++      M_Impl->setMeta( Item, Rights, Explanation, MaxLength );
++   }
++
++
++
++
++
++
+ }
+ 
+ 
+-- 
+2.41.0.windows.1
+

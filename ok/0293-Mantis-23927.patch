@@ -1,0 +1,419 @@
+From d2ff6f42b96e9e9196de6657e80cd838b92e3665 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 16 Jul 2012 15:14:35 +0000
+Subject: [PATCH 0293/1076] Mantis 23927
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@357 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/inc/mMainCommandLine.hpp     |  54 +---
+ .../Massai/cpp/Systools/makefile.mak          |   1 +
+ .../cpp/Systools/src/TestMainCommandline.cpp  |  32 +++
+ .../cpp/Systools/src/mMainCommandLine.cpp     | 253 ++++++++++++++++++
+ 4 files changed, 291 insertions(+), 49 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp b/SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp
+index 6a512193..0892d6f1 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -39,52 +39,14 @@ public:
+     * @param Line:      The command-line as single string.
+     *
+    **/
+-   explicit mMainCommandLine( char const * Line ) :
+-      M_Argv()
+-   {
+-      if( Line )
+-      {
+-         char C = *Line++;
+-         while( C )
+-         {
+-            std::string Str;
+-            while( C && ( C != ' ' ) )
+-            {
+-               Str += C;
+-               C = *Line++;
+-            }
+-            char * CStr = new char[Str.size() + 1];
+-            strcpy( CStr, Str.c_str() );
+-            M_Argv.push_back( CStr );
+-            if( C )
+-            {
+-               // Skip space
+-               C = *Line++;
+-            }
+-         }
+-      }
+-   }
++   explicit mMainCommandLine( char const * Line );
+ 
+    /**
+     *
+     * Destructor.
+     *
+    **/
+-   virtual ~mMainCommandLine() throw()
+-   {
+-      try
+-      {
+-         std::vector<char *>::iterator It = M_Argv.begin();
+-         while( It != M_Argv.end() )
+-         {
+-            delete[] *It;
+-            ++It;
+-         }
+-      }
+-      catch( ... )
+-      {
+-      }
+-   }
++   virtual ~mMainCommandLine() throw();
+ 
+    /**
+     *
+@@ -93,10 +55,7 @@ public:
+     * @return           Argument count.
+     *
+    **/
+-   int argc() const
+-   {
+-      return static_cast<int>( M_Argv.size() );
+-   }
++   int argc() const;
+ 
+    /**
+     *
+@@ -105,10 +64,7 @@ public:
+     * @return           Argument vector.
+     *
+    **/
+-   char const * const * argv() const
+-   {
+-      return &*M_Argv.begin();
+-   }
++   char const * const * argv() const;
+ 
+ private:
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 63f14e4c..ab751849 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -16,6 +16,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\matDaemonW32.obj \
+                         $(_OBJ)\matThreadW32.obj \
+                         $(_OBJ)\mEventSemW32.obj \
++                        $(_OBJ)\mMainCommandLine.obj \
+                         $(_OBJ)\mMutexSemW32.obj \
+                         $(_OBJ)\mSysDebugW32.obj \
+                         $(_OBJ)\mSysTimeW32.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp
+new file mode 100644
+index 00000000..355f8889
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp
+@@ -0,0 +1,32 @@
++#include "mMainCommandLine.hpp"
++
++#include <iostream>
++using namespace std;
++
++
++
++void analyze( char const * Line )
++{
++   mMainCommandLine const A( Line );
++   int const ArgC = A.argc();
++   char const * const * ArgV = A.argv();
++   cout << "analyze(" << Line << ")" << endl;
++   for( int I = 0; I < ArgC; ++I )
++   {
++      cout << "   argv[" << I << "]=<" << ArgV[I] << ">" << endl;
++   }
++   cout << endl;
++}
++
++
++
++int main()
++{
++   analyze( "aaaa bbb cc d" );
++   analyze( "\"a b c\" d e" );
++   analyze( "\"ab\\\"c\" \"\\\\\" d" );
++   analyze( "a\\\\\\b d\"e f\"g h" );
++   analyze( "a\\\\\\\"b c d" );
++   analyze( "a\\\\\\\\\"b c\" d e" );
++   return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp
+new file mode 100644
+index 00000000..f8cb7576
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp
+@@ -0,0 +1,253 @@
++/**
++ **************************************************************************
++ *
++ * @file mMainCommandLine.cpp
++ *
++ * Implements class mMainCommandLine.
++ *
++ * Please note: This implementation follows the "Microsoft way", please
++ * consult also "Parsing C Command-Line Arguments" in MSDN.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "mMainCommandLine.hpp"
++
++
++
++namespace
++{
++
++
++   /**
++    *
++    * Move the data from a source to a vector.
++    *
++    * @param Dst:               A vector of c_strings (argv style)
++    *
++    * @param Src:               A string reference.
++    *
++   **/
++   void appendMove( std::vector<char *> & Dst, std::string & Src )
++   {
++      if( !Src.empty() )
++      {
++         char * CStr = new char[Src.size() + 1];
++         strcpy( CStr, Src.c_str() );
++         Dst.push_back( CStr );
++         Src.clear();
++      }
++   }
++
++
++} // namespace
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++mMainCommandLine::mMainCommandLine( char const * Line ) :
++   M_Argv()
++{
++   if( Line )
++   {
++      int NumberEscape = 0;
++      std::string Str;
++      enum { S_Normal, S_NormalEscape, S_Quote, S_QuoteEscape } S =
++         S_Normal;
++      char C = *Line++;
++      while( C )
++      {
++         switch( S )
++         {
++         case S_Normal:
++            switch( C )
++            {
++            case ' ':
++            case '\t':
++               appendMove( M_Argv, Str );
++               break;
++            case '\"':
++               S = S_Quote;
++               break;
++            case '\\':
++               NumberEscape = 1;
++               S = S_NormalEscape;
++               break;
++            default:
++               Str += C;
++            }
++            break;
++         case S_NormalEscape:
++            switch( C )
++            {
++            case ' ':
++            case '\t':
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               appendMove( M_Argv, Str );
++               S = S_Normal;
++               break;
++            case '\"':
++               if( NumberEscape & 1 )
++               {
++                  NumberEscape -= 1;
++                  S = S_Normal;
++               }
++               else
++               {
++                  S = S_Quote;
++               }
++               NumberEscape /= 2;
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               if( S == S_Normal )
++               {
++                  Str += C;
++               }
++               break;
++            case '\\':
++               NumberEscape += 1;
++               break;
++            default:
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               Str += C;
++               S = S_Normal;
++            }
++            break;
++         case S_Quote:
++            switch( C )
++            {
++            case '\"':
++               S = S_Normal;
++               break;
++            case '\\':
++               NumberEscape = 1;
++               S = S_QuoteEscape;
++               break;
++            default:
++               Str += C;
++            }
++            break;
++         case S_QuoteEscape:
++            switch( C )
++            {
++            case ' ':
++            case '\t':
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               appendMove( M_Argv, Str );
++               S = S_Quote;
++               break;
++            case '\"':
++               if( NumberEscape & 1 )
++               {
++                  NumberEscape -= 1;
++                  S = S_Quote;
++               }
++               else
++               {
++                  S = S_Normal;
++               }
++               NumberEscape /= 2;
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               if( S == S_Quote )
++               {
++                  Str += C;
++               }
++               break;
++            case '\\':
++               NumberEscape += 1;
++               break;
++            default:
++               while( NumberEscape-- )
++               {
++                  Str += '\\';
++               }
++               Str += C;
++               S = S_Quote;
++            }
++            break;
++         }
++         C = *Line++;
++      }
++      appendMove( M_Argv, Str );
++   }
++}
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++mMainCommandLine::~mMainCommandLine() throw()
++{
++   try
++   {
++      std::vector<char *>::iterator It = M_Argv.begin();
++      while( It != M_Argv.end() )
++      {
++         delete[] *It;
++         ++It;
++      }
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++int mMainCommandLine::argc() const
++{
++   return static_cast<int>( M_Argv.size() );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++char const * const * mMainCommandLine::argv() const
++{
++   return &*M_Argv.begin();
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
++
+-- 
+2.41.0.windows.1
+

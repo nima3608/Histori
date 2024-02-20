@@ -1,0 +1,361 @@
+From c3a3db3cf7f0cad59f8b9dc61331542a50849020 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 25 Nov 2015 10:14:16 +0000
+Subject: [PATCH 0624/1000] MANTIS 39108 Mantis 39108: Fix traces in Windows
+ event log - Remove eventlog calls from matDaemonW32.cpp (format was broken).
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@928 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/matDaemonW32.cpp  | 134 +++++++++++++-----
+ 1 file changed, 100 insertions(+), 34 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+index 365a9d3d..edc5301b 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+@@ -12,20 +12,23 @@
+  **************************************************************************
+ **/
+ 
++// Exported
+ #include "systools/matDaemon.h"
+ 
++// SelfServiceCommon
+ #include "text/mArgScan.hpp"
+ #include "text/mMainCommandLine.hpp"
+ 
+-#include <iostream>
++// Compiler lib
+ #include <iostream>
+ #include <sstream>
+ 
++// Windows
+ #include <windows.h>
+ 
+ 
+ 
+-using namespace std;
++//#define USE_WINDOWS_EVENT_LOG
+ 
+ 
+ 
+@@ -103,28 +106,36 @@ namespace
+          mDaemon_log( oss.str().c_str() );
+          //
+          if( dwCurrentState == SERVICE_START_PENDING )
++         {
+              SState.dwControlsAccepted = SERVICE_ACCEPT_SHUTDOWN;
++         }
+          else
++         {
+              SState.dwControlsAccepted = SERVICE_ACCEPT_STOP
+                                        | SERVICE_ACCEPT_SHUTDOWN;
+-
++         }
+          SState.dwCurrentState = dwCurrentState;
+          SState.dwWin32ExitCode = dwWin32ExitCode;
+          SState.dwWaitHint = dwWaitHint;
+-         if
+-         (
+-            ( dwCurrentState == SERVICE_RUNNING ) ||
+-            ( dwCurrentState == SERVICE_STOPPED )
+-         )
++         if (
++               ( dwCurrentState == SERVICE_RUNNING ) ||
++               ( dwCurrentState == SERVICE_STOPPED )
++            )
++         {
+             SState.dwCheckPoint = 0;
++         }
+          else
++         {
+             SState.dwCheckPoint = dwCheckPoint++;
++         }
+          //
+          // Report the status of the service
+          // to the service control manager.
+          //
+          if( SetServiceStatus( SStateHdl, &SState ) )
++         {
+             return 0;
++         }
+          else
+          {
+             DWORD Err = GetLastError();
+@@ -231,10 +242,12 @@ namespace
+          );
+       if( LocalBuffer )
+       {
+-         static string Return;
++         static std::string Return;
+          // supplied buffer is not long enough
+          if( !dwRet )
++         {
+             return "";
++         }
+          else
+          {
+             Return = " - ";
+@@ -244,7 +257,9 @@ namespace
+          return Return.c_str();
+       }
+       else
++      {
+          return "";
++      }
+    }
+ 
+ 
+@@ -263,7 +278,7 @@ namespace
+       )
+    {
+       TCHAR PathAndArgs[512];
+-      string Dependencies;
++      std::string Dependencies;
+       char const * Depsies = 0;
+       if( Dependency )
+       {
+@@ -278,11 +293,11 @@ namespace
+       }
+       if( !GetModuleFileName( NULL, PathAndArgs, sizeof(PathAndArgs) ) )
+       {
+-         cout
++         std::cout
+             << "Unable to install "
+             << mDaemon_getDisplayname()
+             << lastError()
+-            << endl;
++            << std::endl;
+          return 1;
+       }
+       if( Parameters )
+@@ -292,7 +307,7 @@ namespace
+          length += 1;
+          strncat( PathAndArgs, Parameters, sizeof(PathAndArgs) - length );
+       }
+-      cout << "Dependencies:";
++      std::cout << "Dependencies:";
+       if( Depsies )
+       {
+          char const * DeppF = Depsies;
+@@ -303,15 +318,15 @@ namespace
+             {
+                ++DeppT;
+             }
+-            cout << " " << DeppF;
++            std::cout << " " << DeppF;
+             DeppF = DeppT + 1;
+          }
+       }
+       else
+       {
+-         cout << " (none)";
++         std::cout << " (none)";
+       }
+-      cout << endl;
++      std::cout << std::endl;
+       SC_HANDLE SCManagerHdl =
+          OpenSCManager
+          (
+@@ -354,19 +369,19 @@ namespace
+             );
+          if( ServiceHdl )
+          {
+-            cout << mDaemon_getDisplayname() << " installed."
+-                 << endl;
++            std::cout << mDaemon_getDisplayname() << " installed."
++                      << std::endl;
+             CloseServiceHandle( ServiceHdl );
+             return 0;
+          }
+          else
+          {
+-            cout << "CreateService" << lastError() << endl;
++            std::cout << "CreateService" << lastError() << std::endl;
+          }
+          CloseServiceHandle( SCManagerHdl );
+       }
+       else
+-         cout << "OpenSCManager" << lastError() << endl;
++         std::cout << "OpenSCManager" << lastError() << std::endl;
+       return 1;
+    }
+ 
+@@ -408,39 +423,51 @@ namespace
+                )
+             )
+             {
+-               cout << "Stopping " << mDaemon_getDisplayname() << endl;
++               std::cout << "Stopping " << mDaemon_getDisplayname()
++                         << std::endl;
+                Sleep( 1000 );
+                bool More = true;
+                while( More && QueryServiceStatus( ServiceHdl, &SState ) )
+                {
+                   if( SState.dwCurrentState == SERVICE_STOP_PENDING )
+                   {
+-                     cout << "." << flush;
++                     std::cout << "." << std::flush;
+                      Sleep( 1000 );
+                   }
+                   else
++                  {
+                      More = false;
++                  }
+                }
+                if( SState.dwCurrentState == SERVICE_STOPPED )
+-                  cout << mDaemon_getDisplayname() << " stopped." << endl;
++               {
++                  std::cout << mDaemon_getDisplayname() << " stopped."
++                            << std::endl;
++               }
+                else
+-                  cout << mDaemon_getDisplayname()
+-                       << " stop failed."
+-                       << endl;
++               {
++                  std::cout << mDaemon_getDisplayname() << " stop failed."
++                            << std::endl;
++               }
+             }
+             // now remove the service
+             if( DeleteService( ServiceHdl ) )
+-               cout << mDaemon_getDisplayname() << " removed." << endl;
++            {
++               std::cout << mDaemon_getDisplayname() << " removed."
++                         << std::endl;
++            }
+             else
+-               cout << "DeleteService" << lastError() << endl;
++            {
++               std::cout << "DeleteService" << lastError() << std::endl;
++            }
+             CloseServiceHandle( ServiceHdl );
+          }
+          else
+-            cout << "OpenService" << lastError() << endl;
++            std::cout << "OpenService" << lastError() << std::endl;
+          CloseServiceHandle( SCManagerHdl );
+       }
+       else
+-         cout << "OpenSCManager" << lastError() << endl;
++         std::cout << "OpenSCManager" << lastError() << std::endl;
+       return 0;
+    }
+ 
+@@ -464,7 +491,9 @@ namespace
+             service_ctrl
+          );
+       if( !SStateHdl )
++      {
+          return;
++      }
+ 
+       //
+       // SERVICE_STATUS members that dont change in example
+@@ -518,24 +547,25 @@ namespace
+       argScan Arg( argc, argv );
+       if( Arg.help() )
+       {
+-         cout << "Usage: "
++         std::cout << "Usage: "
+               << argv[0]
+               << " [ -install [-autostart] [-dep:<dependency>]"
+                  " [-param:<parameters>] | -deinstall | -normal ";
+          if( mDaemon_help() )
+          {
+-            cout << "<parameters> ]\n"
++            std::cout << "<parameters> ]\n"
+                  << "       <parameters> = "
+-                 << mDaemon_help() << endl;
++                 << mDaemon_help() << std::endl;
+          }
+          else
+          {
+-            cout << "]" << endl;
++            std::cout << "]" << std::endl;
+          }
+          return 0;
+       }
+ 
+       if( Arg.option( "INSTALL" ) )
++      {
+          return install
+                   (
+                      Arg.option( "DEP" ),
+@@ -543,9 +573,12 @@ namespace
+                      Interactive,
+                      Arg.option( "PARAM" )
+                   );
++      }
+ 
+       if( Arg.option( "DEINSTALL" ) )
++      {
+          return deinstall();
++      }
+ 
+       if( Arg.option( "CONSOLE" ) ||
+           Arg.option( "NORMAL" ) )
+@@ -553,6 +586,7 @@ namespace
+          SetConsoleCtrlHandler( console_ctrl, TRUE );
+          return mDaemon_main( argc, argv );
+       }
++
+       //
+       // Neither "normal", nor "install/deinstall"
+       // -> We are a service
+@@ -627,10 +661,12 @@ int mDaemon_indReady( unsigned long mSec )
+  * (see matDaemon.h)
+  *
+ **/
++#ifdef USE_WINDOWS_EVENT_LOG
+ void mDaemon_log( char const * Data )
+ {
+    if( IsService )
+    {
++#if 0
+       //
+       // Write to event log
+       //
+@@ -654,8 +690,38 @@ void mDaemon_log( char const * Data )
+          );
+          DeregisterEventSource(hEventSource);
+       }
++#else
++
++   const char * custom_log_name( mDaemon_getDisplayname() );
++
++   // create registry keys as described on MSDN
++
++   // http://msdn2.microsoft.com/en-us/library/aa363648.aspx
++
++   HANDLE event_log(::RegisterEventSource( NULL, custom_log_name ) );
++
++   ::ReportEvent
++      (
++         event_log,
++         EVENTLOG_SUCCESS,
++         0,
++         0,
++         NULL,
++         1,
++         0,
++         &Data,
++         NULL
++      );
++
++
++#endif
+    }
+ }
++#else // #ifdef USE_WINDOWS_EVENT_LOG
++void mDaemon_log( char const * )
++{
++}
++#endif // #ifdef USE_WINDOWS_EVENT_LOG
+ 
+ 
+ 
+-- 
+2.41.0.windows.1
+

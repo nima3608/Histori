@@ -1,0 +1,302 @@
+From d014f1a3a641856ecc8c5be91af7083a9d9c824b Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 27 Aug 2012 11:07:33 +0000
+Subject: [PATCH 0336/1077] mcorba.lib, mcorbas.lib V1.0.6.19 23.08.2012
+ bugfix, Mantis:24158 call ACE::init, ACE::fini around use of ORB_init,
+ ORB::destroy bugfix, use correct POA for servant deactivation bugfix, fixed
+ reading port after hostname in configuration from CORBA.SERVANTS.*
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@402 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/MassaiCorba/test/makefile.mak  |  34 +++++
+ .../MassaiCorba/test/src/testcase4_srv.cpp    | 144 ++++++++++++++++++
+ .../MassaiCorba/test/src/testcase5_srv.cpp    |  82 ++++++++++
+ 3 files changed, 260 insertions(+)
+ create mode 100644 SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase4_srv.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/makefile.mak b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/makefile.mak
+index afe87155..94633935 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/makefile.mak
+@@ -104,5 +104,39 @@ MY_BIN5_USER_LIBS = \
+ MY_BIN5_LINKLIBS = \
+     $(STDLINKLIBS)
+ 
++######################################################################
++
++MY_BIN6 = \
++    $(_BIN)\mCorba_testcase4_srv.exe
++
++MY_BIN6_OBJS = \
++    $(_OBJ)\testcase4_srv.obj \
++    $(_OBJ)\test_skel.obj \
++    $(_OBJ)\test.obj \
++    $(_OBJ)\testcase_common.obj
++
++MY_BIN6_USER_LIBS = \
++    $(STDUSERLIBS)
++
++MY_BIN6_LINKLIBS = \
++    $(STDLINKLIBS)
++
++######################################################################
++
++MY_BIN7 = \
++    $(_BIN)\mCorba_testcase5_srv.exe
++
++MY_BIN7_OBJS = \
++    $(_OBJ)\testcase5_srv.obj \
++    $(_OBJ)\test_skel.obj \
++    $(_OBJ)\test.obj \
++    $(_OBJ)\testcase_common.obj
++
++MY_BIN7_USER_LIBS = \
++    $(STDUSERLIBS)
++
++MY_BIN7_LINKLIBS = \
++    $(STDLINKLIBS)
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase4_srv.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase4_srv.cpp
+new file mode 100644
+index 00000000..b2dfded1
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase4_srv.cpp
+@@ -0,0 +1,144 @@
++//---------------------------------------------------------------------------
++//
++//  file:       testsvr.cpp
++//
++//  purpose:
++//
++//  date:       21.11.2001, 11:35
++//
++//  author:     Materna Information & Communications (AGe)
++//
++//---------------------------------------------------------------------------
++
++// #define ACE_DOESNT_DEFINE_MAIN
++
++#include <iostream>
++#include "testcase_common.h"
++
++#include "tao/corba.h"
++#include "tao/portableserver/PortableServer.h"
++#include "ace/String_Base.h"
++#include "tao/IORTable/IORTable.h"
++#include "sysTools/mSysProcessTerminate.h"
++#include "tools/localtrace.h"
++#include "tools/TraceLocal.h"
++#include "sysTools/mSysThread.hpp"
++#include "systools/mSysException.hpp"
++#include "ace/Object_Manager.h"
++
++
++using namespace massaiCorba;
++using namespace mSysProcessTerminate;
++using namespace MASSAI::localtrace;
++using mSysException::standardException;
++
++namespace
++{
++  class ORBProcessing: public mSysThread::thread
++  {
++    public:
++      ORBProcessing(const std::string& id, CORBA::ORB_ptr orb);
++
++    private:
++      void function();
++
++      std::string m_id;
++      CORBA::ORB_ptr m_orb;
++  };
++
++  ORBProcessing::ORBProcessing(const std::string& id, CORBA::ORB_ptr orb):
++    thread(0),
++    m_id(id),
++    m_orb(orb)
++  {}
++
++  void ORBProcessing::function()
++  {
++    writeTrace(BasicRuntime_HERE,"ORB (%s) thread started", m_id.c_str());
++    if(m_orb != 0)
++    {
++      standardException Guard;
++      try
++      {
++        m_orb->run();
++      }
++      catch(const CORBA::SystemException& e)
++      {
++        writeTrace(MajorError_HERE,"ORB (%s): CORBA::SystemException: %s", m_id.c_str(), e._info().c_str());
++      }
++      catch(const std::exception& e)
++      {
++        writeTrace(MajorError_HERE,"ORB (%s): exception: (%s)", m_id.c_str(), e.what());
++      }
++      catch(const char* e)
++      {
++        writeTrace(MajorError_HERE,"ORB (%s): exception: (%s)", m_id.c_str(), e);
++      }
++      catch(...)
++      {
++        writeTrace(MajorError_HERE,"ORB (%s): unknown exception", m_id.c_str());
++      }
++    }
++    writeTrace(BasicRuntime_HERE,"ORB (%s) thread terminated", m_id.c_str());
++  }
++}
++
++int main(int argc, char** argv)
++{
++  MASSAI::trace::TraceLocal trc(argv[0]);
++  Materna::MSSD::eventSemaphore terminate;
++  setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
++  CORBA::ORB_var orb;
++  {
++    ACE_OS_Object_Manager ace_os_object_manager;
++    ACE_Object_Manager ace_object_manager;
++    orb = CORBA::ORB_init(argc, argv);
++    CORBA::Object_var poaObj = orb->resolve_initial_references("RootPOA");
++    PortableServer::POA_var rootPoa = PortableServer::POA::_narrow(poaObj);
++    PortableServer::POAManager_var poaManager = rootPoa->the_POAManager();
++    // create new POA
++    CORBA::PolicyList policies;
++    policies.length(3);
++    policies[0]= rootPoa->create_lifespan_policy(PortableServer::PERSISTENT);
++    policies[1]= rootPoa->create_id_assignment_policy(PortableServer::USER_ID);
++    policies[2]= rootPoa->create_implicit_activation_policy(PortableServer::NO_IMPLICIT_ACTIVATION);
++
++    PortableServer::POA_var poa = rootPoa->create_POA("POA", poaManager, policies);
++    // Create implementation object
++    TestServant* servantImpl = new TestServant("TestServant");
++    PortableServer::ServantBase_var servant = servantImpl;
++    //  Activate the NAMED servant
++    PortableServer::ObjectId_var  objID = PortableServer::string_to_ObjectId("TestServant");
++    poa->activate_object_with_id(objID, servantImpl);
++    // Turn your object reference into an IOR string
++    CORBA::String_var ior = orb->object_to_string(servantImpl->_this());
++    // Get a reference to the IOR Table
++    CORBA::Object_var tableObj = orb->resolve_initial_references("IORTable");
++    IORTable::Table_var table = IORTable::Table::_narrow(tableObj.in());
++    // Bind your stringified IOR in the IOR Table
++    table->bind("TestServant", ior.in());
++    // Run implementation
++    poaManager->activate();
++  }
++  ORBProcessing processor("processor", orb);
++  processor.start();
++  terminate.wait();
++  try
++  {
++    orb->shutdown(0);  // returns threads from run() method.
++  }
++  catch(...)
++  {
++    writeTrace(BasicRuntime_HERE, "ORB shutdown failed");
++  }
++  processor.waitTerminated();
++  try
++  {
++    orb->destroy(); // destroy the ORB
++  }
++  catch(...)
++  {
++    writeTrace(BasicRuntime_HERE, "ORB destroy failed");
++  }
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
+new file mode 100644
+index 00000000..c530a975
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
+@@ -0,0 +1,82 @@
++// testcase1
++#include "massaiCorba/corbasrvr.h"
++#include "sysTools/mSysProcessTerminate.h"
++#include "test.h"
++#include "test_skel.h"
++#include "testcase_common.h"
++#include "text/mArgScan.hpp"
++#include "tools/localtrace.h"
++#include "tools/TraceLocal.h"
++#include <iostream>
++#include <map>
++
++using namespace CorbaTest;
++using namespace mSysProcessTerminate;
++using namespace MASSAI::localtrace;
++using namespace massaiCorba;
++
++namespace
++{
++  void printUsage(int argc, char** argv, char* error= 0)
++  {
++    std::cout << std::endl;
++    std::cout << argv[0];
++    std::cout << " [-host:<servantHost, default localhost>]";
++    std::cout << " [-port:<servantPort, default 10100>]";
++    std::cout << " [-servant:<servantName, default TestServant>]";
++    std::cout << " [-threads:<number of servant processing threads, default 5>]";
++    std::cout << std::endl;
++    if(error)
++    {
++      std::cout << error << std::endl;
++    }
++    else
++    {
++      std::cout << "testservant" << std::endl;
++    }
++  }
++}
++
++int main(int argc, char** argv)
++{
++  int result = 0;
++  argScan args(argc, argv);
++  std::string host= option(args, "HOST", "localhost");
++  std::string servant= option(args, "SERVANT", "TestServant");
++  int port = args.optionInteger("PORT", 10100);
++  int threadcount = args.optionInteger("THREADS", 5);
++  if(args.help())
++  {
++    printUsage(argc, argv);
++    result= 1;
++  }
++  else
++  {
++    openTrace(argv[0]);
++    MASSAI::trace::TraceLocal trc(argv[0]);
++    //Materna::MSSD::eventSemaphore terminate;
++    //setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
++    massaiCorba::setLevel(9);
++    try
++    {
++      writeTrace(BasicRuntime_HERE, "create servant (%s:%d/%s); threads(%d)", host.c_str(), port, servant.c_str(), threadcount);
++      TestServant srvnt("S1");
++      corbaServantEx<TestServant> corbaSrvnt(threadcount, srvnt, servant.c_str(), host.c_str(), port);
++      srvnt.setORB(corbaSrvnt.orb());
++      //terminate.wait();
++      writeTraceText(MajorError_HERE, "terminate");
++    }
++    catch(const CORBA::Exception& ex)
++    {
++      writeTrace(MajorError_HERE, "create servant failed (%s)", ex._message());
++    }
++    catch(...)
++    {
++      writeTraceText(MajorError_HERE, "create servant failed");
++    }
++    massaiCorba::cleanup();
++    // resetShutdownHook();
++    closeTrace();
++  }
++  return result;
++}
+-- 
+2.41.0.windows.1
+

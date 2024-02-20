@@ -1,0 +1,101 @@
+From dae8419e4485b62ef86f577568ca6dd3f0bffe60 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Mon, 25 Apr 2016 12:11:03 +0000
+Subject: [PATCH 202/462] Build: Buildenvironment Release creation copy script
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@309 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/copy_release.pl             | 81 +++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/copy_release.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/copy_release.pl b/SelfServiceBuild/Build/scripts/copy_release.pl
+new file mode 100644
+index 0000000..e4312ac
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/copy_release.pl
+@@ -0,0 +1,81 @@
++#!/usr/bin/perl -w
++#
++
++use strict;
++our $VERSION="0.0.0.1";
++
++use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
++use File::Spec;
++use File::Copy::Recursive qw(fcopy dircopy);
++use File::Path qw(make_path);
++use Getopt::Long;
++use DateTime;
++
++my $destPath = "";
++my $sourceRepoPath = "";
++my $version = "0.0.0.0";
++my $kidlist = "kidlist.txt";
++
++my $outputSubPath = "\\SelfServiceBuild\\Build\\output";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("destpath=s"   => \$destPath,
++            "sourcepath=s" => \$sourceRepoPath,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count < 2 or $argv_count > 2 or ($destPath eq "") or $help )
++{
++  print STDERR "usage: $0 --destpath=\"PATH\" --sourcepath=\"PATH\" \n" ;
++  exit 0;
++}
++
++if (! -e $sourceRepoPath)
++{
++  die "$sourceRepoPath does not exist!\n";
++}
++if (! -e $destPath)
++{
++  print "$destPath does not exist but will be created\n";
++}  
++
++make_path(File::Spec->catdir($destPath,"bin"),File::Spec->catdir($destPath,"dll"),File::Spec->catdir($destPath,"installer"),File::Spec->catdir($destPath,"jar"),
++          File::Spec->catdir($destPath,"lib"),File::Spec->catdir($destPath,"makelog"),File::Spec->catdir($destPath,"tools")) or die "Failed to create Subfolders under $destPath $!";
++
++fcopy(File::Spec->catdir($sourceRepoPath,$outputSubPath,"KID-List.txt"),$destPath) or die "Failed to copy KID-List.txt $!";
++for my $file (glob File::Spec->catfile($sourceRepoPath,$outputSubPath,"installer","*.msi"))
++{
++    fcopy($file,File::Spec->catdir($destPath,"installer")) or die "Failed to copy $file $!";
++}
++for my $file (glob File::Spec->catfile($sourceRepoPath,$outputSubPath,"tools","MIPS*.zip"))
++{
++    fcopy($file,File::Spec->catdir($destPath,"tools")) or die "Failed to copy $file $!";
++}
++
++my $binzip = Archive::Zip->new();
++$binzip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"bin"), '', '\.exe$' );
++die "zip write error $!" unless ( $binzip->writeToFileNamed(File::Spec->catfile($destPath,"bin", "bin.zip")) == AZ_OK );
++
++my $dllzip = Archive::Zip->new();
++$dllzip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"dll"), '', '\.dll$|\.x32$' );
++die "zip write error $!" unless ( $dllzip->writeToFileNamed(File::Spec->catfile($destPath,"dll", "dll.zip")) == AZ_OK );
++
++my $jarzip = Archive::Zip->new();
++$jarzip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"jar"), '', '\.jar$' );
++die "zip write error $!" unless ( $jarzip->writeToFileNamed(File::Spec->catfile($destPath,"jar", "jar.zip")) == AZ_OK );
++
++my $libzip = Archive::Zip->new();
++$libzip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"lib"), '', '\.lib$' );
++die "zip write error $!" unless ( $libzip->writeToFileNamed(File::Spec->catfile($destPath,"lib", "lib.zip")) == AZ_OK );
++
++my $makelogzip = Archive::Zip->new();
++$makelogzip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"makelog"), '', '\.txt$' );
++die "zip write error $!" unless ( $makelogzip->writeToFileNamed(File::Spec->catfile($destPath,"makelog", "makelog.zip")) == AZ_OK );
++
++my $toolszip = Archive::Zip->new();
++$toolszip->addTreeMatching( File::Spec->catdir($sourceRepoPath,$outputSubPath,"tools","mibs"), '', '\.mib$' );
++die "zip write error $!" unless ( $toolszip->writeToFileNamed(File::Spec->catfile($destPath,"tools", "mibs.zip")) == AZ_OK );
++
++exit 0;
+-- 
+2.41.0.windows.1
+

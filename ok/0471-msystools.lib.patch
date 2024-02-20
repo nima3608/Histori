@@ -1,0 +1,452 @@
+From 6d9bf686132b97a29f104785cee71dac736723fb Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 9 Sep 2013 18:07:25 +0000
+Subject: [PATCH 0471/1077] msystools.lib V1.0.0.9 Mantis 0028873: GPPDev:
+ Custom KPM150H RFID rename rfidUSBPrinter to mSysUSBPrinter added functions
+ for calculation in mSysTime
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@575 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysTime.h        |  12 +-
+ .../{rfidUSBPrinter.h => mSysUSBPrinter.h}    |   6 +-
+ .../Massai/cpp/Systools/inc/mSysTimeW32.h     |  10 ++
+ .../Massai/cpp/Systools/makefile.mak          |   2 +-
+ .../Massai/cpp/Systools/src/local_def.cpp     |   3 +-
+ .../Massai/cpp/Systools/src/mSysTimeW32.cpp   | 122 ++++++++++++++++++
+ ...idUSBPrinter.cpp => mSysUSBPrinterW32.cpp} |  66 ++--------
+ 7 files changed, 162 insertions(+), 59 deletions(-)
+ rename SelfServiceCommon/Interfaces/inc/systools/{rfidUSBPrinter.h => mSysUSBPrinter.h} (71%)
+ rename SelfServiceCommon/Massai/cpp/Systools/src/{rfidUSBPrinter.cpp => mSysUSBPrinterW32.cpp} (71%)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+index c4301cbf..25b5a559 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+@@ -8,7 +8,8 @@
+ 
+ namespace mSysTime
+ {
+-  class Timestamp {
++  class Timestamp
++  {
+     public:
+       int year;
+       int month;
+@@ -18,6 +19,9 @@ namespace mSysTime
+       int minute;
+       int second;
+       int milliseconds;
++
++      int julianDay() const;
++      bool isLeapYear() const;
+   };
+ 
+   class Duration
+@@ -31,6 +35,7 @@ namespace mSysTime
+   };
+ 
+   Timestamp getTimestamp();
++
+   unsigned long getUpTime();
+   Duration getDuration(unsigned long time_ms);
+   void sleep(unsigned long time_ms);
+@@ -48,6 +53,11 @@ namespace mSysTime
+   bool operator>=(const Duration& left, const Duration& right);
+   bool operator==(const Duration& left, const Duration& right);
+   bool operator!=(const Duration& left, const Duration& right);
++
++  Duration  operator-(const Timestamp& left, const Timestamp& right);
++  Duration  operator-(const Duration&  left, const Duration&  right);
++  Duration  operator+(const Duration&  left, const Duration&  right);
++  Timestamp operator+(const Timestamp& left, const Duration&  right);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+similarity index 71%
+rename from SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h
+rename to SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+index 7cfe13fe..2a98123f 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/rfidUSBPrinter.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+@@ -1,7 +1,7 @@
+ // USB; printer helper functions
+ 
+-#ifndef RFID_USBPRINTER_H_INCLUDED
+-#define RFID_USBPRINTER_H_INCLUDED
++#ifndef MSYS_USBPRINTER_H_INCLUDED
++#define MSYS_USBPRINTER_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+ #pragma message("including: " __FILE__)
+ #endif
+@@ -9,7 +9,7 @@
+ #include <string>
+ #include "tools/TraceInterface.h"
+ 
+-namespace mGPPCustom
++namespace mSysUSBPrinter
+ {
+   std::string getUSBPrinterDevice(const std::string& printerPort, MASSAI::trace::TraceInterface& trc);
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
+index 2d5e4497..7ecacde7 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
+@@ -16,6 +16,16 @@ namespace mSysTime
+   Duration getDuration(const FILETIME& filetime);
+   Timestamp getTimestamp(const FILETIME& filetime);
+   Timestamp getTimestamp(const SYSTEMTIME& systemtime);
++  SYSTEMTIME getSystemTime(const Timestamp& timestamp);
++  FILETIME getFileTime(const Timestamp& timestamp);
++  FILETIME getFileTime(const SYSTEMTIME& systemtime);
++  FILETIME getFileTime(const ULARGE_INTEGER& largeInteger);
++  FILETIME getFileTime(const Duration& duration);
++  ULARGE_INTEGER getLargeInteger(const FILETIME& filetime);
++
++  FILETIME operator-(const SYSTEMTIME& left, const SYSTEMTIME& right);
++  FILETIME operator-(const FILETIME& left, const FILETIME& right);
++  FILETIME operator+(const FILETIME& left, const FILETIME& right);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index ff3ec155..ef5578d6 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -47,7 +47,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysEventW32.obj \
+ #                        $(_OBJ)\mSysHotKeyW32.obj \
+                         $(_OBJ)\mSysIOW32.obj \
+-                        $(_OBJ)\rfidUSBPrinter.obj \
++                        $(_OBJ)\mSysUSBPrinterW32.obj \
+ 
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index bc9c3a59..0485b5d0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -9,7 +9,8 @@ VERSION_ID_DT(systools, 1, 0, 0, 9);
+ \li V1.0.0.9
+ \li Mantis 0028873: GPPDev: Custom KPM150H RFID
+ added mSysIO (timed io)
+-added rfidUSBPrinter (find USB device by printe port name)
++added mSysUSBPrinter (find USB device by printer port name)
++added functions for calculation in mSysTime
+ 
+ \date 15.08.2013
+ \li V1.0.0.8
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+index 3f776890..e7f32b9d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+@@ -5,8 +5,34 @@
+ 
+ #pragma warning(disable:4244)
+ 
++namespace
++{
++  int julianDays[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365};
++}
++
+ namespace mSysTime
+ {
++  int Timestamp::julianDay() const
++  {
++    int result= 0;
++    int month_ = (month - 1) % 12;
++    if(month_ < 2 || !isLeapYear())
++    {
++      result= julianDays[month_] + day;
++    }
++    else
++    {
++      result= julianDays[month_] + day + 1;
++    }
++    return result;
++  }
++
++  bool Timestamp::isLeapYear() const
++  {
++    return (year % 4 == 0) && (year % 100 != 0)
++       || (year % 400 == 0);
++  }
++
+   Timestamp getTimestamp()
+   {
+     SYSTEMTIME systemtime;
+@@ -67,6 +93,64 @@ namespace mSysTime
+     return result;
+   }
+ 
++  SYSTEMTIME getSystemTime(const Timestamp& timestamp)
++  {
++    SYSTEMTIME result;
++    result.wYear = timestamp.year;
++    result.wMonth = timestamp.month;
++    result.wDayOfWeek = timestamp.dayOfWeek;
++    result.wDay = timestamp.day;
++    result.wHour = timestamp.hour;
++    result.wMinute = timestamp.minute;
++    result.wSecond = timestamp.second;
++    result.wMilliseconds = timestamp.milliseconds;
++    return result;
++  }
++
++  FILETIME getFileTime(const Timestamp& timestamp)
++  {
++    return getFileTime(getSystemTime(timestamp));
++  }
++
++  FILETIME getFileTime(const SYSTEMTIME& systemtime)
++  {
++    FILETIME result;
++    SystemTimeToFileTime(&systemtime, &result);
++    return result;
++  }
++
++  FILETIME getFileTime(const ULARGE_INTEGER& largeInteger)
++  {
++    FILETIME result;
++    result.dwLowDateTime = largeInteger.LowPart;
++    result.dwHighDateTime = largeInteger.HighPart;
++    return result;
++  }
++
++  FILETIME getFileTime(const Duration& duration)
++  {
++    ULARGE_INTEGER result;
++    result.QuadPart= duration.days;
++    result.QuadPart*=24;
++    result.QuadPart+= duration.hours;
++    result.QuadPart*= 60;
++    result.QuadPart+= duration.minutes;
++    result.QuadPart*= 60;
++    result.QuadPart+= duration.seconds;
++    result.QuadPart*= 1000;
++    result.QuadPart+= duration.milliseconds;
++    result.QuadPart*= 10000;
++    return getFileTime(result);
++  }
++
++  ULARGE_INTEGER getLargeInteger(const FILETIME& filetime)
++  {
++    ULARGE_INTEGER result;
++    result.LowPart = filetime.dwLowDateTime;
++    result.HighPart = filetime.dwHighDateTime;
++    return result;
++  }
++
+   unsigned long getUpTime()
+   {
+     return GetTickCount();
+@@ -167,4 +251,42 @@ namespace mSysTime
+     return !(left == right);
+   }
+ 
++  FILETIME operator-(const SYSTEMTIME& left, const SYSTEMTIME& right)
++  {
++    return getFileTime(left) - getFileTime(right);
++  }
++
++  FILETIME operator-(const FILETIME& left, const FILETIME& right)
++  {
++    ULARGE_INTEGER result = getLargeInteger(left);
++    result.QuadPart-= getLargeInteger(right).QuadPart;
++    return getFileTime(result);
++  }
++
++  FILETIME operator+(const FILETIME& left, const FILETIME& right)
++  {
++    ULARGE_INTEGER result = getLargeInteger(left);
++    result.QuadPart+= getLargeInteger(right).QuadPart;
++    return getFileTime(result);
++  }
++
++  Duration operator-(const Timestamp& left, const Timestamp& right)
++  {
++    return getDuration(getSystemTime(left) - getSystemTime(right));
++  }
++
++  Duration operator-(const Duration& left, const Duration& right)
++  {
++    return getDuration(getFileTime(left) - getFileTime(right));
++  }
++
++  Duration operator+(const Duration& left, const Duration& right)
++  {
++    return getDuration(getFileTime(left) + getFileTime(right));
++  }
++
++  Timestamp operator+(const Timestamp& left, const Duration& right)
++  {
++    return getTimestamp(getFileTime(left) + getFileTime(right));
++  }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+similarity index 71%
+rename from SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp
+rename to SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+index 5b0211df..97e6acdb 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/rfidUSBPrinter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+@@ -1,6 +1,7 @@
+ // USB; printer helper functions
+ 
+-#include "systools/rfidUSBPrinter.h"
++#include "systools/mSysUSBPrinter.h"
++#include "mSysErrorW32.h"
+ #include <windows.h>
+ #include <setupapi.h>
+ 
+@@ -13,11 +14,6 @@ namespace
+   const char* usbPrintPortNumber = "Port Number";
+   const char* usbPrintBaseName = "Base Name";
+ 
+-  std::string getErrorText(unsigned long errorCode);
+-  void traceLastError(TraceInterface& trc,
+-    long level, const char* file, short line, const char* function,
+-    const char* where, unsigned long errorCode);
+-
+   bool startsWith(const std::string& text, const std::string& prefix);
+ 
+ 
+@@ -50,42 +46,6 @@ namespace
+ 
+ namespace
+ {
+-  std::string getErrorText(unsigned long errorCode)
+-  {
+-    std::string result;
+-    if(errorCode != 0)
+-    {
+-      LPVOID buf;
+-      FormatMessage
+-      (
+-        FORMAT_MESSAGE_ALLOCATE_BUFFER
+-          | FORMAT_MESSAGE_FROM_SYSTEM
+-          | FORMAT_MESSAGE_IGNORE_INSERTS,
+-        0,
+-        errorCode & 0xFFFF,
+-        0,
+-        reinterpret_cast<LPTSTR>(&buf),
+-        0,
+-        0
+-      );
+-      if(buf != 0)
+-      {
+-        result= reinterpret_cast<const char*>(buf);
+-      }
+-      LocalFree(buf);
+-    }
+-    return result;
+-  }
+-
+-  void traceLastError(TraceInterface& trc,
+-    long level, const char* file, short line, const char* function,
+-    const char* where, unsigned long errorCode)
+-  {
+-    trc.writeTrace(level, file, line, function,
+-      "(%.200s) failed: (%d), (%.1000s)",
+-      where, errorCode, getErrorText(errorCode).c_str());
+-  }
+-
+   bool startsWith(const std::string& text, const std::string& prefix)
+   {
+     return text.compare(0, prefix.size(), prefix) == 0;
+@@ -132,7 +92,7 @@ namespace
+     DWORD resultCode = GetLastError();
+     if(resultCode != ERROR_INSUFFICIENT_BUFFER)
+     {
+-      traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", resultCode);
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", resultCode);
+     }
+     else if(devDataDetailSize == 0)
+     {
+@@ -147,7 +107,7 @@ namespace
+       devInfoData.cbSize = sizeof(devInfoData);
+       if(!SetupDiGetDeviceInterfaceDetail(m_devInfo, &m_devData, &devDataDetail, devDataDetailSize, &devDataDetailSize, &devInfoData))
+       {
+-        traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetDeviceInterfaceDetail", GetLastError());
+       }
+       else
+       {
+@@ -185,7 +145,7 @@ namespace
+     LONG resultCode = RegQueryValueEx(m_devKey, usbPrintPortNumber, 0, 0, reinterpret_cast<LPBYTE>(&result), &portSize);
+     if(resultCode != ERROR_SUCCESS)
+     {
+-      traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
+     }
+     return result;
+   }
+@@ -198,7 +158,7 @@ namespace
+     LONG resultCode = RegQueryValueEx(m_devKey, usbPrintBaseName, 0, 0, reinterpret_cast<LPBYTE>(buffer), &bufferSize);
+     if(resultCode != ERROR_SUCCESS)
+     {
+-      traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
++      mSysError::traceLastError(m_trc, MajorError_HERE, "RegQueryValue", resultCode);
+     }
+     else if(bufferSize > m_printerPort.size())
+     {
+@@ -218,7 +178,7 @@ namespace
+     m_devKey = SetupDiOpenDeviceInterfaceRegKey(m_devInfo, &m_devData, 0, KEY_QUERY_VALUE);
+     if(m_devKey == INVALID_HANDLE_VALUE)
+     {
+-      traceLastError(m_trc, MajorError_HERE, "SetupDiOpenRegKey", GetLastError());
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiOpenRegKey", GetLastError());
+       result = false;
+     }
+     return result;
+@@ -231,7 +191,7 @@ namespace
+       LONG resultCode = RegCloseKey(m_devKey);
+       if(resultCode != ERROR_SUCCESS)
+       {
+-        traceLastError(m_trc, MajorError_HERE, "RegCloseKey", resultCode);
++        mSysError::traceLastError(m_trc, MajorError_HERE, "RegCloseKey", resultCode);
+       }
+     }
+   }
+@@ -245,11 +205,11 @@ namespace
+       DWORD resultCode = GetLastError();
+       if(resultCode == ERROR_NO_MORE_ITEMS)
+       {
+-        traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
++        mSysError::traceLastError(m_trc, BasicRuntime_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
+       }
+       else
+       {
+-        traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInterfaces", resultCode);
+       }
+       result = false;
+     }
+@@ -262,7 +222,7 @@ namespace
+     m_devInfo = SetupDiGetClassDevs(&printerGUID, 0, 0, DIGCF_PRESENT | DIGCF_INTERFACEDEVICE);
+     if(m_devInfo == INVALID_HANDLE_VALUE)
+     {
+-      traceLastError(m_trc, MajorError_HERE, "SetupDiGetClassDevs", GetLastError());
++      mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiGetClassDevs", GetLastError());
+       result = false;
+     }
+     return result;
+@@ -274,13 +234,13 @@ namespace
+     {
+       if(!SetupDiDestroyDeviceInfoList(m_devInfo))
+       {
+-        traceLastError(m_trc, MajorError_HERE, "SetupDiDestroyDeviceInfoList", GetLastError());
++        mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiDestroyDeviceInfoList", GetLastError());
+       }
+     }
+   }
+ }
+ 
+-namespace mGPPCustom
++namespace mSysUSBPrinter
+ {
+   std::string getUSBPrinterDevice(const std::string& printerPort, TraceInterface& trc)
+   {
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,393 @@
+From ad0abfdff5af5ed14e6af6db943942b6c983408b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 2 Mar 2012 13:21:03 +0000
+Subject: [PATCH 0249/1076] - Mantis 0022532: Generate exception stack dump
+ even with /EHsc compiler option
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@302 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysException.hpp | 54 +++++++++++++++-
+ .../cpp/Systools/src/mSysExceptionW32.cpp     | 61 ++++++++++++-------
+ .../Massai/cpp/Systools/src/mSysThreadW32.cpp | 58 +++++++++++++-----
+ 3 files changed, 132 insertions(+), 41 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
+index bb3cc5cd..1e6f3912 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009-2011 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,11 +17,15 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-
+-
++// Common header
+ #include "tools/pImplPtr.h"
++
++// Compiler lib
+ #include <exception>
+ 
++// Windows
++#include <Windows.h>
++
+ 
+ 
+ /**
+@@ -34,6 +38,9 @@ namespace mSysException
+ 
+ 
+    /**
++    *
++    * THIS CLASS WILL BE REMOVED SOON!!!
++    * Please use filter_throw_std_exception() instead.
+     *
+     * An object of this class will during its lifetime catch
+     * non-C++ exceptions (e.g. "access violation") and generate
+@@ -96,6 +103,47 @@ namespace mSysException
+    };
+ 
+ 
++   /**
++    *
++    * Translate a Microsoft Structured Exception to a std::exception. This
++    * function is supposed to be used in a __except statement.
++    *
++    * Example use:
++    *
++    * ---------------------------------------------------------------------
++    *      try
++    *      {
++    *         __try
++    *         {
++    *            something_dangerous();
++    *         }
++    *         __except
++    *            (
++    *               mSysException::filter_throw_std_exception
++    *                  (
++    *                     GetExceptionInformation()
++    *                  )
++    *            )
++    *         {
++    *         }
++    *      }
++    *      catch( std::exception & x )
++    *      {
++    *          cout << x.what();
++    *      }
++    * ---------------------------------------------------------------------
++    *
++    * @param pointers:  As given by the GetExceptionInformation().
++    *
++    * @return:          EXCEPTION_EXECUTE_HANDLER
++    *
++   **/
++   int filter_throw_std_exception
++      (
++         EXCEPTION_POINTERS *   pointers
++      );
++
++
+    /**
+     *
+     * Objects of this class will be thrown representing non-C++ exceptions.
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
+index a4b6f2da..9530b5c1 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
+@@ -8,22 +8,22 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2010 MATERNA Information & Communications
++ * Copyright (c) 2010-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+-
+ #if defined(_MSC_VER)
+ // That ... compiler shall not warn about its deficiencies!
+ #pragma warning (disable:4786)
+ #endif /* _MSC_VER */
+ 
++// Exported
+ #include "systools/mSysException.hpp"
+ 
+-
+-
++// Local header
+ #include "mSysDebug.hpp"
+ 
++// Compiler lib
+ #include <iomanip>
+ #include <sstream>
+ 
+@@ -31,7 +31,7 @@
+ 
+ #define MSYSEXCEPTION_DEFAULT( name ) class name : public sex \
+       { \
+-         friend class mSysException::standardException::impl; \
++         friend class localImpl; \
+       protected: \
+          explicit name( EXCEPTION_POINTERS const * ExPtrs ) : \
+             sex(ExPtrs) \
+@@ -49,13 +49,7 @@
+ 
+ 
+ 
+-/**
+- *
+- * PIMPL-Pattern implementation class for
+- * class mSysException::standardException.
+- *
+-**/
+-class mSysException::standardException::impl
++class localImpl
+ {
+ 
+ 
+@@ -65,13 +59,13 @@ class mSysException::standardException::impl
+ public:
+ 
+ 
+-   impl() :
+-      m_fn( _set_se_translator( ano_translator ) )
++   localImpl() :
++      m_fn( _set_se_translator( translateSE ) )
+    {
+    }
+ 
+ 
+-   ~impl() throw()
++   ~localImpl() throw()
+    {
+       try
+       {
+@@ -92,7 +86,7 @@ public:
+    class sex : public mSysException::exception
+    {
+ 
+-      friend class mSysException::standardException::impl;
++      friend class localImpl;
+ 
+       EXCEPTION_POINTERS const M_ExceptionPtrs;
+ 
+@@ -254,7 +248,7 @@ public:
+    class access_violation : public sex
+    {
+ 
+-      friend class mSysException::standardException::impl;
++      friend class localImpl;
+ 
+    protected:
+ 
+@@ -328,7 +322,7 @@ public:
+    class no_memory : public sex
+    {
+ 
+-      friend class mSysException::standardException::impl;
++      friend class localImpl;
+ 
+    protected:
+ 
+@@ -389,7 +383,7 @@ public:
+    MSYSEXCEPTION_DEFAULT( microsoft_cpp )
+ 
+ 
+-   static void ano_translator( unsigned, EXCEPTION_POINTERS * ExPtrs )
++   static void translateSE( unsigned, EXCEPTION_POINTERS * ExPtrs )
+    {
+       switch( ExPtrs->ExceptionRecord->ExceptionCode )
+       {
+@@ -397,7 +391,7 @@ public:
+          throw no_memory(ExPtrs);
+          break;
+       case STATUS_ACCESS_VIOLATION:
+-         throw access_violation(ExPtrs);
++         throw access_violation( ExPtrs);
+          break;
+       case STATUS_DATATYPE_MISALIGNMENT:
+          throw datatype_misalignment(ExPtrs);
+@@ -474,16 +468,27 @@ public:
+ private:
+ 
+ 
+-   impl( mSysException::standardException::impl const & );
++   localImpl( localImpl const & );
+ 
+ 
+-   impl & operator=( mSysException::standardException::impl const & );
++   localImpl & operator=( localImpl const & );
+ 
+ 
+ };
+ 
+ 
+ 
++/**
++ *
++ * PIMPL-Pattern implementation class for
++ * class mSysException::standardException.
++ *
++**/
++class mSysException::standardException::impl : public localImpl
++{
++};
++
++
+ 
+ mSysException::standardException::standardException() :
+    M_Impl( new mSysException::standardException::impl() )
+@@ -491,6 +496,7 @@ mSysException::standardException::standardException() :
+ }
+ 
+ 
++
+ mSysException::standardException::~standardException()
+    throw()
+ {
+@@ -498,6 +504,17 @@ mSysException::standardException::~standardException()
+ 
+ 
+ 
++int mSysException::filter_throw_std_exception
++   (
++      EXCEPTION_POINTERS *   pointers
++   )
++{
++   localImpl::translateSE( 0, pointers );
++   return EXCEPTION_EXECUTE_HANDLER;
++}
++
++
++
+ //-------------------------------------------------------------------------
+ //
+ // End of file
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+index f5d5c236..afc7ddee 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+@@ -13,23 +13,21 @@
+  **************************************************************************
+ **/
+ 
++// Exported
+ #include "systools/mSysThread.hpp"
+ 
+-#include "systools/mSysException.hpp"
++// Common header
++#include "mSysDebug.hpp"
++#include "mSysException.hpp"
+ 
++// Compiler lib
+ #include <exception>
++#include <process.h>                    // _beginthreadex
+ #include <sstream>
+-
+ #include <stdio.h>                      // _snprintf
+-#include <process.h>                    // _beginthreadex
+ #include <windows.h>                    // HANDLE etc.
+ 
+ 
+-#include "mSysDebug.hpp"
+-#include <iomanip>
+-#include <iostream>
+-using namespace std;
+-
+ 
+ #if defined(_MSC_VER) && _MSC_VER > 1200
+ // Recent VC compilers support security-enhanced crt functions
+@@ -292,36 +290,64 @@ public:
+ 
+    /**
+     *
+-    * Thread function
++    * 1st level thread function
+     *
+    **/
+-   void function_1st()
++   void function_1st_level()
+    {
+       if( MH_ThreadExeption )
+       {
+-         mSysException::standardException StdConverter;
++         // Exception handler specified, use a try-catch block ...
+          try
+          {
+-            function_2nd();
++            // ... and call the SE-catching method.
++            function_2nd_level_catchSE();
+          }
+          catch( ... )
+          {
++            // Exception occured, handle the translated
++            // std::exception
+             MH_ThreadExeption->handle();
+          }
+       }
+       else
+       {
+-         function_2nd();
++         // No exception handler specified, call the not-catching
++         // method
++         function_3rd_level_nocatch();
+       }
+       MH_Terminated = true;
+    }
+ 
+    /**
+     *
+-    * Thread function
++    * 2nd level thread function. Catch structured exceptions
++    * and translate them to std::exceptions.
++    *
++   **/
++   void function_2nd_level_catchSE()
++   {
++      __try
++      {
++         function_3rd_level_nocatch();
++      }
++      __except
++         (
++            mSysException::filter_throw_std_exception
++               (
++                  GetExceptionInformation()
++               )
++         )
++      {
++      }
++   }
++
++   /**
++    *
++    * 3rd level thread function. Call application function.
+     *
+    **/
+-   void function_2nd()
++   void function_3rd_level_nocatch()
+    {
+       MH_ThreadId = GetCurrentThreadId();
+       MH_Terminated = false;
+@@ -914,7 +940,7 @@ namespace
+    {
+       mSysThread::mSysThread_Impl *pPara =
+          (mSysThread::mSysThread_Impl *)pV;
+-      pPara->function_1st();
++      pPara->function_1st_level();
+       return 0;
+    }
+ 
+-- 
+2.41.0.windows.1
+

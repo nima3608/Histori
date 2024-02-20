@@ -1,0 +1,190 @@
+From 62016379b4bcafee3af06f9b199b01c28b012540 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 6 Aug 2014 14:59:04 +0000
+Subject: [PATCH 0561/1076] MANTIS 0033249 Platform Setup: MConfig_CustomAction
+ fixed item format for cfgerase.exe calls
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@704 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |  4 +-
+ .../src/MConfig_CustomAction.cpp              | 99 ++++++++++---------
+ 2 files changed, 56 insertions(+), 47 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index 59eb742c..62ffa941 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,12
+-#define FILE_VER_STR     "FileVersion", "1.0.0.12\0"
++#define FILE_VER_BIN     1,0,0,13
++#define FILE_VER_STR     "FileVersion", "1.0.0.13\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 897842fb..bee1fbe1 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -1671,7 +1671,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ 
+   tmp_cmdline.assign(L"\"");
+   tmp_cmdline.append(ToWiden(cfgerase_filename.c_str()));
+-  tmp_cmdline.append(L"\"");
++  tmp_cmdline.append(L"\" ");
+   del_file_name.assign(pPath);
+   del_file_name.append("\\" DEL_CFG_FILE_NAME );
+ 
+@@ -1681,10 +1681,13 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+     while(!del_file.eof())
+     {
+       del_file >> strItem;
+-      cmdline.assign( tmp_cmdline+L" "+ToWiden(strItem.c_str()) );
+-      exec_commandline(hInstall,cmdline);
+-      dbstrs << L"MSI SETUP CA_WriteCfg: " << cmdline.c_str() << std::endl;
+-      Log_Str(dbstrs);
++      if(strItem.length())
++      {
++        cmdline.assign( tmp_cmdline+L" "+ToWiden(strItem.c_str()) );
++        exec_commandline(hInstall,cmdline);
++        dbstrs << L"MSI SETUP CA_WriteCfg: " << cmdline.c_str() << std::endl;
++        Log_Str(dbstrs);
++      }
+     }
+     del_file.close();
+   } else
+@@ -1793,7 +1796,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+     cf_addtolistunique,
+   };
+ 
+-    LPWSTR pwzPath = NULL, pwzType = NULL, pwzValue = NULL, pwzMeta = NULL, pwzFlags = NULL, pwzCondition = NULL;
++  LPWSTR pwzPath = NULL, pwzType = NULL, pwzValue = NULL, pwzMeta = NULL, pwzFlags = NULL, pwzCondition = NULL;
+   bool cfg_table_condition_present;
+   eCfgSetMode fCfgSet;
+   eCfgSetlistFlags fCfgSetList;
+@@ -1822,19 +1825,19 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+   dbstrs << L"MSI SETUP CA_ProcessCFGTable: Read CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << L"]";
+   Log_Str(dbstrs);
+ 
+-    if (S_OK != WcaTableExists(pwzTablePropertyValue))
+-    {
++  if (S_OK != WcaTableExists(pwzTablePropertyValue))
++  {
+     dbstrs << L"MSI SETUP CA_ProcessCFGTable: Skipping CA_ProcessCFGTable() because CFG_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << L"] table not present";
+     Log_Str(dbstrs);
+ 
+-        hr = S_FALSE;
++    hr = S_FALSE;
+     ExitOnFailure(hr, "Skipping CA_ProcessCFGTable()");
+-    }
++  }
+ 
+   sql_gen_select.assign(vcsCfgTableQueryC);
+   sql_gen_select.append(pwzTablePropertyValue);
+   sql_gen_select.append(L"`");
+-    hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++  hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+   cfg_table_condition_present = true;
+   if( hr != S_OK)
+   {
+@@ -1844,10 +1847,10 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+     hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
+     cfg_table_condition_present = false;
+   }
+-    ExitOnFailure(hr, "Failed to open view on [CFG_TABLE_PROP] table");
++  ExitOnFailure(hr, "Failed to open view on [CFG_TABLE_PROP] table");
+ 
+   while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
+-    {
++  {
+     fDelete = false;
+     fCfgSet = cf_set;
+     fCfgSetList = cf_none;
+@@ -1875,38 +1878,9 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+         Log_Str(dbstrs);
+       }
+     }
+-
+-        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Path, &pwzPath);
+-        ExitOnFailure(hr, "failed to get Cfg_Path from [CFG_TABLE_PROP] table");
+-    std::wstring wstrPath(pwzPath);
+-    size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
+-    if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
+-    strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
+-
+-
+-        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
+-        ExitOnFailure(hr, "failed to get Cfg_Entry_Type from [CFG_TABLE_PROP] table");
+-    strbuf << "typ=\"" << pwzType << "\" ";
+-
+-
+-        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Value, &pwzValue);
+-        ExitOnFailure(hr, "failed to get Cfg_Entry_Value from [CFG_TABLE_PROP] table");
+-    strbuf << "val=\"" << escape_str(std::wstring(pwzValue)).c_str() << "\" ";
+-
+-        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Meta, &pwzMeta);
+-        ExitOnFailure(hr, "failed to get Cfg_Entry_Meta from [CFG_TABLE_PROP] table");
+-    if(pwzMeta && wcslen(pwzMeta))
+-    {
+-      strbuf << pwzMeta << " ";
+-      dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+-      Log_Str(dbstrs);
+-    }
+-
+-    dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
+-    Log_Str(dbstrs);
+-
+-        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Flags, &pwzFlags);
+-        ExitOnFailure(hr, "failed to get Cfg_Entry_Flags from [CFG_TABLE_PROP] table");
++    
++    hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Flags, &pwzFlags);
++    ExitOnFailure(hr, "failed to get Cfg_Entry_Flags from [CFG_TABLE_PROP] table");
+     if(pwzFlags && wcslen(pwzFlags))
+     {
+       std::wstring strFlags(pwzFlags);
+@@ -1936,6 +1910,41 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+       Log_Str(dbstrs);
+     }
+ 
++    hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Path, &pwzPath);
++    ExitOnFailure(hr, "failed to get Cfg_Path from [CFG_TABLE_PROP] table");
++    std::wstring wstrPath(pwzPath);
++    size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
++    if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
++      
++    if(fDelete)
++    {
++       strbuf << wstrPath.c_str();
++    } else
++    {
++
++      strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
++
++      hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
++      ExitOnFailure(hr, "failed to get Cfg_Entry_Type from [CFG_TABLE_PROP] table");
++      strbuf << "typ=\"" << pwzType << "\" ";
++
++      hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Value, &pwzValue);
++      ExitOnFailure(hr, "failed to get Cfg_Entry_Value from [CFG_TABLE_PROP] table");
++      strbuf << "val=\"" << escape_str(std::wstring(pwzValue)).c_str() << "\" ";
++
++      hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Meta, &pwzMeta);
++      ExitOnFailure(hr, "failed to get Cfg_Entry_Meta from [CFG_TABLE_PROP] table");
++      if(pwzMeta && wcslen(pwzMeta))
++      {
++        strbuf << pwzMeta << " ";
++        dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
++        Log_Str(dbstrs);
++      }
++    }
++    
++    dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
++    Log_Str(dbstrs);
++
+     std::string cfg_file_name;
+ 
+     char * pPath;
+-- 
+2.41.0.windows.1
+

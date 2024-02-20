@@ -1,0 +1,768 @@
+From df63d87314a9560063849ae2c3200efa651c3f97 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 19 Apr 2012 11:37:25 +0000
+Subject: [PATCH 0274/1077] Mantis 22988, add new configuration wrappers for
+ No-Yes selection and string-map
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@327 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/cfgclnt/nConfigWrapMap.hpp | 132 ++++++++++
+ .../inc/cfgclnt/nConfigWrapNoYes.hpp          | 120 +++++++++
+ .../Massai/cpp/CfgClnt/dll/makefile.mak       |   4 +-
+ .../Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp | 211 ++++++++++++++++
+ .../cpp/CfgClnt/src/nConfigWrapNoYes.cpp      | 228 ++++++++++++++++++
+ .../Massai/cpp/CfgClnt/static/makefile.mak    |   4 +-
+ 6 files changed, 697 insertions(+), 2 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapMap.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapNoYes.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapNoYes.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapMap.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapMap.hpp
+new file mode 100644
+index 00000000..e5e62f92
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapMap.hpp
+@@ -0,0 +1,132 @@
++/**
++ **************************************************************************
++ *
++ * @file nConfigWrapMap.hpp
++ *
++ * Contains class nConfig::wrapMap declaration.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef NCONFIGWRAPMAP_HPP
++#define NCONFIGWRAPMAP_HPP
++
++
++// Compiler lib
++#include <string>
++
++
++namespace nConfig
++{
++
++   /**
++    *
++    * View a textlist configuration as a map<string,string>.
++    * The map will be stored as a list of strings, each string of the
++    * form <first>:<second>:<comment>
++    *
++    *         nConfig::wrapMap MyCfgMap
++    *            (
++    *               "Test",
++    *               "X.Test.MyMap",
++    *               "Here we can assign partitions to locations."
++    *               " The partition shall be separated by a \":\""
++    *               " from the location string."
++    *               " A comment may be written separated by another."
++    *               " \":\" separator.\n\n"
++    *               "The syntax for one entry is:"
++    *               " \"<location>:<partition>[:<comment>]\"\n"
++    *               "Example: \"PMI:7X-43:Acciona\"."
++    *            )
++    *
++    *         ...
++    *
++    *         std::string Second = MyCfgMap.get( First );
++    *
++   **/
++   class wrapMap
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation object.
++      impl * const M_Impl;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param Client:            Configuration client (application) name.
++       *
++       * @param Item:              The configuration item.
++       *
++       * @param Explanation:       Configuration explanation for
++       *                           the configuration UI.
++       *
++      **/
++      wrapMap
++         (
++            char const * Client,
++            char const * Item,
++            char const * Explanation
++         );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~wrapMap() throw();
++
++      /**
++       *
++       * Map read access.
++       *
++       * @param First:             The first string to match.
++       *
++       * @return:                  The associated second string.
++       *
++      **/
++      std::string get( char const * First );
++
++      /**
++       *
++       * Map write access.
++       *
++       * @param First:             The first string.
++       *
++       * @param Second:            The second string.
++       *
++      **/
++      void set( char const * First, char const * Second );
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      wrapMap();
++
++      //! Copy constructor - intentionally not implemented.
++      wrapMap( wrapMap const & Src );
++
++      //! Assignment - intentionally not implemented.
++      wrapMap & operator=( wrapMap const & Src );
++
++   };
++
++} // namespace nConfig
++
++
++#endif // #ifndef NCONFIGWRAPMAP_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapNoYes.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapNoYes.hpp
+new file mode 100644
+index 00000000..1eec88dd
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigWrapNoYes.hpp
+@@ -0,0 +1,120 @@
++/**
++ **************************************************************************
++ *
++ * @file nConfigWrapNoYes.hpp
++ *
++ * Contains class nConfig::wrapNoYes.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2011-2012 MATERNA Information & Communications.
++ *
++ **************************************************************************
++**/
++#ifndef NCONFIGWRAPNOYES_HPP
++#define NCONFIGWRAPNOYES_HPP
++
++
++namespace nConfig
++{
++
++   /**
++    *
++    * Simple no-yes decision configuration wrapper class.
++    *
++    * Code example:
++    *
++    *         nConfig::wrapNoYes MyNoYes
++    *            (
++    *               "Test",
++    *               "Test.MyNoYes",
++    *               "What is here the question?"
++    *            );
++    *
++    *         ...
++    *
++    *         if( MyNoYes.isYes() )
++    *            ...
++    *
++   **/
++   class wrapNoYes
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation reference.
++      impl * M_Impl;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param Client:         Configuration client identification.
++       *
++       * @param Item:           The configuration item extension.
++       *
++       * @param Explanation:    Describes the configuration item.
++       *
++       * @param DefaultYes:     If set, the default answer will be "Yes".
++       *
++      **/
++      wrapNoYes
++         (
++            char const *   Client,
++            char const *   Item,
++            char const *   Explanation,
++            bool           DefaultYes = false
++         );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~wrapNoYes() throw();
++
++      /**
++       *
++       * Status access.
++       *
++       * @return           Is the current configuration NO?
++       *
++      **/
++      bool isNo() const;
++
++      /**
++       *
++       * Status access.
++       *
++       * @return           Is the current configuration YES?
++       *
++      **/
++      bool isYes() const;
++
++   private:
++
++      //! Default constructor - Intentionally not implemented
++      wrapNoYes();
++
++      //! Copy constructor - Intentionally not implemented
++      wrapNoYes( wrapNoYes const & Src );
++
++      //! Assignment - Intentionally not implemented
++      wrapNoYes & operator=( wrapNoYes const & Src );
++
++   };
++
++} //namespace nConfig
++
++
++#endif // #ifndef NCONFIGWRAPNOYES_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
+index 9497d420..658aed60 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
+@@ -43,7 +43,9 @@ MY_LIB1_OBJS = \
+     $(_OBJ)\nConfigNumber.obj \
+     $(_OBJ)\nConfigSelection.obj \
+     $(_OBJ)\nConfigText.obj \
+-    $(_OBJ)\nConfigTextList.obj
++    $(_OBJ)\nConfigTextList.obj \
++    $(_OBJ)\nConfigWrapMap.obj \
++    $(_OBJ)\nConfigWrapNoYes.obj
+ 
+ MY_LIB1_GEN_DIRS = \
+     $(GEN_MASSAI_COMMON)
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
+new file mode 100644
+index 00000000..7531120a
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
+@@ -0,0 +1,211 @@
++/**
++ **************************************************************************
++ *
++ * @file nConfigWrapMap.cpp
++ *
++ * Implements class nConfig::wrapMap methods
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
++#include "cfgclnt/nConfigWrapMap.hpp"
++
++// From common.
++#include "cfgclnt/nConfigCache.hpp"
++#include "cfgclnt/nConfigTextList.hpp"
++
++
++
++typedef std::list<std::string> stringList;
++
++
++
++namespace
++{
++
++
++   char const C_Sep = ':';
++
++
++   std::string tupFirst( std::string const & Str )
++   {
++      unsigned Off = Str.find( C_Sep );
++      return Str.substr( 0, Off );
++   }
++
++
++   std::string tupSecond( std::string const & Str )
++   {
++      unsigned const Off1 = Str.find( C_Sep );
++      if( Off1 == std::string::npos )
++      {
++         return std::string();
++      }
++      else
++      {
++         unsigned const Off2 = Str.find( C_Sep, Off1 + 1 );
++         if( Off2 == std::string::npos )
++         {
++            return Str.substr
++               (
++                  Off1 + 1              // Use all after the separator
++               );
++         }
++         else
++         {
++            return Str.substr
++               (
++                  Off1 + 1,             // Start after the 1st separator
++                  ( Off2 - Off1 ) - 1   // Length of text between
++               );
++         }
++      }
++   }
++
++
++}
++
++
++
++class nConfig::wrapMap::impl :
++      public nConfig::cache<std::list<std::string>,nConfig::gclTextList>
++{
++
++   stringList        M_Default;
++
++   std::string const M_Explanation;
++
++   void create
++      (
++         char const * &              Rights,
++         char const * &              Expl,
++         std::list<std::string> &    Def,
++         long &                      Max
++      )
++   {
++      Rights = 0;
++      Expl = M_Explanation.c_str();
++      Def = M_Default;
++      Max = 1000;               //TODO
++   }
++
++public:
++
++   impl
++      (
++         char const * Client,
++         char const * Item,
++         char const * Explanation
++      ) :
++         nConfig::cache<std::list<std::string>,nConfig::gclTextList>
++            (
++               Item,
++               Client
++            ),
++         M_Explanation( Explanation )
++   {
++   }
++
++   std::list<std::string> uncached()
++   {
++      return get();
++   }
++
++private:
++
++   impl();
++
++   impl( impl const & Src );
++
++   impl & operator=( impl const & Src );
++
++};
++
++
++
++nConfig::wrapMap::wrapMap
++   (
++      char const * Client,
++      char const * Item,
++      char const * Explanation
++   ) :
++      M_Impl( new impl( Client, Item, Explanation ) )
++{
++}
++
++
++
++nConfig::wrapMap::~wrapMap() throw()
++{
++   try
++   {
++      delete M_Impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++std::string nConfig::wrapMap::get( char const * First )
++{
++   stringList const List = M_Impl->cached();
++   if( First )
++   {
++      for(
++            stringList::const_iterator It = List.begin();
++            It != List.end();
++            ++It
++         )
++      {
++         std::string const Str = *It;
++         if( tupFirst( Str ) == First )
++         {
++            return tupSecond( Str ).c_str();
++         }
++      }
++   }
++   return std::string();
++}
++
++
++
++void nConfig::wrapMap::set( char const * First, char const * Second )
++{
++   stringList List = M_Impl->cached();
++   stringList::iterator It = List.begin();
++   bool Found = false;
++   while( !Found && It != List.end() )
++   {
++      if( tupFirst( *It ) == First )
++      {
++         List.erase( It );
++         Found = true;
++      }
++      else
++      {
++         ++It;
++      }
++   }
++   std::string NewStr = First;
++   NewStr += C_Sep;
++   NewStr += Second;
++   List.insert( It, NewStr );
++   M_Impl->set( List );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapNoYes.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapNoYes.cpp
+new file mode 100644
+index 00000000..cee27654
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapNoYes.cpp
+@@ -0,0 +1,228 @@
++/**
++ **************************************************************************
++ *
++ * @file nConfigWrapNoYes.cpp
++ *
++ * Implements class nConfig::wrapNoYes methods.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2011-2012 MATERNA Information & Communications.
++ *
++ **************************************************************************
++**/
++
++
++// Exported
++#include "cfgclnt/nConfigWrapNoYes.hpp"
++
++// Common
++#include "cfgclnt/nConfigCache.hpp"
++#include "cfgclnt/nConfigSelection.hpp"
++
++
++
++/**
++ *
++ * List of possible selections
++ *
++**/
++namespace
++{
++
++   //! The scalar for of "No".
++   long const SimNoYes_Index_No = 0;
++
++   //! The scalar form of "Yes".
++   long const SimNoYes_Index_Yes = 1;
++
++   /**
++    *
++    * Initializes the No-Yes selection list.
++    *
++   **/
++   nConfig::selection const SimNoYes[] =
++   {
++      nConfig::selection
++               (
++                  SimNoYes_Index_No,
++                  "No",
++                  ""
++               ),
++      nConfig::selection
++               (
++                  SimNoYes_Index_Yes,
++                  "Yes",
++                  ""
++               )
++   };
++
++}
++
++
++
++/**
++ *
++ * Simualation behaviour configuration class
++ *
++**/
++class nConfig::wrapNoYes::impl :
++   public nConfig::cache<long,nConfig::gclSelection>
++{
++
++   //! The default index - used in create().
++   long const           M_DefaultNdx;
++
++   //! The explanation - used in create().
++   std::string const    M_Explanation;
++
++   /**
++    *
++    * Callback for nConfig::cache.
++    *
++    * @return           Value from config service.
++    *
++   **/
++   long uncached()
++   {
++      return getIndex();
++   }
++
++protected:
++
++   /**
++    *
++    * This method is called, when the configuration subsystem needs
++    * to create a new configuration item.
++    *
++   **/
++   void create
++        (
++           char const * &               Rights,
++           char const * &               Explanation,
++           long &                       DefaultNdx,
++           nConfig::selection const * & Begin,
++           nConfig::selection const * & End
++        )
++   {
++      Rights = 0;         // Use the default
++      Explanation = M_Explanation.c_str();
++      DefaultNdx = M_DefaultNdx;
++      Begin = SimNoYes;
++      End = SimNoYes + sizeof(SimNoYes)/sizeof(nConfig::selection);
++   }
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Client:            Configuration client identification.
++    *
++    * @param Item:              The configuration item extension.
++    *
++    * @param Explanation:       Describes the configuration item.
++    *
++    * @param DefaultYes:        If set, the default answer will be "Yes".
++    *
++   **/
++   impl
++      (
++         char const *   Client,
++         char const *   Item,
++         char const *   Explanation,
++         bool           DefaultYes
++      ) :
++      nConfig::cache<long,nConfig::gclSelection>( Item, Client ),
++      M_DefaultNdx( DefaultYes ? SimNoYes_Index_Yes : SimNoYes_Index_No ),
++      M_Explanation( Explanation )
++   {
++   }
++
++   /**
++    *
++    * Status access.
++    *
++    * @return           Is the current configuration NO?
++    *
++   **/
++   bool isNo()
++   {
++      return( cached() == SimNoYes_Index_No );
++   }
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   impl();
++
++   //! Copy constructor - intentionally not implemented.
++   impl( impl const & Src );
++
++   //! Assignment - intentionally not implemented.
++   impl & operator=( impl const & Src );
++
++};
++
++
++
++/*
++ * Method implementation - see "nConfigWrapNoYes.hpp".
++ */
++nConfig::wrapNoYes::wrapNoYes
++      (
++         char const *   Client,
++         char const *   Item,
++         char const *   Explanation,
++         bool           DefaultYes
++      ) :
++   M_Impl( new impl( Client, Item, Explanation, DefaultYes ) )
++{
++}
++
++
++
++/*
++ * Method implementation - see "nConfigWrapNoYes.hpp".
++ */
++nConfig::wrapNoYes::~wrapNoYes() throw()
++{
++   try
++   {
++      delete M_Impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ * Method implementation - see "nConfigWrapNoYes.hpp".
++ */
++bool nConfig::wrapNoYes::isNo() const
++{
++   return M_Impl->isNo();
++}
++
++
++
++/*
++ * Method implementation - see "nConfigWrapNoYes.hpp".
++ */
++bool nConfig::wrapNoYes::isYes() const
++{
++   return !M_Impl->isNo();
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgClnt/static/makefile.mak
+index 316c7447..88de5487 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/static/makefile.mak
+@@ -34,7 +34,9 @@ MY_LIB1_OBJS = \
+     $(_OBJ)\nConfigNumber.obj \
+     $(_OBJ)\nConfigSelection.obj \
+     $(_OBJ)\nConfigText.obj \
+-    $(_OBJ)\nConfigTextList.obj
++    $(_OBJ)\nConfigTextList.obj \
++    $(_OBJ)\nConfigWrapMap.obj \
++    $(_OBJ)\nConfigWrapNoYes.obj
+ 
+ MY_LIB1_GEN_DIRS = \
+     $(GEN_MASSAI_COMMON)
+-- 
+2.41.0.windows.1
+

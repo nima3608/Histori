@@ -1,0 +1,2946 @@
+From 88cd942b22c5fc8f88cc458e43b611016047ead8 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 16 Jul 2013 12:03:17 +0000
+Subject: [PATCH 0440/1077] Billing.exe V1.0.0.8 Mantis 0026690: Billing: add
+ attribute Brand to Billing-Data
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@535 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/billing/billing.h          |  66 +--
+ .../cpp/BillingService/inc/BillingClient.h    |  90 ++--
+ .../cpp/BillingService/inc/BillingS_def.h     |  11 +-
+ .../Massai/cpp/BillingService/inc/File.h      |  21 +-
+ .../Massai/cpp/BillingService/inc/server.h    |  95 ++--
+ .../cpp/BillingService/inc/sessionlist.h      | 107 ++--
+ .../cpp/BillingService/src/BillingClient.cpp  | 182 ++-----
+ .../Massai/cpp/BillingService/src/File.cpp    | 272 ++++------
+ .../Massai/cpp/BillingService/src/billing.cpp | 166 ++----
+ .../cpp/BillingService/src/clientmain.cpp     | 225 ++++----
+ .../Massai/cpp/BillingService/src/server.cpp  | 362 +++++--------
+ .../cpp/BillingService/src/sessionlist.cpp    | 488 +++++-------------
+ .../Massai/idl/Massai/BillingService.idl      |   3 +-
+ 13 files changed, 722 insertions(+), 1366 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/billing/billing.h b/SelfServiceCommon/Interfaces/inc/billing/billing.h
+index 4797f7a8..e7fbf95e 100644
+--- a/SelfServiceCommon/Interfaces/inc/billing/billing.h
++++ b/SelfServiceCommon/Interfaces/inc/billing/billing.h
+@@ -1,15 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       billing.h
+-//
+-//  purpose:    Billing service interface
+-//
+-//  date:       04.01.2002, 15:29
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
++// Billing service interface
+ 
+ #ifndef BILLING_H
+ #define BILLING_H
+@@ -23,61 +12,46 @@
+ #include "BillingService.h"
+ #include "BillingService_skel.h"
+ 
+-using namespace CORBA;
+-using namespace BillingAccess;
+-
+ /** Definition of a single billing session */
+-
+ class billingSession
+ {
+-private:
+-
+-    Long        sessionId;
+-    bool        fConnected;
+-
+-    BillingService_ptr            proxy;
+-    corbaClient <BillingService> *cclnt;
+-
+-public:
+-
++  public:
+     /** check if connection to billing service was successful
+-        @return TRUE if successful, FALSE otherwise
+-    */
++        @return TRUE if successful, FALSE otherwise    */
+     bool connected();
+ 
+     /** add an ATB response to the session
+         @param pszResponse - The response of the ATB printer
+-        @return Zero if Ok, error code otherwise
+-    */
+-
+-    long addATBResponse (char *pszResponse);
++        @return Zero if Ok, error code otherwise     */
++    long addATBResponse (const char* pszResponse);
+ 
+     /** add an BTP response to the session
+         @param pszResponse - The response of the BT printer
+-        @return Zero if Ok, error code otherwise
+-    */
+-
+-    long addBTPResponse (char *pszResponse);
++        @return Zero if Ok, error code otherwise     */
++    long addBTPResponse (const char* pszResponse);
+ 
+     /** add an GPP response to the session
+         @param pszResponse - The response of the GP printer
+-        @return Zero if Ok, error code otherwise
+-    */
+-
+-    long addGPPResponse (char *pszResponse);
++        @return Zero if Ok, error code otherwise     */
++    long addGPPResponse (const char* pszResponse);
+ 
+     /** class constructor
+         @param pszAppName - The name of the application
++        @param pszBrand - The brand for the session
+         @param pszAppType - The type of the application
+         @param pszLocation - 3-Letter code of loaction
+-        @param pszKioskID - The kiosk identifier as passed by CUSS platform
+-    */
+-
+-    billingSession(char *pszAppName, char *pszAppType,char *pszLocation, char *pszKioskID);
++        @param pszKioskID - The kiosk identifier as passed by CUSS platform     */
++    billingSession(const char* pszAppName, const char* pszBrand, const char* pszAppType,const char* pszLocation, const char* pszKioskID);
+ 
+     /** class destructor */
+-
+     ~billingSession();
++
++  private:
++    CORBA::Long sessionId;
++    bool        fConnected;
++
++    BillingAccess::BillingService_ptr proxy;
++    corbaClient<BillingAccess::BillingService>* cclnt;
+ };
+ 
+-#endif // BILLING_H
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
+index c7147577..dd219ec5 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingClient.h
+@@ -1,17 +1,7 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       BillingClient.h
+-//
+-//  purpose:    Header file for CORBA client class.
+-//
+-//  date:       05.09.00
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
++// CORBA client class
+ //  history:    ts 11.07.2001 adapted to BillingService (msHostClient.h)
+ //              ts 04.03.2003 use AlternateBillingService
+ //
+-//---------------------------------------------------------------------------
+ 
+ #ifndef BILLINGCLIENT_H
+ #define BILLINGCLIENT_H
+@@ -24,75 +14,61 @@
+ #include "billingService_skel.h"
+ #include <string>
+ 
+-using namespace CORBA;
+-using namespace PortableServer;
+ 
+ /** Definition of a single host session */
+-
+ class billingSession
+ {
+-private:
+-    static const char* pBilling;
+-    static const char* pLocalBilling;
+-    static const char* pAlternateBilling;
+-
+-
+-    Long                 lSessionId;
+-    Long                 lAlternateSessionId;
+-    Long                 lLocalSessionId;
+-
+-
+-    corbaClient<BillingAccess::BillingService> *pHost;
+-    corbaClient<BillingAccess::BillingService> *pAlternateHost;
+-    corbaClient<BillingAccess::BillingService> *pLocalHost;
+-
+-    std::string AppName;
+-    std::string AppType;
+-    std::string KioskID;
+-    std::string Location;
+-
+-public:
+-
++  public:
+     /** open a new billing session
+-        @return Zero if Ok, error code otherwise
+-    */
+-
++        @return Zero if Ok, error code otherwise */
+     long open();
+ 
+     /** close current billing session
+-        @return Zero if Ok, error code otherwise
+-    */
+-
++        @return Zero if Ok, error code otherwise */
+     long close();
+ 
+     /** add ATB response to the BillingService */
+-
+-    long addATBResponse(char *pszResponse);
++    long addATBResponse(const char *pszResponse);
+ 
+     /** add BTP response to the BillingService */
+-
+-    long addBTPResponse(char *pszResponse);
++    long addBTPResponse(const char *pszResponse);
+ 
+     /** add GPP response to the BillingService */
+-
+-    long addGPPResponse(char *pszResponse);
+-
++    long addGPPResponse(const char *pszResponse);
+ 
+     /** class constructor
+         @param pszAppName - The name of the application
++        @param pszBrand - The brand of the session
+         @param pszAppType - The type of the application
+         @param pszKioskID - The kiosk identifier as passed by CUSS platform
+-        @param pszLocation - 3-Letter code of loaction
+-
+-    */
+-    billingSession(char          *pszAppName,
+-                   char          *pszAppType,
+-                   char          *pszKioskID,
+-                   char          *pszLocation);
++        @param pszLocation - 3-Letter code of loaction   */
++    billingSession(const char* pszAppName,
++                   const char* pszBrand,
++                   const char* pszAppType,
++                   const char* pszKioskID,
++                   const char* pszLocation);
+ 
+     /** class destructor */
+-
+     ~billingSession();
++
++  private:
++    static const char* pBilling;
++    static const char* pLocalBilling;
++    static const char* pAlternateBilling;
++
++    Long                 lSessionId;
++    Long                 lAlternateSessionId;
++    Long                 lLocalSessionId;
++
++    corbaClient<BillingAccess::BillingService> *pHost;
++    corbaClient<BillingAccess::BillingService> *pAlternateHost;
++    corbaClient<BillingAccess::BillingService> *pLocalHost;
++
++    std::string AppName;
++    std::string Brand;
++    std::string AppType;
++    std::string KioskID;
++    std::string Location;
+ };
+ 
+ #endif // BILLINGCLIENT_H
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+index ddc20dfa..c81e8a69 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+@@ -1,10 +1,15 @@
+-#define FILE_VER_BIN     1,0,0,7
+-#define FILE_VER_STR     "FileVersion", "1.0.0.7\0"
++#define FILE_VER_BIN     1,0,0,8
++#define FILE_VER_STR     "FileVersion", "1.0.0.8\0"
+ 
+ /*!
+ \page Billing.exe Billing Service - Release Notes
+ 
+-\date 25.14.2013 \li V1.0.0.7
++\date 16.07.2013
++\li V1.0.0.8
++\li Mantis 0026690: Billing: add attribute Brand to Billing-Data
++
++
++\date 25.04.2013 \li V1.0.0.7
+                  \li Mantis 0026967: BillingService: recognize non print AEA messages
+ 
+ \date 07.11.2012 \li V1.0.0.6
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
+index 64fa8391..3c791cfe 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/File.h
+@@ -1,14 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       File.h
+-//
+-//  purpose:    Write Billing to File
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
++// Write Billing to File
+ 
+ #if !defined(FILE_H)
+ #define FILE_H
+@@ -19,8 +9,6 @@
+ #include <string>
+ #include <list>
+ 
+-
+-
+ class Response
+ {
+   public:
+@@ -28,13 +16,14 @@ class Response
+     bool bParseError;
+     Response(const std::string& setRsp, bool setbParseError);
+ };
+-typedef std::list<Response> ResponseList;
+ 
++typedef std::list<Response> ResponseList;
+ 
+-void write(const std::string& KioskId, const std::string& Location, const std::string& AppName,
++void write(const std::string& KioskId, const std::string& Brand,
++  const std::string& Location, const std::string& AppName,
+   const std::string& AppType, time_t start, time_t end, bool bClosed,
+   const ResponseList& ATBResponse, int iATBUsed,
+   const ResponseList& GPPResponse, int iGPPUsed,
+   const ResponseList& BTPResponse, int iBTPUsed);
+ 
+-#endif // FILE_H
+\ No newline at end of file
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
+index 21a9e5f5..8380b0e6 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/server.h
+@@ -1,16 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       server.h
+-//
+-//  purpose:    Servant definitions
+-//
+-//  date:       03.05.2001
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
+-//  history:    ts 11.07.2001 adapted to BillingService
+-//
+-//---------------------------------------------------------------------------
++// Servant definitions
+ 
+ #if !defined(SERVER_H)
+ #define SERVER_H
+@@ -19,15 +7,6 @@
+ #endif
+ 
+ #include "massaiCorba/orbIncDefs.h"
+-/*
+-#include "OB/CORBA.h"
+-#include "OB/Properties.h"
+-#include "OB\CORBAClient.h"
+-#include "OB\POAInterface.h"
+-#include "OB\BootManager.h"
+-#include "OB\ORB_init.h"
+-#include "OB\OBORB.h"
+-*/
+ 
+ #include "BillingService.h"
+ #include "BillingService_skel.h"
+@@ -35,64 +14,54 @@
+ #include "sessionList.h"
+ #include "cfgclnt/nConfigSelection.hpp"
+ 
+-//using namespace CORBA;
+-
+-class BillingServiceServant : public  POA_BillingAccess::BillingService,
+-                      private sessionList
++class BillingServiceServant: public  POA_BillingAccess::BillingService,
++                             private sessionList
+ {
+-private:
+-
+-   ORB_var pOrb;
+-
+-public:
++  public:
++    Long openInvoice(const char* appName, const char*pszBrand,
++      const char* appType, const char* kioskID, const char* location);
++    Long closeInvoice(Long sessionId);
+ 
+-   Long openInvoice (const char* appName, const char* appType,
+-     const char* kioskID, const char* location);
+-   Long closeInvoice (Long sessionId);
++    Long addATBResponse(Long sessionId, const char* response);
++    Long addBTPResponse(Long sessionId, const char* response);
++    Long addGPPResponse(Long sessionId, const char* response);
+ 
+-   Long addATBResponse (Long sessionId, const char* response);
+-   Long addBTPResponse (Long sessionId, const char* response);
+-   Long addGPPResponse (Long sessionId, const char* response);
+ 
++     BillingServiceServant();
++    ~BillingServiceServant();
+ 
+-    BillingServiceServant();
+-   ~BillingServiceServant();
++  private:
++    ORB_var pOrb;
+ };
+ 
+ class KioskId
+ {
+-
+-    #define MAXHOSTNAMESIZE 512
+-    static char hostname[MAXHOSTNAMESIZE+1];
+-    static bool read;
+-    static bool useHostname;
+-
+   public:
+     static const nConfig::selection useLocalHostNameList[];
+-    class cfgUseHostname : public nConfig::gcSelection
++    class cfgUseHostname: public nConfig::gcSelection
+     {
+-       void create
+-                  (
+-                     char const * &      Rights,
+-                     char const * &      Expl,
+-                     long &              DefNdx,
+-                     nConfig::selection const * & Begin,
+-                     nConfig::selection const * & End
+-               );
+-
+-    public:
+-
+-       /** Constructor */
+-
+-       cfgUseHostname(char *pszItem,char *pszUser);
+-
++      public:
++        /** Constructor */
++        cfgUseHostname(const char *pszItem, const char *pszUser);
++      private:
++        void create(char const*& Rights, char const*& Expl,
++          long& DefNdx, nConfig::selection const*& Begin,
++          nConfig::selection const*& End);
+     };
+ 
+     static void readhostname();
+     static bool useLocalHost();
+     static const char* getKioskId(const char* kioskId);
+-};
+ 
++  private:
++    enum CONSTS
++    {
++      MAXHOSTNAMESIZE= 512
++    };
++    static char hostname[MAXHOSTNAMESIZE+1];
++    static bool read;
++    static bool useHostname;
+ 
++};
+ 
+-#endif // SERVER_H
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
+index 7f98017c..22c72508 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/sessionlist.h
+@@ -1,16 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       sessionlist.h
+-//
+-//  purpose:    interface to session control
+-//
+-//  date:       06.05.2001, 12:24
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//  history:    ts 11.07.2001 adapted to BillingService
+-//
+-//---------------------------------------------------------------------------
++// interface to session control
+ 
+ #ifndef SESSIONLIST_H
+ #define SESSIONLIST_H
+@@ -18,80 +6,67 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-/*
+-#include "OB/CORBA.h"
+-#include "OB/Properties.h"
+-#include "OB\CORBAClient.h"
+-#include "OB\POAInterface.h"
+-#include "OB\BootManager.h"
+-#include "OB\ORB_init.h"
+-#include "OB\OBORB.h"
+-*/
+-
+ #include "billingService.h"
+ #include "billingService_skel.h"
+ #include "file.h"
+ #include <string>
+ 
+-// exported function(s)
++class session
++{
++  public:
++    long     sessionId();
++    void     sessionId(long id);
+ 
++    session* nextSession();
++    void     nextSession(session* p);
+ 
++    void     addATBResponse(const char* pResponse);
++    void     addGPPResponse(const char* pResponse);
++    void     addBTPResponse(const char* pResponse);
++    void     close();
++    int      eq(const char* appName, const char* brand,
++               const char* appType, const char* kioskID,
++               const char* location);
+ 
+-class session
+-{
+-private:
++    session(const char* appName, const char* brand,
++            const char* appType, const char* kioskID,
++            const char* location);
++    ~session();
+ 
+-    session   *pNext;
++  private:
++    session*   pNext;
+     long       lId;
+ 
+-    std::string  KioskId, Location, AppName, AppType;
+-    ResponseList ATBResponse, GPPResponse, BTPResponse;
++    std::string KioskId;
++    std::string Location;
++    std::string AppName;
++    std::string Brand;
++    std::string AppType;
++    ResponseList ATBResponse;
++    ResponseList GPPResponse;
++    ResponseList BTPResponse;
+ 
+     time_t     start, end;
+-    int        iATBUsed, iGPPUsed, iBTPUsed;
++    int        iATBUsed;
++    int        iGPPUsed;
++    int        iBTPUsed;
+     bool       bClosed;
+-
+-public:
+-
+-
+-    long     sessionId()             { return(lId); }
+-    void     sessionId(long id)      { lId = id; }
+-
+-    session *nextSession()           { return(pNext); }
+-    void     nextSession(session *p) { pNext = p; }
+-
+-
+-    void     addATBResponse(const char *pResponse);
+-    void     addGPPResponse(const char *pResponse);
+-    void     addBTPResponse(const char *pResponse);
+-    void     close();
+-    int      eq(const char* appName, const char* appType,
+-               const char* kioskID, const char* location);
+-
+-
+-    session(const char* appName, const char* appType,
+-     const char* kioskID, const char* location);
+-
+-   ~session();
+ };
+ 
+ class sessionList
+ {
+-private:
+-
+-    long findSession(const char* appName, const char* appType,
+-     const char* kioskID, const char* location);
+-
+-public:
+-
+-    long setSession(const char* appName, const char* appType,
+-     const char* kioskID, const char* location);
+-
++  public:
++    long setSession(const char* appName, const char* brand,
++      const char* appType, const char* kioskID, const char* location);
+     session *getSession(long sessionId);
+     void rmSession(long sessionId);
+ 
+     sessionList();
+-   ~sessionList();
++    ~sessionList();
++
++  private:
++    long findSession(const char* appName, const char* brand,
++      const char* appType, const char* kioskID, const char* location);
+ };
+ 
+-#endif //SESSIONLIST_H
+\ No newline at end of file
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
+index f20715e0..8ce6c2a1 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/BillingClient.cpp
+@@ -1,17 +1,7 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       BillingClient.cpp
+-//
+-//  purpose:    CORBA client basics
+-//
+-//  date:       26.10.99, 11:17
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
++// CORBA client basics
+ //  history:    ts 11.07.2001 adapted to BillingService (msHostClient.cpp)
+ //              ts 04.03.2003 use AlternateBillingService
+ //
+-//---------------------------------------------------------------------------
+ 
+ #include "BillingClient.h"
+ #include "massaidll/BASE_OS.h"
+@@ -20,70 +10,46 @@
+ using namespace std;
+ using namespace BillingAccess;
+ 
++namespace
++{
++  const char* nonNull(const char* text)
++  {
++    return text?text:"";
++  }
++}
++
+ const char* billingSession::pBilling= "BillingService";
+ const char* billingSession::pLocalBilling= "BillingServiceLocal";
+ const char* billingSession::pAlternateBilling= "BillingServiceAlternate";
+ 
+-
+-//------------------------------------------------------------------------
+-/**
+- *  @fn        long billingSession::open()
+- *
+- *  @brief     open new session
+- *
+- *  @date      15.04.2005
+- *
+- *  @author    Materna Information & Communications (AGe)
+- */
+-//------------------------------------------------------------------------
+-
++// open new session
+ long billingSession::open()
+ {
+-    if(pLocalHost && pLocalHost->proxy())
+-      lSessionId = pLocalHost->proxy()->openInvoice(AppName.c_str(),AppType.c_str(),Location.c_str(),KioskID.c_str());
+-    else
+-      return(-1);
+-
+-    return(0);
++  long result = -1;
++  if(pLocalHost && pLocalHost->proxy())
++  {
++    lSessionId = pLocalHost->proxy()->openInvoice(AppName.c_str(), Brand.c_str(),
++      AppType.c_str(), Location.c_str(), KioskID.c_str());
++    result = 0;
++  }
++  return result;
+ }
+ 
+-//------------------------------------------------------------------------
+-/**
+- *  @fn        long billingSession::close()
+- *
+- *  @brief     close current session
+- *
+- *  @date      15.04.2005
+- *
+- *  @author    Materna Information & Communications (AGe)
+- */
+-//------------------------------------------------------------------------
+-
++// close current session
+ long billingSession::close()
+ {
+-    if(pLocalHost && pLocalHost->proxy())
+-      pLocalHost->proxy()->closeInvoice(lSessionId);
+-    else
+-      return(-1);
+-
+-    return(0);
++  long result = -1;
++  if(pLocalHost && pLocalHost->proxy())
++  {
++    pLocalHost->proxy()->closeInvoice(lSessionId);
++    result = 0;
++  }
++  return result;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   billingSession::billingSession(char *pszAppName,
+-//                char *pszAppType, char *pszKioskID, char *pszLocation)
+-//
+-//  purpose:    class constructor
+-//
+-//  date:       04.05.2001, 13:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-billingSession::billingSession(
+-  char *pszAppName, char *pszAppType, char *pszKioskID, char *pszLocation)
++billingSession::billingSession(const char* pszAppName, const char* pszBrand,
++                               const char* pszAppType, const char* pszKioskID,
++                               const char* pszLocation)
+ {
+   try
+   {
+@@ -103,14 +69,11 @@ billingSession::billingSession(
+   catch(char*)
+   {}
+ 
+-  if (pszAppName)
+-    AppName= pszAppName;
+-  if (pszAppType)
+-    AppType= pszAppType;
+-  if (pszKioskID)
+-    KioskID= pszKioskID;
+-  if (pszLocation)
+-    Location= pszLocation;
++  AppName = nonNull(pszAppName);
++  Brand = nonNull(pszBrand);
++  AppType = nonNull(pszAppType);
++  KioskID = nonNull(pszKioskID);
++  Location = nonNull(pszLocation);
+ 
+   try
+   {
+@@ -148,6 +111,7 @@ billingSession::billingSession(
+     try
+     {
+       lLocalSessionId = pLocalHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                  string_dup(Brand.c_str()),
+                                   string_dup(AppType.c_str()),
+                                   string_dup(KioskID.c_str()),
+                                   string_dup(Location.c_str()));
+@@ -162,6 +126,7 @@ billingSession::billingSession(
+     try
+     {
+       lSessionId = pHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                  string_dup(Brand.c_str()),
+                                   string_dup(AppType.c_str()),
+                                   string_dup(KioskID.c_str()),
+                                   string_dup(Location.c_str()));
+@@ -196,6 +161,7 @@ billingSession::billingSession(
+     try
+     {
+       lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                  string_dup(Brand.c_str()),
+                                   string_dup(AppType.c_str()),
+                                   string_dup(KioskID.c_str()),
+                                   string_dup(Location.c_str()));
+@@ -208,18 +174,6 @@ billingSession::billingSession(
+ 
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   billingSession::~billingSession()
+-//
+-//  purpose:    class destructor
+-//
+-//  date:       04.05.2001, 13:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ billingSession::~billingSession()
+ {
+   if (lLocalSessionId && pLocalHost && pLocalHost->proxy())
+@@ -249,30 +203,13 @@ billingSession::~billingSession()
+     catch(CORBA::Exception&)
+     {}
+   }
+-  if (pHost)
+-    delete pHost;
+-  if (pLocalHost)
+-    delete pLocalHost;
+-  if (pAlternateHost)
+-    delete pAlternateHost;
+-  pHost= 0;
+-  pLocalHost= 0;
+-  pAlternateHost= 0;
++  delete pHost;
++  delete pLocalHost;
++  delete pAlternateHost;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addATBResponse(char *pszResponse)
+-//
+-//  purpose:    add ATB response to the BillingService
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
+-long billingSession::addATBResponse(char *pszResponse)
++// add ATB response to the BillingService
++long billingSession::addATBResponse(const char* pszResponse)
+ {
+   long result= -1;
+   if (pszResponse)
+@@ -302,6 +239,7 @@ long billingSession::addATBResponse(char *pszResponse)
+           try
+           {
+             lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
+                                       string_dup(AppType.c_str()),
+                                       string_dup(KioskID.c_str()),
+                                       string_dup(Location.c_str()));
+@@ -321,8 +259,6 @@ long billingSession::addATBResponse(char *pszResponse)
+         {
+           pAlternateHost= 0;
+         }
+-
+-
+       }
+     }
+     if (lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
+@@ -338,19 +274,8 @@ long billingSession::addATBResponse(char *pszResponse)
+   return result;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addBTPResponse(char *pszResponse)
+-//
+-//  purpose:    add BTP response to the BillingService
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
+-long billingSession::addBTPResponse(char *pszResponse)
++// add BTP response to the BillingService
++long billingSession::addBTPResponse(const char* pszResponse)
+ {
+   long result= -1;
+   if (pszResponse)
+@@ -380,6 +305,7 @@ long billingSession::addBTPResponse(char *pszResponse)
+           try
+           {
+             lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
+                                       string_dup(AppType.c_str()),
+                                       string_dup(KioskID.c_str()),
+                                       string_dup(Location.c_str()));
+@@ -414,19 +340,9 @@ long billingSession::addBTPResponse(char *pszResponse)
+   }
+   return result;
+ }
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addGPPResponse(char *pszResponse)
+-//
+-//  purpose:    add GPP response to the BillingService
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+ 
+-long billingSession::addGPPResponse(char *pszResponse)
++// add GPP response to the BillingService
++long billingSession::addGPPResponse(const char* pszResponse)
+ {
+   long result= -1;
+   if (pszResponse)
+@@ -456,6 +372,7 @@ long billingSession::addGPPResponse(char *pszResponse)
+           try
+           {
+             lAlternateSessionId = pAlternateHost->proxy()->openInvoice(string_dup(AppName.c_str()),
++                                      string_dup(Brand.c_str()),
+                                       string_dup(AppType.c_str()),
+                                       string_dup(KioskID.c_str()),
+                                       string_dup(Location.c_str()));
+@@ -475,7 +392,6 @@ long billingSession::addGPPResponse(char *pszResponse)
+         {
+           pAlternateHost= 0;
+         }
+-
+       }
+     }
+     if (lAlternateSessionId > 0 && pAlternateHost && pAlternateHost->proxy())
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+index 19ae2031..126ef0a0 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/File.cpp
+@@ -1,21 +1,8 @@
+-
+-//---------------------------------------------------------------------------
+-//
+-//  file:       File.cpp
+-//
+-//  purpose:    Write Billing to File
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//              ts 11.01.2002 V01.00.01 get output path from massai configuration
+-//              ts 16.01.2002 V01.00.02 attribute month added (format: YYYY-MM)
+-//              ts 02.12.2002           file name month corrected
+-//              ts 01.06.2004           hex code handling corrected
+-//---------------------------------------------------------------------------
+-
+-
++//  Write Billing to File
++//  ts 11.01.2002 V01.00.01 get output path from massai configuration
++//  ts 16.01.2002 V01.00.02 attribute month added (format: YYYY-MM)
++//  ts 02.12.2002           file name month corrected
++//  ts 01.06.2004           hex code handling corrected
+ 
+ #include "File.h"
+ #include "trc/trace.h"
+@@ -42,50 +29,36 @@ using std::string;
+ */
+ 
+ // base configuration class
+-
+-class cfg : public nConfig::gcText
++class cfg: public nConfig::gcText
+ {
+-   /** This method is called, when the configuration subsystem needs to
+-    *  create a new confuguration item.
+-    */
+-   void create(const char * & Rights, const char * & Explanation, const char * & Default)
+-   {
++  public:
++    cfg(const char* pszItem, const char* pszUser):
++      nConfig::gcText(pszItem, pszUser)
++    {}
++
++  private:
++    /** This method is called, when the configuration subsystem needs to
++     *  create a new confuguration item. */
++    void create(const char*& Rights, const char*& Explanation, const char*& Default)
++    {
+       Rights = "rwl";    // "[r][w][+]"
+       Explanation = "Output path for statistical data";
+       Default = ".\\billing";
+-   }
+-
+-public:
+-   /** Constructor */
+-   cfg(char *pszItem,char *pszUser) : nConfig::gcText(pszItem,pszUser) { }
++    }
+ };
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   char *getOutputPath()
+-//
+-//  purpose:    try to get output path from config
+-//
+-//  date:       11.01.2001
+-//
+-//  author:     Materna Information & Communications (ts)
+-//
+-//---------------------------------------------------------------------------
++// try to get output path from config
+ void readOutputPath(char* pBuffer, int size)
+ {
+-  int    iLen;
+-  cfg host("SERVICES.BILLING.OutputPath","StatisticsService");
+-
++  cfg host("SERVICES.BILLING.OutputPath", "StatisticsService");
+   if(host.get())
+   {
+     strncpy(pBuffer, host.get(), size);
+     pBuffer[size-1]= 0;
+-
+-    iLen= strlen(pBuffer);
+-
+-    if (iLen > 0)
++    int iLen= strlen(pBuffer);
++    if(iLen > 0)
+     {
+-      if (pBuffer[iLen-1] != ':' && pBuffer[iLen-1] != '/' && pBuffer[iLen-1] != '\\')
++      if(pBuffer[iLen-1] != ':' && pBuffer[iLen-1] != '/' && pBuffer[iLen-1] != '\\')
+       {
+         pBuffer[iLen]= '/';
+         pBuffer[iLen+1]= 0;
+@@ -94,36 +67,24 @@ void readOutputPath(char* pBuffer, int size)
+     checkPath(pBuffer);
+   }
+ }
++
+ char *getOutputPath()
+ {
+-static char szTmp [258];
+-static bool readdone= false;
+-
+-    *szTmp = '\0';
+-    if(!readdone)
+-    {
+-      readOutputPath(szTmp, 258);
+-    }
+-
+-    return(szTmp);
++  static char szTmp [258];
++  static bool readdone= false;
++  *szTmp = '\0';
++  if(!readdone)
++  {
++    readOutputPath(szTmp, 258);
++  }
++  return szTmp;
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void writeContentCharData(ostream& out, string::const_iterator first, string const_iterator last)
+-
+- COMMENTS:  write XML AttValue to stream (using apos)
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// write XML AttValue to stream (using apos)
+ void writeContentCharData(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+   string::const_iterator it;
+-  unsigned int i;
+   for(it= first; it != last; it++)
+   {
+     switch(*it)
+@@ -131,54 +92,52 @@ void writeContentCharData(ostream& out, string::const_iterator first, string::co
+       case 0x9:
+       case 0xd:
+       case 0xa:
++      {
+         out << *it;
+         break;
++      }
+       case '&':
++      {
+         out << "&amp;";
+         break;
++      }
+       case '<':
++      {
+         out << "&lt;";
+         break;
++      }
+       case '>':
++      {
+         out << "&gt;";  // avoid "]]>"
+         break;
+-
++      }
+       default:
+-        if ( *it > 127)
++      {
++        if(*it > 127)
+         {
+-          i= (unsigned char)*it;
++          unsigned int i = (unsigned char)*it;
+           sprintf(buffer, "&#x%X;", i);
+           out << buffer;
+         }
+         else
+-        if ( *it >= ' ')
++        if(*it >= ' ')
+         {
+           out << *it;
+-       }
+-       else
+-       {
+-          out << '.';
+-       }
++        }
++        else
++        {
++           out << '.';
++        }
++      }
+     }
+   }
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void writeAttValueApos(ostream& out, string::const_iterator first, string const_iterator last)
+-
+- COMMENTS:  write XML AttValue to stream (using apos)
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// write XML AttValue to stream (using apos)
+ void writeAttValueApos(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+   string::const_iterator it;
+-  unsigned int i;
+   out << "\'";
+   for(it= first; it != last; it++)
+   {
+@@ -187,26 +146,35 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+       case 0x9:
+       case 0xd:
+       case 0xa:
++      {
+         out << *it;
+         break;
++      }
+       case '&':
++      {
+         out << "&amp;";
+         break;
++      }
+       case '<':
++      {
+         out << "&lt;";
+         break;
++      }
+       case '\'':
++      {
+         out << "&apos;";
+         break;
++      }
+       default:
+-        if ( *it > 127)
++      {
++        if(*it > 127)
+         {
+-          i= (unsigned char)*it;
++          unsigned int i = (unsigned char)*it;
+           sprintf(buffer, "&#x%X;", i);
+           out << buffer;
+         }
+         else
+-        if ( *it >= ' ')
++        if(*it >= ' ')
+         {
+           out << *it;
+         }
+@@ -214,27 +182,17 @@ void writeAttValueApos(ostream& out, string::const_iterator first, string::const
+         {
+           out << '.';
+         }
++      }
+     }
+   }
+   out << "\'";
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void writeAttValueQuot(ostream& out, string::const_iterator first, string const_iterator last)
+-
+- COMMENTS:  write XML AttValue to stream (using quot)
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// write XML AttValue to stream (using quot)
+ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const_iterator last)
+ {
+   char buffer[10];
+   string::const_iterator it;
+-  unsigned int i;
+   out << "\"";
+   for(it= first; it != last; it++)
+   {
+@@ -243,26 +201,35 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+       case 0x9:
+       case 0xd:
+       case 0xa:
++      {
+         out << *it;
+         break;
++      }
+       case '&':
++      {
+         out << "&amp;";
+         break;
++      }
+       case '<':
++      {
+         out << "&lt;";
+         break;
++      }
+       case '\"':
++      {
+         out << "&quot;";
+         break;
++      }
+       default:
+-        if ( *it > 127)
++      {
++        if(*it > 127)
+         {
+-          i= (unsigned char)*it;
++          unsigned int i= (unsigned char)*it;
+           sprintf(buffer, "&#x%X;", i);
+           out << buffer;
+         }
+         else
+-        if ( *it >= ' ')
++        if(*it >= ' ')
+         {
+           out << *it;
+         }
+@@ -270,39 +237,20 @@ void writeAttValueQuot(ostream& out, string::const_iterator first, string::const
+         {
+           out << '.';
+         }
++      }
+     }
+   }
+   out << "\"";
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  Response::Response(const string& setRsp, bool setbParsed)
+-
+- COMMENTS:  create response
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// create response
+ Response::Response(const string& setRsp, bool setbParseError)
+ {
+   Rsp= setRsp;
+   bParseError= setbParseError;
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void writePrinter(ostream& out, const string& PrinterType, const ResponseList& Response, int iUsed)
+-
+- COMMENTS:  write printer entry to file
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// write printer entry to file
+ void writePrinter(ostream& out, const string& PrinterType, const ResponseList& Response, int iUsed)
+ {
+   string Used;
+@@ -321,31 +269,19 @@ void writePrinter(ostream& out, const string& PrinterType, const ResponseList& R
+     out << "  <RESPONSE";
+     out << " Value=";
+     writeAttValueQuot(out, it->Rsp.begin(), it->Rsp.end());
+-    if ((it->bParseError))
++    if((it->bParseError))
++    {
+       out << " Parse=\"Error\"";
++    }
+     out << " />" << endl;
+   }
+   out << " </PRINTER>" << endl;
+-
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void write(const string& KioskId, const string& Location, const string& AppName,
+-              const string& AppType, time_t start, time_t end, bool bClosed,
+-              const ResponseList& ATBResponse, int iATBUsed,
+-              const ResponseList& GPPResponse, int iGPPUsed,
+-              const ResponseList& BTPResponse, int iBTPUsed)
+-
+- COMMENTS:  write event to file
+-
+- DATE:      16.07.2001
+-
+- AUTHOR:    Materna Information & Communications (TS)
+-
+----------------------------------------------------------------------------*/
++// write event to file
+ void write(const string& KioskId, const string& Location, const string& AppName,
+-  const string& AppType, time_t start, time_t end, bool bClosed,
++  const string& Brand, const string& AppType,
++  time_t start, time_t end, bool bClosed,
+   const ResponseList& ATBResponse, int iATBUsed,
+   const ResponseList& GPPResponse, int iGPPUsed,
+   const ResponseList& BTPResponse, int iBTPUsed)
+@@ -354,27 +290,28 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+   string StartDate, EndDate, StartMonth;
+   char Name[350];
+   ofstream *pOut;
+-  struct tm saveTime, *pST;
+-  pST= localtime(&end);
+-  if (pST)
++  struct tm saveTime;
++  struct tm* pST= localtime(&end);
++  if(pST)
++  {
+     saveTime= *pST;
+-//              ts 02.12.2002           file name month corrected
+-  sprintf(Name, "%sBill%04d%02d%02d.xml", getOutputPath(),
+-   (saveTime.tm_year%5000)+1900,
+-   (saveTime.tm_mon%12)+1,
+-   (saveTime.tm_mday%32)
+-     );
+-
++  }
++  sprintf(Name, "%sBill%04d%02d%02d.xml",
++    getOutputPath(),
++    (saveTime.tm_year%5000)+1900,
++    (saveTime.tm_mon%12)+1,
++    (saveTime.tm_mday%32)
++  );
+ 
+   prot("OutputFile= %s\n", Name);
+   pOut= new ofstream(Name, std::ios_base::out | std::ios_base::in | std::ios_base::ate);
+-  if (!(*pOut).good())
++  if(!(*pOut).good())
+   {
+     delete pOut;
+     pOut=new ofstream(Name, std::ios_base::out | std::ios_base::ate);
+   }
+   std::streamoff pos= (*pOut).tellp();
+-  if (pos <= sizeof("<BILLING></BILLING>"))
++  if(pos <= sizeof("<BILLING></BILLING>"))
+   {
+     (*pOut).seekp(0);
+     (*pOut) << "<BILLING>" << endl;
+@@ -383,13 +320,13 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+   {
+     (*pOut).seekp(pos - (sizeof("</BILLING>")+2));
+   }
+-  if ((*pOut).good())
++  if((*pOut).good())
+   {
+     char Buffer[48];
+     struct tm* pTime;
+ 
+     pTime= localtime(&start);
+-    if (pTime)
++    if(pTime)
+     {
+       strftime(Buffer, sizeof(Buffer), "%Y-%m-%d %H:%M:%S", pTime);
+       StartDate= Buffer;
+@@ -411,11 +348,14 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+     // LH tests require dates & times to be reset every day.
+     // That's why we got negative durations, that caused errors in writing values to the database
+     // 06.05.2003 (AGe)
+-
+     if((end - start) >= 0)
++    {
+       sprintf(Buffer, "%d", end-start);
++    }
+     else
++    {
+       sprintf(Buffer, "%d", 999999);
++    }
+ 
+     Duration= Buffer;
+ 
+@@ -453,7 +393,7 @@ void write(const string& KioskId, const string& Location, const string& AppName,
+   }
+   else
+   {
+-    TRACE(HERE_1,"Can not  open (%.1000s).", Name);
++    TRACE(HERE_1, "Can not  open (%.1000s).", Name);
+   }
+   delete pOut;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/billing.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/billing.cpp
+index 74eb0e73..b4bfe391 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/billing.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/billing.cpp
+@@ -1,142 +1,72 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       billing.cpp
+-//
+-//  purpose:    Implementation of the billing interface
+-//
+-//  date:       04.01.2002, 15:39
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-//#define SHOW_INCLUDE_FILES
+-
++//  Implementation of the billing interface
+ #include "billing/billing.h"
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   bool billingSession::connected()
+-//
+-//  purpose:    resturns conncetion status
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
++using namespace BillingAccess;
+ 
++//  resturns conncetion status
+ bool billingSession::connected()
+ {
+-    return(fConnected);
++  return fConnected;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addATBResponse (char *pszResponse)
+-//
+-//  purpose:    adds response from ATB
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long billingSession::addATBResponse (char *pszResponse)
++//  adds response from ATB
++long billingSession::addATBResponse (const char* pszResponse)
+ {
+-    if(proxy && sessionId && pszResponse)
+-      return(proxy->addATBResponse(sessionId,pszResponse));
+-    else
+-      return(-1);
++  long result = -1;
++  if(connected() && pszResponse)
++  {
++    result = proxy->addATBResponse(sessionId, pszResponse);
++  }
++  return result;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addBTPResponse (char *pszResponse)
+-//
+-//  purpose:    adds response from BTP
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long billingSession::addBTPResponse (char *pszResponse)
++//  adds response from BTP
++long billingSession::addBTPResponse (const char* pszResponse)
+ {
+-    if(proxy && sessionId && pszResponse)
+-      return(proxy->addBTPResponse(sessionId,pszResponse));
+-    else
+-      return(-1);
++  long result = -1;
++  if(connected() && pszResponse)
++  {
++    result = proxy->addBTPResponse(sessionId, pszResponse);
++  }
++  return result;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long billingSession::addGPPResponse (char *pszResponse)
+-//
+-//  purpose:    adds response from GPP
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long billingSession::addGPPResponse (char *pszResponse)
++//  adds response from GPP
++long billingSession::addGPPResponse (const char* pszResponse)
+ {
+-    if(proxy && sessionId && pszResponse)
+-      return(proxy->addGPPResponse(sessionId,pszResponse));
+-    else
+-      return(-1);
++  long result = -1;
++  if(connected() && pszResponse)
++  {
++    result = proxy->addGPPResponse(sessionId, pszResponse);
++  }
++  return result;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   billingSession::billingSession(char *pszAppName, char *pszAppType,char *pszLocation, char *pszKioskID)
+-//
+-//  purpose:    class constructor
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-billingSession::billingSession(char *pszAppName, char *pszAppType,char *pszLocation, char *pszKioskID)
++billingSession::billingSession(const char* pszAppName, const char* pszBrand, const char* pszAppType, const char* pszLocation, const char* pszKioskID)
+ {
+-    sessionId  = 0;
+-    fConnected = false;
+-
+-    if(pszAppName && pszAppType && pszLocation && pszKioskID)
++  sessionId  = 0;
++  fConnected = false;
++  if(pszAppName && pszBrand && pszAppType && pszLocation && pszKioskID)
++  {
++    cclnt = new corbaClient<BillingService>("BillingService");
++    // ... and save the BillingService for the remote access
++    proxy = cclnt->proxy();
++    if(proxy)
+     {
+-       cclnt = new corbaClient <BillingService> ("BillingService");
+-
+-       // ... and save the BillingService for the remote access
+-
+-       proxy = cclnt->proxy();
+-
+-       if(proxy && (sessionId = proxy->openInvoice(pszAppName,pszAppType,pszLocation,pszKioskID)) != 0)
+-         fConnected = true;
++      sessionId = proxy->openInvoice(pszAppName, pszBrand, pszAppType, pszLocation, pszKioskID);
++      if(sessionId)
++      {
++        fConnected = true;
++      }
+     }
++  }
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   billingSession::~billingSession()
+-//
+-//  purpose:    class destructor
+-//
+-//  date:       04.01.2002, 16:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ billingSession::~billingSession()
+ {
+-    if(proxy && sessionId)
+-      proxy->closeInvoice(sessionId);
+-
+-    if(cclnt) delete cclnt;
++  if(connected())
++  {
++    proxy->closeInvoice(sessionId);
++  }
++  delete cclnt;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
+index ef70318f..65d5cc4c 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/clientmain.cpp
+@@ -1,15 +1,3 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       clientmain.cpp
+-//
+-//  purpose:
+-//
+-//  date:       04.05.2001, 13:58
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ #include <signal.h>
+ #include <string.h>
+ #include <iostream>
+@@ -17,24 +5,12 @@
+ 
+ #include "BillingClient.h"
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  VOID exitHandler(INT iSignal)
+-
+- COMMENTS:  Signal handler
+-
+- DATE:      04/11/97 - 11:58:33
+-
+- AUTHOR:    Dr. Materna GmbH   (AGe)
+-
+----------------------------------------------------------------------------*/
+-
++// Signal handler
+ static void exitHandler(int iSignal)
+ {
+-char szTmp[30];
+-
+-    switch(iSignal)
+-    {
++  char szTmp[30];
++  switch(iSignal)
++  {
+     case SIGABRT:   strcpy(szTmp,"SIGABRT");  break;
+     case SIGBREAK:  strcpy(szTmp,"SIGBREAK"); break;
+     case SIGTERM:   strcpy(szTmp,"SIGTERM");  break;
+@@ -43,12 +19,12 @@ char szTmp[30];
+     case SIGFPE:    strcpy(szTmp,"SIGFPE");   break;
+     case SIGSEGV:   strcpy(szTmp,"SIGSEGV");  break;
+     case SIGILL:    strcpy(szTmp,"SIGILL");   break;
+-    }
++  }
+ 
+-    printf("signal [%s]\n",szTmp);
++  printf("signal [%s]\n",szTmp);
+ 
+-    switch(iSignal)
+-    {
++  switch(iSignal)
++  {
+     case SIGTERM: break;
+ 
+     case SIGABRT:
+@@ -58,10 +34,8 @@ char szTmp[30];
+     case SIGFPE:
+     case SIGSEGV:
+     case SIGILL:
+-         break;
+-    }
+-
+-    return;
++       break;
++  }
+ }
+ 
+ 
+@@ -76,101 +50,104 @@ void help()
+   std::cout << "x: send atb response with chars below 0x20" << std::endl;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   int main()
+-//
+-//  purpose:    program entry
+-//
+-//  date:       04.07.2001, 09:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ int main(int argc, char** argv)
+ {
+-char szInput[1024];
+-
+-    int c;
+-    bool quit;
+-    long result;
+-
+-    signal(SIGABRT, exitHandler);
+-    signal(SIGBREAK,exitHandler);
+-    signal(SIGTERM, exitHandler);
+-    signal(SIGINT,  exitHandler);
+-
+-    signal(SIGSEGV, exitHandler);
+-    signal(SIGILL,  exitHandler);
+-    signal(SIGFPE,  exitHandler);
+-
+-    bool stop= false;
+-    while(!stop)
++  signal(SIGABRT, exitHandler);
++  signal(SIGBREAK,exitHandler);
++  signal(SIGTERM, exitHandler);
++  signal(SIGINT,  exitHandler);
++
++  signal(SIGSEGV, exitHandler);
++  signal(SIGILL,  exitHandler);
++  signal(SIGFPE,  exitHandler);
++
++  bool stop= false;
++  while(!stop)
++  {
++    billingSession hclnt("TestApp","", "TST","DTM", "DTM");
++
++    help();
++    bool quit= false;
++    while(!quit)
+     {
+-      billingSession hclnt("TestApp","TST","DTM", "DTM");
+ 
+-      help();
+-      quit= false;
+-      while(!quit)
++      int c = _getche();
++      std::cout << std::endl;
++      switch(c)
+       {
+-
+-        c = _getche();
+-        std::cout << std::endl;
+-        switch(c)
++        case 'h':
+         {
+-          case 'h':
+-            help();
+-            break;
+-          case 'q':
+-            quit= true;
+-            break;
+-          case 'a':
+-            std::cout << "ATB response:" << std::endl;
+-            std::cin >> szInput;
+-            result= hclnt.addATBResponse(szInput);
+-            std::cout << "addATBResponse: " << result << std::endl;
+-            break;
+-          case 'g':
+-            std::cout << "GPP response:" << std::endl;
+-            std::cin >> szInput;
+-            result= hclnt.addGPPResponse(szInput);
+-            std::cout << "addGPPResponse: " << result << std::endl;
+-            break;
+-          case 'b':
+-            std::cout << "BTP response:" << std::endl;
+-            std::cin >> szInput;
+-            result= hclnt.addBTPResponse(szInput);
+-            std::cout << "addBTPResponse: " << result << std::endl;
+-            break;
+-          case 'x':
+-            std::cout << "ATB response with 01 02 0a 1f 20:" << std::endl;
+-            szInput[0] = 0x01;
+-            szInput[1] = 0x02;
+-            szInput[2] = 0x0a;
+-            szInput[3] = 0x1f;
+-            szInput[4] = 0x20;
+-            szInput[5] = 0x00;
+-            result= hclnt.addATBResponse(szInput);
+-            std::cout << "addATBResponse: " << result << std::endl;
+-
+-            std::cout << "ATB response with 09 21 0a 22 :" << std::endl;
+-            szInput[0] = 0x09;
+-            szInput[1] = 0x21;
+-            szInput[2] = 0x0a;
+-            szInput[3] = 0x22;
+-            szInput[4] = 0x00;
+-            result= hclnt.addATBResponse(szInput);
+-            std::cout << "addATBResponse: " << result << std::endl;
+-            break;
+-          case 's':
+-            stop=true;
+-            break;
+-          default:
+-            help();
++          help();
++          break;
++        }
++        case 'q':
++        {
++          quit= true;
++          break;
++        }
++        case 'a':
++        {
++          char szInput[1024];
++          std::cout << "ATB response:" << std::endl;
++          std::cin >> szInput;
++          long result= hclnt.addATBResponse(szInput);
++          std::cout << "addATBResponse: " << result << std::endl;
++          break;
++        }
++        case 'g':
++        {
++          char szInput[1024];
++          std::cout << "GPP response:" << std::endl;
++          std::cin >> szInput;
++          long result= hclnt.addGPPResponse(szInput);
++          std::cout << "addGPPResponse: " << result << std::endl;
++          break;
++        }
++        case 'b':
++        {
++          char szInput[1024];
++          std::cout << "BTP response:" << std::endl;
++          std::cin >> szInput;
++          long result= hclnt.addBTPResponse(szInput);
++          std::cout << "addBTPResponse: " << result << std::endl;
++          break;
++        }
++        case 'x':
++        {
++          char szInput[1024];
++          std::cout << "ATB response with 01 02 0a 1f 20:" << std::endl;
++          szInput[0] = 0x01;
++          szInput[1] = 0x02;
++          szInput[2] = 0x0a;
++          szInput[3] = 0x1f;
++          szInput[4] = 0x20;
++          szInput[5] = 0x00;
++          long result= hclnt.addATBResponse(szInput);
++          std::cout << "addATBResponse: " << result << std::endl;
++
++          std::cout << "ATB response with 09 21 0a 22 :" << std::endl;
++          szInput[0] = 0x09;
++          szInput[1] = 0x21;
++          szInput[2] = 0x0a;
++          szInput[3] = 0x22;
++          szInput[4] = 0x00;
++          result= hclnt.addATBResponse(szInput);
++          std::cout << "addATBResponse: " << result << std::endl;
++          break;
++        }
++        case 's':
++        {
++          stop=true;
++          break;
++        }
++        default:
++        {
++          help();
++          break;
+         }
+       }
+     }
+-    std::cout << "Stop" << std::endl;
+-    return 0;
++  }
++  std::cout << "Stop" << std::endl;
++  return 0;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
+index 05311efa..aa89888c 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/server.cpp
+@@ -1,12 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       server.cpp
+-//
+-//  purpose:    CORBA servant
+-//
+-//  date:       25.10.00, 16:41
+-//
+-//  author:     Dr. Materna GmbH (AGe)
++//  CORBA servant
+ //
+ //  history:    ts 11.07.2001 adapted to BillingService
+ //              ts 09.01.2002 V01.00.00 output time in format YYYY-MM-DD hh:mm:ss
+@@ -25,264 +17,180 @@
+ #include "Tools/VERSION.H"
+ #include "cfgclnt/nConfigSelection.hpp"
+ 
+-
+ VERSION_ID_DT( 01, 00, 07 );
+ 
+ using namespace BillingAccess;
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   BillingServiceServant::BillingServiceServant()
+-//
+-//  purpose:    class constructor
+-//
+-//  date:       27.10.00, 11:15
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-BillingServiceServant::BillingServiceServant()
+-{
+-//    listener = NULL;
+-
+-    TRACE(HERE_4,"servant[%x] started...",this);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   BillingServiceServant::~BillingServiceServant()
+-//
+-//  purpose:    clean up
+-//
+-//  date:       27.10.00, 14:29
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-BillingServiceServant::~BillingServiceServant()
+-{
+-    TRACE(HERE_4,"servant[%x] terminated.",this);
+-}
+-
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   Long BillingServiceServant::openInvoice (const char* appName,
+-//              const char* appType, const char* kioskID, const char* location)
+-//
+-//  purpose:    opens a new host session
+-//
+-//  date:       06.05.2001, 10:12
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
++//  opens a new host session
+ //---------------------------------------------------------------------------
+ // base configuration class
+-const nConfig::selection KioskId::useLocalHostNameList[]= {nConfig::selection(0, "No", "Use the assigned kiosk id"), nConfig::selection(1, "Yes", "Ignore the assigned kiosk id, use the local host name")};
++const nConfig::selection KioskId::useLocalHostNameList[]=
++{
++  nConfig::selection(0, "No", "Use the assigned kiosk id"),
++  nConfig::selection(1, "Yes", "Ignore the assigned kiosk id, use the local host name")
++};
+ bool KioskId::read= false;
+ bool KioskId::useHostname= false;
+ char KioskId::hostname[MAXHOSTNAMESIZE+1];
++
+ void KioskId::cfgUseHostname::create
+-           (
+-              char const * &      Rights,
+-              char const * &      Expl,
+-              long &              DefNdx,
+-              nConfig::selection const * & Begin,
+-              nConfig::selection const * & End
+-        )
++(
++  char const*& Rights,
++  char const*& Expl,
++  long& DefNdx,
++  nConfig::selection const*& Begin,
++  nConfig::selection const*& End
++)
+ {
+-   Rights = "rwl";    // "[r][w][+]"
+-   Expl = "Use local hostname for kioskid";
+-   DefNdx = 0;
+-   Begin= useLocalHostNameList;
+-   End= useLocalHostNameList + 2;
++  Rights = "rwl";    // "[r][w][+]"
++  Expl = "Use local hostname for kioskid";
++  DefNdx = 0;
++  Begin= useLocalHostNameList;
++  End= useLocalHostNameList + 2;
+ }
+-KioskId::cfgUseHostname::cfgUseHostname(char *pszItem,char *pszUser) : nConfig::gcSelection(pszItem,pszUser) { };
++
++KioskId::cfgUseHostname::cfgUseHostname(const char *pszItem, const char *pszUser):
++  nConfig::gcSelection(pszItem, pszUser)
++{}
++
+ void KioskId::readhostname()
+ {
+- try
+- {
+-   gethostname(hostname, MAXHOSTNAMESIZE);
+-   hostname[MAXHOSTNAMESIZE]=0;
+- }
+- catch( ... )
+- {
+-   TRACE(HERE_1, "gethostname failed");
+-   hostname[0]=0;
+-   useHostname= false;
+- }
++  try
++  {
++    gethostname(hostname, MAXHOSTNAMESIZE);
++    hostname[MAXHOSTNAMESIZE]=0;
++  }
++  catch( ... )
++  {
++    TRACE(HERE_1, "gethostname failed");
++    hostname[0]=0;
++    useHostname= false;
++  }
+ }
++
+ bool KioskId::useLocalHost()
+ {
+- if(!read)
+- {
+-   try
+-   {
+-     cfgUseHostname cfg("SERVICES.BILLING.useLocalHostname","StatisticsService");
+-     useHostname= (cfg.getIndex() == 1);
+-     read= true;
+-   }
+-   catch(...)
+-   {
+-   }
+-   readhostname();
+- }
+- return useHostname;
++  if(!read)
++  {
++    try
++    {
++      cfgUseHostname cfg("SERVICES.BILLING.useLocalHostname", "StatisticsService");
++      useHostname = (cfg.getIndex() == 1);
++      read= true;
++    }
++    catch(...)
++    {}
++    readhostname();
++  }
++  return useHostname;
+ }
++
+ const char* KioskId::getKioskId(const char* kioskId)
+ {
+- if(useLocalHost())
+-   return hostname;
+- else
+-   return kioskId;
++  if(useLocalHost())
++  {
++    return hostname;
++  }
++  else
++  {
++    return kioskId;
++  }
+ }
+ 
+ 
+-
+-Long BillingServiceServant::openInvoice (const char* appName,
+-  const char* appType, const char* kioskID, const char* location)
++//  class constructor
++BillingServiceServant::BillingServiceServant()
+ {
+-long id = 0;
+-
+-    TRACE(HERE_6,"openInvoice((%.200s), (%.200s), (%.200s), (%.200s))", appName, appType, kioskID, location);
+-
+-    try
+-    {
+-
+-      id = setSession(appName, appType, KioskId::getKioskId(kioskID), location);
+-      TRACE(HERE_6,"openInvoice()= %d", id);
+-      prot("openSession(%s, %s, %s, %s), id = %d\n", appName, appType, kioskID, location, id);
+-    }
+-    catch(CORBA::SystemException &)
+-    {
+-      //TRACE(HERE,"CORBA::SystemException in openSession(%s, %s, %s, %s)\n%s",
+-      //  appName, appType, kioskID, location, id,X._to_string());
+-      TRACE(HERE_1,"CORBA::SystemException in openSession((%.200s), (%.200s), (%.200s), (%.200s)), %d",
+-        appName, appType, kioskID, location, id);
+-    }
+-    catch(...)
+-    {
+-      TRACE(HERE_1,"unknown exception in openSession((%.200s), (%.200s), %s, (%.200s))", appName, appType, kioskID, location);
+-    }
++  TRACE(HERE_4, "servant[%x] started...", this);
++}
+ 
+-    return(id);
++//  clean up
++BillingServiceServant::~BillingServiceServant()
++{
++  TRACE(HERE_4, "servant[%x] terminated.", this);
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   Long BillingServiceServant::closeInvoice(Long sessionId)
+-//
+-//  purpose:    closes a specific host session
+-//
+-//  date:       06.05.2001, 10:13
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
++Long BillingServiceServant::openInvoice(const char* appName, const char* brand,
++  const char* appType, const char* kioskID, const char* location)
++{
++  long id = 0;
++  TRACE(HERE_6, "openInvoice((%.200s), (%.200s), (%.200s), (%.200s), (%.200s))",
++    appName, brand, appType, kioskID, location);
++  try
++  {
++    id = setSession(appName, brand, appType, KioskId::getKioskId(kioskID), location);
++    TRACE(HERE_6, "openInvoice()= %d", id);
++    prot("openSession(%s, %s, %s, %s, %s), id = %d\n",
++      appName, brand, appType, kioskID, location, id);
++  }
++  catch(CORBA::SystemException &)
++  {
++    TRACE(HERE_1, "CORBA::SystemException in openSession((%.200s), (%.200s), (%.200s), (%.200s), (%.200s)), %d",
++      appName, brand, appType, kioskID, location, id);
++  }
++  catch(...)
++  {
++    TRACE(HERE_1, "unknown exception in openSession((%.200s), (%.200s), (%.200s), (%.200s), (%.200s))",
++      appName, brand, appType, kioskID, location);
++  }
++  return id;
++}
+ 
++//  closes a specific host session
+ Long BillingServiceServant::closeInvoice(Long sessionId)
+ {
+-session *ps;
+-
+-    TRACE(HERE_6,"closeInvoice(%d)",sessionId);
+-
+-    if((ps = getSession(sessionId)) != NULL)
+-    {
+-      prot("closeInvoice, id = %d\n",sessionId);
+-      ps->close();
+-      rmSession(sessionId);
+-    }
+-
+-    return(0);
++  session* ps;
++  TRACE(HERE_6, "closeInvoice(%d)", sessionId);
++  if((ps = getSession(sessionId)) != NULL)
++  {
++    prot("closeInvoice, id = %d\n", sessionId);
++    ps->close();
++    rmSession(sessionId);
++  }
++  return 0;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   Long BillingServiceServant::addATBResponse (Long sessionId, const char* response)
+-//
+-//  purpose:    add a response for an ATB printer
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// add a response for an ATB printer
+ Long BillingServiceServant::addATBResponse (Long sessionId, const char* response)
+ {
+-session *ps;
+-
+-    TRACE(HERE_7,"addATBResponse(%d,(%.200s))", sessionId, response);
+-    prot("addATBResponse(%d,%s)\n", sessionId, response);
+-
+-    if((ps = getSession(sessionId)) != NULL)
+-    {
+-      ps->addATBResponse(response);
+-      return(0);
+-    }
+-    else
+-      return(-1);
++  Long result = -1;
++  TRACE(HERE_7, "addATBResponse(%d, (%.200s))", sessionId, response);
++  prot("addATBResponse(%d, %s)\n", sessionId, response);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addATBResponse(response);
++    result = 0;
++  }
++  return result;
+ }
+ 
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   Long BillingServiceServant::addBTPResponse (Long sessionId, const char* response)
+-//
+-//  purpose:    add a response for an BT printer
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// add a response for an BT printer
+ Long BillingServiceServant::addBTPResponse (Long sessionId, const char* response)
+ {
+-session *ps;
+-
+-    TRACE(HERE_7,"addBTPResponse(%d,(%.200s))", sessionId, response);
+-    prot("addBTPResponse(%d,%s)\n", sessionId, response);
+-
+-    if((ps = getSession(sessionId)) != NULL)
+-    {
+-      ps->addBTPResponse(response);
+-      return(0);
+-    }
+-    else
+-      return(-1);
++  Long result = -1;
++  TRACE(HERE_7, "addBTPResponse(%d, (%.200s))", sessionId, response);
++  prot("addBTPResponse(%d, %s)\n", sessionId, response);
++  session* ps =getSession(sessionId);
++  if(ps)
++  {
++    ps->addBTPResponse(response);
++    result = 0;
++  }
++  return result;
+ }
+ 
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   Long BillingServiceServant::addGPPResponse (Long sessionId, const char* response)
+-//
+-//  purpose:    add a response for an GP printer
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// add a response for an GP printer
+ Long BillingServiceServant::addGPPResponse (Long sessionId, const char* response)
+ {
+-session *ps;
+-
+-    TRACE(HERE_7,"addGPPResponse(%d,(%.200s))", sessionId, response);
+-    prot("addGPPResponse(%d,%s)\n", sessionId, response);
+-
+-    if((ps = getSession(sessionId)) != NULL)
+-    {
+-      ps->addGPPResponse(response);
+-      return(0);
+-    }
+-    else
+-      return(-1);
++  Long result = -1;
++  TRACE(HERE_7, "addGPPResponse(%d, (%.200s))", sessionId, response);
++  prot("addGPPResponse(%d, %s)\n", sessionId, response);
++  session* ps = getSession(sessionId);
++  if(ps)
++  {
++    ps->addGPPResponse(response);
++    result = 0;
++  }
++  return result;
+ }
+-
+-
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+index c4ee6bb0..4a49de2e 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+@@ -1,18 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       sessionList.cpp
+-//
+-//  purpose:    session control implementation
+-//
+-//  date:       06.05.2001, 12:29
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//  history:    ts 11.07.2001 adapted to BillingService
+-//
+-//---------------------------------------------------------------------------
+-
+-
++// session control implementation
+ 
+ #include "sessionList.h"
+ 
+@@ -23,471 +9,281 @@
+ 
+ #include "PrinterRsp.h"
+ 
++namespace
++{
++  const char* nonNull(const char* text)
++  {
++    return text?text:"";
++  }
++}
+ 
+ using namespace BillingAccess;
+ 
+ // global vars for this file
+-
+ static long       sessionCounter = 0;
+ static session   *pSessions      = NULL;
+ 
++long session::sessionId()
++{
++  return(lId);
++}
+ 
++void session::sessionId(long id)
++{
++  lId = id;
++}
++
++session* session::nextSession()
++{
++  return(pNext);
++}
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void session::close()
+-//
+-//  purpose:    set session closed flag
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
++void session::nextSession(session* p)
++{
++  pNext = p;
++}
+ 
++// set session closed flag
+ void session::close()
+ {
+   bClosed= true;
+   end= time(0);
+-
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void session::addATBResponse(const char *pResponse)
+-//
+-//  purpose:    add response of ATB printer
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// add response of ATB printer
+ void session::addATBResponse(const char *pResponse)
+ {
+-  bool bATBError;
+-  int iUsed;
+-  if (pResponse)
++  if(pResponse)
+   {
+-    iUsed= 0;
+-    if (parseATB(iUsed, pResponse) == 0)
++    int iUsed= 0;
++    bool bATBError = true;
++    if(parseATB(iUsed, pResponse) == 0)
+     {
+       bATBError= false;
+       iATBUsed+= iUsed;
+     }
+-    else
+-      bATBError= true;
+     ATBResponse.push_back(Response(pResponse, bATBError));
+   }
+ }
+ 
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void session::addGPPResponse(const char *pResponse)
+-//
+-//  purpose:    add response of GP printer
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// add response of GP printer
+ void session::addGPPResponse(const char *pResponse)
+ {
+-  bool bGPPError;
+-  int iUsed;
+-  if (pResponse)
++  if(pResponse)
+   {
+-    iUsed= 0;
+-    if (parseGPP(iUsed, pResponse) == 0)
++    int iUsed= 0;
++    bool bGPPError = true;
++    if(parseGPP(iUsed, pResponse) == 0)
+     {
+       bGPPError= false;
+       iGPPUsed+= iUsed;
+     }
+-    else
+-      bGPPError= true;
+     GPPResponse.push_back(Response(pResponse, bGPPError));
+   }
+ }
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void session::addBTPResponse(const char *pResponse)
+-//
+-//  purpose:    add response of BT printer
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+ 
++// add response of BT printer
+ void session::addBTPResponse(const char *pResponse)
+ {
+-  bool bBTPError;
+-  int iUsed;
+-  if (pResponse)
++  if(pResponse)
+   {
+-    iUsed= 0;
++    int iUsed= 0;
++    bool bBTPError = true;
+     if (parseBTP(iUsed, pResponse) == 0)
+     {
+       bBTPError= false;
+       iBTPUsed+= iUsed;
+     }
+-    else
+-      bBTPError= true;
+     BTPResponse.push_back(Response(pResponse, bBTPError));
+   }
+ }
+ 
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   int  session::eq(const char* appName, const char* appType,
+-//                  const char* kioskID, const char* location)
+-//
+-//  purpose:    set session closed flag
+-//
+-//  date:       11.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
+-int  session::eq(const char* appName, const char* appType,
++int session::eq(const char* appName, const char* brand, const char* appType,
+   const char* kioskID, const char* location)
+ {
+-  int result;
+-  result= 0;
+-  if (appName && appType && kioskID && location)
++  int result= 0;
++  if(appName && brand && appType && kioskID && location)
+   {
+     if ((AppName == appName)
++      && (Brand == brand)
+       && (AppType == appType)
+       && (KioskId == kioskID)
+       && (Location == location))
++    {
+       result= 1;
++    }
+   }
+   return result;
+ 
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   session::session(const char* appName, const char* appType,
+-//                const char* kioskID, const char* location);
+-//
+-//  purpose:    class constructor
+-//
+-//  date:       06.05.2001, 13:39
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-session::session(const char* appName, const char* appType,
+-  const char* kioskID, const char* location)
++session::session(const char* appName, const char* brand,
++  const char* appType, const char* kioskID, const char* location)
+ {
+-    pNext       = NULL;
+-
+-    start= time(0);
+-    end= start;
++  pNext = NULL;
++  start = time(0);
++  end = start;
+ 
+-    if (appName)
+-      AppName= appName;
+-    if (appType)
+-      AppType= appType;
+-    if (kioskID)
+-      KioskId= kioskID;
+-    if (location)
+-      Location= location;
++  AppName= nonNull(appName);
++  Brand = nonNull(brand);
++  AppType= nonNull(appType);
++  KioskId= nonNull(kioskID);
++  Location= nonNull(location);
+ 
+-    iATBUsed= 0;
+-    iGPPUsed= 0;
+-    iBTPUsed= 0;
++  iATBUsed= 0;
++  iGPPUsed= 0;
++  iBTPUsed= 0;
+ 
+-    bClosed= false;
++  bClosed= false;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   session::~session()
+-//
+-//  purpose:    class destructor
+-//
+-//  date:       08.05.2001, 15:21
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ session::~session()
+ {
+-    if (!bClosed)
+-      end= time(0);
+-    // clean up everything
+-    write(KioskId, Location, AppName, AppType, start, end, bClosed,
+-      ATBResponse, iATBUsed, GPPResponse, iGPPUsed, BTPResponse, iBTPUsed);
++  if(!bClosed)
++  {
++    end= time(0);
++  }
++  // clean up everything
++  write(KioskId, Location, AppName, Brand, AppType, start, end, bClosed,
++    ATBResponse, iATBUsed, GPPResponse, iGPPUsed, BTPResponse, iBTPUsed);
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   sessionList::sessionList()
+-//
+-//  purpose:    class constructor
+-//
+-//  date:       06.05.2001, 13:05
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+ sessionList::sessionList()
+-{
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   sessionList::~sessionList()
+-//
+-//  purpose:    class destructor
+-//
+-//  date:       06.05.2001, 13:06
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
++{}
+ 
+ sessionList::~sessionList()
+ {
+-session *pTmp;
+-session *pDel;
+-
+-
+-    if(!pSessions)
+-      return;
+-
+-    pTmp = pSessions;
+-
++  if(pSessions)
++  {
++    session* pTmp = pSessions;
+     while(pTmp)
+     {
+-      pDel = pTmp;
++      session* pDel = pTmp;
+       pTmp = pTmp->nextSession();
+-
+       delete pDel;
+     }
+-
+     // set this pointer to NULL
+-
+     pSessions = NULL;
++  }
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   session *sessionList::getSession(long sessionId)
+-//
+-//  purpose:    get session from sessionId
+-//
+-//  date:       10.05.2001, 15:58
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-session *sessionList::getSession(long sessionId)
++// get session from sessionId
++session* sessionList::getSession(long sessionId)
+ {
+-session *pTmp     = NULL;
+-session *pSession = NULL;
+-long     id       = 0;
+-
+-    if(!pSessions)
+-    {
+-      // nothing to search for, return 0
+-
+-      return(pSession);
+-    }
+-    else
++  session *pSession = 0;
++  if(pSessions)
++  {
++    // query list
++    for(session* pTmp = pSessions; pTmp && !pSession; pTmp = pTmp->nextSession())
+     {
+-      // query list
+-
+-      for(pTmp = pSessions; pTmp && !pSession; pTmp = pTmp->nextSession())
++      if(pTmp->sessionId() == sessionId)
+       {
+-        if(pTmp->sessionId() == sessionId)
+-        {
+-          // that's a match !!
+-
+-          pSession = pTmp;
+-        }
++        // that's a match !!
++        pSession = pTmp;
+       }
+     }
+-
+-    return(pSession);
++  }
++  return pSession;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   session *sessionList::rmSession(long sessionId)
+-//
+-//  purpose:    remove session from sessionId
+-//
+-//  date:       16.07.2001
+-//
+-//  author:     Materna Information & Communications (TS)
+-//
+-//---------------------------------------------------------------------------
+-
++// remove session from sessionId
+ void sessionList::rmSession(long sessionId)
+ {
+-session *pTmp     = NULL;
+-session *pSession = NULL;
+-session *pPrev    = NULL;
+-long     id       = 0;
+-
+-    if(!pSessions)
++  if(pSessions)
++  {
++    session* pSession = 0;
++    session* pPrev    = 0;
++    // query list
++    for(session* pTmp = pSessions; pTmp && !pSession; pTmp = pTmp->nextSession())
+     {
+-      // nothing to search for, return 0
+-
+-      return;
++      if(pTmp->sessionId() == sessionId)
++      {
++        // that's a match !!
++        pSession = pTmp;
++      }
++      else
++      {
++        pPrev = pTmp;
++      }
+     }
+-    else
++    if(pSession)
+     {
+-      // query list
+-
+-      for(pTmp = pSessions; pTmp && !pSession; pTmp = pTmp->nextSession())
++      if(!pPrev)
+       {
+-        if(pTmp->sessionId() == sessionId)
+-        {
+-          // that's a match !!
+-
+-          pSession = pTmp;
+-        }
+-        else
+-          pPrev = pTmp;
++        pSessions= pSession->nextSession();
+       }
+-
+-      if (pSession)
++      else
+       {
+-        if (pPrev == NULL)
+-          pSessions= pSession->nextSession();
+-        else
+-          pPrev->nextSession(pSession->nextSession());
+-        pSession->nextSession(NULL);
+-        delete pSession;
++        pPrev->nextSession(pSession->nextSession());
+       }
++      pSession->nextSession(0);
++      delete pSession;
+     }
++  }
+ }
+ 
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long sessionList::findSession(const char* appName, const char* appType,
+-//              const char* kioskID, const char* location);
+-//
+-//  purpose:    find a session in the list according to appName, appType, kioskID and location
+-//
+-//  date:       06.05.2001, 13:17
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long sessionList::findSession(const char* appName, const char* appType,
++// find a session in the list according to appName, brand, appType, kioskID and location
++long sessionList::findSession(const char* appName, const char* brand, const char* appType,
+   const char* kioskID, const char* location)
+ {
+-session *pTmp;
+-long     id = 0;
+-
+-    if(!pSessions)
+-    {
+-      // nothing to search for, return 0
+-
+-      return(id);
+-    }
+-    else
++  long     id = 0;
++  if(pSessions)
++  {
++    // walk through the list, seach an corresponding session
++    for(session* pTmp = pSessions; pTmp && id == 0; pTmp = pTmp->nextSession())
+     {
+-      // walk through the list, seach an corresponding session
+-
+-      for(pTmp = pSessions; pTmp && id == 0; pTmp = pTmp->nextSession())
++      if(pTmp->eq(appName, brand, appType, kioskID, location))
+       {
+-        if(pTmp->eq(appName, appType, kioskID, location) )
+-        {
+-          // that's a match !!
+-
+-          id = pTmp->sessionId();
+-        }
++        // that's a match !!
++        id = pTmp->sessionId();
+       }
+     }
+-
+-    return(id);
++  }
++  return id;
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long sessionList::setSession(const char* appName, const char* appType,
+-//               const char* kioskID, const char* location);
+-//
+-//  purpose:    set a new session to the list
+-//
+-//  date:       06.05.2001, 13:04
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long sessionList::setSession(const char* appName, const char* appType,
+-  const char* kioskID, const char* location)
++// set a new session to the list
++long sessionList::setSession(const char* appName, const char* brand,
++  const char* appType, const char* kioskID, const char* location)
+ {
+-session *pNew;
+-session *pTmp;
+-long     id;
+-
+-    if((id = findSession(appName, appType, kioskID, location)) != 0)
++  long id = findSession(appName, brand, appType, kioskID, location);
++  if(id)
++  {
++    // need to reopen the session ?? (implemenatation)
++    TRACE(HERE_2, "session[%d] already allocated.", id);
++  }
++  else
++  {
++    session* pNew = new session(appName, brand, appType, kioskID, location);
++    if(!pNew)
+     {
+-      // need to reopen the session ?? (implemenatation)
+-
+-      TRACE(HERE_2,"session[%d] already allocated.",id);
+-
+-      return(id);
++      id = -1;
+     }
+-
+-    if((pNew = new session(appName, appType, kioskID, location)) == NULL)
+-      return(-1);
+     else
+     {
+       // set new elements
+-
+       pNew->sessionId(++sessionCounter);
+-
+       // save return value
+-
+       id = pNew->sessionId();
+-
+       pNew->nextSession(NULL);
+     }
+-
+     if(!pSessions)
+     {
+       // set new element as the first
+-
+       pSessions = pNew;
+-
+-      TRACE(HERE_5,"session[%d] added to list.",id);
++      TRACE(HERE_5, "session[%d] added to list.", id);
+     }
+     else
+     {
+       // walk to end of list and append new item
+-
+-      pTmp = pSessions;
+-
++      session* pTmp = pSessions;
+       while(pTmp->nextSession())
++      {
+         pTmp = pTmp->nextSession();
+-
++      }
+       pTmp->nextSession(pNew);
+-
+-      TRACE(HERE_5,"session[%d] added to list.",id);
++      TRACE(HERE_5, "session[%d] added to list.", id);
+     }
+-
+-    return(id);
++  }
++  return id;
+ }
+diff --git a/SelfServiceCommon/Massai/idl/Massai/BillingService.idl b/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
+index 56d07bcb..e1052c7c 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/BillingService.idl
+@@ -31,13 +31,14 @@ module BillingAccess
+     {
+         /** Open a new billing session
+             @param appName - The name of the application
++            @param brand - The brand for this session
+             @param appType - The type of the application
+             @param kioskID - The id of the kiosk
+             @param location - The location of the kiosk
+             @return A valid session identifier or error if return value is < 0
+         */
+ 
+-        long openInvoice (in string appName, in string appType, in string kioskID, in string location);
++        long openInvoice (in string appName, in string brand, in string appType, in string kioskID, in string location);
+ 
+         /** Close a previously opened billing session
+             @param sessionId - The session identifier returned with openInvoice()
+-- 
+2.41.0.windows.1
+

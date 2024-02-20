@@ -1,0 +1,250 @@
+From cdddebda16b06f31824fc55c440708e84d0cd155 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 24 Jun 2015 14:34:44 +0000
+Subject: [PATCH 0670/1077] MANTIS 36971 MANTIS 36971: Configuration-Service
+ crashes after new installation - massaiCfgXB*.exe 1.4.4 - CfgXMgrB*.exe 1.4.4
+ - No longer set local environment variable CORBA_USE_NESTED_CALLS.   Instead
+ increase the number of CORBA threads to 20.   Reason is the assumption, that
+ the nested CORBA calls create problems with normally mutex-protected objects.
+ - Simplify trace control as a first step to allow dynamic changes.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@870 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 17 ++++++-
+ .../cpp/CfgXMgrB/inc/cfgCorba_Template.hpp    |  4 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 17 ++++++-
+ .../Massai/cpp/CfgXMgrB/inc/traceLocal.hpp    | 20 +--------
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      |  5 +--
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   | 45 +------------------
+ .../Massai/cpp/CfgXMgrB/src/traceLocal.cpp    |  9 ++++
+ 7 files changed, 45 insertions(+), 72 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 6eaf7073..c4628d5c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -410,8 +410,21 @@
+ //! @par     Change:
+ //! - MANTIS 35110: MassaiCfgxB: generates huge trace files
+ //! - Use new common lib tracesToFileParts to generate limited files.
+-#define FILE_VER_BIN 1,4,3,0
+-#define FILE_VER_DTS "1.4.3.0"
++// #define FILE_VER_BIN 1,4,3,0
++// #define FILE_VER_DTS "1.4.3.0"
++//
++//! @version 1.4.4
++//! @date    24.06.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 36971: Configuration-Service crashes after new installation
++//! - No longer set local environment variable CORBA_USE_NESTED_CALLS.
++//!   Instead increase the number of CORBA threads to 20.
++//!   Reason is the assumption, that the nested CORBA calls create
++//!   problems with normally mutex-protected objects.
++//! - Simplify trace control as a first step to allow dynamic changes.
++#define FILE_VER_BIN 1,4,4,0
++#define FILE_VER_DTS "1.4.4.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Template.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Template.hpp
+index 130b771e..784d3d11 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Template.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Template.hpp
+@@ -31,7 +31,7 @@ template<class T> corbaServantEx<T> * new_Servant
+    if( Interface )
+       return new corbaServantEx<T>
+                      (
+-                        1,
++                        20,
+                         Servant,
+                         Name,
+                         Interface, CFGMGR_PORT
+@@ -39,7 +39,7 @@ template<class T> corbaServantEx<T> * new_Servant
+    else
+       return new corbaServantEx<T>
+                      (
+-                        1,
++                        20,
+                         Servant,
+                         Name,
+                         CFGMGR_PORT
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index d886d40d..3589aeda 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -401,8 +401,21 @@
+ //! @par     Change:
+ //! - MANTIS 35110: MassaiCfgxB: generates huge trace files
+ //! - Use new common lib tracesToFileParts to generate limited files.
+-#define FILE_VER_BIN 1,4,3,0
+-#define FILE_VER_DTS "1.4.3.0"
++// #define FILE_VER_BIN 1,4,3,0
++// #define FILE_VER_DTS "1.4.3.0"
++//
++//! @version 1.4.4
++//! @date    24.06.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 36971: Configuration-Service crashes after new installation
++//! - No longer set local environment variable CORBA_USE_NESTED_CALLS.
++//!   Instead increase the number of CORBA threads to 20.
++//!   Reason is the assumption, that the nested CORBA calls create
++//!   problems with normally mutex-protected objects.
++//! - Simplify trace control as a first step to allow dynamic changes.
++#define FILE_VER_BIN 1,4,4,0
++#define FILE_VER_DTS "1.4.4.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
+index be231f6b..bbcb168c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/traceLocal.hpp
+@@ -17,31 +17,13 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
+-#if 0
+ 
+-#include "trc/TraceClt.h"
+-#include <iostream>
+-
+-
+-
+-/**
+- *
+- * Initialize tracing.
+- *
+- * @param Stream:       Stream to use for traces, may be 0.
+- *
+- * @param Level:        Trace level threshold.
+- *
+-**/
+-void traceLocal_Setup( std::ostream * Stream, long Level );
+-
+-#else
++void traceLocal_ListenForChange();
+ 
+ void traceLocal_SetConsole();
+ 
+ void traceLocal_SetPath( char const * path );
+ 
+-#endif
+ 
+ #endif // #ifndef TRACELOCAL_HPP
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index 936e515f..0a91da5a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -87,6 +87,7 @@ int main( int argc, char ** argv )
+    // Traces
+    //
+    traceLocal_SetConsole();
++   traceLocal_ListenForChange();
+    writeTrace
+    (
+       5, "", 0, "",
+@@ -136,10 +137,6 @@ int main( int argc, char ** argv )
+       //
+       cfgEntity Configuration( ConfigFile.c_str() );
+       Configuration.cfgFileRead();
+-
+-      // Due to a change in massaiCorba ...
+-      _putenv( "CORBA_USE_NESTED_CALLS=yes please!" );
+-
+       //
+       // CORBA servants
+       //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index 23dbdeac..652bd1f3 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -138,51 +138,13 @@ int mDaemon_main( int argc, char const * const * argv )
+    //
+    // Traces
+    //
+-#if 0
+-   std::ofstream * pTrace = 0;
+-   char const * const TraceDir = Arg.option( "TRACEDIR" );
+-   if( TraceDir )
+-   {
+-      // A directory has been specified -> generate tracefile names.
+-      std::ostringstream GenTraceFile;
+-      SYSTEMTIME T;
+-      GetLocalTime( &T );
+-      GenTraceFile
+-         << TraceDir
+-         << "\\CfgXMgrB_"
+-         << T.wYear
+-         << std::setw( 2 ) << std::setfill( '0' ) << T.wMonth
+-         << std::setw( 2 ) << std::setfill( '0' ) << T.wDay
+-         << "_"
+-         << std::setw( 2 ) << std::setfill( '0' ) << T.wHour
+-         << std::setw( 2 ) << std::setfill( '0' ) << T.wMinute
+-         << std::setw( 2 ) << std::setfill( '0' ) << T.wSecond
+-         << ".trc";
+-      pTrace = new std::ofstream( GenTraceFile.str().c_str() );
+-   }
+-   else
+-   {
+-      char const * const TraceFile = Arg.option( "TRACEFILE" );
+-      if( TraceFile )
+-      {
+-         pTrace = new std::ofstream( TraceFile );
+-      }
+-   }
+-   if( pTrace )
+-   {
+-      traceLocal_Setup( pTrace, 9 );
+-   }
+-   else
+-   {
+-      traceLocal_Setup( &std::cout, 0 );
+-   }
+-#else
+    char const * const TraceDir = Arg.option( "TRACEDIR" );
+    if( TraceDir )
+    {
+       traceLocal_SetPath( TraceDir );
+    }
+-#endif
++   traceLocal_ListenForChange();
++
+    writeTrace
+    (
+       5, "", 0, "",
+@@ -240,9 +202,6 @@ int mDaemon_main( int argc, char const * const * argv )
+       );
+       Configuration.cfgFileRead();
+ 
+-      // Due to a change in massaiCorba ...
+-      _putenv( "CORBA_USE_NESTED_CALLS=yes please!" );
+-
+       //
+       // CORBA servants
+       //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+index 6d5101f2..3ba3d492 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+@@ -40,6 +40,15 @@ namespace
+ 
+ 
+ 
++void traceLocal_ListenForChange()
++{
++   // TODO:
++   // Perhaps with a config item, which is given as a start parameter.
++   // e.g. "-tracecfg:TRACES.CfgServive"
++}
++
++
++
+ void traceLocal_SetConsole()
+ {
+    if( l_writer )
+-- 
+2.41.0.windows.1
+

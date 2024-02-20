@@ -1,0 +1,109 @@
+From 7c00449bed4178b457f3e3241767cd7e0aeaf63d Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 15 Aug 2013 13:37:06 +0000
+Subject: [PATCH 0467/1077] massai_systools.lib
+
+V1.0.0.8
+Mantis 0028547: mstarter: crashes sometimes at platform start
+race condition at termination of processes:
+  ProcessList deletes ProcessStart deletes ProcessHolder while ProcessHolder handles termination notification
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@569 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp          |  9 ++++++++-
+ .../Massai/cpp/Systools/src/mSysProcessListW32.cpp | 14 +++++++++-----
+ 2 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index c8391296..6cbcdc5b 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,10 +1,17 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 7);
++VERSION_ID_DT(systools, 1, 0, 0, 8);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
++\date 15.08.2013
++\li V1.0.0.8
++\li Mantis 0028547: mstarter: crashes sometimes at platform start
++race condition at termination of processes:
++  ProcessList deletes ProcessStart deletes ProcessHolder while ProcessHolder handles termination notification
++
++
+ \date 31.07.2013
+ \li V1.0.0.7
+ \li Mantis 0028323: GPPDev: Custom VKP-80II
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index de74a533..8f054e26 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -160,6 +160,7 @@ namespace
+       TraceInterface& m_trc;
+       ChildProcess m_mainChild;
+       Termination m_termination;
++      bool m_finished;
+   };
+ 
+   typedef std::set<ProcessHolder*> ProcessHolderSet;
+@@ -362,7 +363,8 @@ namespace
+     m_pStarter(pStarter),
+     m_trc(trc),
+     m_mainChild(mainChild),
+-    m_termination(termination)
++    m_termination(termination),
++    m_finished(false)
+   {}
+ 
+   ProcessHolder::~ProcessHolder()
+@@ -422,6 +424,7 @@ namespace
+     {
+       m_pStarter->notify();
+     }
++    m_finished = true;
+   }
+ 
+   const Internal& ProcessHolder::getInternal() const
+@@ -436,7 +439,7 @@ namespace
+ 
+   bool ProcessHolder::isStopped() const
+   {
+-    return m_pProcess->getStatus() == STATUS_TERMINATED;
++    return m_finished;
+   }
+ 
+   bool ProcessHolder::sendBreak()
+@@ -550,14 +553,14 @@ namespace
+ 
+   bool ProcessStart::isStopped() const
+   {
+-    bool result = false;
++    bool result = true;
+     ProcessHolderPtrList::const_iterator it = m_childs.begin();
+     ProcessHolderPtrList::const_iterator end = m_childs.end();
+     for(; it != end; it++)
+     {
+-      if((*it)->isStopped())
++      if(!(*it)->isStopped())
+       {
+-        result = true;
++        result = false;
+         break;
+       }
+     }
+@@ -997,6 +1000,7 @@ namespace
+       const ProcessProperties& prop = *it;
+       ProcessStart* process = new ProcessStart(prop, *this, m_settings, m_processWatchdog, m_trc);
+       process->start();
++      // ProcessStartPtr sharedPtr(process);
+       m_processPtrList.push_back(ProcessStartPtr(process));
+       if(pListener)
+       {
+-- 
+2.41.0.windows.1
+

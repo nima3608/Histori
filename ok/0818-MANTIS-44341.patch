@@ -1,0 +1,707 @@
+From ba302e2f71017bf0a660ddc1279f9cb28cbe3e89 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 17 Jan 2017 15:03:01 +0000
+Subject: [PATCH 0818/1077] MANTIS 44341 massaiCfgXB.exe version 1.6.4 - MANTIS
+ 44341: Configuration defective - Use an additional configuration backup,
+ written immediately after successful read. - Cleanup code, remove unnecessary
+ compiler options.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1140 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  15 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp     |   5 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  15 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     | 345 ++++++++----------
+ 4 files changed, 186 insertions(+), 194 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index af045d6b..856e255c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -484,8 +484,19 @@
+ //! - MANTIS 44263: Platform can't be started after Kiosk reboot
+ //! - Do not allow "illegal" characters in an item's data (explanation
+ //!   and value).
+-#define FILE_VER_BIN 1,6,3,0
+-#define FILE_VER_DTS "1.6.3.0"
++// #define FILE_VER_BIN 1,6,3,0
++// #define FILE_VER_DTS "1.6.3.0"
++//
++//! @version 1.6.4
++//! @date    17.01.2017
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 44341: Configuration defective
++//! - Use an additional configuration backup, written immediately after
++//!   successful read.
++//! - Cleanup code, remove unnecessary compiler options.
++#define FILE_VER_BIN 1,6,4,0
++#define FILE_VER_DTS "1.6.4.0"
+ //
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+index e618685e..c5afe253 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -412,8 +412,7 @@ public:
+     * Save the configuration database to files.
+     *
+    **/
+-   void allSaveEntity() const throw();
+-   void _allSaveEntity() throw();
++   void allSaveEntity() throw();
+ 
+    /**
+     *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 20239af6..156e5ae6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -475,8 +475,19 @@
+ //! - MANTIS 44263: Platform can't be started after Kiosk reboot
+ //! - Do not allow "illegal" characters in an item's data (explanation
+ //!   and value).
+-#define FILE_VER_BIN 1,6,3,0
+-#define FILE_VER_DTS "1.6.3.0"
++// #define FILE_VER_BIN 1,6,3,0
++// #define FILE_VER_DTS "1.6.3.0"
++//
++//! @version 1.6.4
++//! @date    17.01.2017
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 44341: Configuration defective
++//! - Use an additional configuration backup, written immediately after
++//!   successful read.
++//! - Cleanup code, remove unnecessary compiler options.
++#define FILE_VER_BIN 1,6,4,0
++#define FILE_VER_DTS "1.6.4.0"
+ //
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index ebffe135..12ad94e3 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -59,9 +59,6 @@
+ //! Trace text macro
+ #define CENT "cfgEntity::"
+ 
+-//! Configuration macro
+-#define DELAYED_SAVE
+-
+ //! Configuration macro
+ #define SETINITIAL_EXTENDS_RANGE
+ 
+@@ -396,7 +393,7 @@ public:
+     *
+    **/
+    Materna::MSSD::mutexSemaphore & cevMutex();
+-   
++
+    /**
+     *
+     * Save the map to an ostream.
+@@ -1209,26 +1206,41 @@ void cfgEntityValue::cevUpdate
+ 
+ namespace
+ {
+-   /*
+-    * Begin of anonymous namespace
+-    */
+ 
+ 
+    /**
+     *
+-    * Make a ".backup" filename.
+-    *
+-    * @param Dst:       The string to hold the result.
++    * Make a ".backup" filename. This first backup is written,
++    * after the original configuration file has been written successfully.
++    * It should thus be quite recent.
+     *
+     * @param Src:       The string to hold the original name.
+     *
++    * @return:          The string to hold the result.
++    *
+    **/
+-   void allBackupOf( std::string & Dst, std::string const & Src )
++   std::string allBackup1Of( std::string const & Src )
+    {
+-      Dst = Src + "-backup.xml";
++      return Src + "-backup.xml";
+    }
+ 
+ 
++   /**
++    *
++    * Make a ".backup2" filename. This second backup is written after
++    * the original or first backup have been read successfully.
++    * It might be a bit outdated, but still better than nothing.
++    *
++    * @param Src:       The string to hold the original name.
++    *
++    * @return:          The string to hold the result.
++    *
++   **/
++   std::string allBackup2Of( std::string const & Src )
++   {
++      return Src + "-backup2.xml";
++   }
++
+ 
+    /**
+     *
+@@ -1245,7 +1257,6 @@ namespace
+    }
+ 
+ 
+-
+    /**
+     *
+     * Save the configuration database to a file.
+@@ -1392,7 +1403,6 @@ namespace
+    };
+ 
+ 
+-
+    /**
+     *
+     * Queue for indications.
+@@ -1401,7 +1411,6 @@ namespace
+    Materna::MSSD::fmtQueue<changeInfo *> ChangeQ( 32 );
+ 
+ 
+-
+    /**
+     *
+     * Thread class for indications.
+@@ -1450,7 +1459,6 @@ namespace
+    };
+ 
+ 
+-
+    /**
+     *
+     * Thread object for indications. Thread will start upon
+@@ -1460,8 +1468,6 @@ namespace
+    changeThread ChangeThread;
+ 
+ 
+-
+-#ifdef DELAYED_SAVE
+    /**
+     *
+     * Thread class for to save the configuration file.
+@@ -1505,7 +1511,9 @@ namespace
+             //
+             cfgEntity * const Entity = M_E;
+             if( Entity )
+-               Entity->_allSaveEntity();
++            {
++               Entity->allSaveEntity();
++            }
+          }
+       }
+ 
+@@ -1548,8 +1556,7 @@ namespace
+       //! Assignment - intentionally not implemented.
+       saveThread & operator=( saveThread const & Src );
+ 
+-   };
+-
++   }; // class saveThread
+ 
+ 
+    /**
+@@ -1560,13 +1567,8 @@ namespace
+    **/
+    saveThread SaveThread;
+ 
+-#endif // #ifdef DELAYED_SAVE
+-
+ 
+-   /*
+-    * End of anonymous namespace
+-    */
+-}
++} // namespace
+ 
+ 
+ 
+@@ -1708,65 +1710,31 @@ cfgEntity::~cfgEntity()
+  * Method implementation - see cfgEntity.hpp.
+  *
+ **/
+-void cfgEntity::allSaveEntity() const throw()
++void cfgEntity::allSaveEntity() throw()
+ {
+-#ifdef DELAYED_SAVE
+-   SaveThread.post();
+-#else
+    if( M_CfgFile_Reading )
+-      return;
+-   try
+-   {
+-      writeTrace( SecondaryRuntime_HERE, CENT "allSaveEntity ..." );
+-      // Not reading the file right now -> we may write.
+-      M_CfgFile_Writing.request();
+-      // Save to configuration file
+-      if( allSaveToFile( M_File, M_Meta, M_Value ) )
+-      {
+-         // Configuration save successfully, now do the backup.
+-         // Please note:   we do not touch the backup, if the previous
+-         //                operation has failed.
+-         std::string File2;
+-         allBackupOf( File2, M_File );
+-         // Save to configuration backup file, don't care if no success.
+-         (void)allSaveToFile( File2, M_Meta, M_Value );
+-      }
+-      writeTrace( SecondaryRuntime_HERE, CENT "allSaveEntity." );
+-      M_CfgFile_Writing.release();
+-   }
+-   catch( ... )
+    {
+-   }
+-#endif
+-}
+-
+-/**
+- *
+- * Method implementation - see cfgEntity.hpp.
+- *
+-**/
+-void cfgEntity::_allSaveEntity() throw()
+-{
+-   if( M_CfgFile_Reading )
+       return;
++   }
+    try
+    {
+       writeTrace( SecondaryRuntime_HERE, CENT "allSaveEntity ..." );
+       // Not reading the file right now -> we may write.
+-      M_CfgFile_Writing.request();
++      Materna::MSSD::autoMutex no_other_writer( M_CfgFile_Writing );
+       // Save to configuration file
+       if( allSaveToFile( M_File, M_Meta, M_Value ) )
+       {
+          // Configuration save successfully, now do the backup.
+          // Please note:   we do not touch the backup, if the previous
+          //                operation has failed.
+-         std::string File2;
+-         allBackupOf( File2, M_File );
+-         // Save to configuration backup file, ignore if not successful.
+-         (void)allSaveToFile( File2, M_Meta, M_Value );
++         (void)allSaveToFile
++            (
++               allBackup1Of( M_File ),
++               M_Meta,
++               M_Value
++            );
+       }
+       writeTrace( SecondaryRuntime_HERE, CENT "allSaveEntity." );
+-      M_CfgFile_Writing.release();
+    }
+    catch( ... )
+    {
+@@ -1784,18 +1752,27 @@ void cfgEntity::_allSaveEntity() throw()
+ void cfgEntity::cfgFileRead()
+ {
+    writeTrace( SecondaryRuntime_HERE, CEFR " ..." );
+-   M_CfgFile_Writing.request();
++   Materna::MSSD::autoMutex no_other_writer( M_CfgFile_Writing );
+    M_CfgFile_Reading = true;
+-   mInFile<std::string> ConfigFileData( M_File.c_str() );
+-   if( ConfigFileData.success() )
++   //
++   // Read the original config file
++   //
++   mInFile<std::string> cfgfile0_data( M_File.c_str() );
++   if( cfgfile0_data.success() )
+    {
+       try
+       {
+          writeTrace( SecondaryRuntime_HERE, CEFR " - parse" );
+-         cfgFromXML_readMap( *this, ConfigFileData.container() );
++         cfgFromXML_readMap( *this, cfgfile0_data.container() );
+          writeTrace( SecondaryRuntime_HERE, CEFR "." );
+          M_CfgFile_Reading = false;
+-         M_CfgFile_Writing.release();
++         // Successful read, save it to 2nd backup
++         (void)allSaveToFile
++            (
++               allBackup2Of( M_File ),
++               M_Meta,
++               M_Value
++            );
+          return;
+       }
+       catch( std::exception & X )
+@@ -1808,14 +1785,14 @@ void cfgEntity::cfgFileRead()
+          //
+          // Save the erroneous file for later analysis
+          //
+-         std::string Errname;
+-         allErrorOf( Errname, M_File );
++         std::string cfgfile0_errname;
++         allErrorOf( cfgfile0_errname, M_File );
+          writeTrace
+          (
+             SecondaryRuntime_HERE, CEFR " - save file to [%s]",
+-            Errname.c_str()
++            cfgfile0_errname.c_str()
+          );
+-         saveConfigFile( Errname, ConfigFileData );
++         saveConfigFile( cfgfile0_errname, cfgfile0_data );
+       }
+       catch( ... )
+       {
+@@ -1826,14 +1803,14 @@ void cfgEntity::cfgFileRead()
+          //
+          // Save the erroneous file for later analysis
+          //
+-         std::string Errname;
+-         allErrorOf( Errname, M_File );
++         std::string cfgfile0_errname;
++         allErrorOf( cfgfile0_errname, M_File );
+          writeTrace
+          (
+             SecondaryRuntime_HERE, CEFR " - save file to [%s]",
+-            Errname.c_str()
++            cfgfile0_errname.c_str()
+          );
+-         saveConfigFile( Errname, ConfigFileData );
++         saveConfigFile( cfgfile0_errname, cfgfile0_data );
+       }
+    }
+    else
+@@ -1844,78 +1821,143 @@ void cfgEntity::cfgFileRead()
+       );
+    }
+    //
+-   // Try the backup
++   // Try the 1st backup
+    //
+-   std::string BackupFile;
+-   allBackupOf( BackupFile, M_File );
+-   mInFile<std::string> BackupFileData( BackupFile.c_str() );
+-   if( BackupFileData.success() )
++   std::string const cfgfile1_name = allBackup1Of( M_File );
++   mInFile<std::string> cfgfile1_data( cfgfile1_name.c_str() );
++   if( cfgfile1_data.success() )
+    {
+       try
+       {
+-         writeTrace( SecondaryRuntime_HERE, CEFR " - parse backup" );
+-         cfgFromXML_readMap( *this, BackupFileData.container() );
++         writeTrace( SecondaryRuntime_HERE, CEFR " - parse 1st backup" );
++         cfgFromXML_readMap( *this, cfgfile1_data.container() );
+          Materna::warningAndContinue
+          (
+-            CEFR " - use backup."
++            CEFR " - use 1st backup."
+          );
+          M_CfgFile_Reading = false;
+-         M_CfgFile_Writing.release();
++         // Successful read, save it to 2nd backup
++         (void)allSaveToFile
++            (
++               allBackup2Of( M_File ),
++               M_Meta,
++               M_Value
++            );
+          return;
+       }
+       catch( std::exception & X )
+       {
+          Materna::warningAndContinue
+          (
+-            CEFR " - backup STD exception",
++            CEFR " - 1st backup STD exception",
+             X.what()
+          );
+          //
+          // Save the erroneous file for later analysis
+          //
+-         std::string Errname;
+-         allErrorOf( Errname, BackupFile );
++         std::string cfgfile1_errname;
++         allErrorOf( cfgfile1_errname, cfgfile1_name );
+          writeTrace
+          (
+-            SecondaryRuntime_HERE, CEFR " - save file to [%s]",
+-            Errname.c_str()
++            SecondaryRuntime_HERE, CEFR " - save 1st backup file to [%s]",
++            cfgfile1_errname.c_str()
+          );
+-         saveConfigFile( Errname, BackupFileData );
++         saveConfigFile( cfgfile1_errname, cfgfile1_data );
+       }
+       catch( ... )
+       {
+          Materna::warningAndContinue
+          (
+-            CEFR " - backup unknown exception"
++            CEFR " - 1st backup unknown exception"
+          );
+          //
+          // Save the erroneous file for later analysis
+          //
+-         std::string Errname;
+-         allErrorOf( Errname, BackupFile );
++         std::string cfgfile1_errname;
++         allErrorOf( cfgfile1_errname, cfgfile1_name );
+          writeTrace
+          (
+-            SecondaryRuntime_HERE, CEFR " - save file to [%s]",
+-            Errname.c_str()
++            SecondaryRuntime_HERE, CEFR " - save 1st backup file to [%s]",
++            cfgfile1_errname.c_str()
+          );
+-         saveConfigFile( Errname, BackupFileData );
++         saveConfigFile( cfgfile1_errname, cfgfile1_data );
+       }
+    }
+    else
+    {
+       Materna::warningAndContinue
+       (
+-         CEFR " - backup file not found"
++         CEFR " - 1st backup file not found"
++      );
++   }
++   //
++   // Try the 2nd backup
++   //
++   std::string const cfgfile2_name = allBackup2Of( M_File );
++   mInFile<std::string> cfgfile2_data( cfgfile2_name.c_str() );
++   if( cfgfile2_data.success() )
++   {
++      try
++      {
++         writeTrace( SecondaryRuntime_HERE, CEFR " - parse 2nd backup" );
++         cfgFromXML_readMap( *this, cfgfile2_data.container() );
++         Materna::warningAndContinue
++         (
++            CEFR " - use 2nd backup."
++         );
++         M_CfgFile_Reading = false;
++         return;
++      }
++      catch( std::exception & X )
++      {
++         Materna::warningAndContinue
++         (
++            CEFR " - 2nd backup STD exception",
++            X.what()
++         );
++         //
++         // Save the erroneous file for later analysis
++         //
++         std::string cfgfile2_errname;
++         allErrorOf( cfgfile2_errname, cfgfile2_name );
++         writeTrace
++         (
++            SecondaryRuntime_HERE, CEFR " - save 2nd backup file to [%s]",
++            cfgfile2_errname.c_str()
++         );
++         saveConfigFile( cfgfile2_errname, cfgfile2_data );
++      }
++      catch( ... )
++      {
++         Materna::warningAndContinue
++         (
++            CEFR " - 2nd backup unknown exception"
++         );
++         //
++         // Save the erroneous file for later analysis
++         //
++         std::string cfgfile2_errname;
++         allErrorOf( cfgfile2_errname, cfgfile2_name );
++         writeTrace
++         (
++            SecondaryRuntime_HERE, CEFR " - save 2nd backup file to [%s]",
++            cfgfile2_errname.c_str()
++         );
++         saveConfigFile( cfgfile2_errname, cfgfile2_data );
++      }
++   }
++   else
++   {
++      Materna::warningAndContinue
++      (
++         CEFR " - 2nd backup file not found"
+       );
+    }
+-
+    //
+    // Continue with an empty configuration
+    //
+    M_CfgFile_Reading = false;
+-   M_CfgFile_Writing.release();
+-
+-}
++} // cfgEntity::cfgFileRead()
+ 
+ 
+ 
+@@ -2088,7 +2130,7 @@ void cfgEntity::itemCreate
+       // Item name not given, just create meta data.
+       (void)M_Meta->cemFromMeta( MetaData );
+    }
+-   allSaveEntity();
++   SaveThread.post();
+    //-std::cout << "cfgEntity::itemCreate." << std::endl;
+ }
+ 
+@@ -2121,7 +2163,7 @@ void cfgEntity::itemDelete
+             CENT "itemDelete error: could not queue change indication!"
+          );
+    }
+-   allSaveEntity();
++   SaveThread.post();
+    //-std::cout << "cfgEntity::itemDelete." << std::endl;
+ }
+ 
+@@ -2213,70 +2255,13 @@ void cfgEntity::itemSetMeta
+       try
+       {
+          // Might throw cfgEntity_NotFound
+-         cfgValue const * RawValue = M_Value->cevGetRaw( Item );
++         (void)M_Value->cevGetRaw( Item );
+          // No exception - value already set.
+-         reference const RefOrig = M_Value->cevGetRef( Item );
+-#if 0
+-         TODO: Copy from create - necessary?
+-         if( RefOrig )
+-         {
+-            // Try to get metadata for creation - perhaps throwing?
+-            (void)M_Meta->cemFromRef
+-               (
+-                  "", cfgEntity::PURP_CREATE, RefOrig
+-               );
+-         }
+-         // No meta found, value probably from setInitial()
+-#endif
+          // Create the meta data for this item.
+          //-std::cout << "cfgEntity::itemSetMeta - 1" << std::endl;
+          reference const RefNew = M_Meta->cemFromMeta( MetaData );
+          //-std::cout << "cfgEntity::itemSetMeta - 2" << std::endl;
+-#if 0
+-         TODO: Copy from create - necessary?
+-         if( MetaData.isDefault() )
+-         {
+-            //
+-            // This is again a call by setInitial().
+-            // Accept a new value to overwrite the old one.
+-            //
+-            M_Value->cevUpdate( Item, RefNew, ValDef );
+-         }
+-         else
+-         {
+-            //
+-            // This is a call by create().
+-            // Do NOT set a new value, since we want to take the value
+-            // from setInitial().
+-            //
+-            if( !MetaData.valueAllowed( *RawValue ) && CheckVal )
+-            {
+-#ifdef SETINITIAL_EXTENDS_RANGE
+-               cfgMeta * const Meta = M_Meta->cemFromRef
+-                                         (
+-                                            "<create>",
+-                                             cfgEntity::PURP_METASET,
+-                                             RefNew
+-                                         );
+-               if( !Meta )
+-               {
+-                  //-std::cout << "cfgEntity::itemSetValue - "
+-                  //-          "X:NotFound (no meta)" << std::endl;
+-                  throw cfgEntity_NotFound();
+-               }
+-               if( !Meta->valueAllow( *RawValue ) )
+-#endif
+-               {
+-                  //-std::cout << "cfgEntity::itemSetMeta - X:IllegalValue"
+-                  //-          << std::endl;
+-                  throw cfgEntity_IllegalValue();
+-               }
+-            }
+-            M_Value->cevUpdate( Item, RefNew );
+-         }
+-#else
+          M_Value->cevUpdate( Item, RefNew );
+-#endif
+       }
+       catch( cfgEntity_NotAuthorized & )
+       {
+@@ -2287,20 +2272,6 @@ void cfgEntity::itemSetMeta
+       }
+       catch( cfgEntity_NotFound & )
+       {
+-#if 0
+-         TODO: Copy from create - necessary?
+-         // Value not set, check meta and value.
+-         if (
+-               !MetaData.isDefault() &&
+-               !MetaData.valueAllowed( *ValDef ) &&
+-               CheckVal
+-            )
+-         {
+-            //-std::cout << "cfgEntity::itemSetMeta - X:IllegalValue"
+-            //-          << std::endl;
+-            throw cfgEntity_IllegalValue();
+-         }
+-#endif
+          // Create meta and item data.
+          M_Meta->cemFromMeta( MetaData );
+          //-std::cout << "cfgEntity::itemSetMeta - update" << std::endl;
+@@ -2323,7 +2294,7 @@ void cfgEntity::itemSetMeta
+       // Item name not given, just create meta data.
+       (void)M_Meta->cemFromMeta( MetaData );
+    }
+-   allSaveEntity();
++   SaveThread.post();
+    //-std::cout << "cfgEntity::itemSetMeta." << std::endl;
+ }
+ 
+@@ -2389,7 +2360,7 @@ void cfgEntity::itemSetValue
+             CENT "itemSetValue error: could not queue change indication!"
+          );
+    }
+-   allSaveEntity();
++   SaveThread.post();
+    //-std::cout << "cfgEntity::itemSetValue(" << Item << ")." << std::endl;
+ }
+ 
+@@ -2515,7 +2486,7 @@ void cfgEntity::rightsSet
+    delete NewMeta;
+    // Update meta reference of value
+    M_Value->cevUpdate( Item, RefNew );
+-   allSaveEntity();
++   SaveThread.post();
+    //-std::cout << "cfgEntity::rightsSet(" << Item << ")." << std::endl;
+ }
+ 
+-- 
+2.41.0.windows.1
+

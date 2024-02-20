@@ -1,0 +1,1690 @@
+From 29855dd5f1e1d133cdd6892f893d5c684a470023 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 25 Sep 2013 19:07:45 +0000
+Subject: [PATCH 0404/1000] massai_systools.lib V1.0.0.13 Mantis 0028892: PLF:
+ SAM-Hotkey not working mSysHotKey: listen on windows hot keys
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@593 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysDeviceEvent.h |  17 +-
+ .../Interfaces/inc/systools/mSysEvent.h       |   4 +
+ .../Interfaces/inc/systools/mSysHotKey.h      | 106 +++
+ .../cpp/Systools/inc/mSysDeviceEventW32.h     |  20 +-
+ .../Massai/cpp/Systools/inc/mSysEventW32.h    |   9 +-
+ .../Massai/cpp/Systools/inc/mSysHotKeyW32.h   | 127 +++
+ .../Massai/cpp/Systools/makefile.mak          |  12 +-
+ .../cpp/Systools/src/TestSysDeviceEvents.cpp  |   1 +
+ .../Massai/cpp/Systools/src/TestSysHotKey.cpp |  90 ++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   7 +-
+ .../cpp/Systools/src/mSysDeviceEventW32.cpp   |  99 ++-
+ .../Massai/cpp/Systools/src/mSysEventW32.cpp  |  36 +-
+ .../Massai/cpp/Systools/src/mSysHotKeyW32.cpp | 767 ++++++++++++++++++
+ 13 files changed, 1273 insertions(+), 22 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysHotKeyW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysHotKey.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
+index ffd96f95..02c6c149 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceEvent.h
+@@ -129,13 +129,22 @@ namespace mSysDevice
+       virtual void customEvent(const FileCustom& file);
+   };
+ 
+-  // see mSystem::System::getDeviceEventProcessor() in mSysEvent.h for obtaining a DeviceEventProcessor
+-  class DeviceEventProcessor
++  class DeviceEventManager
++  {
++    public:
++      virtual ~DeviceEventManager();
++      virtual void addListener(DeviceEventListener& listener);
++      virtual void rmvListener(DeviceEventListener& listener);
++  };
++
++  // see mSystem::System::getDeviceEventProcessor(mSysDevice::DeviceEventManager& manager) in mSysEvent.h for obtaining a DeviceEventProcessor
++  // after the execution of DeviceEventProcessor::rmvListener
++  // the HotKeyProcessor calls manager.rmvListener
++  // between these points the DeviceEventProcessor may execute the callback of the DeviceEventListener
++  class DeviceEventProcessor: public DeviceEventManager
+   {
+     public:
+       virtual ~DeviceEventProcessor();
+-      virtual void addListener(DeviceEventListener& listener) = 0;
+-      virtual void rmvListener(DeviceEventListener& listener) = 0;
+   };
+ 
+   std::ostream& operator<<(std::ostream& out, const UniversallyUniqueIdentifier& data);
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+index 6d05d039..327c2bf1 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+@@ -7,6 +7,7 @@
+ #endif
+ 
+ #include "systools/mSysDeviceEvent.h"
++#include "systools/mSysHotKey.h"
+ #include "tools/TraceInterface.h"
+ 
+ namespace mSysEvent
+@@ -16,6 +17,9 @@ namespace mSysEvent
+     public:
+       virtual ~System();
+       virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor() = 0;
++      virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor(mSysDevice::DeviceEventManager& manager) = 0;
++      virtual mSysHotKey::HotKeyProcessor* getHotKeyProcessor() = 0;
++      virtual mSysHotKey::HotKeyProcessor* getHotKeyProcessor(mSysHotKey::HotKeyManager& manager) = 0;
+   };
+ 
+   System* createSystem(MASSAI::trace::TraceInterface& trc);
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h b/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
+new file mode 100644
+index 00000000..4e26504f
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysHotKey.h
+@@ -0,0 +1,106 @@
++// process hot keys
++
++#ifndef MSYSHOTKEY_H_INCLUDED
++#define MSYSHOTKEY_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "tools/TraceInterface.h"
++#include <set>
++#include <iostream>
++
++namespace mSysHotKey
++{
++  enum RegisterResult
++  {
++    RR_SUCCESS,
++    RR_REGISTER_KEY_FAILED,
++    RR_ALREADY_REGISTERED,
++  };
++
++
++  enum Modifier
++  {
++    MMOD_CONTROL,
++    MMOD_SHIFT,
++    MMOD_ALT,
++    MMOD_COUNT,
++  };
++
++  enum Key
++  {
++    KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
++    KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M,
++    KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
++    KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
++    KEY_ESCAPE, KEY_TAB, KEY_SPACE, KEY_BACK, KEY_RETURN, KEY_PRINT, KEY_INSERT, KEY_DELETE, KEY_PAUSE,
++    KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME,KEY_END, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
++    KEY_COUNT,
++  };
++
++  typedef std::set<Modifier> Modifiers;
++
++  class HotKey
++  {
++    public:
++      HotKey();
++      HotKey(Key key);
++      HotKey(Key key, Modifier m1);
++      HotKey(Key key, Modifier m1, Modifier m2);
++      HotKey(Key key, Modifier m1, Modifier m2, Modifier m3);
++
++      Modifiers modifier;
++      Key key;
++
++      std::string getText() const;
++  };
++
++  class HotKeyListener
++  {
++    public:
++      virtual ~HotKeyListener();
++      virtual void onKeyPressed(const HotKey& key) = 0;
++  };
++
++  class HotKeyManager
++  {
++    public:
++      virtual ~HotKeyManager();
++      virtual void addListener(const HotKey& key, HotKeyListener* pListener);
++      virtual void addListenerResult(const HotKey& key, HotKeyListener* pListener, RegisterResult result);
++      virtual void rmvListener(const HotKey& key, HotKeyListener* pListener);
++  };
++
++  // see mSystem::System::getHotKeyProcessor(mSysHotKey::HotKeyManager& manager) in mSysEvent.h for obtaining a HotKeyProcessor
++  // after the execution of HotKeyProcessor::rmvListener
++  // the HotKeyProcessor calls manager.rmvListener
++  // between these points the HotKeyProcessor may execute the callback of the HotKeyListener
++  class HotKeyProcessor: public HotKeyManager
++  {
++    public:
++      virtual ~HotKeyProcessor();
++  };
++
++
++  bool operator==(const HotKey& left, const HotKey& right);
++  bool operator!=(const HotKey& left, const HotKey& right);
++
++  bool operator< (const HotKey& left, const HotKey& right);
++  bool operator> (const HotKey& left, const HotKey& right);
++  bool operator<=(const HotKey& left, const HotKey& right);
++  bool operator>=(const HotKey& left, const HotKey& right);
++
++  const char* getResultText(RegisterResult data);
++  const char* getKeyText(Key data);
++  const char* getModifierText(Modifier data);
++  std::string getModifiersText(const Modifiers& data);
++
++  std::ostream& operator<<(std::ostream& out, RegisterResult data);
++  std::ostream& operator<<(std::ostream& out, Key data);
++  std::ostream& operator<<(std::ostream& out, Modifier data);
++  std::ostream& operator<<(std::ostream& out, const Modifiers& data);
++  std::ostream& operator<<(std::ostream& out, const HotKey& data);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
+index fa1f64e0..c403b86a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysDeviceEventW32.h
+@@ -19,6 +19,18 @@ namespace mSysDevice
+ {
+   typedef std::list<DeviceEventListener*> DeviceEventListenerList;
+ 
++  class DeviceEventProcessorImpl;
++
++  class Notify
++  {
++    public:
++      Notify(DeviceEventProcessorImpl& processor);
++      ~Notify();
++
++    private:
++      DeviceEventProcessorImpl& m_processor;
++  };
++
+   class DeviceEventProcessorImpl:
+     public DeviceEventProcessor,
+     private mSysEvent::SystemMessageListener,
+@@ -26,12 +38,15 @@ namespace mSysDevice
+     private mSysEvent::SystemMessageCall
+   {
+     public:
+-      DeviceEventProcessorImpl(mSysEvent::SystemMessageProcessor& processor, MASSAI::trace::TraceInterface& trc);
++      DeviceEventProcessorImpl(mSysEvent::SystemMessageProcessor& processor, DeviceEventManager& manager, MASSAI::trace::TraceInterface& trc);
+       virtual ~DeviceEventProcessorImpl();
+       void init();
+       virtual void addListener(DeviceEventListener& listener);
+       virtual void rmvListener(DeviceEventListener& listener);
+ 
++      void beginNotification();
++      void endNotification();
++
+     private:
+       DeviceEventListenerList getListener();
+       void registerDeviceEvents(HWND messageWindow);
+@@ -64,9 +79,12 @@ namespace mSysDevice
+ 
+       mSysEvent::SystemMessageProcessor& m_processor;
+       DeviceEventListenerList m_listener;
++      DeviceEventListenerList m_removeListener;
++      size_t m_busy;
+       Materna::MSSD::Mutex m_access;
+       MASSAI::trace::TraceInterface& m_trc;
+       HDEVNOTIFY m_interfaceNotification;
++      DeviceEventManager& m_manager;
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
+index 1651478e..cb3e8dae 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysEventW32.h
+@@ -35,7 +35,9 @@ namespace mSysEvent
+   class SystemMessageProcessor:
+     public System,
+     private mSysThread::thread,
+-    private SystemMessageListener
++    private SystemMessageListener,
++    private mSysDevice::DeviceEventManager,
++    private mSysHotKey::HotKeyManager
+   {
+     public:
+       SystemMessageProcessor(MASSAI::trace::TraceInterface& trc);
+@@ -49,6 +51,9 @@ namespace mSysEvent
+ 
+       // System
+       virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor();
++      virtual mSysDevice::DeviceEventProcessor* getDeviceEventProcessor(mSysDevice::DeviceEventManager& manager);
++      virtual mSysHotKey::HotKeyProcessor* getHotKeyProcessor();
++      virtual mSysHotKey::HotKeyProcessor* getHotKeyProcessor(mSysHotKey::HotKeyManager& manager);
+ 
+       LRESULT handleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+ 
+@@ -68,8 +73,8 @@ namespace mSysEvent
+       ListenerMap m_listener;
+       MASSAI::trace::TraceInterface& m_trc;
+       DWORD m_threadId;
+-      bool m_terminate;
+       mSysDevice::DeviceEventProcessor* m_deviceEventProcessor;
++      mSysHotKey::HotKeyProcessor* m_hotKeyProcessor;
+       HWND m_window;
+   };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysHotKeyW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysHotKeyW32.h
+new file mode 100644
+index 00000000..6512a6d1
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysHotKeyW32.h
+@@ -0,0 +1,127 @@
++// process hot keys
++
++#ifndef MSYSHOTKEYW32_H_INCLUDED
++#define MSYSHOTKEYW32_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "systools/mMutexCS.h"
++#include "systools/mSysHotKey.h"
++#include "tools/TraceInterface.h"
++#include "mSysEventW32.h"
++#include <map>
++#include <list>
++#include <set>
++#include <windows.h>
++
++
++namespace mSysHotKey
++{
++  typedef std::list<HotKeyListener*> ListenerList;
++  typedef std::list<HotKey> HotKeyList;
++  typedef std::map<HotKey, ListenerList> ListenerMap;
++
++  class HotKeyHolder
++  {
++    public:
++      HotKeyHolder();
++      HotKeyHolder(const HotKey& key, MASSAI::trace::TraceInterface& trc);
++      HotKeyHolder(const HotKeyHolder& assign);
++      HotKeyHolder& operator=(const HotKeyHolder& assign);
++      ~HotKeyHolder();
++
++      void swap(HotKeyHolder& exchange);
++      void acquire();
++      ATOM getAtom() const;
++      const HotKey& getKey() const;
++      UINT getKeyCode() const;
++      UINT getModifierCode() const;
++
++    private:
++      void release();
++
++      ATOM m_atom;
++      LPTSTR m_atomData;
++      bool m_owner;
++      HotKey m_key;
++      UINT m_keyCode;
++      UINT m_modifierCode;
++  };
++
++  typedef std::map<ATOM, HotKeyHolder> HotKeyMap;
++
++  class HotKeyProcessorImpl;
++
++  class Notify
++  {
++    public:
++      Notify(HotKeyProcessorImpl& processor);
++      ~Notify();
++
++    private:
++      HotKeyProcessorImpl& m_processor;
++  };
++
++  class HotKeyProcessorImpl:
++    public HotKeyProcessor,
++    private HotKeyListener,
++    private mSysEvent::SystemMessageListener,
++    private mSysEvent::SystemMessageCall
++  {
++    public:
++      HotKeyProcessorImpl(mSysEvent::SystemMessageProcessor& processor, HotKeyManager& manager, MASSAI::trace::TraceInterface& trc);
++      virtual ~HotKeyProcessorImpl();
++      void init();
++
++      // HotKeyProcessor
++      virtual void addListener(const HotKey& key, HotKeyListener* pListener);
++      virtual void rmvListener(const HotKey& key, HotKeyListener* pListener);
++
++      void beginNotification();
++      void endNotification();
++
++    private:
++      // HotKeyListener
++      virtual void onKeyPressed(const HotKey& key);
++
++      // SystemMessageListener
++      virtual void message(UINT message, WPARAM wParam, LPARAM lParam);
++
++      // SystemMessageCall
++      virtual void execute(HWND messageWindow);
++
++      ListenerList getListener(const HotKey& key);
++      void updateHotkeys();
++
++      RegisterResult registerKey(HWND messageWindow, const HotKeyHolder& key);
++      void unregisterKey(HWND messageWindow, const HotKeyList& keyList);
++      void unregisterKey(HWND messageWindow, const HotKey& key);
++
++      void addHotKeys(HWND messageWindow);
++      void rmvHotKeys(HWND messageWindow);
++
++      void rmvListenerDelegate(const ListenerMap& removeListener);
++      void rmvListenerDelegate(const HotKey& key, const ListenerList& listenerList);
++      void rmvListenerDelegate(const HotKey& key, HotKeyListener* pListener);
++
++      void addListenerDelegate(const HotKey& key, HotKeyListener* pListener);
++
++      void addListenerResultDelegate(const HotKey& key, const ListenerList& listenerList, RegisterResult result);
++      void addListenerResultDelegate(const HotKey& key, HotKeyListener* pListener, RegisterResult result);
++
++
++      mSysEvent::SystemMessageProcessor& m_processor;
++      ListenerMap m_listener;
++      ListenerMap m_removeListener;
++      ListenerMap m_addListener;
++      HotKeyMap m_registered;
++      bool m_invoke;
++      size_t m_busy;
++      HotKeyManager& m_manager;
++      Materna::MSSD::Mutex m_access;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index fc753c16..ebaca941 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -45,7 +45,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysProcessTreeW32.obj \
+                         $(_OBJ)\mSysDeviceEventW32.obj \
+                         $(_OBJ)\mSysEventW32.obj \
+-#                        $(_OBJ)\mSysHotKeyW32.obj \
++                        $(_OBJ)\mSysHotKeyW32.obj \
+                         $(_OBJ)\mSysIOW32.obj \
+                         $(_OBJ)\mSysUSBPrinterW32.obj \
+                         $(_OBJ)\mSysUSBDeviceW32.obj \
+@@ -124,4 +124,14 @@ MY_BIN8_LINKLIBS =      User32.lib setupapi.lib
+ MY_BIN8_OBJS =          $(_OBJ)\TestSysUSBHID.obj
+ 
+ #######################################################################
++
++MY_BIN9 =               $(_BIN)\TestSysHotKey.exe
++
++MY_BIN9_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
++
++MY_BIN9_LINKLIBS =      User32.lib
++
++MY_BIN9_OBJS =          $(_OBJ)\TestSysHotKey.obj
++
++######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
+index 273ebcde..84f94094 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysDeviceEvents.cpp
+@@ -112,6 +112,7 @@ int main(int argc, char **argv)
+     DeviceEventProcessor* deviceEvents = system->getDeviceEventProcessor();
+     deviceEvents->addListener(listener);
+     terminate.wait();
++    deviceEvents->rmvListener(listener);
+     delete system;
+   }
+   catch(const eventSemaphore_Exception&)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysHotKey.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysHotKey.cpp
+new file mode 100644
+index 00000000..72de0061
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysHotKey.cpp
+@@ -0,0 +1,90 @@
++// Test mSysHotKey
++
++#include "systools/mSysHotKey.h"
++#include "systools/mSysEvent.h"
++#include "tools/TraceLocal.h"
++#include "systools/mEventSem.hpp"
++#include "systools/mSysException.hpp"
++#include "systools/mSysProcessTerminate.h"
++#include <iostream>
++
++
++using namespace mSysEvent;
++using namespace mSysHotKey;
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceInterface;
++using mSysException::standardException;
++using Materna::MSSD::eventSemaphore;
++using Materna::MSSD::eventSemaphore_Exception;
++
++namespace
++{
++  class HotKeyListenerImpl: public HotKeyListener, public HotKeyManager
++  {
++    public:
++      HotKeyListenerImpl(TraceInterface& trc):
++        m_trc(trc)
++      {}
++
++      ~HotKeyListenerImpl()
++      {}
++
++      void onKeyPressed(const HotKey& key)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "onKeyPressed (%s)", key.getText().c_str());
++      }
++
++      void addListener(const HotKey& key, HotKeyListener* pListener)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "addListener (%s)", key.getText().c_str());
++      }
++
++      void addListenerResult(const HotKey& key, HotKeyListener* pListener, RegisterResult result)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "addListenerResult (%s) (%d, %s)", key.getText().c_str(), result, getResultText(result));
++      }
++
++      void rmvListener(const HotKey& key, HotKeyListener* pListener)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "rmvListener (%s)", key.getText().c_str());
++      }
++
++
++    private:
++      TraceInterface& m_trc;
++  };
++}
++
++int main(int argc, char **argv)
++{
++  eventSemaphore terminate;
++  TraceLocal trc("TestSysHotKey");
++  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_LATE, &terminate, &trc);
++  standardException guard;
++  try
++  {
++    HotKeyListenerImpl listener(trc);
++    System* system = createSystem(trc);
++    HotKeyProcessor* hotKeyProcessor = system->getHotKeyProcessor(listener);
++    hotKeyProcessor->addListener(HotKey(KEY_F9, MMOD_CONTROL), &listener);
++    hotKeyProcessor->addListener(HotKey(KEY_0, MMOD_CONTROL, MMOD_SHIFT, MMOD_ALT), &listener);
++    terminate.wait();
++    hotKeyProcessor->rmvListener(HotKey(KEY_F9, MMOD_CONTROL), &listener);
++    hotKeyProcessor->rmvListener(HotKey(KEY_0, MMOD_CONTROL, MMOD_SHIFT, MMOD_ALT), &listener);
++    delete system;
++  }
++  catch(const eventSemaphore_Exception&)
++  {
++    trc.writeTrace(MajorError_HERE, "open semaphore failed");
++  }
++  catch(const std::exception& x)
++  {
++    trc.writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  mSysProcessTerminate::resetShutdownHook();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 129ba81a..7612f1ad 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,12 +1,17 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 12);
++VERSION_ID_DT(systools, 1, 0, 0, 13);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
+ massai_systools.lib
+ 
++\date 25.09.2013
++\li V1.0.0.13
++\li Mantis 0028892: PLF: SAM-Hotkey not working
++mSysHotKey: listen on windows hot keys
++
+ 
+ \date 19.09.2013
+ \li V1.0.0.12
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
+index abd96f00..fa185fc7 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceEventW32.cpp
+@@ -14,6 +14,10 @@ using mSysEvent::SystemMessageProcessor;
+ using mSysEvent::SystemMessageListener;
+ using namespace mSysDevice;
+ 
++#ifndef DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
++#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 4
++#endif
++
+ namespace
+ {
+   DeviceEvent getDeviceEvent(WPARAM wparam)
+@@ -149,15 +153,30 @@ namespace
+ 
+ namespace mSysDevice
+ {
+-  DeviceEventProcessorImpl::DeviceEventProcessorImpl(SystemMessageProcessor& processor, MASSAI::trace::TraceInterface& trc):
++  Notify::Notify(DeviceEventProcessorImpl& processor):
++    m_processor(processor)
++  {
++    m_processor.beginNotification();
++  }
++
++  Notify::~Notify()
++  {
++    m_processor.endNotification();
++  }
++
++
++  DeviceEventProcessorImpl::DeviceEventProcessorImpl(SystemMessageProcessor& processor, DeviceEventManager& manager, MASSAI::trace::TraceInterface& trc):
+     DeviceEventProcessor(),
+     SystemMessageListener(),
+     DeviceEventListener(),
+     m_processor(processor),
+     m_listener(),
++    m_removeListener(),
++    m_busy(0),
+     m_access(),
+     m_trc(trc),
+-    m_interfaceNotification(0)
++    m_interfaceNotification(0),
++    m_manager(manager)
+   {}
+ 
+   DeviceEventProcessorImpl::~DeviceEventProcessorImpl()
+@@ -174,14 +193,57 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::addListener(DeviceEventListener& listener)
+   {
+-    AutoMutexCS mx(m_access);
+-    m_listener.push_back(&listener);
++    {
++      AutoMutexCS mx(m_access);
++      m_listener.push_back(&listener);
++    }
++    m_manager.addListener(listener);
+   }
+ 
+   void DeviceEventProcessorImpl::rmvListener(DeviceEventListener& listener)
++  {
++    bool done = false;
++    {
++      AutoMutexCS mx(m_access);
++      m_listener.remove(&listener);
++      if(m_busy > 0)
++      {
++        m_removeListener.push_back(&listener);
++      }
++      else
++      {
++        done = true;
++      }
++    }
++    if(done)
++    {
++      m_manager.rmvListener(listener);
++    }
++  }
++
++  void DeviceEventProcessorImpl::beginNotification()
+   {
+     AutoMutexCS mx(m_access);
+-    m_listener.remove(&listener);
++    m_busy++;
++  }
++
++  void DeviceEventProcessorImpl::endNotification()
++  {
++    DeviceEventListenerList removeListener;
++    {
++      AutoMutexCS mx(m_access);
++      m_busy--;
++      if(m_busy == 0)
++      {
++        removeListener.swap(m_removeListener);
++      }
++    }
++    DeviceEventListenerList::iterator it = removeListener.begin();
++    DeviceEventListenerList::iterator end = removeListener.end();
++    for(; it != end; it++)
++    {
++      m_manager.rmvListener(*(*it));
++    }
+   }
+ 
+   DeviceEventListenerList DeviceEventProcessorImpl::getListener()
+@@ -194,10 +256,6 @@ namespace mSysDevice
+     return result;
+   }
+ 
+-#ifndef DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
+-#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 4
+-#endif
+-
+   void DeviceEventProcessorImpl::registerDeviceEvents(HWND messageWindow)
+   {
+     DEV_BROADCAST_DEVICEINTERFACE interfaceFilter;
+@@ -369,6 +427,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::userDefinedEvent(const std::string& event)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -380,6 +439,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceNodesChanged()
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -391,6 +451,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::configEvent(ConfigEvent event)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -402,6 +463,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Device& dev)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -413,6 +475,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Volume& volume)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -424,6 +487,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const Port& port)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -435,6 +499,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const OEMDevice& device)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -446,6 +511,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::deviceEvent(DeviceEvent event, const File& file)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -457,6 +523,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::customEvent(const Device& dev)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -468,6 +535,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::customEvent(const Volume& volume)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -479,6 +547,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::customEvent(const Port& port)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -490,6 +559,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::customEvent(const OEMDevice& device)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -501,6 +571,7 @@ namespace mSysDevice
+ 
+   void DeviceEventProcessorImpl::customEvent(const FileCustom& file)
+   {
++    Notify notify(*this);
+     DeviceEventListenerList listener = getListener();
+     DeviceEventListenerList::iterator it = listener.begin();
+     DeviceEventListenerList::iterator end = listener.end();
+@@ -604,6 +675,16 @@ namespace mSysDevice
+   {}
+ 
+ 
++  DeviceEventManager::~DeviceEventManager()
++  {}
++
++  void DeviceEventManager::addListener(DeviceEventListener& listener)
++  {}
++
++  void DeviceEventManager::rmvListener(DeviceEventListener& listener)
++  {}
++
++
+   DeviceEventProcessor::~DeviceEventProcessor()
+   {}
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+index e26ec732..a36807d0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+@@ -5,6 +5,7 @@
+ #include "systools/mSysException.hpp"
+ #include "mSysErrorW32.h"
+ #include "mSysDeviceEventW32.h"
++#include "mSysHotKeyW32.h"
+ #include <windows.h>
+ 
+ using Materna::MSSD::AutoMutexCS;
+@@ -12,6 +13,10 @@ using MASSAI::trace::TraceInterface;
+ using mSysThread::thread;
+ using mSysDevice::DeviceEventProcessor;
+ using mSysDevice::DeviceEventProcessorImpl;
++using mSysDevice::DeviceEventManager;
++using mSysHotKey::HotKeyProcessor;
++using mSysHotKey::HotKeyProcessorImpl;
++using mSysHotKey::HotKey;
+ using mSysException::standardException;
+ using namespace mSysEvent;
+ 
+@@ -290,17 +295,17 @@ namespace mSysEvent
+     m_listener(),
+     m_trc(trc),
+     m_threadId(0),
+-    m_terminate(false),
+     m_deviceEventProcessor(0),
++    m_hotKeyProcessor(0),
+     m_window(0)
+   {}
+ 
+   SystemMessageProcessor::~SystemMessageProcessor()
+   {
+-    m_terminate = true;
+     postWindowMessage(WM_CLOSE, 0,0);
+     waitTerminated();
+     delete m_deviceEventProcessor;
++    delete m_hotKeyProcessor;
+   }
+ 
+   void SystemMessageProcessor::init()
+@@ -447,7 +452,7 @@ namespace mSysEvent
+       registerWindowClass();
+       createWindow();
+       checkCallList();
+-      while(!m_terminate)
++      for(;;)
+       {
+         BOOL result = GetMessage(&msg, m_window, 0, 0);
+         if(result == 0)
+@@ -499,6 +504,7 @@ namespace mSysEvent
+       }
+       case WM_DESTROY:
+       {
++        m_window = 0;
+         PostQuitMessage(0);
+         result = 0;
+         break;
+@@ -525,17 +531,39 @@ namespace mSysEvent
+   }
+ 
+   DeviceEventProcessor* SystemMessageProcessor::getDeviceEventProcessor()
++  {
++    return getDeviceEventProcessor(*this);
++  }
++
++  DeviceEventProcessor* SystemMessageProcessor::getDeviceEventProcessor(DeviceEventManager& manager)
+   {
+     AutoMutexCS mx(m_access);
+     if(!m_deviceEventProcessor)
+     {
+-      DeviceEventProcessorImpl* processor = new DeviceEventProcessorImpl(*this, m_trc);
++      DeviceEventProcessorImpl* processor = new DeviceEventProcessorImpl(*this, manager, m_trc);
+       processor->init();
+       m_deviceEventProcessor = processor;
+     }
+     return m_deviceEventProcessor;
+   }
+ 
++  HotKeyProcessor* SystemMessageProcessor::getHotKeyProcessor()
++  {
++    return getHotKeyProcessor(*this);
++  }
++
++  HotKeyProcessor* SystemMessageProcessor::getHotKeyProcessor(HotKeyManager& manager)
++  {
++    AutoMutexCS mx(m_access);
++    if(!m_hotKeyProcessor)
++    {
++      HotKeyProcessorImpl* processor = new HotKeyProcessorImpl(*this, manager, m_trc);
++      processor->init();
++      m_hotKeyProcessor = processor;
++    }
++    return m_hotKeyProcessor;
++  }
++
+   System::~System()
+   {}
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
+new file mode 100644
+index 00000000..c08fda8c
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysHotKeyW32.cpp
+@@ -0,0 +1,767 @@
++// process hot keys
++
++#include "sysTools/mSysHotKey.h"
++#include "mSysHotKeyW32.h"
++#include "mSysErrorW32.h"
++#include "sysTools/mAutoMutexCS.h"
++#include <sstream>
++#include <algorithm>
++#include <list>
++
++using Materna::MSSD::AutoMutexCS;
++using mSysEvent::SystemMessageProcessor;
++using MASSAI::trace::TraceInterface;
++using mSysError::SystemErrorCode;
++using namespace mSysHotKey;
++
++namespace
++{
++  UINT getKeyCode(Key data)
++  {
++    switch(data)
++    {
++      case KEY_0:        return '0';
++      case KEY_1:        return '1';
++      case KEY_2:        return '2';
++      case KEY_3:        return '3';
++      case KEY_4:        return '4';
++      case KEY_5:        return '5';
++      case KEY_6:        return '6';
++      case KEY_7:        return '7';
++      case KEY_8:        return '8';
++      case KEY_9:        return '9';
++      case KEY_A:        return 'A';
++      case KEY_B:        return 'B';
++      case KEY_C:        return 'C';
++      case KEY_D:        return 'D';
++      case KEY_E:        return 'E';
++      case KEY_F:        return 'F';
++      case KEY_G:        return 'G';
++      case KEY_H:        return 'H';
++      case KEY_I:        return 'I';
++      case KEY_J:        return 'J';
++      case KEY_K:        return 'K';
++      case KEY_L:        return 'L';
++      case KEY_M:        return 'M';
++      case KEY_N:        return 'N';
++      case KEY_O:        return 'O';
++      case KEY_P:        return 'P';
++      case KEY_Q:        return 'Q';
++      case KEY_R:        return 'R';
++      case KEY_S:        return 'S';
++      case KEY_T:        return 'T';
++      case KEY_U:        return 'U';
++      case KEY_V:        return 'V';
++      case KEY_W:        return 'W';
++      case KEY_X:        return 'X';
++      case KEY_Y:        return 'Y';
++      case KEY_Z:        return 'Z';
++      case KEY_F1:       return VK_F1;
++      case KEY_F2:       return VK_F2;
++      case KEY_F3:       return VK_F3;
++      case KEY_F4:       return VK_F4;
++      case KEY_F5:       return VK_F5;
++      case KEY_F6:       return VK_F6;
++      case KEY_F7:       return VK_F7;
++      case KEY_F8:       return VK_F8;
++      case KEY_F9:       return VK_F9;
++      case KEY_F10:      return VK_F10;
++      case KEY_F11:      return VK_F11;
++      case KEY_F12:      return VK_F12;
++      case KEY_ESCAPE:   return VK_ESCAPE;
++      case KEY_TAB:      return VK_TAB;
++      case KEY_SPACE:    return VK_SPACE;
++      case KEY_BACK:     return VK_BACK;
++      case KEY_RETURN:   return VK_RETURN;
++      case KEY_PRINT:    return VK_PRINT;
++      case KEY_INSERT:   return VK_INSERT;
++      case KEY_DELETE:   return VK_DELETE;
++      case KEY_PAUSE:    return VK_PAUSE;
++      case KEY_PAGEUP:   return VK_PRIOR;
++      case KEY_PAGEDOWN: return VK_NEXT;
++      case KEY_HOME:     return VK_HOME;
++      case KEY_END:      return VK_END;
++      case KEY_LEFT:     return VK_LEFT;
++      case KEY_RIGHT:    return VK_RIGHT;
++      case KEY_UP:       return VK_UP;
++      case KEY_DOWN:     return VK_DOWN;
++      default:           return 0;
++    }
++  }
++
++  UINT getModifierCode(Modifier data)
++  {
++    switch(data)
++    {
++      case MMOD_CONTROL: return MOD_CONTROL;
++      case MMOD_SHIFT:   return MOD_SHIFT;
++      case MMOD_ALT:     return MOD_ALT;
++      default:           return 0;
++    }
++  }
++
++  UINT getModifierCode(const Modifiers data)
++  {
++    UINT result = 0;
++    Modifiers::const_iterator it = data.begin();
++    Modifiers::const_iterator end = data.end();
++    for(; it != end; it++)
++    {
++      result|= getModifierCode(*it);
++    }
++    return result;
++  }
++
++}
++
++namespace mSysHotKey
++{
++  HotKeyHolder::HotKeyHolder():
++    m_atom(0),
++    m_owner(false),
++    m_atomData(0),
++    m_key(),
++    m_keyCode(0),
++    m_modifierCode(0)
++  {}
++
++  HotKeyHolder::HotKeyHolder(const HotKey& key, TraceInterface& trc):
++    m_atom(0),
++    m_owner(false),
++    m_atomData(0),
++    m_key(key),
++    m_keyCode(::getKeyCode(m_key.key)),
++    m_modifierCode(::getModifierCode(m_key.modifier))
++  {
++    WORD id = (m_modifierCode << 8) | m_keyCode;
++    m_atomData = MAKEINTATOM(id);
++    m_atom = FindAtom(m_atomData);
++    if(m_atom != 0)
++    {
++      m_owner = false;
++    }
++    else
++    {
++      m_atom = GlobalAddAtom(m_atomData);
++      if(m_atom != 0)
++      {
++        m_owner = true;
++      }
++      else
++      {
++        SystemErrorCode errorCode = mSysError::getErrorCode();
++        trc.writeTrace(MajorError_HERE, "GlobalAddAtom(0x%0x): (%d; %s)",
++          id, errorCode, mSysError::getErrorText(errorCode).c_str());
++      }
++    }
++  }
++
++  HotKeyHolder::HotKeyHolder(const HotKeyHolder& assign):
++    m_atom(assign.m_atom),
++    m_owner(false),
++    m_atomData(assign.m_atomData),
++    m_key(assign.m_key),
++    m_keyCode(assign.m_keyCode),
++    m_modifierCode(assign.m_modifierCode)
++  {}
++
++  HotKeyHolder& HotKeyHolder::operator=(const HotKeyHolder& assign)
++  {
++    release();
++    m_atom = assign.m_atom;
++    m_owner = false;
++    m_atomData = assign.m_atomData;
++    m_key = assign.m_key;
++    m_keyCode = assign.m_keyCode;
++    m_modifierCode = assign.m_modifierCode;
++    return *this;
++  }
++
++  void HotKeyHolder::acquire()
++  {
++    if(!m_owner)
++    {
++      if(GlobalAddAtom(m_atomData) != 0)
++      {
++        m_owner = true;
++      }
++    }
++  }
++
++  HotKeyHolder::~HotKeyHolder()
++  {
++    release();
++  }
++
++  void HotKeyHolder::release()
++  {
++    if(m_owner)
++    {
++      GlobalDeleteAtom(m_atom);
++    }
++  }
++
++  void HotKeyHolder::swap(HotKeyHolder& exchange)
++  {
++    std::swap(m_atom, exchange.m_atom);
++    std::swap(m_owner, exchange.m_owner);
++    std::swap(m_atomData, exchange.m_atomData);
++    std::swap(m_key, exchange.m_key);
++    std::swap(m_keyCode, exchange.m_keyCode);
++    std::swap(m_modifierCode, exchange.m_modifierCode);
++  }
++
++  ATOM HotKeyHolder::getAtom() const
++  {
++    return m_atom;
++  }
++
++  const HotKey& HotKeyHolder::getKey() const
++  {
++    return m_key;
++  }
++
++  UINT HotKeyHolder::getKeyCode() const
++  {
++    return m_keyCode;
++  }
++
++  UINT HotKeyHolder::getModifierCode() const
++  {
++    return m_modifierCode;
++  }
++
++
++  HotKey::HotKey():
++    modifier(),
++    key(KEY_0)
++  {}
++
++  HotKey::HotKey(Key key):
++    modifier(),
++    key(key)
++  {}
++
++  HotKey::HotKey(Key key, Modifier m1):
++    modifier(),
++    key(key)
++  {
++    modifier.insert(m1);
++  }
++
++  HotKey::HotKey(Key key, Modifier m1, Modifier m2):
++    modifier(),
++    key(key)
++  {
++    modifier.insert(m1);
++    modifier.insert(m2);
++  }
++
++  HotKey::HotKey(Key key, Modifier m1, Modifier m2, Modifier m3):
++    modifier(),
++    key(key)
++  {
++    modifier.insert(m1);
++    modifier.insert(m2);
++    modifier.insert(m3);
++  }
++
++  std::string HotKey::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++
++  Notify::Notify(HotKeyProcessorImpl& processor):
++    m_processor(processor)
++  {
++    m_processor.beginNotification();
++  }
++
++  Notify::~Notify()
++  {
++    m_processor.endNotification();
++  }
++
++
++  HotKeyProcessorImpl::HotKeyProcessorImpl(SystemMessageProcessor& processor,
++    mSysHotKey::HotKeyManager& manager, TraceInterface& trc):
++    m_processor(processor),
++    m_listener(),
++    m_removeListener(),
++    m_addListener(),
++    m_registered(),
++    m_invoke(false),
++    m_busy(0),
++    m_manager(manager),
++    m_access(),
++    m_trc(trc)
++  {}
++
++  HotKeyProcessorImpl::~HotKeyProcessorImpl()
++  {
++    m_processor.rmvListener(WM_HOTKEY, *this);
++  }
++
++  void HotKeyProcessorImpl::init()
++  {
++    m_processor.addListener(WM_HOTKEY, *this);
++  }
++
++  void HotKeyProcessorImpl::addListener(const HotKey& key, HotKeyListener* pListener)
++  {
++    AutoMutexCS mx(m_access);
++    m_listener[key].push_back(pListener);
++    m_addListener[key].push_back(pListener);
++    updateHotkeys();
++    addListenerDelegate(key, pListener);
++  }
++
++  void HotKeyProcessorImpl::rmvListener(const HotKey& key, HotKeyListener* pListener)
++  {
++    AutoMutexCS mx(m_access);
++    m_removeListener[key].push_back(pListener);
++    ListenerList& list = m_listener[key];
++    list.remove(pListener);
++    if(list.size() == 0)
++    {
++      m_listener.erase(key);
++    }
++    updateHotkeys();
++  }
++
++  void HotKeyProcessorImpl::updateHotkeys()
++  {
++    AutoMutexCS mx(m_access);
++    if(!m_invoke)
++    {
++      m_invoke = true;
++      m_processor.invoke(*this);
++    }
++  }
++
++  void HotKeyProcessorImpl::beginNotification()
++  {
++    AutoMutexCS mx(m_access);
++    m_busy++;
++  }
++
++  void HotKeyProcessorImpl::endNotification()
++  {
++    ListenerMap removeListener;
++    {
++      AutoMutexCS mx(m_access);
++      m_busy--;
++      if(m_busy == 0)
++      {
++        removeListener.swap(m_removeListener);
++      }
++    }
++    rmvListenerDelegate(removeListener);
++  }
++
++  void HotKeyProcessorImpl::rmvListenerDelegate(const ListenerMap& removeListener)
++  {
++    ListenerMap::const_iterator it = removeListener.begin();
++    ListenerMap::const_iterator end = removeListener.end();
++    for(; it != end; it++)
++    {
++      rmvListenerDelegate(it->first, it->second);
++    }
++  }
++
++  void HotKeyProcessorImpl::rmvListenerDelegate(const HotKey& key,
++    const ListenerList& listenerList)
++  {
++    ListenerList::const_iterator it = listenerList.begin();
++    ListenerList::const_iterator end = listenerList.end();
++    for(; it != end; it++)
++    {
++      rmvListenerDelegate(key, *it);
++    }
++  }
++
++  void HotKeyProcessorImpl::rmvListenerDelegate(const HotKey& key, HotKeyListener* pListener)
++  {
++    m_manager.rmvListener(key, pListener);
++  }
++
++  void HotKeyProcessorImpl::addListenerDelegate(const HotKey& key, HotKeyListener* pListener)
++  {
++    m_manager.addListener(key, pListener);
++  }
++
++  void HotKeyProcessorImpl::addListenerResultDelegate(const HotKey& key,
++    const ListenerList& listenerList, RegisterResult result)
++  {
++    ListenerList::const_iterator it = listenerList.begin();
++    ListenerList::const_iterator end = listenerList.end();
++    for(; it != end; it++)
++    {
++      addListenerResultDelegate(key, *it, result);
++    }
++  }
++
++  void HotKeyProcessorImpl::addListenerResultDelegate(const HotKey& key,
++    HotKeyListener* pListener, RegisterResult result)
++  {
++    m_manager.addListenerResult(key, pListener, result);
++  }
++
++
++  void HotKeyProcessorImpl::onKeyPressed(const HotKey& key)
++  {
++    Notify notify(*this);
++    ListenerList listener = getListener(key);
++    ListenerList::iterator it = listener.begin();
++    ListenerList::iterator end = listener.end();
++    for(; it != end; it++)
++    {
++      (*it)->onKeyPressed(key);
++    }
++  }
++
++  void HotKeyProcessorImpl::message(UINT message, WPARAM wParam, LPARAM lParam)
++  {
++    if(message == WM_HOTKEY)
++    {
++      ATOM atom = wParam;
++      HotKeyMap::iterator it = m_registered.find(atom);
++      if(it == m_registered.end())
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "WM_HOTKEY (0x%x, 0x%x, 0x%x) ignored",
++          wParam, (lParam >> 16) & 0xFFFF, lParam & 0xFFFF);
++      }
++      else
++      {
++        const HotKey& key = it->second.getKey();
++        m_trc.writeTrace(BasicRuntime_HERE, "WM_HOTKEY (0x%x, 0x%x, 0x%x) (%s)",
++          wParam, (lParam >> 16) & 0xFFFF, lParam & 0xFFFF, key.getText().c_str());
++        onKeyPressed(key);
++      }
++    }
++  }
++
++  RegisterResult HotKeyProcessorImpl::registerKey(HWND messageWindow, const HotKeyHolder& key)
++  {
++    RegisterResult result = RR_SUCCESS;
++    m_trc.writeTrace(BasicRuntime_HERE, "RegisterHotKey(0x%x, 0x%x, 0x%x) (%s)",
++      key.getAtom(), key.getModifierCode(), key.getKeyCode(), key.getKey().getText().c_str());
++    if(!RegisterHotKey(messageWindow, key.getAtom(), key.getModifierCode(), key.getKeyCode()))
++    {
++      SystemErrorCode errorCode = mSysError::getErrorCode();
++      m_trc.writeTrace(MajorError_HERE, "RegisterHotKey(0x%x, 0x%x, 0x%x) (%s): (%d; %s)",
++        key.getAtom(), key.getModifierCode(), key.getKeyCode(), key.getKey().getText().c_str(),
++        errorCode, mSysError::getErrorText(errorCode).c_str());
++      if(errorCode == ERROR_HOTKEY_ALREADY_REGISTERED)
++      {
++        result= RR_ALREADY_REGISTERED;
++      }
++      else
++      {
++        result= RR_REGISTER_KEY_FAILED;
++      }
++    }
++    return result;
++  }
++
++  void HotKeyProcessorImpl::unregisterKey(HWND messageWindow, const HotKeyList& keyList)
++  {
++    HotKeyList::const_iterator it = keyList.begin();
++    HotKeyList::const_iterator end = keyList.end();
++    for(; it != end; it++)
++    {
++      unregisterKey(messageWindow, *it);
++    }
++  }
++
++  void HotKeyProcessorImpl::unregisterKey(HWND messageWindow, const HotKey& key)
++  {
++    HotKeyHolder keyHolder(key, m_trc);
++    HotKeyMap::const_iterator registered = m_registered.find(keyHolder.getAtom());
++    if(registered != m_registered.end())
++    {
++      if(!UnregisterHotKey(messageWindow, keyHolder.getAtom()))
++      {
++        SystemErrorCode errorCode = mSysError::getErrorCode();
++        m_trc.writeTrace(MajorError_HERE, "UnregisterHotKey(0x%x) (0x%x, 0x%x) (%s): (%d; %s)",
++          keyHolder.getAtom(), keyHolder.getModifierCode(), keyHolder.getKeyCode(), key.getText().c_str(),
++          errorCode, mSysError::getErrorText(errorCode).c_str());
++      }
++      m_registered.erase(registered);
++    }
++  }
++
++  void HotKeyProcessorImpl::addHotKeys(HWND messageWindow)
++  {
++    ListenerMap addListener;
++    {
++      AutoMutexCS mx(m_access);
++      addListener.swap(m_addListener);
++    }
++    ListenerMap::const_iterator it = addListener.begin();
++    ListenerMap::const_iterator end = addListener.end();
++    for(; it != end; it++)
++    {
++      const HotKey& key = it->first;
++      const ListenerList& list = it->second;
++      RegisterResult result = RR_SUCCESS;
++      HotKeyHolder keyHolder(key, m_trc);
++      HotKeyMap::const_iterator registered = m_registered.find(keyHolder.getAtom());
++      if(registered == m_registered.end())
++      {
++        result = registerKey(messageWindow, keyHolder);
++        if(result == RR_SUCCESS)
++        {
++          HotKeyHolder& stored = m_registered[keyHolder.getAtom()];
++          stored.swap(keyHolder);
++          stored.acquire();
++        }
++      }
++      else if(registered->second.getKey() != key)
++      {
++        result = RR_REGISTER_KEY_FAILED;
++      }
++      else
++      {
++        result = registerKey(messageWindow, keyHolder);
++      }
++      addListenerResultDelegate(key, list, result);
++    }
++  }
++
++  void HotKeyProcessorImpl::rmvHotKeys(HWND messageWindow)
++  {
++    ListenerMap removeListener;
++    HotKeyList unregister;
++    {
++      AutoMutexCS mx(m_access);
++      removeListener.swap(m_removeListener);
++      ListenerMap::const_iterator it = removeListener.begin();
++      ListenerMap::const_iterator end = removeListener.end();
++      for(; it != end; it++)
++      {
++        if(m_listener.find(it->first) == m_listener.end())
++        {
++          unregister.push_back(it->first);
++        }
++      }
++    }
++    unregisterKey(messageWindow, unregister);
++    rmvListenerDelegate(removeListener);
++  }
++
++  void HotKeyProcessorImpl::execute(HWND messageWindow)
++  {
++    AutoMutexCS mx(m_access);
++    m_invoke = false;
++    addHotKeys(messageWindow);
++    rmvHotKeys(messageWindow);
++  }
++
++  ListenerList HotKeyProcessorImpl::getListener(const HotKey& key)
++  {
++    AutoMutexCS mx(m_access);
++    ListenerList result;
++    ListenerMap::iterator it = m_listener.find(key);
++    if(it != m_listener.end())
++    {
++      result = it->second;
++    }
++    return result;
++  }
++
++
++  HotKeyListener::~HotKeyListener()
++  {}
++
++  HotKeyManager::~HotKeyManager()
++  {}
++
++  void HotKeyManager::addListener(const HotKey& key, HotKeyListener* pListener)
++  {}
++
++  void HotKeyManager::rmvListener(const HotKey& key, HotKeyListener* pListener)
++  {}
++
++  void HotKeyManager::addListenerResult(const HotKey& key,
++    HotKeyListener* pListener, RegisterResult result)
++  {}
++
++
++  HotKeyProcessor::~HotKeyProcessor()
++  {}
++
++  const char* getResultText(RegisterResult data)
++  {
++    switch(data)
++    {
++      case RR_SUCCESS:             return "SUCCESS";
++      case RR_REGISTER_KEY_FAILED: return "REGISTER_KEY_FAILED";
++      case RR_ALREADY_REGISTERED:  return "ALREADY_REGISTERED";
++      default:                     return "unknown";
++    }
++  }
++
++  const char* getKeyText(Key data)
++  {
++    switch(data)
++    {
++      case KEY_0:        return "0";
++      case KEY_1:        return "1";
++      case KEY_2:        return "2";
++      case KEY_3:        return "3";
++      case KEY_4:        return "4";
++      case KEY_5:        return "5";
++      case KEY_6:        return "6";
++      case KEY_7:        return "7";
++      case KEY_8:        return "8";
++      case KEY_9:        return "9";
++      case KEY_A:        return "A";
++      case KEY_B:        return "B";
++      case KEY_C:        return "C";
++      case KEY_D:        return "D";
++      case KEY_E:        return "E";
++      case KEY_F:        return "F";
++      case KEY_G:        return "G";
++      case KEY_H:        return "H";
++      case KEY_I:        return "I";
++      case KEY_J:        return "J";
++      case KEY_K:        return "K";
++      case KEY_L:        return "L";
++      case KEY_M:        return "M";
++      case KEY_N:        return "N";
++      case KEY_O:        return "O";
++      case KEY_P:        return "P";
++      case KEY_Q:        return "Q";
++      case KEY_R:        return "R";
++      case KEY_S:        return "S";
++      case KEY_T:        return "T";
++      case KEY_U:        return "U";
++      case KEY_V:        return "V";
++      case KEY_W:        return "W";
++      case KEY_X:        return "X";
++      case KEY_Y:        return "Y";
++      case KEY_Z:        return "Z";
++      case KEY_F1:       return "F1";
++      case KEY_F2:       return "F2";
++      case KEY_F3:       return "F3";
++      case KEY_F4:       return "F4";
++      case KEY_F5:       return "F5";
++      case KEY_F6:       return "F6";
++      case KEY_F7:       return "F7";
++      case KEY_F8:       return "F8";
++      case KEY_F9:       return "F9";
++      case KEY_F10:      return "F10";
++      case KEY_F11:      return "F11";
++      case KEY_F12:      return "F12";
++      case KEY_ESCAPE:   return "ESCAPE";
++      case KEY_TAB:      return "TAB";
++      case KEY_SPACE:    return "SPACE";
++      case KEY_BACK:     return "BACK";
++      case KEY_RETURN:   return "RETURN";
++      case KEY_PRINT:    return "PRINT";
++      case KEY_INSERT:   return "INSERT";
++      case KEY_DELETE:   return "DELETE";
++      case KEY_PAUSE:    return "PAUSE";
++      case KEY_PAGEUP:   return "PAGEUP";
++      case KEY_PAGEDOWN: return "PAGEDOWN";
++      case KEY_HOME:     return "HOME";
++      case KEY_END:      return "END";
++      case KEY_LEFT:     return "LEFT";
++      case KEY_RIGHT:    return "RIGHT";
++      case KEY_UP:       return "UP";
++      case KEY_DOWN:     return "DOWN";
++      default:           return "unknown";
++    }
++  }
++
++  const char* getModifierText(Modifier data)
++  {
++    switch(data)
++    {
++      case MMOD_CONTROL: return "CONTROL";
++      case MMOD_SHIFT:   return "SHIFT";
++      case MMOD_ALT:     return "ALT";
++      default:           return "unknown";
++    }
++  }
++
++  std::string getModifiersText(const Modifiers& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
++  bool operator==(const HotKey& left, const HotKey& right)
++  {
++    return left.key == right.key && left.modifier == right.modifier;
++  }
++
++  bool operator!=(const HotKey& left, const HotKey& right)
++  {
++    return !(left == right);
++  }
++
++  bool operator< (const HotKey& left, const HotKey& right)
++  {
++    return left.key < right.key
++        || (left.key == right.key
++        && (left.modifier < right.modifier));
++  }
++
++  bool operator> (const HotKey& left, const HotKey& right)
++  {
++    return right < left;
++  }
++
++  bool operator<=(const HotKey& left, const HotKey& right)
++  {
++    return !(right < left);
++  }
++
++  bool operator>=(const HotKey& left, const HotKey& right)
++  {
++    return !(left < right);
++  }
++
++  std::ostream& operator<<(std::ostream& out, Key data)
++  {
++    out << getKeyText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, RegisterResult data)
++  {
++    out << getResultText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, Modifier data)
++  {
++    out << getModifierText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const Modifiers& data)
++  {
++    Modifiers::const_iterator it = data.begin();
++    Modifiers::const_iterator end = data.end();
++    out << "{";
++    for(; it != end; it++)
++    {
++      out << *it << ", ";
++    }
++    out << "}";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const HotKey& data)
++  {
++    out << "HotKey: " << data.key << "; " << data.modifier;
++    return out;
++  }
++}
+-- 
+2.41.0.windows.1
+

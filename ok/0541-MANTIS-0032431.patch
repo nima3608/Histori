@@ -1,0 +1,1259 @@
+From 1d6f04d49b0144bab058b91c889c45338928a6d6 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 18 Nov 2014 16:55:14 +0000
+Subject: [PATCH 0541/1000] MANTIS 0032431 -implement all commands, which are
+ to handle in the Worker Msg-Queue:    -WM_MASSAISTART   
+ -WM_MASSAISTART_REMOTE    -WM_MASSAIREBOOT_REMOTE   
+ -WM_MASSAISHUTDOWN_REMOTE    -WM_MASSAISTOP_REMOTE   
+ -WM_MASSAISTOP_SCHEDULER    -WM_MASSAISTART_SCHEDULER
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@776 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |  28 +-
+ .../Massai/cpp/mControl/inc/mControl_reboot.h |   2 +-
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  16 +-
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |  26 +-
+ .../cpp/mControl/src/mControl_config.cpp      |  66 +++-
+ .../Massai/cpp/mControl/src/mControl_main.cpp |  67 ++--
+ .../mControl/src/mControl_notification.cpp    |   2 +-
+ .../cpp/mControl/src/mControl_reboot.cpp      |  23 +-
+ .../cpp/mControl/src/mControl_scheduler.cpp   |  29 +-
+ .../cpp/mControl/src/mControl_servant.cpp     |  33 ++
+ .../cpp/mControl/src/mControl_worker.cpp      | 342 ++++++++++++------
+ 11 files changed, 419 insertions(+), 215 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 4d040ee6..a4a98ed8 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -34,6 +34,9 @@
+ //Poco includes
+ #include "poco\ThreadPool.h"
+ 
++//Compiler includes
++#include <list>
++
+ 
+ namespace mControl
+ {
+@@ -42,17 +45,18 @@ namespace mControl
+     class GlobalConfig
+     {
+     private:
+-        bool                    m_serverMode,
+-                                m_noLog,
+-                                m_noSNMP,
+-                                m_portableMCC,
+-                                m_isRunningAsUserShell,
+-                                m_started,
+-                                m_terminate;
+-
+-        long                    m_allProcesses,
+-                                m_currentProcesses,
+-                                m_currLoadPercent;
++        bool                    m_serverMode;
++        bool                    m_noLog;
++        bool                    m_noSNMP;
++        bool                    m_portableMCC;
++        bool                    m_isRunningAsUserShell;
++        bool                    m_started;
++        bool                    m_terminate;
++
++        long                    m_allProcesses;
++        long                    m_currentProcesses;
++        long                    m_currLoadPercent;
++        
+         float                   m_tmp;
+ 
+         Poco::ThreadPool        m_threadPool;
+@@ -63,6 +67,7 @@ namespace mControl
+ 
+         Poco::NotificationQueue m_queue;
+         Worker*                 m_worker;
++        std::list<long>         m_prList;
+ 
+     public:
+         GlobalConfig();
+@@ -93,6 +98,7 @@ namespace mControl
+         CEnvSubst& getEnvS(){ return m_EnvS; }
+         Poco::NotificationQueue& getQueue(){ return m_queue; }
+         Worker* getWorker(){ return m_worker; }
++        std::list<long>& getPrList(){ return m_prList; }
+ 
+     
+         /**
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+index 621b0707..3edda967 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+@@ -34,7 +34,7 @@ namespace mControl
+     {
+       private:
+         long                        m_startDelay;
+-        Poco::NotificationQueue &         m_notificationQueue;  
++        Poco::NotificationQueue &   m_notificationQueue;  
+         GlobalConfig&               m_globalConfig;
+         MControlServant*            m_servant;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 653ad8da..52381de7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -22,13 +22,12 @@
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Runnable.h"
+ 
+-
+ namespace mControl
+ {
+     class Worker : public Poco::Runnable
+     {
+     private:
+-        Poco::NotificationQueue &         m_notificationQueue; 
++        Poco::NotificationQueue &   m_notificationQueue; 
+         GlobalConfig&               m_globalConfig;
+         Dialog&                     m_dialog;
+         cfgListSysCommands*         m_shutDownCommands;
+@@ -87,6 +86,19 @@ namespace mControl
+         * Waits until starter has terminated
+         */
+         void waitForStarterTermination();
++
++
++        /**
++        *   starts the update and starter exe
++        *   @return: success of execution
++        */
++        long massaiStartRemote();
++
++
++        /**
++        *   
++        */
++        long massaiStartScheduler();
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 147c8835..8b491ac4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -41,35 +41,25 @@
+     #define szClassName "win32app"              // The main window class name.
+ 
+ 
+-    //Platform Commands
+-    /*
+-    #define WM_MASSAISTART              1000
+-    #define WM_MASSAISTART_REMOTE       1001
+-    #define WM_MASSAIREBOOT_REMOTE      1002
+-    #define WM_MASSAISHUTDOWN_REMOTE    1003
+-    #define WM_MASSAISTOP_REMOTE        1004
+-    #define WM_MASSAISTOP_SCHEDULER     1005
+-    #define WM_MASSAISTART_SCHEDULER    1006
+-    #define WM_START_DELAY_TIMER        1007
+-    */
+-
+-    #define WM_MASSAISTART            (WM_USER + 1)
+-    #define WM_MASSAISTOP_REMOTE      (WM_USER + 2)
+-    #define WM_MASSAISTART_REMOTE     (WM_USER + 3)
++    //Platform msg's (WM_USER = 1024)
++    #define WM_MASSAISTART            (WM_USER + 1) 
++    #define WM_MASSAISTOP_REMOTE      (WM_USER + 2) 
++    #define WM_MASSAISTART_REMOTE     (WM_USER + 3) 
+     #define WM_MASSAIREBOOT_REMOTE    (WM_USER + 4)
+     #define WM_MASSAISHUTDOWN_REMOTE  (WM_USER + 5)
+ 
+     #define WM_MASSAISTOP_SCHEDULER   (WM_USER + 6)
+     #define WM_MASSAISTART_SCHEDULER  (WM_USER + 7)
+ 
+-    #define WM_TEST                   (WM_USER + 8)
+-
+     #define WM_MCONTROL_PROGRESS      (WM_USER + 10)
+-
+     #define WM_START_DELAY_TIMER      (WM_USER + 101)
++    
++    //Other msg's
++    //as msg or as meber of config?
+     #define WM_EXEC_SYS_CMD_SHUTDOWN  (WM_USER + 102)
+     #define WM_EXEC_SYS_CMD_STARTUP   (WM_USER + 103)
+ 
++    //value Defines
+     #define START_DELAY_TIMER           1
+ 
+     #define SEM_NAME       "mPlatformStartup"
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 69f2d481..03943e5d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -42,11 +42,16 @@ namespace mControl
+         m_noSNMP(false),
+         m_portableMCC(false),
+         m_isRunningAsUserShell(false),
++        m_started(false),
++        m_terminate(false),
++        m_allProcesses(0),
++        m_currentProcesses(0),
++        m_currLoadPercent(0),
++        m_tmp(0),
+         m_threadPool(),
+         m_alert(NULL),
+         m_EnvS(),
+         m_queue(),
+-        m_terminate(false),
+         m_worker(NULL)
+     {
+     }
+@@ -364,11 +369,10 @@ namespace mControl
+         TCHAR           greeting[] = _T("Hello, World!");        
+ 
+ 
+-        //TODO: case WM_MCONTROL_PROGRESS:
+         switch (message)
+         {
+             //original as in the old mControl
+-            //TODO: check the comments 
++            //TODO: check the comments (outcommented code)
+             case WM_CREATE:                                         
+                 TRACE(HERE,"WM_CREATE");
+ 
+@@ -607,7 +611,6 @@ namespace mControl
+                 break;
+ 
+             //original as in the old mControl
+-            //TODO: implement the fuctions in the comments
+             case WM_CLOSE: 
+             {
+                 TRACE(HERE,"WM_CLOSE");
+@@ -659,6 +662,41 @@ namespace mControl
+             }
+             break;
+ 
++            /*
++            case WM_USER:
++            {
++                TRACE(SecondaryRuntime_HERE,"WM_USER");
++
++                if(wParam)
++                {
++                    m_globalConfig.setAllProcesses(wParam);
++                }
++
++                if(lParam > 0)
++                {
++                    m_globalConfig.getPrList().push_back(lParam);
++                    m_globalConfig.setCurrentProcesses( m_globalConfig.getCurrentProcesses() + 1);
++                }
++                else if (m_globalConfig.getCurrentProcesses()>0)
++                    m_globalConfig.setCurrentProcesses( m_globalConfig.getCurrentProcesses() - 1);
++
++                TRACE(HERE_9,"Processbar: all = %d, current = %d, pid = %d",m_globalConfig.getAllProcesses(),m_globalConfig.getCurrentProcesses(), lParam);
++
++                if(m_globalConfig.getAllProcesses())
++                {
++                    m_globalConfig.setCurrLoadPercent( (long)( ( (float)m_globalConfig.getCurrentProcesses()/(float)m_globalConfig.getAllProcesses() )*100) );
++
++                    SendMessage(m_hWndLoad,PBM_SETPOS,m_globalConfig.getCurrLoadPercent(),0);
++
++                    UpdateWindow(m_hWndLoad);
++
++                    if(m_globalConfig.serverMode() && lParam >= 0 && m_globalConfig.getCurrLoadPercent() >= 100)
++                        ShowWindow(hWnd,SW_MINIMIZE);
++                }
++            }
++            break;
++            */
++
+             case WM_MCONTROL_PROGRESS:
+             {
+                 TRACE(SecondaryRuntime_HERE,"WM_MCONTROL_PROGRESS");
+@@ -788,7 +826,7 @@ namespace mControl
+ 
+ 
+               case VK_F8:
+-
++                  TRACE(SecondaryRuntime_HERE,"VK_F8");
+                    if(!m_globalConfig.serverMode())
+                    {
+                      if(MessageBox(hWnd,
+@@ -805,9 +843,8 @@ namespace mControl
+                    }
+                    break;
+ 
+-          case VK_F9:
+           case VK_F11:
+-
++               TRACE(SecondaryRuntime_HERE,"VK_F11");
+                if(!m_globalConfig.serverMode())
+                {
+                  if(MessageBox(hWnd,
+@@ -829,7 +866,8 @@ namespace mControl
+ 
+                break;
+ 
+-        case VK_F12: 
++        case VK_F12:
++            TRACE(SecondaryRuntime_HERE,"VK_F12");
+                 if(mDaemon_isService())
+                 {
+                     MessageBox(hWnd,
+@@ -846,10 +884,14 @@ namespace mControl
+                     {
+                     sendAlert(ALERT_E_REBOOT_LOCAL);
+ 
+-                    // execute system commands before shutting down
+-                    //TODO: check if a sleep is needed
+-                    //TODO: implement correct handle for WM_EXEC_SYS_CMD_SHUTDOWN
+-                    m_globalConfig.getQueue().enqueueNotification( new MControlNotification( "", CONFIG_ID,  WM_EXEC_SYS_CMD_SHUTDOWN) );
++                    Worker* worker = m_globalConfig.getWorker();
++                    if( worker )
++                    {
++                        // execute system commands after platform stopped
++                        worker->execSysCmdsShutdown();
++                    }
++                    else
++                        TRACE(HERE,"ERROR: no worker available");
+ 
+                     rc = Tools::shutdownOS_Now(true);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 1bd7ce43..fe1103df 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -48,7 +48,7 @@ using Poco::NotificationQueue;
+ 
+ //Global vars 
+ HINSTANCE globalHInstance;
+-GlobalConfig globalConfig;
++GlobalConfig* globalConfig = new GlobalConfig();
+ 
+ 
+ 
+@@ -132,14 +132,15 @@ int mDaemon_main( int argc, char const * const * argv )
+ {
+     TRACE(HERE,"entering mDaemon_main...");
+   
+-    Dialog      mainDialog  = Dialog(globalConfig.getQueue(), globalHInstance, globalConfig);
++    /********************************
++    *   create Dialog object and start to build the window
++    */
++    Dialog      mainDialog  = Dialog(globalConfig->getQueue(), globalHInstance, *globalConfig);
+ 
+-    Worker worker(globalConfig.getQueue(), globalConfig, mainDialog);
++    Worker worker(globalConfig->getQueue(), *globalConfig, mainDialog);
+ 
+-    globalConfig.setWorker(&worker);
++    globalConfig->setWorker(&worker);
+ 
+-    Scheduler   scheduler   = Scheduler(globalConfig.getQueue(), globalConfig);
+-    
+     argScan     args( argc, argv );
+    
+     long        rc = 0;
+@@ -221,7 +222,7 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+     if( args.option( "ENABLEPORTABLEMCC" ) )
+     {
+-        globalConfig.setPortableMCC(true);
++        globalConfig->setPortableMCC(true);
+         TRACE(HERE,"%s found option [enableportablemcc], removable device check for mcc enabled\n",Tools::timeStamp());
+     }
+ 
+@@ -298,7 +299,7 @@ int mDaemon_main( int argc, char const * const * argv )
+     }
+ 
+     TRACE(HERE,"set Base environment variables...");
+-    globalConfig.getEnvS().SetBaseEnvVars();
++    globalConfig->getEnvS().SetBaseEnvVars();
+ 
+ 
+     //******************************************************************************************
+@@ -310,24 +311,24 @@ int mDaemon_main( int argc, char const * const * argv )
+         TRACE(HERE,"handle the args parameter...");
+ 
+         if( args.option( "SERVER" ) || mDaemon_isService() )
+-            globalConfig.setServerMode(true);
++            globalConfig->setServerMode(true);
+         
+ 
+         if( args.option( "NOLOG" ) )
+-            globalConfig.setNoLog(true);
++            globalConfig->setNoLog(true);
+         
+ 
+         if( args.option( "NOSNMP" ) )
+-            globalConfig.setNoSNMP(true);
++            globalConfig->setNoSNMP(true);
+           
+ 
+         if(args.option("USERSHELL"))
+         {
+-            globalConfig.setRunningAsUserShell(true);
++            globalConfig->setRunningAsUserShell(true);
+        
+         }
+ 
+-        if(globalConfig.noLogActive())
++        if(globalConfig->noLogActive())
+         {
+             // A noSNMP parameter is ignored.
+             TRACE
+@@ -335,9 +336,9 @@ int mDaemon_main( int argc, char const * const * argv )
+                 HERE,
+                 "%s started (server mode = %s, as service = %s, noLOG = %s) ...",
+                 szClassName,
+-                Tools::boolToChar( globalConfig.serverMode() ),
++                Tools::boolToChar( globalConfig->serverMode() ),
+                 Tools::boolToChar( mDaemon_isService() != 0 ),
+-                Tools::boolToChar( globalConfig.noLogActive() )
++                Tools::boolToChar( globalConfig->noLogActive() )
+             );
+         }
+         else
+@@ -347,11 +348,11 @@ int mDaemon_main( int argc, char const * const * argv )
+                 HERE,
+                 "%s started (server mode = %s, as service = %s, noLOG = %s noNSMP = %s userShell = %s) ...",
+                 szClassName,
+-                Tools::boolToChar( globalConfig.serverMode() ),
++                Tools::boolToChar( globalConfig->serverMode() ),
+                 Tools::boolToChar( mDaemon_isService() != 0 ),
+-                Tools::boolToChar( globalConfig.noLogActive() ),
+-                Tools::boolToChar( globalConfig.noSNMPActive() ),
+-                Tools::boolToChar( globalConfig.isRunningAsUserShell() )
++                Tools::boolToChar( globalConfig->noLogActive() ),
++                Tools::boolToChar( globalConfig->noSNMPActive() ),
++                Tools::boolToChar( globalConfig->isRunningAsUserShell() )
+             );
+         }
+ 
+@@ -397,17 +398,21 @@ int mDaemon_main( int argc, char const * const * argv )
+         //******************************************************************************************
+         //  initialize and starting servant, scheduler and rebooter 
+         //******************************************************************************************      
+-        MControlServant servant(globalConfig.getQueue());
++        
++        
++        MControlServant servant(globalConfig->getQueue());
++
+         corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl", 19998);
+ 
+-        KioskReboot     rebooter (100, globalConfig.getQueue(), globalConfig, &servant);     
++        
++        KioskReboot     rebooter (100, globalConfig->getQueue(), *globalConfig, &servant);     
+         rebooter.saveRebootDate();
+         
+         
+         // but start only if not in server mode !!!
+-        if(!globalConfig.serverMode())
++        if(!globalConfig->serverMode())
+         {
+-            globalConfig.getThreadPool().start( rebooter );
++            globalConfig->getThreadPool().start( rebooter );
+         }
+ 
+         
+@@ -416,17 +421,19 @@ int mDaemon_main( int argc, char const * const * argv )
+         {
+             //Configuration not started
+             TRACE(HERE,"ERROR: Configuration not started");
+-            return -1;
++            //return -1;
+         }
+ 
+-        globalConfig.getThreadPool().start( scheduler );
++        Scheduler   scheduler(globalConfig->getQueue(), *globalConfig);
++
++        globalConfig->getThreadPool().start( scheduler );
+ 
+-        OS_Sleep(100);
++        //Deprecated: OS_Sleep(100);
+ 
+         
+         //start working up the commands of rebooter and scheduler
+-        globalConfig.getThreadPool().start( worker );
+-        //globalConfig.getThreadPool().joinAll();
++        globalConfig->getThreadPool().start( worker );
++        //globalConfig->getThreadPool().joinAll();
+         
+ 
+         //handle all incomming Messages in the Windows-Queue
+@@ -439,11 +446,11 @@ int mDaemon_main( int argc, char const * const * argv )
+         //TODO: check if needed
+         //Shutdhown Rebooter and Scheduler
+         /*
+-        if(!globalConfig.serverMode())
++        if(!globalConfig->serverMode())
+             rebooter.cancel();
+         */
+ 
+-        globalConfig.getThreadPool().stopAll();
++        globalConfig->getThreadPool().stopAll();
+     }
+     catch( std::exception & X )
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+index cb742781..8912f739 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+@@ -29,7 +29,7 @@ namespace mControl
+       m_parentID(id),
+       m_cmd(cmd)
+     {
+-        TRACE(HERE,"Create Notification: ID[ %d ], Command[ %d ], data[ %s ]", id, cmd, data);
++        TRACE(HERE,"Create Notification: ID[ %d ], Command[ %d ]", id, cmd);
+     }
+ 
+     string MControlNotification ::data() const
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+index 080542c2..c0264403 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+@@ -11,8 +11,8 @@
+ //---------------------------------------------------------------------------
+ 
+ //Project includes
+-#include "..\inc\mControl_Reboot.h"
+-#include "..\inc\mControl_notification.h";
++#include "..\inc\mControl_reboot.h"
++#include "..\inc\mControl_notification.h"
+ 
+ //MATERNA includes
+ #include "trc/trace.h"
+@@ -36,7 +36,7 @@ namespace mControl
+ 
+     long KioskReboot::saveRebootDate()
+     {
+-        /*
++        
+         FILE *fp;
+         mDate date = mDate::today();
+         mTime time = mTime();
+@@ -57,14 +57,12 @@ namespace mControl
+         }
+         else
+           return(-1);
+-          */
+-        return 1;
+     }
+ 
+ 
+     long KioskReboot::getRebootDate(mDate *pDate)
+     {
+-        /*
++        
+         FILE *fp;
+         mDate date;
+ 
+@@ -82,23 +80,22 @@ namespace mControl
+         }
+         else
+             return(-1);
+-        */
+-        return 1;
+     }
+ 
+                                                                                                     
+     void KioskReboot::run()
+     {
+         TRACE(HERE,"KioskReboot-Thread run() started...");
++        
++        mDate* lastRebootDate = new mDate();
++        long correctDate = this->getRebootDate( lastRebootDate );
+ 
+-        mDate lastRebootDate = mDate();
+-        long correctDate = this->getRebootDate( &lastRebootDate );
+-
+-        //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate.dayOfMonth(), lastRebootDate.monthOfYear(), lastRebootDate.year() );
++        //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate->dayOfMonth(), lastRebootDate->monthOfYear(), lastRebootDate->year() );
+ 
++        
+         if(correctDate)
+         {
+-            getNotificationQueue().enqueueNotification( new MControlNotification("WM_MASSAIREBOOT_REMOTE", REBOOTER_ID, WM_MASSAIREBOOT_REMOTE) );
++            m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAIREBOOT_REMOTE", REBOOTER_ID, WM_MASSAIREBOOT_REMOTE) );
+         }
+         else
+         {
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index 67c872b0..768fc6c5 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -42,48 +42,44 @@ namespace mControl
+ 
+     void Scheduler::initList()
+     {
+-        for(int index = WM_USER ; index <= WM_USER + 7; index++)
++        for(int index = WM_USER ; index < WM_USER + 7; index++)
+         {
+             switch ( index )
+             {
+             case WM_MASSAISTART:
+-                    TRACE(HERE,"WM_MASSAISTART command enqueued");
++                    TRACE(HERE,"WM_MASSAISTART command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAISTART_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISTART_REMOTE command enqueued");
++                    TRACE(HERE,"WM_MASSAISTART_REMOTE command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAIREBOOT_REMOTE:
+-                    TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command enqueued");
++                    TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAISHUTDOWN_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command enqueued");
++                    TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAISTOP_REMOTE:
+-                    TRACE(HERE,"WM_MASSAISTOP_REMOTE command enqueued");
++                    TRACE(HERE,"WM_MASSAISTOP_REMOTE command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAISTOP_SCHEDULER:
+-                    TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command enqueued");
++                    TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+             
+             case WM_MASSAISTART_SCHEDULER:
+-                    TRACE(HERE,"WM_MASSAISTART_SCHEDULER command enqueued");
++                    TRACE(HERE,"WM_MASSAISTART_SCHEDULER command in scheduler list enqueued");
+                     m_cmdList.push_back( index );
+                     break;
+-
+-            default:
+-                    TRACE(HERE,"ERROR: unknown command [ %d ]", index);
+-                    break;
+             }  
+         }
+     }
+@@ -103,21 +99,24 @@ namespace mControl
+         int i=0;
+ 
+         
+-
+         for(cmdIterator = getCmdList().begin(); cmdIterator != getCmdList().end(); cmdIterator++)
+         {
++            
+             if( (*cmdIterator) == WM_MASSAISTART_SCHEDULER )
+             {
+                 //scheduled restart, here the scheduler is restarted by adding a Notification to the Queue
+                 //TODO: restarting scheduler
+-                getNotificationQueue().enqueueNotification( new MControlNotification( "WM_MASSAISTART_SCHEDULER", SCHEDULER_ID, (*cmdIterator) ));
++                TRACE(HERE, "Command [ %d ] with ID[ %d ] in global MsgQueue enqueued", (*cmdIterator), SCHEDULER_ID);
++                m_notificationQueue.enqueueNotification( new MControlNotification( "WM_MASSAISTART_SCHEDULER", SCHEDULER_ID, (*cmdIterator) ));
+             }
+             else
+             {
+                 //scheduled exec, here the cmd are started in mSysProcess's 
+                 //TODO: Replace the WorkNotification by cmd exec 
+-                getNotificationQueue().enqueueNotification( new MControlNotification( "default data", SCHEDULER_ID, (*cmdIterator)) );
++                TRACE(HERE, "Command [ %d ] with ID[ %d ] in global MsgQueue enqueued", (*cmdIterator), SCHEDULER_ID);
++                m_notificationQueue.enqueueNotification( new MControlNotification( "default", SCHEDULER_ID, (*cmdIterator)) );
+             }
++            
+         }
+     }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+index f40ac5d7..a7ab8db0 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+@@ -43,6 +43,8 @@ namespace mControl
+ 
+     std::string MControlServant::getRebootFileName()
+     {
++        TRACE(HERE,"getRebootFilename() ...");
++
+         std::string userDir;
+         try
+         {
+@@ -76,6 +78,8 @@ namespace mControl
+     //TODO: implement Notficiation for WM_MASSAISTOP_REMOTE
+     long MControlServant::shutdownOS(bool fReboot, bool fForced)
+     {
++        TRACE(HERE,"shutdownOS(...) ...");
++
+        try
+        {
+           TRACE
+@@ -123,6 +127,8 @@ namespace mControl
+     //TODO: -get the information of the process in the for-loop
+     Controller::processList * MControlServant::queryProcessList()
+     {
++        TRACE(HERE,"queryProcessList() ...");
++
+         Controller::processList_var controllerPList;
+         CORBA::ULong i;
+ 
+@@ -217,6 +223,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::killProcess(CORBA::Long pid)
+     {
++        TRACE(HERE,"killProcess(...) ...");
++
+         long rc = 0;
+ 
+         // Get a handle to the process.
+@@ -239,6 +247,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::shutdownPlatform()
+     {
++        TRACE(HERE,"killProcess() ...");
++
+         long rc;
+ 
+         TRACE(HERE,"shutdownPlatform(): Kiosk busy: %s",Tools::noYes(m_kioskBusy));
+@@ -257,6 +267,8 @@ namespace mControl
+     //TODO: implement Notification for WM_MASSAISTART_REMOTE
+     CORBA::Long MControlServant::startPlatform()
+     {
++        TRACE(HERE,"startPlatform() ...");
++
+         long rc = 0;//SendMessage(serverWindow,WM_MASSAISTART_REMOTE,0,0);
+ 
+         TRACE(HERE,"requested platform start, rc = %d",rc);
+@@ -268,6 +280,8 @@ namespace mControl
+     //TODO: implement Notification for WM_MASSAIREBOOT_REMOTE
+     CORBA::Long MControlServant::rebootKiosk()
+     {
++        TRACE(HERE,"rebootKiosk() ...");
++
+         long rc;
+ 
+         if(!m_kioskBusy)
+@@ -287,6 +301,8 @@ namespace mControl
+     //TODO: implement Notification for WM_MASSAISHUTDOWN_REMOTE
+     CORBA::Long MControlServant::shutdownKiosk()
+     {
++        TRACE(HERE,"shutdownKiosk() ...");
++
+         long rc;
+ 
+         if(!m_kioskBusy)
+@@ -306,6 +322,8 @@ namespace mControl
+     //TODO: implement Notification for WM_MASSAISTOP_REMOTE
+     CORBA::Long MControlServant::forcedShutdownPlatform()
+     {
++        TRACE(HERE,"forcedShutdownPlatform() ...");
++
+         long rc;
+ 
+         m_kioskBusy = false;
+@@ -321,6 +339,7 @@ namespace mControl
+     //TODO: implement Notification for WM_MASSAISTOP_REMOTE
+     CORBA::Long MControlServant::forcedRestartPlatform()
+     {
++        TRACE(HERE,"forcedRestartPlatform() ...");
+ 
+         m_kioskBusy = false;
+ 
+@@ -339,6 +358,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::forcedRebootKiosk()
+     {
++        TRACE(HERE,"forcedRebootKiosk() ...");
++
+         long rc;
+ 
+         m_kioskBusy = false;
+@@ -354,6 +375,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::forcedShutdownKiosk()
+     {
++        TRACE(HERE,"forcedShutdownKiosk() ...");
++
+         long rc;
+ 
+         m_kioskBusy = false;
+@@ -370,6 +393,8 @@ namespace mControl
+     //TODO: implement loadHostsFile()
+     CORBA::Long MControlServant::reloadHostsFile()
+     {
++        TRACE(HERE,"reloadHostsFile() ...");
++
+         return 0;//(loadHostsFile());
+     }
+ 
+@@ -384,6 +409,8 @@ namespace mControl
+ 
+     char *MControlServant::lastRebootTime()
+     {
++        TRACE(HERE,"lastRebootTime() ...");
++
+         FILE *fp;
+         mDate date;
+         mTime time;
+@@ -411,6 +438,8 @@ namespace mControl
+ 
+     char *MControlServant::systemTime()
+     {
++        TRACE(HERE,"systemTime() ...");
++
+         DATETIME dt;
+         long     rc;
+         char     szTmp[256];
+@@ -429,6 +458,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::executeCommand( const Controller::kioskControl::string_sequence & string_args )
+     {
++        TRACE(HERE,"executeCommand(...) ...");
++
+         if( string_args.length() < 1 )
+         {
+             TRACE( HERE, "controllerServant::executeCommand: wrong length sequence" );
+@@ -512,6 +543,8 @@ namespace mControl
+ 
+     CORBA::Long MControlServant::setSystemTime(const char *dateTime)
+     {
++        TRACE( HERE, "setSystemTime(...) ...");
++
+         DATETIME dt,ndt;
+         long     rc;
+         char     szTmp[256];
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index dce63993..e828d2c7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -48,6 +48,7 @@ namespace mControl
+         //dequeue a Notification out of the Queue
+         Poco::AutoPtr<Poco::Notification> pNf;
+         MControlNotification* pWorkNf;
++
+         long rc;
+ 
+         //work as long as there are Notifications
+@@ -66,96 +67,100 @@ namespace mControl
+                     switch ( cmd )
+                     {
+                     case WM_MASSAISTART:
++                        {
+                             TRACE(HERE,"WM_MASSAISTART command dequeued");
+-                            break;
++                        }
++                        break;
+                     
+                     case WM_MASSAISTART_REMOTE:
+-                            TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_REMOTE");
++                        {
++                            TRACE(HERE,"WM_MASSAISTART_REMOTE command dequeued ...");
++
++                            rc = massaiStartRemote();
++                            
++                            TRACE(HERE,"Correct execution of [WM_MASSAISTART_REMOTE]: rc [ %d ]", rc); 
++                        }
++                        break;
++                    
++                    case WM_MASSAIREBOOT_REMOTE:
++                        {
++                            TRACE(SecondaryRuntime_HERE,"WM_MASSAIREBOOT_REMOTE");
++                            m_dialog.getWindowConfig().sendAlert(ALERT_E_REBOOT_REMOTE);
++                            rc = 0;
++                        }
++                        break;
++                    
++                    
++                    case WM_MASSAISHUTDOWN_REMOTE:
++                        {
++                            TRACE(SecondaryRuntime_HERE,"WM_MASSAISHUTDOWN_REMOTE");
++
++                            m_dialog.getWindowConfig().sendAlert(ALERT_E_SHUTDOWN_REMOTE);
++                            rc = 0;
++                        }
++                        break;
++                    
++                    case WM_MASSAISTOP_REMOTE:
++                        {
++                            TRACE(SecondaryRuntime_HERE,"WM_MASSAISTOP_REMOTE");
+ 
+                             // request from remote !!
++                            rc = 0;
+ 
+-                            if(!m_globalConfig.isStarted())
++                            if(m_globalConfig.isStarted())
+                             {
+-                                SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
+-
+-                                m_dialog.getWindowConfig().sendAlert(ALERT_E_START_REMOTE);
+-
+-                                m_globalConfig.setStarted( true );
+-
+-                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
+-
+-                                // start update service previous to all other tasks ...
++                                m_dialog.getWindowConfig().sendAlert(ALERT_E_STOPPED_REMOTE);
+ 
+-                                rc = startUpdate();
++                                m_globalConfig.setStarted(false);
+ 
+-                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++                                waitForStarterTermination();
+ 
+-                                if(rc == REBOOT_KIOSK)
+-                                {
+-                                    TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
++                                // execute system commands after platform stopped
++                                execSysCmdsShutdown();
++                            }
++                            TRACE(HERE,"WM_MASSAISTOP_REMOTE execution: rc = [%d]", rc);
++                        }
++                        break;
++                    
++                    case WM_MASSAISTOP_SCHEDULER:
++                        {
++                            TRACE(SecondaryRuntime_HERE,"WM_MASSAISTOP_SCHEDULER");
+ 
+-                                    rc = Tools::shutdownOS_Now(true);
++                            if(m_globalConfig.isStarted())
++                            {
++                                ShowWindow(m_dialog.getWindowConfig().getHwnd(),SW_NORMAL);
+ 
+-                                    TRACE(HERE,"kiosk reboot, rc = %d",rc);
++                                TRACE(HERE,"scheduler requested STOP");
+ 
+-                                    PostQuitMessage(0);
+-                                    rc = 0;
+-                                    //TODO: find other way of return rc;
+-                                    TRACE(HERE,"Ask for correct execution: rc [ %d ]", rc);
+-                                    break;
+-                                }
++                                m_dialog.getWindowConfig().sendAlert(ALERT_E_STOPPED_SCHEDULED);
+ 
+-                                // execute system commands before starting platform
+-                                execSysCmdsStartup();
++                                m_globalConfig.setStarted(false);
+ 
+-                                rc = startAll();
++                                waitForStarterTermination();
+ 
+-                                if(!rc)
+-                                {
+-                                    Sleep(1000);
++                                // execute system commands after platform stopped
++                                execSysCmdsShutdown();
+ 
+-                                    SetActiveWindow(m_dialog.getWindowConfig().getHwnd());
+-                                    SetFocus(m_dialog.getWindowConfig().getHwnd());
+-                                }
++                                m_notificationQueue.enqueueNotification( new MControlNotification("", WORKER_ID, WM_MASSAISTART_SCHEDULER) );
+                             }
+-                            else
+-                                rc = -1;
+-                            //TODO: find other way of return rc;
+-                            TRACE(HERE,"Ask for correct execution: rc [ %d ]", rc); 
+-                            break;
+-                    
+-                    /*
+-                    case WM_MASSAIREBOOT_REMOTE:
+-                            TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command dequeued");
+-                            break;
+-                    
+-                    case WM_MASSAISHUTDOWN_REMOTE:
+-                            TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command dequeued");
+-                            break;
+-                    
+-                    case WM_MASSAISTOP_REMOTE:
+-                            TRACE(HERE,"WM_MASSAISTOP_REMOTE command dequeued");
+-                            break;
+-                    
+-                    case WM_MASSAISTOP_SCHEDULER:
+-                            TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command dequeued");
+-                            break;
++                        }
++                        break;
+                     
+                     case WM_MASSAISTART_SCHEDULER:
++                        {
+                             TRACE(HERE,"WM_MASSAISTART_SCHEDULER command dequeued");
+-                            break;
++
++                            rc = massaiStartScheduler();
++
++                            TRACE(HERE,"WM_MASSAISTART_SCHEDULER execution: rc = [%d]", rc);
++                        }
++                        break;
+                     
+-                    case WM_EXEC_SYS_CMD_SHUTDOWN:
+-                            TRACE(HERE,"WM_EXEC_SYS_CMD_SHUTDOWN command dequeued");
+-                            execSysCmdsShutdown();
+-                            break;
+-                    */
+                     default:
++                        {
+                             TRACE(HERE,"ERROR: unknown command [ %d ]", cmd);
+-                            break;
++                        }
++                        break;
+                     }               
+                 }
+             }
+@@ -207,8 +212,6 @@ namespace mControl
+     }
+ 
+ 
+-    
+-
+     long Worker::mSystem( char const * cmd, char const * purpose )
+     {
+        std::string task( "cmd.exe /X /C \"" );
+@@ -217,11 +220,12 @@ namespace mControl
+        TRACE( HERE, "mSystem(%s)", task.c_str() );
+        mSysProcess::parent par;
+        par.setCommandline( task.c_str() );
+-       mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
+ 
++       mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
++       
+        m_processListMonitor.add( ctrl );
+ 
+-       return 0;
++       return 1;
+     }
+ 
+ 
+@@ -305,74 +309,188 @@ namespace mControl
+     void Worker::waitForStarterTermination()
+     {
+         TRACE(HERE,"waitForStarterTermination ...");
+-        /*
++
+         long   lExitCode;
+         MSG    msg;
+         HANDLE hProcess;
+         list<long>::iterator prI;
+         list<long>::iterator tmpI;
+ 
+-            SendMessage(m_impl.getDialog().getWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
++        SendMessage(m_dialog.getWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
+ 
+-            try
++        try
++        {
++            if(m_processStarter)
+             {
+-              if(m_processList)
+-              {
+                 TRACE(HERE,"waiting for starter termination ...");
+-                hStarter->signalStop();
+-                while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
++                m_processStarter->signalStop();
++                while( m_processStarter->getStatus() == mSysProcess::STATUS_RUNNING )
+                 {
+-                  for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
+-                  {
+-                     try
+-                     {
+-                       TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),prList.size());
+-
+-                       hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
+-
+-                       if(hProcess)
+-                       {
+-                         if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
+-                         {
+-                           lCurrentProcesses--;
++                    for(prI = m_globalConfig.getPrList().begin(); prI != m_globalConfig.getPrList().end() && m_globalConfig.getPrList().size(); tmpI = prI++)
++                    {
++                        try
++                        {
++                            TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),m_globalConfig.getPrList().size());
+ 
+-                           flTmp = (float)lCurrentProcesses/(float)lAllProcesses;
++                            hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
+ 
+-                           lCurrLoadPercent = (long)(flTmp *100);
++                            if(hProcess)
++                            {
++                                if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
++                                {
++                                    m_globalConfig.setCurrentProcesses( m_globalConfig.getCurrentProcesses() - 1);
+ 
+-                           SendMessage(hwndLoad,PBM_SETPOS,lCurrLoadPercent,0);
++                                    m_globalConfig.setCurrLoadPercent( (long)( ( (float)m_globalConfig.getCurrentProcesses()/(float)m_globalConfig.getAllProcesses() )*100) );
+ 
+-                           UpdateWindow(hwndLoad);
++                                    SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETPOS,m_globalConfig.getCurrLoadPercent(),0);
+ 
+-                           if(prList.size() > 0)
+-                             prList.erase(tmpI);
+-                         }
++                                    UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
+ 
+-                         // close this handle always !!
++                                    if(m_globalConfig.getPrList().size() > 0)
++                                        m_globalConfig.getPrList().erase(tmpI);
++                                }
+ 
+-                         CloseHandle(hProcess);
+-                       }
+-                     }
+-                     catch( ... ) {};
+-                  }
++                                // close this handle always !!
++                                CloseHandle(hProcess);
++                            }
++                        }
++                        catch( ... ) {};
++                    }
+ 
+-                  while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
++                    while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
+                     DispatchMessage(&msg);
+ 
+-                  OS_Sleep(500);
++                    OS_Sleep(500);
+                 }
+ 
+-                SendMessage(hwndLoad,PBM_SETPOS,0,0);
+-                UpdateWindow(hwndLoad);
++                SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETPOS,0,0);
++                UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
+ 
+                 TRACE(HERE,"waiting for starter termination, done.");
+ 
+-                delete hStarter;
++                delete m_processStarter;
++
++                m_processStarter = NULL;
++            }
++        }
++        catch( ... ) {};
++    }
++
++
++    long Worker::massaiStartRemote()
++    {
++        TRACE(HERE,"massasiStartRemote() ...");
++
++        long rc;
++
++        // request from remote !!
++        if(!m_globalConfig.isStarted())
++        {
++            SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
++
++            m_dialog.getWindowConfig().sendAlert(ALERT_E_START_REMOTE);
++
++            m_globalConfig.setStarted( true );
++
++            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
++            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++            UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
++
++            // start update service previous to all other tasks ...
++            rc = startUpdate();
++
++            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
++            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++
++            if(rc == REBOOT_KIOSK)
++            {
++                TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
++
++                rc = Tools::shutdownOS_Now(true);
++                TRACE(HERE,"kiosk reboot, rc = %d",rc);
++
++                PostQuitMessage(0);
++                return 0;
++            }
++
++            // execute system commands before starting platform
++            execSysCmdsStartup();
++            rc = startAll();
++
++            if(!rc)
++            {
++                Sleep(1000);
++
++                SetActiveWindow(m_dialog.getWindowConfig().getHwnd());
++                SetFocus(m_dialog.getWindowConfig().getHwnd());
++            }
++        }
++        else
++            rc = -1;
++        
++        return rc;
++    }
++
++
++    long Worker::massaiStartScheduler()
++    {
++        long rc;
++        if(!m_globalConfig.isStarted())
++        {
++            TRACE(HERE,"scheduler requested START");
++            m_dialog.getWindowConfig().sendAlert(ALERT_E_START_SCHEDULED);
++            
++            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
++
++            SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
++
++            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++            UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
++
++            // start update service previous to all other tasks ...
++            rc = startUpdate();
++
++            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
++            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++
++            if(rc == REBOOT_KIOSK)
++            {
++                TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
++
++                m_dialog.getWindowConfig().sendAlert(ALERT_E_REBOOT_UPDATE);
++
++                rc = Tools::shutdownOS_Now(true);
++
++                TRACE(HERE,"kiosk reboot, rc = %d",rc);
+ 
+-                hStarter = NULL;
+-              }
++                PostQuitMessage(0);
++                return 0;
+             }
+-            catch( ... ) {};
+-            */
++
++            // execute system commands before starting platform
++            execSysCmdsStartup();
++
++            rc = startAll();
++            if( rc )
++            {
++                char szMsg[512];
++
++                sprintf(szMsg,"Problem detected during platform startup.\nError = %d",rc);
++
++                MessageBox(m_dialog.getWindowConfig().getHwnd(),TEXT(szMsg),TEXT("Massai"),MB_ICONSTOP | MB_OK);
++
++                PostMessage(m_dialog.getWindowConfig().getHwnd(),WM_CLOSE,0,0);
++            }
++            else
++            {
++                Sleep(500);
++
++                SetActiveWindow(m_dialog.getWindowConfig().getHwnd());
++                SetFocus(m_dialog.getWindowConfig().getHwnd());
++
++                m_globalConfig.setStarted(true);
++            }
++        }
++        return 0;
+     }
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

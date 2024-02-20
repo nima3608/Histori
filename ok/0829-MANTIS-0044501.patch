@@ -1,0 +1,849 @@
+From 7749c35d938a8fd6c939f271fe4c0a677d22e8da Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 14 Mar 2017 19:03:36 +0000
+Subject: [PATCH 0829/1077] MANTIS 0044501 change:
+ mSysProcessTerminate::setShutdownHook does not work as expected
+
+massai_systools.lib
+V1.0.0.36
+
+- added new function setShutdownHook with window title and block shutdown reason for shutdown notification on windows 7
+- creates an invisible window to block shutdown
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1171 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/systools/mSysProcessTerminate.h       |  36 +-
+ .../Massai/cpp/Systools/makefile.mak          |  16 +-
+ .../Systools/src/TestSysProcessTerminate.cpp  |  26 +
+ .../Massai/cpp/Systools/src/local_def.cpp     |  10 +-
+ .../Systools/src/mSysProcessTerminateW32.cpp  | 587 ++++++++++++------
+ 5 files changed, 471 insertions(+), 204 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTerminate.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTerminate.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTerminate.h
+index 28665d41..f019c84b 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTerminate.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTerminate.h
+@@ -1,34 +1,32 @@
+-/**
+- * control shutdown of current process
+-**/
+-
+-#ifndef MSYSPROCESSTERMINATE_H_INCLUDED
+-#define MSYSPROCESSTERMINATE_H_INCLUDED
+-#ifdef SHOW_INCLUDE_FILES
+-#pragma message("including: " __FILE__)
+-#endif
++// control shutdown of current process
++#pragma once
+ 
+ #include "systools/mEventSem.hpp"
+ #include "tools/TraceInterface.h"
+-#include <memory>
++#include <string>
+ 
+ namespace mSysProcessTerminate
+ {
+-  /*
+-    register for early, in-between or late
+-    notification at system shutdown
+-  */
++  // register for early, in-between or late
++  // notification at system shutdown on Windows XP
+   enum ShutdownPriority
+   {
+     SHUTDOWN_EARLY,
+     SHUTDOWN_NORMAL,
+     SHUTDOWN_LATE,
+   };
+-  /*
+-    register for notification at system shutdown
+-  */
++
++
++  // wait for
++  //   CTRL-C and CTRL-Break
++  //   shutdown/log off
++  //   close console window
++
++  // does not catch shutdown/log on >=Windows 7
+   void setShutdownHook(ShutdownPriority priority, Materna::MSSD::eventSemaphore* pEvent, MASSAI::trace::TraceInterface* pTrc);
++
++  // does catch shutdown/log on Windows 7, windows title and block shutdown reason is visible to user
++  // creates invisible window of class mSysProcessTerminate, process is also notified when this window is closed
++  void setShutdownHook(ShutdownPriority priority, Materna::MSSD::eventSemaphore* pEvent, const std::string& title, const std::wstring& reason, MASSAI::trace::TraceInterface* pTrc);
+   void resetShutdownHook();
+ }
+-
+-#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 309cc0c6..49107a4f 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -115,7 +115,7 @@ MY_BIN7 =               $(_BIN)\TestSysDeviceEvents.exe
+ 
+ MY_BIN7_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
+ 
+-MY_BIN7_LINKLIBS =      User32.lib
++MY_BIN7_LINKLIBS =      User32.lib $(DIR_BOOST)\lib\libboost_thread-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_date_time-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_system-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_chrono-vc100-mt-1_54.lib
+ 
+ MY_BIN7_OBJS =          $(_OBJ)\TestSysDeviceEvents.obj
+ 
+@@ -135,7 +135,7 @@ MY_BIN9 =               $(_BIN)\TestSysHotKey.exe
+ 
+ MY_BIN9_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
+ 
+-MY_BIN9_LINKLIBS =      User32.lib
++MY_BIN9_LINKLIBS =      User32.lib $(DIR_BOOST)\lib\libboost_thread-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_date_time-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_system-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_chrono-vc100-mt-1_54.lib
+ 
+ MY_BIN9_OBJS =          $(_OBJ)\TestSysHotKey.obj
+ 
+@@ -145,7 +145,7 @@ MY_BIN10 =              $(_BIN)\TestSysThreadPool.exe
+ 
+ MY_BIN10_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS)
+ 
+-MY_BIN10_LINKLIBS =     User32.lib
++MY_BIN10_LINKLIBS =     User32.lib $(DIR_BOOST)\lib\libboost_thread-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_date_time-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_system-vc100-mt-1_54.lib $(DIR_BOOST)\lib\libboost_chrono-vc100-mt-1_54.lib
+ 
+ MY_BIN10_OBJS =         $(_OBJ)\TestSysThreadPool.obj
+ 
+@@ -185,19 +185,19 @@ MY_BIN14 =              $(_BIN)\TestSysServiceMonitor.exe
+ 
+ MY_BIN14_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
+ 
+-MY_BIN14_LINKLIBS =     
++MY_BIN14_LINKLIBS =     User32.lib 
+ 
+ MY_BIN14_OBJS =         $(_OBJ)\TestSysServiceMonitor.obj
+ 
+ ######################################################################
+ 
+-MY_BIN15 =              $(_BIN)\TestSysServiceControl.exe
++MY_BIN15 =              $(_BIN)\TestSysProcessTerminate.exe
+ 
+-MY_BIN15_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++MY_BIN15_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)  $(LIB_TRACE)
+ 
+-MY_BIN15_LINKLIBS =     
++MY_BIN15_LINKLIBS =     User32.lib
+ 
+-MY_BIN15_OBJS =         $(_OBJ)\TestSysServiceControl.obj
++MY_BIN15_OBJS =         $(_OBJ)\TestSysProcessTerminate.obj
+ 
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTerminate.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTerminate.cpp
+new file mode 100644
+index 00000000..6a7b26c7
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTerminate.cpp
+@@ -0,0 +1,26 @@
++// Test mSysProcessTerminate
++
++#include "systools/mSysProcessTerminate.h"
++#include "tools/TraceSystem.h"
++#include "tools/TraceLocal.h"
++#include "tools/TraceClient.h"
++#include <iostream>
++#include <windows.h>
++
++using namespace mSysProcessTerminate;
++using MASSAI::trace::TraceSystem;
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceClient;
++
++int main(int argc, char** argv)
++{
++  TraceClient trc("TestSysProcessTerminate");
++  Materna::MSSD::eventSemaphore terminate;
++  setShutdownHook(SHUTDOWN_NORMAL, &terminate, "TestSysProcessTerminate", L"cleanup platform", &trc);
++  terminate.wait();
++  trc.writeTrace(MajorError_HERE, "shutdown...");
++  Sleep(15000);
++  trc.writeTrace(MajorError_HERE, "shutdown.");
++  resetShutdownHook();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 65a4411a..cb2df68f 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 35);
++VERSION_ID_DT(systools, 1, 0, 0, 36);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 35);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.35
++@version 1.0.0.36
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.36
++\li 14.03.2017
++\li change SteT Mantis 0044501: mSysProcessTerminate::setShutdownHook does not work as expected
++- added new funcation setShutdownHook with window title and block shutdown reason for shutdown notification on windows 7
++- creates an invisible window to block shutdown
++
+ \version 1.0.0.35
+ \li 01.12.2016
+ \li change SteT Mantis 0043868: integration of EZ-Access device for KIS kiosk
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
+index 0e90e590..a158a2b2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
+@@ -1,215 +1,441 @@
+-/**
+- * control shutdown of current process
+-**/
++//  control shutdown of current process
+ 
+ #include "systools/mSysProcessTerminate.h"
+ #include "mSysErrorW32.h"
++#include "boost/thread.hpp"
+ #include <windows.h>
+ #include <signal.h>
++#include <stdio.h>
+ 
+ using MASSAI::trace::TraceInterface;
+ using Materna::MSSD::eventSemaphore;
+-using namespace mSysProcessTerminate;
+ 
+-namespace
++namespace mSysProcessTerminate
+ {
+-  typedef void (__cdecl *SignalHandler)(int);
+-  /*
+-    register for terminate event
+-    event is posted if an event occurs
+-  */
+-  class TerminateData
++  namespace
+   {
+-    public:
+-      TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, TraceInterface* pTrc);
+-      ~TerminateData();
+-      void registerForShutdown();
+-      void cleanup();
+-      void notify(const char* event);
+-    private:
+-      void setSignalHandler();
+-      void resetSignalHandler();
+-      void setCtrlHandler();
+-      void resetCtrlHandler();
+-      void setShutdownParameter();
+-      void resetShutdownParameter();
+-
+-      TraceInterface* m_trc;
+-      ShutdownPriority m_priority;
+-      DWORD m_shutdownPriority;
+-      DWORD m_shutdownFlags;
+-      SignalHandler m_abrt;
+-      SignalHandler m_term;
+-      SignalHandler m_segv;
+-      SignalHandler m_ill;
+-      SignalHandler m_fpe;
+-      eventSemaphore* m_pEvent;
+-      const char* m_name;
+-  };
+-  TerminateData* pData= 0;
+-
+-  const char* getCTRLName(DWORD type)
++    const char* WINDOW_CLASSNAME = "mSysProcessTerminate";
++    const UINT WM_FORCE_CLOSE = WM_USER;
++  }
++
++  namespace
+   {
+-    switch(type)
++    typedef void (__cdecl *SignalHandler)(int);
++    // register for terminate event
++    // event is posted if an event occurs
++    class TerminateData
+     {
+-      case CTRL_BREAK_EVENT:     return "CTRL_BREAK";
+-      case CTRL_C_EVENT:         return "CTRL_C";
+-      case CTRL_CLOSE_EVENT:     return "CLOSE";
+-      case CTRL_SHUTDOWN_EVENT:  return "SHUTDOWN";
+-      case CTRL_LOGOFF_EVENT:    return "LOGOFF";
+-      default:                   return "unknown ctrl event";
++      public:
++        TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, TraceInterface* pTrc);
++        TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, const std::string& title, const std::wstring& reason, TraceInterface* pTrc);
++        ~TerminateData();
++        void registerForShutdown();
++        void cleanup();
++        void notifyBlocking(const char* event);
++        void notify(const char* event);
++        LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
++
++      private:
++        void setSignalHandler();
++        void resetSignalHandler();
++        void setCtrlHandler();
++        void resetCtrlHandler();
++        void setShutdownParameter();
++        void resetShutdownParameter();
++
++        void handleWindowsMessages();
++        void registerWindowClass();
++        void createWindow();
++        void unregisterWindowClass();
++
++        void blockShutdown();
++        void unblockShutdown();
++
++        TraceInterface* m_trc;
++        ShutdownPriority m_priority;
++        DWORD m_shutdownPriority;
++        DWORD m_shutdownFlags;
++        SignalHandler m_abrt;
++        SignalHandler m_term;
++        SignalHandler m_segv;
++        SignalHandler m_ill;
++        SignalHandler m_fpe;
++        eventSemaphore* m_pEvent;
++        eventSemaphore m_done;
++        const char* m_name;
++        std::string m_title;
++        std::wstring m_reason;
++        HWND m_window;
++    };
++
++    TerminateData* pData= 0;
++
++    const char* getCTRLName(DWORD type)
++    {
++      switch(type)
++      {
++        case CTRL_BREAK_EVENT:     return "CTRL_BREAK";
++        case CTRL_C_EVENT:         return "CTRL_C";
++        case CTRL_CLOSE_EVENT:     return "CLOSE";
++        case CTRL_SHUTDOWN_EVENT:  return "SHUTDOWN";
++        case CTRL_LOGOFF_EVENT:    return "LOGOFF";
++        default:                   return "unknown ctrl event";
++      }
+     }
+-  }
+-  const char* getSignalName(int type)
+-  {
+-    switch(type)
++
++    const char* getSignalName(int type)
+     {
+-      case SIGABRT:  return "ABRT";
+-      case SIGBREAK: return "BREAK";
+-      case SIGTERM:  return "TERM";
+-      case SIGINT:   return "INT";
+-      case SIGFPE:   return "FPE";
+-      case SIGSEGV:  return "SEGV";
+-      case SIGILL:   return "ILL";
+-      default:       return "unknown signal";
++      switch(type)
++      {
++        case SIGABRT:  return "ABRT";
++        case SIGBREAK: return "BREAK";
++        case SIGTERM:  return "TERM";
++        case SIGINT:   return "INT";
++        case SIGFPE:   return "FPE";
++        case SIGSEGV:  return "SEGV";
++        case SIGILL:   return "ILL";
++        default:       return "unknown signal";
++      }
+     }
+-  }
+-  BOOL WINAPI ctrlHandler(DWORD type)
+-  {
+-    BOOL result = false; // not handled here, forward to other handler
+-    switch(type)
++
++    BOOL WINAPI ctrlHandler(DWORD type)
+     {
+-      case CTRL_BREAK_EVENT:
+-      case CTRL_C_EVENT:
+-      case CTRL_CLOSE_EVENT:
+-      case CTRL_SHUTDOWN_EVENT:
++      BOOL result = false; // not handled here, forward to other handler
++      switch(type)
+       {
+-        const char* name= getCTRLName(type);
+-        if(pData != 0)
++        case CTRL_BREAK_EVENT:
++        case CTRL_C_EVENT:
++        case CTRL_CLOSE_EVENT:
++        case CTRL_SHUTDOWN_EVENT:
+         {
+-          pData->notify(name);
++          const char* name= getCTRLName(type);
++          if(pData != 0)
++          {
++            pData->notifyBlocking(name);
++          }
++          result = true; // handled here
++          break;
+         }
+-        result = true; // handled here
+-        break;
++        case CTRL_LOGOFF_EVENT:
++        default:
++          break;
+       }
+-      case CTRL_LOGOFF_EVENT:
+-      default:
+-        break;
++      return result;
+     }
+-    return true;
+-  }
+-  void signalHandler(int code)
+-  {
+-    signal(code, signalHandler);
+-    const char* name= getSignalName(code);
+-    if(pData != 0)
++
++    void signalHandler(int code)
+     {
+-      pData->notify(name);
++      signal(code, signalHandler);
++      const char* name= getSignalName(code);
++      if(pData != 0)
++      {
++        pData->notifyBlocking(name);
++      }
+     }
+-  }
+-  DWORD getPriority(ShutdownPriority priority)
+-  {
+-    switch(priority)
++
++    DWORD getPriority(ShutdownPriority priority)
+     {
+-      case SHUTDOWN_EARLY: return 0x380;
+-      case SHUTDOWN_LATE:  return 0x180;
+-      default:             return 0x280;
++      switch(priority)
++      {
++        case SHUTDOWN_EARLY: return 0x380;
++        case SHUTDOWN_LATE:  return 0x180;
++        default:             return 0x280;
++      }
+     }
+-  }
+-  /*
+-    register for terminate event
+-    event is posted if an event occurs
+-  */
+-  TerminateData::TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, TraceInterface* pTrc):
+-    m_trc(pTrc),
+-    m_priority(priority),
+-    m_shutdownPriority(0),
+-    m_shutdownFlags(0),
+-    m_abrt(0),
+-    m_term(0),
+-    m_segv(0),
+-    m_ill(0),
+-    m_fpe(0),
+-    m_pEvent(pEvent),
+-    m_name("no signal")
+-  {}
+-  TerminateData::~TerminateData()
+-  {}
+-  void TerminateData::registerForShutdown()
+-  {
+-    setSignalHandler();
+-    setCtrlHandler();
+-    setShutdownParameter();
+-  }
+-  void TerminateData::cleanup()
+-  {
+-    resetSignalHandler();
+-    resetCtrlHandler();
+-    resetShutdownParameter();
+-    m_trc->writeTrace(MajorError_HERE, "terminated by (%s)", m_name);
+-  }
+-  void TerminateData::notify(const char* event)
+-  {
+-    m_name= event;
+-    m_pEvent->post();
+-  }
+-  void TerminateData::setSignalHandler()
+-  {
+-    // signal(SIGBREAK, signalHandler); // handled by ctrlHandler
+-    // signal(SIGINT,   signalHandler); // handled by ctrlHandler
+-    m_abrt = signal(SIGABRT, signalHandler);
+-    m_term = signal(SIGTERM, signalHandler);
+-    m_segv = signal(SIGSEGV, signalHandler);
+-    m_ill  = signal(SIGILL,  signalHandler);
+-    m_fpe  = signal(SIGFPE,  signalHandler);
+-  }
+-  void TerminateData::resetSignalHandler()
+-  {
+-    // signal(SIGBREAK, signalHandler); // handled by ctrlHandler
+-    // signal(SIGINT,   signalHandler); // handled by ctrlHandler
+-    signal(SIGABRT, m_abrt);
+-    signal(SIGTERM, m_term);
+-    signal(SIGSEGV, m_segv);
+-    signal(SIGILL,  m_ill);
+-    signal(SIGFPE,  m_fpe);
+-  }
+-  void TerminateData::setCtrlHandler()
+-  {
+-    if(!SetConsoleCtrlHandler(ctrlHandler, true))  // add handler
++
++    LRESULT CALLBACK windowCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+     {
+-      mSysError::traceLastError(*m_trc, MajorError_HERE, "SetConsoleCtrlHandler", mSysError::getErrorCode());
++      LRESULT result = 0;
++      if(pData != 0)
++      {
++        result = pData->handleMessage(hwnd, msg, wParam, lParam);
++      }
++      else
++      {
++        result = DefWindowProc(hwnd, msg, wParam, lParam);
++      }
++      return result;
+     }
+-  }
+-  void TerminateData::resetCtrlHandler()
+-  {
+-    if(!SetConsoleCtrlHandler(ctrlHandler, false)) // remove handler
++
++    TerminateData::TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, TraceInterface* pTrc):
++      m_trc(pTrc),
++      m_priority(priority),
++      m_shutdownPriority(0),
++      m_shutdownFlags(0),
++      m_abrt(0),
++      m_term(0),
++      m_segv(0),
++      m_ill(0),
++      m_fpe(0),
++      m_pEvent(pEvent),
++      m_name("no signal"),
++      m_title(),
++      m_reason(),
++      m_window(0)
++    {}
++
++    TerminateData::TerminateData(ShutdownPriority priority, eventSemaphore* pEvent, const std::string& title, const std::wstring& reason, TraceInterface* pTrc):
++      m_trc(pTrc),
++      m_priority(priority),
++      m_shutdownPriority(0),
++      m_shutdownFlags(0),
++      m_abrt(0),
++      m_term(0),
++      m_segv(0),
++      m_ill(0),
++      m_fpe(0),
++      m_pEvent(pEvent),
++      m_name("no signal"),
++      m_title(title),
++      m_reason(reason),
++      m_window(0)
+     {
+-      mSysError::traceLastError(*m_trc, MajorError_HERE, "SetConsoleCtrlHandler", mSysError::getErrorCode());
++      boost::thread (boost::bind(&TerminateData::handleWindowsMessages, this));
+     }
+-  }
+-  void TerminateData::setShutdownParameter()
+-  {
+-    if(!GetProcessShutdownParameters(&(m_shutdownPriority), &(m_shutdownFlags)))
++
++    TerminateData::~TerminateData()
++    {}
++
++    void TerminateData::registerForShutdown()
++    {
++      setSignalHandler();
++      setCtrlHandler();
++      setShutdownParameter();
++    }
++
++    void TerminateData::cleanup()
++    {
++      if(m_window)
++      {
++        PostMessage(m_window, WM_FORCE_CLOSE, 0, 0);
++      }
++      resetSignalHandler();
++      // resetCtrlHandler();
++      resetShutdownParameter();
++      m_trc->writeTrace(MajorError_HERE, "terminated by (%s)", m_name);
++      m_done.post();
++    }
++
++    void TerminateData::notifyBlocking(const char* event)
++    {
++      notify(event);
++      m_done.wait();
++    }
++
++    void TerminateData::notify(const char* event)
++    {
++      m_name= event;
++      m_pEvent->post();
++    }
++
++    void TerminateData::setSignalHandler()
++    {
++      // signal(SIGBREAK, signalHandler); // handled by ctrlHandler
++      // signal(SIGINT,   signalHandler); // handled by ctrlHandler
++      m_abrt = signal(SIGABRT, signalHandler);
++      m_term = signal(SIGTERM, signalHandler);
++      m_segv = signal(SIGSEGV, signalHandler);
++      m_ill  = signal(SIGILL,  signalHandler);
++      m_fpe  = signal(SIGFPE,  signalHandler);
++    }
++
++    void TerminateData::resetSignalHandler()
++    {
++      // signal(SIGBREAK, signalHandler); // handled by ctrlHandler
++      // signal(SIGINT,   signalHandler); // handled by ctrlHandler
++      signal(SIGABRT, m_abrt);
++      signal(SIGTERM, m_term);
++      signal(SIGSEGV, m_segv);
++      signal(SIGILL,  m_ill);
++      signal(SIGFPE,  m_fpe);
++    }
++
++    void TerminateData::setCtrlHandler()
++    {
++      if(!SetConsoleCtrlHandler(ctrlHandler, true))  // add handler
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "SetConsoleCtrlHandler", mSysError::getErrorCode());
++      }
++    }
++
++    void TerminateData::resetCtrlHandler()
++    {
++      if(!SetConsoleCtrlHandler(ctrlHandler, false)) // remove handler
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "SetConsoleCtrlHandler", mSysError::getErrorCode());
++      }
++    }
++
++    void TerminateData::setShutdownParameter()
++    {
++      if(!GetProcessShutdownParameters(&(m_shutdownPriority), &(m_shutdownFlags)))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "GetProcessShutdownParameters", mSysError::getErrorCode());
++        m_shutdownPriority = getPriority(SHUTDOWN_NORMAL);
++        m_shutdownFlags = 0;
++      }
++      if(!SetProcessShutdownParameters(getPriority(m_priority), m_shutdownFlags | SHUTDOWN_NORETRY))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "SetProcessShutdownParameters", mSysError::getErrorCode());
++      }
++    }
++
++    void TerminateData::resetShutdownParameter()
+     {
+-      mSysError::traceLastError(*m_trc, MajorError_HERE, "GetProcessShutdownParameters", mSysError::getErrorCode());
+-      m_shutdownPriority = getPriority(SHUTDOWN_NORMAL);
+-      m_shutdownFlags = 0;
++      if(!SetProcessShutdownParameters(m_shutdownPriority, m_shutdownFlags))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "SetProcessShutdownParameters", mSysError::getErrorCode());
++      }
+     }
+-    if(!SetProcessShutdownParameters(getPriority(m_priority), m_shutdownFlags | SHUTDOWN_NORETRY))
++
++    void TerminateData::handleWindowsMessages()
+     {
+-      mSysError::traceLastError(*m_trc, MajorError_HERE, "SetProcessShutdownParameters", mSysError::getErrorCode());
++      registerWindowClass();
++      createWindow();
++      blockShutdown();
++      for(;;)
++      {
++        MSG msg;
++        BOOL result = GetMessage(&msg, m_window, 0, 0);
++        if(result == 0)
++        {
++          m_trc->writeTrace(BasicRuntime_HERE, "received WM_QUIT, finish");
++          break;
++        }
++        else if(result == -1)
++        {
++          mSysError::traceLastError(*m_trc, MajorError_HERE, "GetMessage", GetLastError());
++          break;
++        }
++        else
++        {
++          TranslateMessage(&msg);
++          DispatchMessage(&msg);
++        }
++      }
++      unblockShutdown();
++      unregisterWindowClass();
++    }
++
++    void TerminateData::registerWindowClass()
++    {
++      m_trc->writeTrace(BasicRuntime_HERE, "RegisterClass mSysProcessTerminate");
++      HINSTANCE hInstance = GetModuleHandle(0);
++      WNDCLASS windowClass;
++      windowClass.style         = 0;
++      windowClass.lpfnWndProc   = windowCallback;
++      windowClass.cbClsExtra    = 0;
++      windowClass.cbWndExtra    = 0;
++      windowClass.hInstance     = hInstance;
++      windowClass.hIcon         = 0;
++      windowClass.hCursor       = 0;
++      windowClass.hbrBackground = 0;
++      windowClass.lpszMenuName  = 0;
++      windowClass.lpszClassName = WINDOW_CLASSNAME;
++      if(!RegisterClass(&windowClass))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "RegisterClass", GetLastError());
++      }
++    }
++
++    void TerminateData::unregisterWindowClass()
++    {
++      m_trc->writeTrace(BasicRuntime_HERE, "UnregisterClass mSysProcessTerminate");
++      HINSTANCE hInstance = GetModuleHandle(0);
++      if(!UnregisterClass(WINDOW_CLASSNAME, hInstance))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "UnregisterClass", GetLastError());
++      }
++    }
++
++    void TerminateData::createWindow()
++    {
++      HINSTANCE hInstance = GetModuleHandle(0);
++      m_window = CreateWindow
++      (
++        WINDOW_CLASSNAME,
++        m_title.c_str(),
++        WS_OVERLAPPEDWINDOW,
++        CW_USEDEFAULT,
++        0,
++        CW_USEDEFAULT,
++        0,
++        0,
++        0,
++        hInstance,
++        0
++      );
++      if(m_window == 0)
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "CreateWindow", GetLastError());
++      }
++    }
++
++    void TerminateData::blockShutdown()
++    {
++      if(!ShutdownBlockReasonCreate(m_window, m_reason.c_str()))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "ShutdownBlockReasonCreate", GetLastError());
++      }
++    }
++
++    void TerminateData::unblockShutdown()
++    {
++      if(!ShutdownBlockReasonDestroy(m_window))
++      {
++        mSysError::traceLastError(*m_trc, MajorError_HERE, "ShutdownBlockReasonDestroy", GetLastError());
++      }
+     }
+   }
+-  void TerminateData::resetShutdownParameter()
++
++  LRESULT TerminateData::handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+   {
+-    if(!SetProcessShutdownParameters(m_shutdownPriority, m_shutdownFlags))
++    LRESULT ret = 0;
++    switch(msg)
+     {
+-      mSysError::traceLastError(*m_trc, MajorError_HERE, "SetProcessShutdownParameters", mSysError::getErrorCode());
++      case WM_FORCE_CLOSE:
++      {
++        PostQuitMessage(0);
++        break;
++      }
++      case WM_DESTROY:
++      {
++        PostQuitMessage(0);
++        break;
++      }
++      case WM_CLOSE:
++      {
++        if(pData)
++        {
++          pData->notify("WM_CLOSE");
++        }
++        break;
++      }
++      case WM_QUERYENDSESSION:
++      {
++        if(pData)
++        {
++          pData->notify("WM_QUERYENDSESSION");
++        }
++        break;
++      }
++      case WM_ENDSESSION:
++      {
++        if(pData)
++        {
++          pData->notify("WM_ENDSESSION");
++        }
++        break;
++      }
++      default:
++      {
++        ret = DefWindowProc(hwnd, msg, wParam, lParam);
++        break;
++      }
+     }
++    return ret;
+   }
+-}
+-namespace mSysProcessTerminate
+-{
++
+   void setShutdownHook(ShutdownPriority priority, eventSemaphore* pEvent, TraceInterface* pTrc)
+   {
+     if(pData == 0)
+@@ -218,13 +444,24 @@ namespace mSysProcessTerminate
+       pData->registerForShutdown();
+     }
+   }
++
++  void setShutdownHook(ShutdownPriority priority, Materna::MSSD::eventSemaphore* pEvent, const std::string& title, const std::wstring& reason, MASSAI::trace::TraceInterface* pTrc)
++  {
++    if(pData == 0)
++    {
++      pData= new TerminateData(priority, pEvent, title, reason, pTrc);
++      pData->registerForShutdown();
++    }
++  }
++
+   void resetShutdownHook()
+   {
+     if(pData != 0)
+     {
+-      pData->cleanup();
+-      delete pData;
++      TerminateData* pCleanup = pData;
+       pData= 0;
++      pCleanup->cleanup();
++      delete pCleanup;
+     }
+   }
+ }
+-- 
+2.41.0.windows.1
+

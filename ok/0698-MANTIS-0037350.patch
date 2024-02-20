@@ -1,0 +1,325 @@
+From 0913da833bc459e0e9f72ebb8170c60d0248a926 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 17 Nov 2015 20:19:48 +0000
+Subject: [PATCH 0698/1076] MANTIS 0037350 extension: integration of EZ-Access
+ device for KIS kiosk
+
+keyboard.idl
+V1.0
+- added keyboardId to select a single keyboard.idl
+- added general error code RC_ERROR
+
+textidl.lib
+V1.0.0.12
+- implementation for keyboardId and RC_ERROR from keyboard.idl
+- added keyboardIdText
+
+massai_systools.lib
+V1.0.0.30
+- added cancel to mSysDeviceIO::device
+- find keyboard filter driver by device name
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@926 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysDeviceIO.h    |  1 +
+ .../inc/systools/mSysFindKeyboardFilter.h     |  2 +-
+ .../Interfaces/inc/textIDL/textkeyboard.h     |  2 ++
+ .../src/TestSysFindKeyboardFilter.cpp         |  6 +++---
+ .../cpp/Systools/src/mSysDeviceIOW32.cpp      | 16 +++++++++++++---
+ .../Systools/src/mSysFindKeyboardFilter.cpp   | 19 ++++++++++++-------
+ .../Massai/cpp/textIDL/src/textKeyboard.cpp   | 15 +++++++++++++++
+ .../Massai/idl/Massai/keyboard.idl            | 18 ++++++++++++++++--
+ 8 files changed, 63 insertions(+), 16 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
+index 02da1bb1..a8f5cf12 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
+@@ -18,6 +18,7 @@ namespace mSysDeviceIO
+     public:
+       virtual ~device();
+       virtual std::string send(unsigned int code, size_t size) = 0;
++      virtual void cancel() = 0;
+       virtual void close() = 0;
+   };
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h b/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
+index 8a0d103f..8b5e9e63 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
+@@ -8,5 +8,5 @@
+ namespace mSysKeyboard
+ {
+   // return keyboard filter
+-  std::string getKeyboardFilter(mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++  std::string getKeyboardFilter(mSysUSBDevice::Search search, const std::string& name, MASSAI::trace::TraceInterface& trc);
+ }
+diff --git a/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h b/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
+index c9123594..56377179 100644
+--- a/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
++++ b/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
+@@ -134,6 +134,7 @@ namespace ipsKeyboard
+   std::string scanCodeListText(const ipsKeyboardIDL::scanCodeList& data);
+   std::string statusText      (const ipsKeyboardIDL::status& data);
+   std::string statusResultText(const ipsKeyboardIDL::statusResult& data);
++  std::string keyboardIdText  (const ipsKeyboardIDL::keyboardId& data);
+ 
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::resultCode& data);
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusCode& data);
+@@ -141,4 +142,5 @@ namespace ipsKeyboard
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::scanCodeList& data);
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::status& data);
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusResult& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::keyboardId& data);
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
+index c8290864..74d2e6b0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
+@@ -11,13 +11,13 @@ int main(int argc, char **argv)
+   TraceLocal trc("TestSysKeyboardFilter");
+   try
+   {
+-    if(argc == 1)
++    if(argc == 2)
+     {
+-      std::cout << mSysKeyboard::getKeyboardFilter(mSysUSBDevice::DEV_SEARCH_PRESENT, trc);
++      std::cout << mSysKeyboard::getKeyboardFilter(mSysUSBDevice::DEV_SEARCH_PRESENT, argv[1], trc);
+     }
+     else
+     {
+-      std::cout << "Usage: TestSysKeyboardFilter.exe" << std::endl;
++      std::cout << "Usage: TestSysKeyboardFilter.exe <name>" << std::endl;
+       std::cout << "  find KeyboardFilter" << std::endl;
+     }
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
+index f0ea39fa..9b823515 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
+@@ -6,6 +6,7 @@
+ 
+ using namespace mSysDeviceIO;
+ using MASSAI::trace::TraceInterface;
++using mSysError::SystemErrorCode;
+ 
+ namespace
+ {
+@@ -20,6 +21,7 @@ namespace
+       deviceImpl(const std::string& name, const deviceOptions& options, TraceInterface& trc);
+       virtual ~deviceImpl();
+       virtual std::string send(unsigned int code, size_t size);
++      virtual void cancel();
+       virtual void close();
+ 
+     private:
+@@ -60,7 +62,7 @@ namespace
+     );
+     if(m_handle == INVALID_HANDLE_VALUE)
+     {
+-      DWORD resultCode = GetLastError();
++      SystemErrorCode resultCode = mSysError::getErrorCode();
+       traceLastError(m_trc, MajorError_HERE, "CreateFile", m_name, resultCode);
+       throw DeviceIOException(mSysError::getErrorText(resultCode));
+     }
+@@ -79,7 +81,7 @@ namespace
+       m_handle = INVALID_HANDLE_VALUE;
+       if(!CloseHandle(handle))
+       {
+-        traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, GetLastError());
++        traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, mSysError::getErrorCode());
+       }
+     }
+   }
+@@ -91,7 +93,7 @@ namespace
+     DWORD read = 0;
+     if(!DeviceIoControl(m_handle, code, 0, 0, buffer, size, &read, 0))
+     {
+-      DWORD resultCode = GetLastError();
++      SystemErrorCode resultCode = mSysError::getErrorCode();
+       delete[] buffer;
+       traceLastError(m_trc, MajorError_HERE, "DeviceIoControl", m_name, resultCode);
+       throw DeviceIOException(mSysError::getErrorText(resultCode));
+@@ -103,6 +105,14 @@ namespace
+     delete[] buffer;
+     return result;
+   }
++
++  void deviceImpl::cancel()
++  {
++    if(!CancelIoEx(m_handle, 0))
++    {
++      traceLastError(m_trc, MajorError_HERE, "CancelIoEx", m_name, mSysError::getErrorCode());
++    }
++  }
+ }
+ 
+ namespace mSysDeviceIO
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+index 7aff2061..f86cd1da 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+@@ -6,27 +6,30 @@
+ #include <sstream>
+ #include <iomanip>
+ #include <windows.h>
++#include <cfgmgr32.h>
+ 
+ using MASSAI::trace::TraceInterface;
+ using mSysUSBDeviceW32::Devices;
+ using mSysUSBDeviceW32::DeviceData;
++using mSysUSBDeviceW32::DeviceInfo;
+ using mSysUSBDevice::Search;
+ 
+ namespace
+ {
+   const GUID KBFILTER_GUID     = {0x3fb7299d, 0x6847, 0x4490, {0xb0, 0xc9, 0x99, 0xe0, 0x98, 0x6a, 0xb8, 0x86} };
+-  const std::string DEVICE_ID = "{d3658391-1f71-463c-b7ea-097ceaec5271}#ipskeyboardfilter";
++  const std::string DEVICE_ID = "{d3658391-1f71-463c-b7ea-097ceaec5271}#ipskeyboardfilter_";
+ 
+   class FindKeyboardFilter
+   {
+     public:
+-      FindKeyboardFilter(Search search, TraceInterface& trc);
++      FindKeyboardFilter(Search search, const std::string& name, TraceInterface& trc);
+       ~FindKeyboardFilter();
+ 
+       std::string getDevice();
+ 
+     private:
+       Search m_search;
++      std::string m_name;
+       TraceInterface& m_trc;
+   };
+ 
+@@ -34,8 +37,9 @@ namespace
+ 
+ namespace
+ {
+-  FindKeyboardFilter::FindKeyboardFilter(Search search, TraceInterface& trc):
++  FindKeyboardFilter::FindKeyboardFilter(Search search, const std::string& name, TraceInterface& trc):
+     m_search(search),
++    m_name(name),
+     m_trc(trc)
+   {}
+ 
+@@ -51,11 +55,12 @@ namespace
+       for(DWORD i = 0;; i++)
+       {
+         DeviceData devicedata(devices, i, KBFILTER_GUID, m_trc);
++        DeviceInfo deviceinfo(devices, i, m_trc);
+         std::string name = devicedata.getDeviceName();
+-        if(name.find(DEVICE_ID) != std::string::npos)
++        m_trc.writeTrace(BasicRuntime_HERE, "name: (%s)", name.c_str());
++        if(name.find(DEVICE_ID + m_name) != std::string::npos)
+         {
+           result = name;
+-          m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
+         }
+       }
+     }
+@@ -69,9 +74,9 @@ namespace
+ 
+ namespace mSysKeyboard
+ {
+-  std::string getKeyboardFilter(mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc)
++  std::string getKeyboardFilter(mSysUSBDevice::Search search, const std::string& name, MASSAI::trace::TraceInterface& trc)
+   {
+-    FindKeyboardFilter find(search, trc);
++    FindKeyboardFilter find(search, name, trc);
+     return find.getDevice();
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+index 0bf33651..0d2e0dfb 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+@@ -138,6 +138,7 @@ namespace ipsKeyboard
+     {
+       case ipsKeyboardIDL::RC_OK:       return "OK";
+       case ipsKeyboardIDL::RC_LISTENER: return "LISTENER";
++      case ipsKeyboardIDL::RC_ERROR:    return "ERROR";
+       default:                          return unknown("resultCode", data);
+     }
+   }
+@@ -180,6 +181,13 @@ namespace ipsKeyboard
+     return out.str();
+   }
+ 
++  std::string keyboardIdText(const ipsKeyboardIDL::keyboardId& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::resultCode& data)
+   {
+     out << resultCodeText(data);
+@@ -229,4 +237,11 @@ namespace ipsKeyboard
+     out << "status: (" << data.status << ")";
+     return out;
+   }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::keyboardId& data)
++  {
++    out << "name: (" << data.deviceName << ")";
++    out << "id: (" << data.deviceId << ")";
++    return out;
++  }
+ }
+diff --git a/SelfServiceCommon/Massai/idl/Massai/keyboard.idl b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+index 19008b75..df06832f 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+@@ -2,6 +2,12 @@
+ #ifndef KEYBOARD_IDL
+ #define KEYBOARD_IDL
+ 
++#ifdef USE_TAO_ORB_IDL
++   #ifdef _TAO_2_0_
++      #include "tao\orb.idl"
++   #endif
++#endif
++
+ #pragma prefix "massai.materna.com"
+ 
+ module ipsKeyboardIDL
+@@ -13,7 +19,8 @@ module ipsKeyboardIDL
+   enum resultCode
+   {
+     RC_OK,
+-    RC_LISTENER
++    RC_LISTENER,
++    RC_ERROR
+   };
+   
+   enum statusCode
+@@ -42,6 +49,12 @@ module ipsKeyboardIDL
+     status status;
+   };
+   
++  struct keyboardId
++  {
++    string deviceName;
++    string deviceId;
++  };
++  
+   interface keyboardListener
+   {
+     void statusIndication(in status status);
+@@ -51,7 +64,8 @@ module ipsKeyboardIDL
+   interface keyboardService
+   {
+     statusResult getStatus();
+-    void setListener(in scanCodeList scanCodes, in keyboardListener listener);
++    void setKeyboard(in keyboardId keyboard, in scanCodeList scanCodes);    
++    void setListener(in keyboardListener listener);
+     void rmvListener(in keyboardListener listener);    
+   };  
+ };
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,275 @@
+From 3986bdc01908c4eb1f98ba81b6633732e98b5c5f Mon Sep 17 00:00:00 2001
+From: kboeluek <kboeluek@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 May 2014 16:57:11 +0000
+Subject: [PATCH 0541/1077] MANTIS 0020990 extension;
+ Platform_Extension_CUSS_1_2: Periodic/Automatic restart of the application
+
+systools @version 1.0.0.16
+
+- mSysProcessList.h / mSysProcessListW32.cpp
+  added a method to mSysProcess::ApplicationList to get a map of all application processes
+- mSysProcess.hpp / mSysProcessW32.cpp
+  added two methods in mSysProcess::child. these methods provide access to time and IO usage of processes.
+- mSysTime.hpp / mSysTimeW32.cpp:
+  added a method to compute the time in ms for Duration object
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@673 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |  4 ++
+ .../Interfaces/inc/systools/mSysProcessList.h |  1 +
+ .../Interfaces/inc/systools/mSysTime.h        |  1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 15 +++++-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 35 ++++++++++++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 49 ++++++++++++++++++-
+ .../Massai/cpp/Systools/src/mSysTimeW32.cpp   | 15 ++++++
+ 7 files changed, 116 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index eca53d24..05284b61 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -227,6 +227,10 @@ namespace mSysProcess
+ 
+       // get parent process id
+       virtual std::string getParentProcessId() const = 0;
++      
++      virtual std::string getProcessIoUsage() const = 0;
++      
++      virtual std::string getProcessTimeUsage() const = 0;
+ 
+    }; // class child
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index 988a24a0..d79ef530 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -130,6 +130,7 @@ namespace mSysProcess
+       mSysWindow::WindowList findWinByTitleClassName(const std::string& group);
+       mSysWindow::WindowList findVisibleWin(const std::string& group);
+       mReset::Time checkForTerminatedProcesses();
++      std::map<std::string, std::list<child*>> getProcessMap();
+ 
+       class Impl;
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+index 25b5a559..8407e3ab 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+@@ -39,6 +39,7 @@ namespace mSysTime
+   unsigned long getUpTime();
+   Duration getDuration(unsigned long time_ms);
+   void sleep(unsigned long time_ms);
++  unsigned long getDurationInMs(Duration d);
+ 
+   bool operator<(const Timestamp& left, const Timestamp& right);
+   bool operator>(const Timestamp& left, const Timestamp& right);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 1dcd4a0f..82495496 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 15);
++VERSION_ID_DT(systools, 1, 0, 0, 16);
+ 
+ /*!
+ \file
+@@ -8,12 +8,23 @@ VERSION_ID_DT(systools, 1, 0, 0, 15);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.15
++@version 1.0.0.16
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.16
++\li 14.05.2014
++\li extension - BoKa Mantis 0020990: Automated restarts
++\li - mSysProcessList.h / mSysProcessListW32.cpp
++\li   added a method to mSysProcess::ApplicationList to get a map of all application processes
++\li - mSysProcess.hpp / mSysProcessW32.cpp
++\li   added two methods in mSysProcess::child. these methods provide
++\li   access to time and IO usage of processes.
++\li - mSysTime.hpp / mSysTimeW32.cpp:
++\li   added a method to compute the time in ms for Duration object
++
+ \version 1.0.0.15
+ \li 27.03.2014
+ \li change - JK Mantis 29186
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 47833e3d..6970b897 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -255,6 +255,7 @@ namespace
+         WindowSearchType search, const std::string& group);
+ 
+       void stop(const std::string& group);
++      std::map<std::string, std::list<child*>> getProcessMap();
+ 
+     private:
+       virtual void notify(ProcessStart& process);
+@@ -284,7 +285,7 @@ namespace
+       ProcessStartSet getDiff(const ProcessStartPtrList& minuend, const PropertyList& subtrahend);
+       ProcessStartSet getProcessStartSet(const std::string& group);
+ 
+-
++      
+       ProcessListCallback* m_pListener;
+       eventSemaphore m_break;
+       bool m_stop;
+@@ -1415,6 +1416,27 @@ namespace
+     }
+     return result;
+   }
++  
++  std::map<std::string, std::list<child*>> ProcessListImpl::getProcessMap()
++  {
++    std::map<std::string, std::list<child*>> processMap;
++    //iterate over ProcessStart pointers
++    ProcessStartPtrList::iterator it;
++    for (it = m_processPtrList.begin(); it != m_processPtrList.end(); ++it)
++    {
++      ProcessStartPtr ptr = *it;
++      ProcessHolderSet phs;
++      ptr->getProcessList(phs);
++      ProcessHolderSet::iterator i;
++      std::list<child*> childrenList;
++      for (i = phs.begin(); i != phs.end(); ++i)
++      {
++        childrenList.push_back((*i)->getProcess());
++        processMap[ptr->getGroup()] = childrenList;
++      }
++    }
++    return processMap;
++  }
+ }
+ 
+ namespace mSysProcess
+@@ -1462,6 +1484,7 @@ namespace mSysProcess
+       WindowList findWinByTitleClassName(const std::string& group);
+       WindowList findVisibleWin(const std::string& group);
+       Time checkForTerminatedProcesses();
++      std::map<std::string, std::list<child*>> getProcessMap();
+ 
+     private:
+       WindowSearchMap m_searchMap;
+@@ -1663,6 +1686,11 @@ namespace mSysProcess
+     search->search();
+     return search->getList();
+   }
++  
++  std::map<std::string, std::list<child*>> ApplicationList::Impl::getProcessMap()
++  {
++    return ProcessListImpl::getProcessMap();
++  }
+ 
+   WindowId::WindowId():
+     wndTitle(),
+@@ -1869,4 +1897,9 @@ namespace mSysProcess
+   {
+     return m_pImpl->findVisibleWin(group);
+   }
++  
++  std::map<std::string, std::list<child*>> ApplicationList::getProcessMap()
++  {
++    return m_pImpl->getProcessMap();
++  } 
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 20f0857b..96d348f4 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -368,6 +368,9 @@ namespace
+       void printTime(std::ostream& out, mSysProcess::status state) const;
+       void printCounters(std::ostream& out) const;
+       bool sendEvent(DWORD event);
++      
++      std::string getProcessIoUsage() const;
++      std::string getProcessTimeUsage() const;
+ 
+     private:
+       void openProcess();
+@@ -1028,7 +1031,51 @@ namespace
+   {
+     return M_Internal;
+   }
+-
++  
++  
++  std::string myChild::getProcessIoUsage() const
++  {
++    IO_COUNTERS ioCounters;
++    std::stringstream strStream;
++    
++    if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++    {
++      ULONGLONG read = ioCounters.ReadTransferCount;
++      ULONGLONG write = ioCounters.WriteTransferCount;
++      ULONGLONG other = ioCounters.OtherTransferCount;
++      strStream << std::dec;
++      strStream << (read + write + other);
++    }
++    else
++    {
++      logLastError(M_Logging, "GetProcessIoCounters");
++    }
++    return strStream.str();
++  }
++      
++  std::string myChild::getProcessTimeUsage() const
++  {
++    FILETIME creation;
++    FILETIME exit;
++    FILETIME kernel;
++    FILETIME user;
++    
++    std::stringstream out;
++    
++    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    {
++      out << std::dec;
++      mSysTime::Duration usr = mSysTime::getDuration(user);
++      mSysTime::Duration krnl = mSysTime::getDuration(kernel);
++      unsigned long sum = mSysTime::getDurationInMs(usr) + mSysTime::getDurationInMs(krnl);
++      out << sum;
++    }
++    else
++    {
++      logLastError(M_Logging, "GetProcessTimes");
++    }
++    return out.str();
++  }
+ 
+ } // namespace
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+index e7f32b9d..b6bd7441 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+@@ -289,4 +289,19 @@ namespace mSysTime
+   {
+     return getTimestamp(getFileTime(left) + getFileTime(right));
+   }
++  
++  unsigned long getDurationInMs(Duration d)
++  {
++    const unsigned long millisecsPerSecond = 1000;
++    const unsigned long secondsPerMinute = 60;
++    const unsigned long minutesPerHour = 60;
++    const unsigned long hoursPerDay = 20;
++    unsigned long result = 0;
++    result += d.milliseconds;
++    result += (d.seconds * millisecsPerSecond);
++    result += (d.minutes * secondsPerMinute * millisecsPerSecond);
++    result += (d.hours * minutesPerHour * secondsPerMinute * millisecsPerSecond);
++    result += (d.days * hoursPerDay * minutesPerHour * secondsPerMinute * millisecsPerSecond);
++    return result;
++  }
+ }
+-- 
+2.41.0.windows.1
+

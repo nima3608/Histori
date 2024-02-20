@@ -1,0 +1,672 @@
+From 64e81529f27b4cbc2ddd865277f4e862c33bbda4 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 22 Jan 2016 15:33:13 +0000
+Subject: [PATCH 0717/1077] MANTIS 0032431 -Added class for manipulating date
+ and time objects from boost -Added Notification interface to create
+ Notifications for Poco::NotificationQueue -Added SchedulerInterface -Added
+ ScheduledTask interface to schedule tasks with the SchedulerInterface
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@958 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/makefile.mak             |   7 +-
+ .../Massai/cpp/Tools/src/Notification.cpp     |  54 ++++
+ .../Massai/cpp/Tools/src/ScheduledTask.cpp    | 112 +++++++++
+ .../cpp/Tools/src/SchedulerInterface.cpp      | 234 ++++++++++++++++++
+ .../Massai/cpp/Tools/src/dateTimeTools.cpp    | 197 +++++++++++++++
+ 5 files changed, 603 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 3b7c68cf..10cd149c 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -8,7 +8,7 @@
+ 
+ ######################################################################
+ 
+-MY_CFLAGS =             $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_REGEX) $(INC_BOOST)
++MY_CFLAGS =             $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_REGEX) $(INC_BOOST) $(INC_POCO)
+ 
+ MY_LIB1 =               $(LIB_DST_TOOLS)
+ 
+@@ -46,6 +46,11 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\TraceSetLevelDelegate.obj \
+                         $(_OBJ)\Interval.obj \
+                         $(_OBJ)\configItem.obj \
++                        $(_OBJ)\Notification.obj \
++                        $(_OBJ)\ScheduledTask.obj \
++                        $(_OBJ)\SchedulerInterface.obj \
++                        $(_OBJ)\dateTimeTools.obj \
++                        
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
+new file mode 100644
+index 00000000..c18420c4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
+@@ -0,0 +1,54 @@
++//---------------------------------------------------------------------------
++//
++//  file:       Notification.cpp
++//
++//  purpose:    Implementation of: Notification
++//
++//  date:       21.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++//Materna includes
++#include "tools/Notification.h"
++#include "trc/trace.h"
++
++
++using namespace std;
++
++
++namespace MASSAI
++{
++  namespace Notification
++  {
++        /**
++        *   Constructor.
++        *  
++        *   @param info:    Data used for information about the msg
++        *   @param pID:     The ID of the Thread, which has posted the Message
++        *   @param msg:     The Message to put in the Notification-Queue
++        */
++        /*
++        template <typename tempMsg>   
++        ThreadNotification<tempMsg>::ThreadNotification(std::string info, std::string pID, tempMsg msg) :
++          m_info(info),
++          m_parentID(pID),
++          m_msg(msg)
++        {
++          TRACE(HERE,"Create Notification: ParentID[%s], Msg[%d], MsgInfo[%s]", pID.c_str(), msg, info.c_str());
++        }
++        */
++        
++        /**
++        * getter Methods
++        *//*
++        template <typename tempMsg>   
++        std::string     ThreadNotification<tempMsg>::data(){ return m_info; }
++        template <typename tempMsg>           
++        std::string     ThreadNotification<tempMsg>::getId(){ return m_parentID; }
++        template <typename tempMsg>           
++        tempMsg  ThreadNotification<tempMsg>::getMsg(){ return m_msg; }*/
++
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+new file mode 100644
+index 00000000..c6b312c4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+@@ -0,0 +1,112 @@
++//---------------------------------------------------------------------------
++//
++//  file:       ScheduledTask.cpp
++//
++//  purpose:    Implementation of: ScheduledTask
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++//Compiler includes
++#include <sstream>
++
++//MATERNA includes
++#include "trc/trace.h"
++#include "tools/ScheduledTask.h"
++#include "tools/dateTimeTools.h"
++
++
++using namespace std;
++
++
++namespace MASSAI
++{
++  namespace Scheduler
++  {
++    UserInfo::UserInfo(std::string acc, std::string pw) :
++      account(acc),
++      password(pw)
++    {
++    }
++
++
++    Task::Task(std::string cmd, UserInfo userInfo) :
++      m_cmd(cmd),
++      m_userInfo(userInfo)
++    {
++    }
++
++
++    Task::~Task()
++    {
++    }
++
++
++    ScheduledTask::ScheduledTask(long hour, long min, long delayRange, std::string scheduleFrequency, Task* task) :
++        m_executionTime( hour,min,0,0 ),
++        m_delayRange(delayRange),
++        m_task(task),
++        m_scheduleMonthly( -1 ),
++        m_scheduleWeekly( -1 ),
++        m_scheduleDaily(false),
++        m_scheduleInfo("")
++    {
++      int day;
++      stringstream ssScheduleInfo ("");
++
++      if(scheduleFrequency != "" )
++      {
++          if( scheduleFrequency == "last" )
++          {
++              m_scheduleMonthly = MASSAI::DateTimeTools::getActualSystemDate().end_of_month().day();
++              ssScheduleInfo  << "every " << m_scheduleMonthly << "." << "of Month";
++          }
++          else 
++          {
++              try
++              {
++                  m_scheduleMonthly = stoi (scheduleFrequency);
++                  ssScheduleInfo  << "every " << m_scheduleMonthly << "." << "of Month";
++              }
++              catch (const std::invalid_argument& ia) 
++              {
++                  TRACE(MajorWarning_HERE, "WARNING: INVALID ARGUMENT - %s", ia.what());
++
++                  day = MASSAI::DateTimeTools::getDayOfWeekAsNumber(scheduleFrequency);
++
++                  if( day != -1 )
++                  {
++                    m_scheduleWeekly = day;
++                    ssScheduleInfo  << "every " << MASSAI::DateTimeTools::getDayOfWeekAsString(m_scheduleWeekly);
++                  }
++                  else
++                  {
++                    TRACE(MajorWarning_HERE, "WARNING: Could not get the right schedule Information. Default set to daily");
++                    m_scheduleDaily = true;
++                    ssScheduleInfo << "every day";
++                  }
++              } 
++          }
++      }
++      else
++      {
++        m_scheduleDaily = true;
++        ssScheduleInfo << "every day";
++      }
++
++      m_scheduleInfo = ssScheduleInfo.str();
++
++      TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d] + %02d, Frequency[%s], Task-Command[%s], Task-User[%s]",
++          m_executionTime.hours(), 
++          m_executionTime.minutes(),
++          m_delayRange,
++          m_scheduleInfo.c_str(),
++          m_task->getCmd().c_str(),
++          m_task->getUserAccount().c_str()
++      );
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+new file mode 100644
+index 00000000..081f36f2
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+@@ -0,0 +1,234 @@
++//---------------------------------------------------------------------------
++//
++//  file:       SchedulerInterface.cpp
++//
++//  purpose:    Implementation of: SchedulerInterface
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++//MATERNA includes
++#include "trc/trace.h"
++#include "tools/SchedulerInterface.h"
++#include "tools/dateTimeTools.h"
++#include "tools/Notification.h"
++
++//Boost includes
++#include "boost/date_time/gregorian/gregorian.hpp"
++#include "boost/date_time/posix_time/posix_time.hpp" 
++
++
++using Poco::Runnable;
++using MASSAI::Notification::ThreadNotification;
++using namespace std;
++
++
++namespace MASSAI
++{
++  namespace Scheduler
++  {
++    SchedulerInterface::SchedulerInterface(long m_wait, Poco::NotificationQueue* localQueue) :
++        m_wait(m_wait),
++        m_localQueue(localQueue),
++        m_taskList()
++    {
++    }
++
++
++    SchedulerInterface::~SchedulerInterface()
++    {
++    }
++
++    
++    void SchedulerInterface::run()
++    {              
++        TRACE(HERE,"Scheduler-thread started..."); 
++        
++        Poco::AutoPtr<Poco::Notification> pocoNotification;
++        ThreadNotification<MASSAI::Notification::THREAD_MSG>* pWorkNf;
++
++        bool terminate = false;
++
++        while( !terminate )
++        {
++            pocoNotification = m_localQueue->waitDequeueNotification(m_wait);
++ 
++            pWorkNf = dynamic_cast<ThreadNotification<MASSAI::Notification::THREAD_MSG>*>(pocoNotification.get());
++          
++            if (pWorkNf != NULL)
++            {               
++                MASSAI::Notification::THREAD_MSG msg =  (pWorkNf->getMsg());
++               
++                switch ( msg )
++                {
++                case MASSAI::Notification::CMD_THREAD_SHUTDOWN_NOW:
++                    {
++                        TRACE(HERE, "CMD_THREAD_SHUTDOWN command dequeued");
++
++                        terminate = true;
++                    }
++                    break;
++
++                default:
++                    {
++                        TRACE(MajorWarning_HERE, "WARNING: Unknown Command!");
++                    }
++                    break;
++                }
++            }
++            else
++            {
++                if( this->shouldRefresh() )
++                {
++                  this->deleteList();
++                  this->refreshList();
++                }
++
++                this->scheduleTasks();
++            }
++            
++        }
++
++        TRACE(HERE, "Scheduler-Thread terminated");
++    }
++    
++    
++    void SchedulerInterface::scheduleTasks()
++    {
++      TRACE(SecondaryRuntime_HERE, "Check for commands to get scheduled"); 
++
++      list<ScheduledTask *>::iterator  taskIterator;
++
++      boost::posix_time::time_duration currentTime;
++      boost::gregorian::date           currentDate;
++      
++      bool scheduleNow;
++      bool scheduleToday;
++
++      for( taskIterator = m_taskList.begin(); taskIterator != m_taskList.end(); taskIterator++ )
++      {
++        scheduleNow = false;
++        scheduleToday = false;
++
++        unsigned long minutes_max = 23*60 + 59;
++
++        //Correct time for schedule?
++        currentTime = boost::posix_time::time_duration ( MASSAI::DateTimeTools::getActualSystemTime() );
++
++        unsigned long minutes_of_now   = currentTime.hours()*60 +
++                                         currentTime.minutes();
++          
++        unsigned long minutes_to_schedule_low = (*taskIterator)->getTime().hours() *60      + 
++                                                (*taskIterator)->getTime().minutes();
++        
++        unsigned long randomDelay = 0;
++        if( (*taskIterator)->getDelayRange() > 0)
++        {
++          randomDelay =  rand() % ((*taskIterator)->getDelayRange() + 1);
++        }
++
++
++        if( minutes_to_schedule_low + randomDelay > minutes_max)
++        {
++          //extra check for time
++          unsigned long rest_of_delay = minutes_to_schedule_low + randomDelay - minutes_max + 1;
++
++          bool firstDaySchedule = minutes_to_schedule_low  <= minutes_of_now   &&
++                                  minutes_max >= minutes_of_now; 
++
++          bool secondDaySchedule = rest_of_delay >= minutes_of_now;
++
++          scheduleNow = firstDaySchedule || secondDaySchedule;
++
++          //extra check for date
++          if( firstDaySchedule )
++          {
++            //Correct day for schedule?
++            currentDate = MASSAI::DateTimeTools::getActualSystemDate();
++            
++            scheduleToday = 
++              (*taskIterator)->getScheduleMonthly() == currentDate.year_month_day().day   ||
++              (*taskIterator)->getScheduleWeekly()  == currentDate.day_of_week()          ||
++              (*taskIterator)->getScheduleDaily();           
++          }
++          else if( secondDaySchedule )
++          {
++            //Correct day for schedule?
++            currentDate = MASSAI::DateTimeTools::getActualSystemDate();
++            
++            scheduleToday = 
++              (*taskIterator)->getScheduleMonthly() == currentDate.year_month_day().day -1  ||
++              (*taskIterator)->getScheduleWeekly()  == currentDate.day_of_week()        -1  ||
++              (*taskIterator)->getScheduleDaily();
++          }
++
++          TRACE(HERE, "RestDelay=[%d], minutes_low=[%d], minutes_now=[%d], minutes_max=[%d], firstSchedule=[%d], secondDaySchedule=[%d], ScheduleToday=[%d]", 
++            rest_of_delay, minutes_to_schedule_low, minutes_of_now, minutes_max, firstDaySchedule, secondDaySchedule, scheduleToday);
++        }
++        else
++        {
++          unsigned long minutes_to_schedule_high = (*taskIterator)->getTime().hours() *60      + 
++                                                   (*taskIterator)->getTime().minutes()        +
++                                                    randomDelay;
++           
++          scheduleNow = minutes_to_schedule_low  <= minutes_of_now   &&
++                        minutes_to_schedule_high >= minutes_of_now; 
++
++          //Correct day for schedule?
++          currentDate = MASSAI::DateTimeTools::getActualSystemDate();
++            
++          scheduleToday = 
++            (*taskIterator)->getScheduleMonthly() == currentDate.year_month_day().day   ||
++            (*taskIterator)->getScheduleWeekly()  == currentDate.day_of_week()          ||
++            (*taskIterator)->getScheduleDaily();
++        }
++
++        //Schedule the task if day and time is right
++        if( scheduleToday && scheduleNow )
++        {
++          TRACE(
++            HERE, "\n\n************************************************************************************\n"
++            "Execute Task: \n"
++            "\tCommand[%s]\n"
++            "\tTime[%02d:%02d] + %02d delay\n"
++            "\tFrequency(%s)\n"
++            "\tUser-Account(%s)\n"
++            "************************************************************************************\n",
++            (*taskIterator)->getTask()->getCmd().c_str(), 
++            (*taskIterator)->getTime().hours(), 
++            (*taskIterator)->getTime().minutes(), 
++            (*taskIterator)->getDelayRange(),
++            (*taskIterator)->getScheduleInfo().c_str(), 
++            (*taskIterator)->getTask()->getUserAccount().c_str()
++          );
++        
++          this->executeTask((*taskIterator)->getTask());
++        }
++      }
++    }
++
++
++    bool SchedulerInterface::shouldRefresh()
++    {
++      return false;
++    }
++    
++    
++    void SchedulerInterface::executeTask(MASSAI::Scheduler::Task* task)
++    {
++    }
++
++
++    void SchedulerInterface::refreshList()
++    {
++    }
++
++
++    void SchedulerInterface::deleteList()
++    {
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
+new file mode 100644
+index 00000000..3c94cde1
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/dateTimeTools.cpp
+@@ -0,0 +1,197 @@
++//---------------------------------------------------------------------------
++//
++//  file:       dateTimeTools.cpp
++//
++//  purpose:    Implementation of: DateTimeTools
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++//MATERNA includes
++#include "tools/dateTimeTools.h"
++
++//Compiler includes
++#include <sstream>
++
++
++
++namespace MASSAI
++{
++   boost::posix_time::time_duration DateTimeTools::getActualSystemTime()  
++  {
++      time_t t = time(0);   
++      struct tm * now = localtime( & t );
++
++      boost::posix_time::time_duration today( now->tm_hour,now->tm_min,now->tm_sec,0 );
++
++      return today;
++  }
++
++
++  boost::gregorian::date DateTimeTools::getActualSystemDate()  
++  {
++      time_t t = time(0);  
++      struct tm * now = localtime( & t );
++
++      boost::gregorian::date actualDate( ((1900) + (now->tm_year)), ((1) + (now->tm_mon)), (now->tm_mday) );
++
++      return actualDate;
++  }
++  
++  
++  std::string DateTimeTools::timeStamp()
++  {
++    std::stringstream sStream ("");
++
++    boost::gregorian::date              actualDate ( MASSAI::DateTimeTools::getActualSystemDate() );
++    boost::posix_time::time_duration    actualTime ( MASSAI::DateTimeTools::getActualSystemTime() );
++
++    std::stringstream ssHour ("");
++    std::stringstream ssMinute ("");
++    std::stringstream ssSecond ("");
++    std::stringstream ssDay ("");
++    std::stringstream ssMonth ("");
++
++    if( actualTime.hours() < 10 )
++        ssHour << "0" << actualTime.hours();         
++    else
++        ssHour << actualTime.hours();
++
++    if( actualTime.minutes() < 10 )
++        ssMinute << "0" << actualTime.minutes();         
++    else
++        ssMinute << actualTime.minutes();
++
++    if( actualTime.seconds() < 10 )
++        ssSecond << "0" << actualTime.seconds();         
++    else
++        ssSecond << actualTime.seconds();
++
++    if( actualDate.year_month_day().day < 10 )
++        ssDay << "0" << actualDate.year_month_day().day;         
++    else
++        ssDay << actualDate.year_month_day().day;
++
++    if( actualDate.year_month_day().month.as_number()  < 10 )
++        ssMonth << "0" << actualDate.year_month_day().month.as_number() ;         
++    else
++        ssMonth << actualDate.year_month_day().month.as_number() ;
++
++    sStream << ssHour.str() 
++            << ":"
++            << ssMinute.str()
++            << ":"
++            << ssSecond.str()
++            << "-"
++            << ssDay.str()    
++            << "." 
++            << ssMonth.str()   
++            << "." 
++            << actualDate.year_month_day().year;         
++
++    std::string timeStamp (sStream.str());
++
++    return timeStamp;
++  }
++
++
++  std::string DateTimeTools::timeStamp(boost::posix_time::time_duration time, boost::gregorian::date date)
++  {
++    std::stringstream sStream ("");
++    std::stringstream ssHour ("");
++    std::stringstream ssMinute ("");
++    std::stringstream ssSecond ("");
++    std::stringstream ssDay ("");
++    std::stringstream ssMonth ("");
++
++    if( time.hours() < 10 )
++        ssHour << "0" << time.hours();         
++    else
++        ssHour << time.hours();
++
++    if( time.minutes() < 10 )
++        ssMinute << "0" << time.minutes();         
++    else
++        ssMinute << time.minutes();
++
++    if( time.seconds() < 10 )
++        ssSecond << "0" << time.seconds();         
++    else
++        ssSecond << time.seconds();
++
++    if( date.year_month_day().day < 10 )
++        ssDay << "0" << date.year_month_day().day;         
++    else
++        ssDay << date.year_month_day().day;
++
++    if( date.year_month_day().month.as_number()  < 10 )
++        ssMonth << "0" << date.year_month_day().month.as_number() ;         
++    else
++        ssMonth << date.year_month_day().month.as_number() ;
++
++    sStream << ssHour.str() 
++            << ":"
++            << ssMinute.str()
++            << ":"
++            << ssSecond.str()
++            << "-"
++            << ssDay.str()    
++            << "." 
++            << ssMonth.str()   
++            << "." 
++            << date.year_month_day().year;         
++    
++    std::string timeStamp (sStream.str());
++
++    return timeStamp;
++  }
++  
++  
++  long DateTimeTools::getDayOfWeekAsNumber(std::string sDay)
++  {
++      long  iDay=-1;
++
++      if( sDay == "mon" )
++          iDay = 1;
++      else if( sDay == "tue" )
++          iDay = 2;
++      else if( sDay == "wed" )
++          iDay = 3;
++      else if( sDay == "thu" )
++          iDay = 4;
++      else if( sDay == "fri" )
++          iDay = 5;
++      else if( sDay == "sat" )
++          iDay = 6;
++      else if( sDay == "sun" )
++          iDay = 0;
++     
++      return iDay;
++  }
++
++
++  std::string DateTimeTools::getDayOfWeekAsString(long lDay)
++  {
++      std::string sDay ("");
++
++      if( lDay ==  1)
++          sDay = "Monday";
++      else if( lDay == 2 )
++          sDay = "Tuesday";
++      else if( lDay == 3 )
++          sDay = "Wednesday";
++      else if( lDay == 4 )
++          sDay = "Thursday";
++      else if( lDay == 5 )
++          sDay = "Friday";
++      else if( lDay == 6 )
++          sDay = "Saturday";
++      else if( lDay == 0 )
++          sDay = "Sunday";
++     
++      return sDay;
++  }
++}
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,303 @@
+From 5f8372bf3f2873af05d495908bb96963a7e458f7 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 28 Mar 2022 20:16:26 +0000
+Subject: [PATCH 1063/1077] MANTIS 0059165 bugfix: Call CUSS 1.5 Shortcuts
+ without extension from Platform config
+
+massai_systools.lib
+V1.0.0.44
+- fix calculation of timestamp + duration
+- use getLocalTimestamp for process start/stop time
+- add mSysTimeOut for formatted output
+- add boost unit test for addition and subtraction
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1718 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/inc/mSysTimeW32.h     |  1 +
+ .../Massai/cpp/Systools/makefile.mak          | 18 +++++-
+ .../cpp/Systools/src/UnitTestSysTime.cpp      | 25 ++++++++
+ .../Massai/cpp/Systools/src/UnitTests.cpp     |  3 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 +++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 10 ++--
+ .../Massai/cpp/Systools/src/mSysTimeOut.cpp   | 59 +++++++++++++++++++
+ .../Massai/cpp/Systools/src/mSysTimeW32.cpp   | 15 ++++-
+ 8 files changed, 132 insertions(+), 9 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/UnitTestSysTime.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/UnitTests.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeOut.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
+index 7ecacde7..18b86fb4 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysTimeW32.h
+@@ -15,6 +15,7 @@ namespace mSysTime
+ {
+   Duration getDuration(const FILETIME& filetime);
+   Timestamp getTimestamp(const FILETIME& filetime);
++  Timestamp getLocalTimestamp(const FILETIME& filetime);
+   Timestamp getTimestamp(const SYSTEMTIME& systemtime);
+   SYSTEMTIME getSystemTime(const Timestamp& timestamp);
+   FILETIME getFileTime(const Timestamp& timestamp);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index f76d0b7f..8fce4116 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -21,6 +21,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mMutexSemW32.obj \
+                         $(_OBJ)\mSysDebugW32.obj \
+                         $(_OBJ)\mSysTimeW32.obj \
++                        $(_OBJ)\mSysTimeOut.obj \
+                         $(_OBJ)\mSysErrorW32.obj \
+                         $(_OBJ)\mSysExceptionW32.obj \
+                         $(_OBJ)\mSysMain.obj \
+@@ -185,7 +186,7 @@ MY_BIN14 =              $(_BIN)\TestSysServiceMonitor.exe
+ 
+ MY_BIN14_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
+ 
+-MY_BIN14_LINKLIBS =     User32.lib 
++MY_BIN14_LINKLIBS =     User32.lib
+ 
+ MY_BIN14_OBJS =         $(_OBJ)\TestSysServiceMonitor.obj
+ 
+@@ -199,5 +200,20 @@ MY_BIN15_LINKLIBS =     User32.lib
+ 
+ MY_BIN15_OBJS =         $(_OBJ)\TestSysProcessTerminate.obj
+ 
++######################################################################
++
++MY_UNITTEST_BIN = \
++    $(_BIN)\UnitTests.exe
++
++MY_UNITTEST_BIN_OBJS = \
++    $(_OBJ)\UnitTests.obj \
++    $(_OBJ)\UnitTestSysTime.obj \
++
++MY_UNITTEST_BIN_USER_LIBS = \
++    $(LIB_TEXT) \
++    $(LIB_TRACENOCONFIGS) \
++
++MY_UNITTEST_BIN_LINKLIBS = \
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/UnitTestSysTime.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/UnitTestSysTime.cpp
+new file mode 100644
+index 00000000..62de38b2
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/UnitTestSysTime.cpp
+@@ -0,0 +1,25 @@
++#include "boost/test/unit_test.hpp"
++#include "boost/test/test_tools.hpp"
++#include "systools/mSysTime.h"
++#include "systools/mSysTimeOut.h"
++using namespace mSysTime;
++
++BOOST_AUTO_TEST_CASE(SysTime)
++{
++  Timestamp now = getTimestamp();
++  std::cout << now << std::endl;
++  Timestamp start = {2022, 12, 6, 31, 23, 59, 59, 999};
++  Duration diff = {0, 0, 0, 0, 1};
++  Timestamp finish = {2023, 01, 7, 1, 0, 0, 0, 0};
++
++  Duration begin = {0, 23, 59, 59, 999};
++  Duration end = {1, 0, 0, 0, 0};
++
++  BOOST_CHECK_EQUAL(finish, start + diff);
++  BOOST_CHECK_EQUAL(start, finish - diff);
++  BOOST_CHECK_EQUAL(diff, finish - start);
++
++  BOOST_CHECK_EQUAL(end, begin + diff);
++  BOOST_CHECK_EQUAL(begin, end - diff);
++  BOOST_CHECK_EQUAL(diff, end - begin);
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/UnitTests.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/UnitTests.cpp
+new file mode 100644
+index 00000000..8d8f05b5
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/UnitTests.cpp
+@@ -0,0 +1,3 @@
++#pragma warning(disable: 4535)
++#define BOOST_TEST_MODULE "C++ Unit Tests for the HS862SR"
++#include "boost/test/included/unit_test.hpp"
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 86c4a706..c6b50559 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 43);
++VERSION_ID_DT(systools, 1, 0, 0, 44);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 43);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.43
++@version 1.0.0.44
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.44
++\li 28.03.2022
++\li bugfix - SteT Mantis 0059165: Call CUSS 1.5 Shortcuts without extension from Platform config
++- fix calculation of timestamp + duration
++- add mSysTimeOut for formatted output
++
+ \version 1.0.0.43
+ \li changed - SteT Mantis 0062279: DeskoPentaAssureId with ChipData
+ - mSysSmartCardReader check if SCardAccessStartedEvent is valid
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 7280f26c..b1f74668 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -1651,10 +1651,10 @@ namespace
+         out << std::dec;
+         out << "user\t" << mSysTime::getDuration(user)      << "\t";
+         out << "kernel\t" << mSysTime::getDuration(kernel)    << std::endl;
+-        out << "start\t" << mSysTime::getTimestamp(creation) << "\t";
++        out << "start\t" << mSysTime::getLocalTimestamp(creation) << "\t";
+         if(state != mSysProcess::STATUS_RUNNING)
+         {
+-          out << "stop\t" << mSysTime::getTimestamp(exit);
++          out << "stop\t" << mSysTime::getLocalTimestamp(exit);
+         }
+         out << std::endl;
+       }
+@@ -1688,10 +1688,10 @@ namespace
+         out << std::dec;
+         out << "user\t"   << mSysTime::getDuration(user)      << "\t";
+         out << "kernel\t" << mSysTime::getDuration(kernel)    << "\t";
+-        out << "start\t"  << mSysTime::getTimestamp(creation) << "\t";
++        out << "start\t"  << mSysTime::getLocalTimestamp(creation) << "\t";
+         if(state != mSysProcess::STATUS_RUNNING)
+         {
+-          out << "stop\t" << mSysTime::getTimestamp(exit)     << "\t";
++          out << "stop\t" << mSysTime::getLocalTimestamp(exit)     << "\t";
+         }
+         else
+         {
+@@ -1945,7 +1945,7 @@ namespace
+                )
+          )
+       {
+-         result = mSysTime::getTimestamp( creation );
++         result = mSysTime::getLocalTimestamp( creation );
+       }
+       else
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeOut.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeOut.cpp
+new file mode 100644
+index 00000000..64eada6f
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeOut.cpp
+@@ -0,0 +1,59 @@
++// time; current time, system up time, sleep
++
++#include "systools/mSysTimeOut.h"
++#include <iomanip>
++
++namespace
++{
++  char* DOW[] = {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"};
++}
++
++namespace std
++{
++  std::ostream& operator<<(std::ostream& out, const mSysTime::Timestamp& time)
++  {
++    out << DOW[time.dayOfWeek % 7];
++    out << " ";
++    out << std::setfill('0') << std::setw(4) << time.year;
++    out << "-";
++    out << std::setfill('0') << std::setw(2) << time.month;
++    out << "-";
++    out << std::setfill('0') << std::setw(2) << time.day;
++    out << "T";
++    out << std::setfill('0') << std::setw(2) << time.hour;
++    out << ":";
++    out << std::setfill('0') << std::setw(2) << time.minute;
++    out << ":";
++    out << std::setfill('0') << std::setw(2) << time.second;
++    out << ".";
++    out << std::setfill('0') << std::setw(3) << time.milliseconds;
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const mSysTime::Duration& duration)
++  {
++    if(duration.days != 0)
++    {
++      out << std::setfill('0') << std::setw(2) << duration.days;
++      out << " ";
++    }
++    if(duration.days != 0 || duration.hours != 0)
++    {
++      out << std::setfill('0') << std::setw(2) << duration.hours;
++      out << ":";
++    }
++    if(duration.days != 0 || duration.hours != 0 || duration.minutes != 0)
++    {
++      out << std::setfill('0') << std::setw(2) << duration.minutes;
++      out << ":";
++      out << std::setfill('0') << std::setw(2) << duration.seconds;
++    }
++    else
++    {
++      out << duration.seconds;
++    }
++    out << ".";
++    out << std::setfill('0') << std::setw(3) << duration.milliseconds;
++    return out;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+index a5421f36..a38d0100 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+@@ -80,7 +80,7 @@ namespace mSysTime
+     return result;
+   }
+ 
+-  Timestamp getTimestamp(const FILETIME& filetime)
++  Timestamp getLocalTimestamp(const FILETIME& filetime)
+   {
+     // 100 nano seconds since 1.Janur 1601
+     SYSTEMTIME systemtime;
+@@ -88,6 +88,14 @@ namespace mSysTime
+     return getTimestamp(getLocalTimeFromUTC(systemtime));
+   }
+ 
++  Timestamp getTimestamp(const FILETIME& filetime)
++  {
++    // 100 nano seconds since 1.Janur 1601
++    SYSTEMTIME systemtime;
++    FileTimeToSystemTime(&filetime, &systemtime);
++    return getTimestamp(systemtime);
++  }
++
+   Timestamp getTimestamp(const SYSTEMTIME& systemtime)
+   {
+     Timestamp result;
+@@ -299,6 +307,11 @@ namespace mSysTime
+     return getTimestamp(getFileTime(left) + getFileTime(right));
+   }
+ 
++  Timestamp operator-(const Timestamp& left, const Duration& right)
++  {
++    return getTimestamp(getFileTime(left) - getFileTime(right));
++  }
++
+   unsigned long getDurationInMs(Duration d)
+   {
+     const unsigned long millisecsPerSecond = 1000;
+-- 
+2.41.0.windows.1
+

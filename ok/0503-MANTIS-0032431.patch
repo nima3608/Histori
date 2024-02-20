@@ -1,0 +1,341 @@
+From 072640a1f23d7ba41d4d6d7fed361f195c249bd8 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 1 Oct 2014 14:00:56 +0000
+Subject: [PATCH 0503/1000] MANTIS 0032431 Implemented WindowsConfig-Class to
+ create the Main Window of mControl
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@730 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h | 79 +++++++++++++++-
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |  6 ++
+ .../cpp/mControl/src/mControl_config.cpp      | 92 +++++++++++++++++++
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 77 ++--------------
+ 4 files changed, 183 insertions(+), 71 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index deaa0904..1028ecd0 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -10,11 +10,84 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#ifndef WINDOWCONFIG_H
+-#define WINDOWCONFIG_H
++#ifndef CONFIG_H
++#define CONFIG_H
++
++#include "..\inc\mControl_def.h"
++
++//Windows includes
++#include <windows.h>
++#include <stdlib.h>
++#include <string.h>
++#include <tchar.h>
+ 
+ namespace mControl
+ {
+-	class Config;
++	class WindowConfig
++    {
++        protected:
++            WNDCLASSEX      m_Wcex;
++
++            LPCTSTR         m_Title; 
++            LPCTSTR         m_ClassName;
++            
++            HWND            m_HWnd; 
++
++            HINSTANCE       m_HInstance; 
++            
++            HMENU           m_HMenu; 
++            
++            int             m_style; 
++            int             m_exStyle; 
++            int             m_x, m_y; 
++            int             m_width, m_height;
++
++        public:
++            /**
++            * Initializes the WNDCLASSEX Object and calls the RegisterWindow() Method of the Windows API.
++            */
++            int registerWindow();
++
++
++
++            /**
++            * Initializes the HWDW Object and calls the CreateWindow() Method of the Windows API.
++            */
++            int createWindow();
++
++            
++
++            /**
++            * Calls the ShowWindow() Method of the Window API, with the correct Parameters.
++            */
++            void showWindow(int cmd);
++
++
++
++            /**
++            * Attribut getter Methods
++            */
++            HWND getHwnd();
++
++            //Constructor
++            WindowConfig(HINSTANCE hInst);
++
++
++
++            /**
++            * Other (might useful) Methods. Not yet implemented
++            */
++            void SetInstance(HINSTANCE hInstance); // Required
++            void SetClassName(LPCTSTR lpClassName); // Required
++            void SetStyle(UINT uiStyle);
++            void SetIcon(HICON hIcon);
++            void SetIconSmall(HICON hIcon);
++            void SetCursor(HCURSOR hCursor);
++            void SetBackground(HBRUSH hbrBackground);
++            void SetMenu(LPCTSTR lpMenuName);
++            void SetClsExtra(int cbClsExtra);
++            void SetWndExtra(int cbWndExtra);
++            LPCTSTR GetClassName() const;
++    };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 9b6abf6d..2694f6e4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -25,4 +25,10 @@
+ #define SCHEDULER_ID 0
+ 
+ #define APP_NAME "mControl"
++#define CLASS_NAME "win32app"
+ 
++// The main window class name.
++//static TCHAR szWindowClass[] = _T("win32app");
++
++// The string that appears in the application's title bar.
++//static TCHAR szTitle[] = _T("mConrol");
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index dad9424e..ba30d024 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -11,7 +11,99 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "..\inc\mControl_config.h"
++#include "..\inc\mControl_dialog.h"
+ 
+ namespace mControl
+ {
++    WindowConfig::WindowConfig(HINSTANCE hInst) :
++        m_Wcex(),
++        m_Title(TEXT(APP_NAME)),
++        m_ClassName(TEXT(CLASS_NAME)),
++        m_HWnd(),
++        m_HInstance(),    
++        m_HMenu(),
++        m_style(CS_HREDRAW | CS_VREDRAW), 
++        m_exStyle(0), 
++        m_x(CW_USEDEFAULT),
++        m_y(CW_USEDEFAULT),
++        m_width(500),
++        m_height(500)
++    {
++        m_HInstance = hInst;
++    }
++
++    int WindowConfig::registerWindow()
++    {
++        m_Wcex.cbSize = sizeof(WNDCLASSEX);
++        m_Wcex.style          = m_style;
++        m_Wcex.lpfnWndProc    = Dialog::WndProc;
++        m_Wcex.cbClsExtra     = 0;
++        m_Wcex.cbWndExtra     = 0;
++        m_Wcex.hInstance      = m_HInstance;
++        m_Wcex.hIcon          = LoadIcon(m_HInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++        m_Wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
++        m_Wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
++        m_Wcex.lpszMenuName   = NULL;
++        m_Wcex.lpszClassName  = m_ClassName;
++        m_Wcex.hIconSm        = LoadIcon(m_Wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++
++        if (!RegisterClassEx(&m_Wcex))
++        {
++            MessageBox(NULL,
++                _T("Call to RegisterClassEx failed!"),
++                _T("Win32 Guided Tour"),
++                NULL);
++
++            return 1;
++        }
++    }
++
++    int WindowConfig::createWindow()
++    {
++        // The parameters to CreateWindow explained:
++        // m_ClassName: the name of the application
++        // m_Title: the text that appears in the title bar
++        // WS_OVERLAPPEDWINDOW: the type of window to create
++        // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
++        // m_width, m_height: initial size (width, length)
++        // NULL: the parent of this window
++        // NULL: this application dows not have a menu bar
++        // m_HInstance: the first parameter from WinMain
++        // NULL: not used in this application
++        m_HWnd = ::CreateWindow(
++            m_ClassName,
++            m_Title,
++            m_style,
++            CW_USEDEFAULT, CW_USEDEFAULT,
++            m_width, m_height,
++            NULL,
++            NULL,
++            m_HInstance,
++            NULL
++        );
++
++        if (!m_HWnd)
++        {
++            MessageBox(NULL,
++                _T("Call to CreateWindow failed!"),
++                _T("Win32 Guided Tour"),
++                NULL);
++
++            return 1;
++        }
++    }
++
++    HWND WindowConfig::getHwnd()
++    {
++        return m_HWnd;
++    }
++
++    void WindowConfig::showWindow(int cmd)
++    {
++        // The parameters to ShowWindow explained:
++        // hWnd: the value returned from CreateWindow
++        // nCmdShow: the fourth parameter from WinMain
++        ::ShowWindow(m_HWnd, cmd); 
++        UpdateWindow(m_HWnd);
++    }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 68fcc219..89b3d05a 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -16,6 +16,7 @@
+ #include "..\inc\mControl_impl.h"
+ #include "..\inc\mControl_notification.h"
+ #include "..\inc\mControl_dialog.h"
++#include "..\inc\mControl_def.h"
+ 
+ //Poco inlcudes
+ #include "Poco/ThreadPool.h"
+@@ -23,6 +24,7 @@
+ 
+ //Materna includes
+ #include "trc/trace.h"
++#include "..\inc\mControl_config.h"
+ 
+ //Windows includes
+ #include <windows.h>
+@@ -37,13 +39,10 @@ using Poco::ThreadPool;
+ using Poco::AutoPtr;
+ 
+ 
+-// Global variables                                                 //VARIABLEN IN KLASSE PACKEN
+ 
+-    // The main window class name.
+-    static TCHAR szWindowClass[] = _T("win32app");
++// Global variables                                                 //VARIABLEN IN KLASSE PACKEN
+ 
+-    // The string that appears in the application's title bar.
+-    static TCHAR szTitle[] = _T("mConrol");
++    
+ 
+     HINSTANCE hInst;
+ 
+@@ -63,70 +62,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
+ {
+ 
+     WNDCLASSEX wcex;
++    mControl_Impl impl;
+ 
+-    wcex.cbSize = sizeof(WNDCLASSEX);
+-    wcex.style          = CS_HREDRAW | CS_VREDRAW;
+-    wcex.lpfnWndProc    = Dialog::WndProc;
+-    wcex.cbClsExtra     = 0;
+-    wcex.cbWndExtra     = 0;
+-    wcex.hInstance      = hInstance;
+-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+-    wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
+-    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
+-    wcex.lpszMenuName   = NULL;
+-    wcex.lpszClassName  = szWindowClass;
+-    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+-
+-    if (!RegisterClassEx(&wcex))
+-    {
+-        MessageBox(NULL,
+-            _T("Call to RegisterClassEx failed!"),
+-            _T("Win32 Guided Tour"),
+-            NULL);
+-
+-        return 1;
+-    }
+-
+-    hInst = hInstance; // Store instance handle in our global variable
+-
+-    // The parameters to CreateWindow explained:
+-    // szWindowClass: the name of the application
+-    // szTitle: the text that appears in the title bar
+-    // WS_OVERLAPPEDWINDOW: the type of window to create
+-    // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
+-    // 500, 100: initial size (width, length)
+-    // NULL: the parent of this window
+-    // NULL: this application dows not have a menu bar
+-    // hInstance: the first parameter from WinMain
+-    // NULL: not used in this application
+-    HWND hWnd = CreateWindow(
+-        szWindowClass,
+-        szTitle,
+-        WS_OVERLAPPEDWINDOW,
+-        CW_USEDEFAULT, CW_USEDEFAULT,
+-        500, 100,
+-        NULL,
+-        NULL,
+-        hInstance,
+-        NULL
+-    );
+-
+-    if (!hWnd)
+-    {
+-        MessageBox(NULL,
+-            _T("Call to CreateWindow failed!"),
+-            _T("Win32 Guided Tour"),
+-            NULL);
+-
+-        return 1;
+-    }
+-
+-    // The parameters to ShowWindow explained:
+-    // hWnd: the value returned from CreateWindow
+-    // nCmdShow: the fourth parameter from WinMain
+-    ShowWindow(hWnd,
+-        nCmdShow);
+-    UpdateWindow(hWnd);
++    WindowConfig windowConfig(hInstance);
++    windowConfig.registerWindow();
++    windowConfig.createWindow();
++    windowConfig.showWindow(nCmdShow);
+ 
+     // Main message loop:
+     MSG msg;
+-- 
+2.41.0.windows.1
+

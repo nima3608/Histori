@@ -1,0 +1,550 @@
+From 6cac1757ad843d2e5d7304c6423740fd127a8c43 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 16 Feb 2012 12:33:28 +0000
+Subject: [PATCH 0241/1076] Bugfixing (VC10 related) Reduce the number of
+ compiler warnings, introducing "multiline_macro.h" Mantis 0022440
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@293 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/multiline_macro.h    | 51 +++++++++++++++++++
+ .../Interfaces/inc/Tools/traces.hpp           |  6 +--
+ .../Interfaces/inc/Tools/tracesMac.hpp        | 36 +++++++------
+ .../Massai/cpp/CfgClnt/inc/nConfig_I.hpp      | 13 ++++-
+ .../cpp/CfgClnt/src/nConfigBasicNumber.cpp    | 33 +++++-------
+ .../cpp/CfgClnt/src/nConfigBasicSelection.cpp | 28 +++++-----
+ .../cpp/CfgClnt/src/nConfigBasicText.cpp      | 28 +++++-----
+ .../cpp/CfgClnt/src/nConfigBasicTextList.cpp  | 30 +++++------
+ 8 files changed, 136 insertions(+), 89 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/multiline_macro.h
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/multiline_macro.h b/SelfServiceCommon/Interfaces/inc/Tools/multiline_macro.h
+new file mode 100644
+index 00000000..daeda551
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/multiline_macro.h
+@@ -0,0 +1,51 @@
++/**
++ **************************************************************************
++ *
++ * @file multiline_macro.h
++ *
++ * Help getting rid of compiler warnings for the
++ *     do{ \
++ *       ... \
++ *       } while(0)
++ * pattern. replace the sequence above by:
++ *     MULTILINE_MACRO_BEGIN() \
++ *     ... \
++ *     MULTILINE_MACRO_END()
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MULTILINE_MACRO_H
++#define MULTILINE_MACRO_H
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#define MULTILINE_MACRO_BEGIN() \
++      do \
++      { \
++
++#if defined(_MSC_VER) && _MSC_VER > 1200
++   // Recent VC compilers support the __pragma syntax
++#define MULTILINE_MACRO_END() \
++      __pragma(warning(push)) \
++      __pragma(warning(disable:4127)) \
++      } while( 0 ) \
++      __pragma(warning(pop))
++#else
++   // For other compilers ...
++#define MULTILINE_MACRO_END() \
++      } while( 0 )
++#endif
++
++#endif // #ifndef MULTILINE_MACRO_H
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/traces.hpp b/SelfServiceCommon/Interfaces/inc/Tools/traces.hpp
+index 985e0a01..ea3f536d 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/traces.hpp
++++ b/SelfServiceCommon/Interfaces/inc/Tools/traces.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Jürgen Kreierhoff
+  *
+- * Copyright (c) 2009-2010 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -136,12 +136,12 @@ namespace traces
+        *
+        * Attribute getter.
+        *
+-       * @param Topic:  The topic to query.
++       * @param:        The topic to query.
+        *
+        * @return:       Is the topic enabled?
+        *
+       **/
+-      virtual bool enabled( topic Topic ) const
++      virtual bool enabled( topic ) const
+       {
+          //! Assume the topic diabled, if not overloaded
+          return false;
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/tracesMac.hpp b/SelfServiceCommon/Interfaces/inc/Tools/tracesMac.hpp
+index de24aad0..ce66b021 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/tracesMac.hpp
++++ b/SelfServiceCommon/Interfaces/inc/Tools/tracesMac.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2010-2011 MATERNA Information & Communications
++ * Copyright (c) 2010-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,6 +17,7 @@
+ #pragma message("including: " __FILE__)
+ #endif
+ 
++#include "tools/multiline_macro.h"
+ #include "tools/traces.hpp"
+ 
+ #include <sstream>
+@@ -79,6 +80,12 @@ namespace traces
+       //! Default constructor - intentionally not implemented.
+       metaLFL();
+ 
++      //! Copy constructor - intentionally not implemented.
++      metaLFL( metaLFL const & Src );
++
++      //! Assignment - intentionally not implemented.
++      metaLFL & operator=( metaLFL const & Src );
++
+    };
+ 
+ 
+@@ -101,17 +108,15 @@ namespace traces
+  *
+ **/
+ #define TRC_X( Level, Msg ) \
+-      do \
+-      { \
+-         if( Level <= Trc.currentLevel() ) \
++      MULTILINE_MACRO_BEGIN() \
++      if( Level <= Trc.currentLevel() ) \
+          { \
+             static traces::metaLFL Meta( Level, __FILE__, __LINE__ ); \
+             std::ostringstream Strm; \
+             Strm << Msg; \
+             Trc.write(  Meta, Strm.str().c_str() ); \
+          } \
+-      } while( 0 )
+-
++      MULTILINE_MACRO_END()
+ 
+ /**
+  *
+@@ -132,17 +137,16 @@ namespace traces
+  *
+ **/
+ #define TRC_X_TOPIC( Topic, Level, Msg ) \
+-      do \
++      MULTILINE_MACRO_BEGIN() \
++      if( Trc.enabled( Topic ) && \
++          ( Level <= Trc.currentLevel() ) ) \
+       { \
+-         if( Trc.enabled( Topic ) && \
+-             ( Level <= Trc.currentLevel() ) ) \
+-         { \
+-            static traces::metaLFL Meta( Level, __FILE__, __LINE__ ); \
+-            std::ostringstream Strm; \
+-            Strm << Msg; \
+-            Trc.write(  Meta, Strm.str().c_str() ); \
+-         } \
+-      } while( 0 )
++         static traces::metaLFL Meta( Level, __FILE__, __LINE__ ); \
++         std::ostringstream Strm; \
++         Strm << Msg; \
++         Trc.write(  Meta, Strm.str().c_str() ); \
++      } \
++      MULTILINE_MACRO_END()
+ 
+ 
+ /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/inc/nConfig_I.hpp b/SelfServiceCommon/Massai/cpp/CfgClnt/inc/nConfig_I.hpp
+index 97ee4d12..05b0764f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/inc/nConfig_I.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/inc/nConfig_I.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2000-2006, MATERNA Information & Communications
++ * Copyright (c) 2000-2012, MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -42,7 +42,7 @@ namespace nConfig
+        * Refers the client class.
+        *
+       **/
+-      nConfig::gclBase *        M_HandleUser;
++      nConfig::gclBase * const  M_HandleUser;
+ 
+       bool                      M_ListenerStatus;
+ 
+@@ -70,6 +70,15 @@ namespace nConfig
+       {
+       }
+ 
++      /**
++       *
++       * Destructor
++       *
++      **/
++      ~gclBase_Handle()
++      {
++      }
++
+       /**
+        *
+        * Disable calling valueChanged()
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
+index a57bc5c0..abd17169 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2008 MATERNA Information & Communications
++ * Copyright (c) 2007-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -19,6 +19,7 @@
+ #include "CfgMgr.h"
+ #include "cfgclnt/CfgMgrIPC.h"
+ #include "systools/mAutoMutex.hpp"
++#include "tools/multiline_macro.h"
+ 
+ #include <iostream>
+ 
+@@ -29,52 +30,46 @@
+ #define CBNST "nConfig::basicNumber::set"
+ 
+ #define THROW_( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_A( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_AccessNotAuthorized( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_E( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemAlreadyExists( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_I( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_R( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_OutOfRange( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_S( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ServantNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
+index 39a35f6b..936fe78a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicSelection.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2008 MATERNA Information & Communications
++ * Copyright (c) 2007-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -19,6 +19,7 @@
+ #include "CfgMgr.h"
+ #include "cfgclnt/CfgMgrIPC.h"
+ #include "systools/mAutoMutex.hpp"
++#include "tools/multiline_macro.h"
+ 
+ #include <iostream>
+ 
+@@ -29,44 +30,39 @@
+ #define CBSSTS  "nConfig::basicSelection::setString"
+ 
+ #define THROW_( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_A( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_AccessNotAuthorized( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_E( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemAlreadyExists( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_I( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_S( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ServantNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
+index a1363c93..dc87e612 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicText.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2005-2008 MATERNA Information & Communications
++ * Copyright (c) 2005-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -19,6 +19,7 @@
+ #include "CfgMgr.h"
+ #include "cfgclnt/CfgMgrIPC.h"
+ #include "systools/mAutoMutex.hpp"
++#include "tools/multiline_macro.h"
+ 
+ #include <iostream>
+ 
+@@ -28,44 +29,39 @@
+ #define CBTST "nConfig::basicText::set"
+ 
+ #define THROW_( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_A( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_AccessNotAuthorized( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_E( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemAlreadyExists( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_I( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_S( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ServantNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
+index bda5b02e..290afda7 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicTextList.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007-2009 MATERNA Information & Communications
++ * Copyright (c) 2007-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -24,6 +24,7 @@
+ #include "CfgMgr.h"
+ #include "cfgclnt/CfgMgrIPC.h"
+ #include "systools/mAutoMutex.hpp"
++#include "tools/multiline_macro.h"
+ 
+ #include <iostream>
+ 
+@@ -33,44 +34,39 @@
+ #define CBTLST  "nConfig::basicTextList::set"
+ 
+ #define THROW_( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_A( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_AccessNotAuthorized( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_E( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemAlreadyExists( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_I( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ItemNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ #define THROW_S( I, S ) \
+-   do \
+-   { \
++      MULTILINE_MACRO_BEGIN() \
+       if( M_pOS ) \
+          *M_pOS << S << " Item=" << I << std::endl; \
+       throw nConfig::exception_ServantNotFound( I, S ); \
+-   } while(0)
++      MULTILINE_MACRO_END()
+ 
+ 
+    /**
+@@ -85,7 +81,7 @@ namespace
+ {
+ 
+ 
+-   
++
+ 
+ 
+    /**
+-- 
+2.41.0.windows.1
+

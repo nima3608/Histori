@@ -1,0 +1,276 @@
+From 6f058454d07645a0265472b248ad5437a61efbef Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 7 Nov 2014 14:47:53 +0000
+Subject: [PATCH 0524/1000] MANTIS 0032431 -global NotificationQueue -process
+ class implementation
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@755 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |   4 +
+ .../cpp/mControl/inc/mControl_process.h       | 108 ++++++++++++++++++
+ .../Massai/cpp/mControl/inc/mControl_reboot.h |  95 +++++++++++++++
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |   1 +
+ 4 files changed, 208 insertions(+)
+ create mode 100644 SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 39b26f3e..165a75f9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -15,6 +15,7 @@
+ 
+ //Project includes
+ #include "..\inc\mControl_def.h"
++#include "..\inc\mControl_notification.h"
+ 
+ //MATERNA includes
+ #include "text/cEnvSubst.hpp"
+@@ -57,6 +58,8 @@ namespace mControl
+ 
+         CEnvSubst   m_EnvS;
+ 
++        NotificationQueue  m_queue;
++
+     public:
+         GlobalConfig();
+         ~GlobalConfig();
+@@ -83,6 +86,7 @@ namespace mControl
+ 
+         ThreadPool& getThreadPool(){ return m_threadPool; }
+         CEnvSubst& getEnvS(){ return m_EnvS; }
++        NotificationQueue& getQueue(){ return m_queue; }
+ 
+ 
+     
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
+new file mode 100644
+index 00000000..4a17a8c2
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
+@@ -0,0 +1,108 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_process.h
++//
++//  purpose:    class definition: ProcessCallback
++//
++//  date:       06.11.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#ifndef CALLBACK_H
++#define CALLBACK_H
++
++//Project includes
++#include "mControl_config.h"
++
++//Materna includes
++#include "systools/mSysProcess.hpp"
++
++//Compiler includes
++#include <string.h>
++
++
++using namespace std;
++
++namespace mControl
++{
++    class ProcessCallback :
++       public mSysProcess::callBack
++    {
++    private:
++       string const         m_appName;
++       string const         m_streamName;
++       GlobalConfig&        m_globalConfig;
++       
++
++    public:
++        /**
++        *   Constructor.
++        *   @param AppName:         calling Application
++        *   @param m_streamName:    which callback is created. Example STDERR
++        **/
++        ProcessCallback( char const * App, char const * m_streamName, GlobalConfig& config );
++
++        ~ProcessCallback();
++
++        /**
++        *   Traces the given Line
++        *   @param Line:    the Line to Trace
++        **/
++        void lineOut( char const * Line ) const;
++    };
++
++
++    
++    class ProcessControl
++    {
++        class impl;
++
++    private:
++       impl *                               m_impl;
++
++
++    public:
++
++       ProcessControl
++          (
++             mSysProcess::parent & parent,
++             char const * application_name,
++             GlobalConfig& config
++          );
++
++       ~ProcessControl() throw();
++
++       char const * getName() const;
++
++       mSysProcess::status getStatus() const;
++
++       void kill();
++
++       void signalStop();
++
++       mSysProcess::child * getProcess();
++
++    };
++
++
++    class ProcessListMonitor
++    {
++    private:
++       std::list<ProcessControl *>        m_list;
++
++    public:
++
++       ProcessListMonitor();
++
++       ~ProcessListMonitor() throw();
++
++       void add( ProcessControl * processcontrol );
++
++       void check();
++
++    };
++
++} //end namespace mControl
++#endif //endif CALLBACK_H
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+new file mode 100644
+index 00000000..efd7943d
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+@@ -0,0 +1,95 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_reboot.h
++//
++//  purpose:    class definition: KioskReboot
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#ifndef MCONTROL_REBOOT_H
++#define MCONTROL_REBOOT_H
++
++//Project includes
++#include "..\inc\mControl_def.h"
++#include "..\inc\mControl_scheduler.h"
++#include "..\inc\mControl_config.h"
++#include "..\inc\mControl_servant.h"
++
++//MATERNA includes
++#include "massaidll/mTime.hpp"
++#include "massaidll/mDate.hpp"
++
++//Poco includes
++#include "Poco/NotificationQueue.h"
++#include "Poco/Runnable.h"
++
++
++using Poco::Runnable;
++using Poco::NotificationQueue;
++
++namespace mControl
++{
++    class KioskReboot : public Runnable
++    {
++      private:
++        long                        m_startDelay;
++        NotificationQueue &         m_notificationQueue;  
++        GlobalConfig&               m_globalConfig;
++        MControlServant*            m_servant;
++
++        /**
++        * may needed, when using the Task class of Poco
++        */
++        void doTask();
++
++      public:
++        //TODO: implement correct functionality
++        /**
++        * Needs to be implemented from the Runnable interface.
++        * Here the kiosk is rebooted once per day
++        */
++        void run();
++
++
++        //TODO: implement
++        /**
++        * default implementation
++        *
++        * Saves the last reboot
++        * @return long - successful completion
++        */
++        long saveRebootDate();
++
++
++        //TODO: implement
++        /**
++        *
++        * Reads the last reboot-date of the Kiosk in a file,
++        * The File is administrated by the controllerServant-attribute of the class.
++        *
++        * @param lastDate : mDate* - pointer to the date Variable
++        * @return long - successful
++        */
++        long getRebootDate(mDate* lastDate);
++
++        
++
++        /**
++        * getter Methods
++        */
++        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        long getDelay(){ return m_startDelay; }
++
++
++
++        //Constructor
++	      KioskReboot(long sDelay, NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
++        //Destructor
++	      ~KioskReboot();
++    };
++}
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index a283493f..e63ac2eb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -33,6 +33,7 @@
+     #define SCHEDULER_ID    101
+     #define DIALOG_ID       102
+     #define WORKER_ID       103
++    #define CONFIG_ID       104
+ 
+ 
+     //WIN-Api specific names
+-- 
+2.41.0.windows.1
+

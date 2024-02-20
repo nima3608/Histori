@@ -1,0 +1,118 @@
+From 97a7da091ef00f5d77ab9db398554176c0e47b89 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 18 Nov 2015 20:41:35 +0000
+Subject: [PATCH 0623/1000] MANTIS 0037350 extension: integration of EZ-Access
+ device for KIS kiosk
+
+keyboard.idl
+V1.0
+- use keyPressed instead of keyUp/keyDown
+
+textidl.lib
+V1.0.0.12
+- use keyPressed instead of keyUp/keyDown
+
+massai_systools.lib
+V1.0.0.30
+- use first matching keyboard filter in findkeyboardfilter
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@927 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/mSysFindKeyboardFilter.cpp |  5 +++--
+ .../Massai/cpp/textIDL/src/textKeyboard.cpp     | 17 +++++------------
+ .../Massai/idl/Massai/keyboard.idl              |  3 +--
+ 3 files changed, 9 insertions(+), 16 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+index f86cd1da..e6c02afa 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+@@ -1,5 +1,6 @@
+ // keyboard filter helper functions
+ 
++#include "text/textTools.h"
+ #include "systools/mSysFindKeyboardFilter.h"
+ #include "mSysErrorW32.h"
+ #include "mSysUSBDeviceW32.h"
+@@ -39,7 +40,7 @@ namespace
+ {
+   FindKeyboardFilter::FindKeyboardFilter(Search search, const std::string& name, TraceInterface& trc):
+     m_search(search),
+-    m_name(name),
++    m_name(MASSAI::text::toLower(name)),
+     m_trc(trc)
+   {}
+ 
+@@ -55,12 +56,12 @@ namespace
+       for(DWORD i = 0;; i++)
+       {
+         DeviceData devicedata(devices, i, KBFILTER_GUID, m_trc);
+-        DeviceInfo deviceinfo(devices, i, m_trc);
+         std::string name = devicedata.getDeviceName();
+         m_trc.writeTrace(BasicRuntime_HERE, "name: (%s)", name.c_str());
+         if(name.find(DEVICE_ID + m_name) != std::string::npos)
+         {
+           result = name;
++          break;
+         }
+       }
+     }
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+index 0d2e0dfb..8d1c2abb 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+@@ -203,14 +203,7 @@ namespace ipsKeyboard
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::event& data)
+   {
+     out << keyScanCodeText(data.scanCode);
+-    if(data.keyUp)
+-    {
+-      out << " pressed";
+-    }
+-    if(data.keyDown)
+-    {
+-      out << " released";
+-    }
++    out << (data.keyPressed ? " pressed" : " released");
+     return out;
+   }
+ 
+@@ -233,15 +226,15 @@ namespace ipsKeyboard
+ 
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusResult& data)
+   {
+-    out << "result: (" << data.resultCode << ")";
+-    out << "status: (" << data.status << ")";
++    out << "result(" << data.resultCode << ") ";
++    out << "status(" << data.status << ") ";
+     return out;
+   }
+ 
+   std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::keyboardId& data)
+   {
+-    out << "name: (" << data.deviceName << ")";
+-    out << "id: (" << data.deviceId << ")";
++    out << "name(" << data.deviceName << ") ";
++    out << "id(" << data.deviceId << ") ";
+     return out;
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/idl/Massai/keyboard.idl b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+index df06832f..b98097a0 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+@@ -32,8 +32,7 @@ module ipsKeyboardIDL
+   struct event
+   {
+     keyScanCode scanCode;
+-    boolean keyUp;
+-    boolean keyDown;
++    boolean keyPressed;
+   };
+   
+   typedef sequence<keyScanCode> scanCodeList;
+-- 
+2.41.0.windows.1
+

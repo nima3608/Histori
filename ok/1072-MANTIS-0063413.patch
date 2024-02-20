@@ -1,0 +1,409 @@
+From 71567279a0f932b4b8da852b23ab1a34055eb619 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 15 Sep 2022 20:05:15 +0000
+Subject: [PATCH 1072/1077] MANTIS 0063413 Single PC Solution for SBD -
+ Remoteconnection
+
+SysTools add mSysMonitor::MonitorList
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1746 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysMonitor.h     |  41 ++++
+ .../Massai/cpp/Systools/inc/mSysMonitorW32.h  |  52 +++++
+ .../Massai/cpp/Systools/makefile.mak          |  17 +-
+ .../cpp/Systools/src/TestSysMonitor.cpp       |  11 +
+ .../cpp/Systools/src/mSysMonitorW32.cpp       | 215 ++++++++++++++++++
+ 5 files changed, 333 insertions(+), 3 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysMonitor.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysMonitorW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysMonitor.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysMonitorW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysMonitor.h b/SelfServiceCommon/Interfaces/inc/systools/mSysMonitor.h
+new file mode 100644
+index 00000000..8a265af4
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysMonitor.h
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include "tools/TraceInterface.h"
++#include <list>
++#include <string>
++#include <iostream>
++
++namespace mSysMonitor
++{
++  class MonitorInfo
++  {
++    public:
++      bool attachedToDesktop;
++      bool primaryDevice;
++      bool active;
++      bool attached;
++      unsigned int width;
++      unsigned int height;
++      int left;
++      int top;
++
++      std::string devicename;
++
++      std::string getText() const;
++  };
++
++  class MonitorList
++  {
++    public:
++      MonitorList(MASSAI::trace::TraceInterface& trc);
++
++      const std::list<MonitorInfo>& getList() const;
++      std::string getText() const;
++    private:
++      std::list<MonitorInfo> monitorList;
++  };
++
++  std::ostream& operator<<(std::ostream& out, const MonitorInfo& data);
++  std::ostream& operator<<(std::ostream& out, const std::list<MonitorInfo>& data);
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysMonitorW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysMonitorW32.h
+new file mode 100644
+index 00000000..6b28c7f9
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysMonitorW32.h
+@@ -0,0 +1,52 @@
++#pragma once
++
++#include "systools/mSysMonitor.h"
++
++#include <vector>
++#include <string>
++
++#include <windows.h>
++#include <stdio.h>
++
++namespace mSysMonitor
++{
++  class DisplayDeviceInfo
++  {
++    public:
++      DisplayDeviceInfo(unsigned int displayNum, unsigned int monNum,
++        const DISPLAY_DEVICE& displayDevice, const DISPLAY_DEVICE& displayDeviceMonitor,
++        MASSAI::trace::TraceInterface& trc);
++      ~DisplayDeviceInfo();
++
++      MonitorInfo getDeviceInfo() const;
++      bool hasError() const;
++
++    private:
++      void readName(const CHAR* monitor, const CHAR* device);
++      void readDeviceFlags(DWORD flags);
++      void readMonitorFlags(DWORD flags);
++      void readDeviceMode(const DEVMODE& mode);
++      void readDeviceMode(const CHAR* device);
++
++      MonitorInfo info;
++      bool failed;
++      MASSAI::trace::TraceInterface& trc;
++  };
++
++  class EnumMonitors
++  {
++    public:
++      EnumMonitors(MASSAI::trace::TraceInterface& trc);
++      ~EnumMonitors();
++
++      std::list<MonitorInfo> getDeviceInfoList();
++
++    private:
++      void readList();
++      void readDisplayDevice(DWORD dispNum, const DISPLAY_DEVICE& displayDevice);
++      void readMonitorDevice(DWORD dispNum, const DISPLAY_DEVICE& displayDevice, DWORD monNum, const DISPLAY_DEVICE& displayDeviceMi);
++      MASSAI::trace::TraceInterface& trc;
++      std::list<MonitorInfo> info;
++  };
++}
++
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 8165624e..0bc76397 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -57,6 +57,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysThreadPoolW32.obj \
+                         $(_OBJ)\mSysFindComPortW32.obj \
+                         $(_OBJ)\mSysSmartCardReaderW32.obj \
++                        $(_OBJ)\mSysMonitorW32.obj \
+ 
+ 
+ ######################################################################
+@@ -190,15 +191,25 @@ MY_BIN14_LINKLIBS =     User32.lib
+ 
+ MY_BIN14_OBJS =         $(_OBJ)\TestSysServiceMonitor.obj
+ 
+-######################################################################
++#######################################################################
++#
++#MY_BIN15 =              $(_BIN)\TestSysProcessTerminate.exe
++#
++#MY_BIN15_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++#
++#MY_BIN15_LINKLIBS =     User32.lib
++#
++#MY_BIN15_OBJS =         $(_OBJ)\TestSysProcessTerminate.obj
++#
++#######################################################################
+ 
+-MY_BIN15 =              $(_BIN)\TestSysProcessTerminate.exe
++MY_BIN15 =              $(_BIN)\TestSysMonitor.exe
+ 
+ MY_BIN15_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
+ 
+ MY_BIN15_LINKLIBS =     User32.lib
+ 
+-MY_BIN15_OBJS =         $(_OBJ)\TestSysProcessTerminate.obj
++MY_BIN15_OBJS =         $(_OBJ)\TestSysMonitor.obj
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMonitor.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMonitor.cpp
+new file mode 100644
+index 00000000..1d8c3258
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMonitor.cpp
+@@ -0,0 +1,11 @@
++#include "sysTools/mSysMonitor.h"
++#include "tools/TraceLocal.h"
++#include <iostream>
++
++int main(int argc, char** argv)
++{
++  MASSAI::trace::TraceLocal trc("TestSysMonitor");
++  mSysMonitor::MonitorList monitorList(trc);
++  trc.writeTrace(BasicRuntime_HERE, "%s", monitorList.getText().c_str());
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysMonitorW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMonitorW32.cpp
+new file mode 100644
+index 00000000..127dd716
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMonitorW32.cpp
+@@ -0,0 +1,215 @@
++#include "sysTools/mSysMonitor.h"
++#include "mSysMonitorW32.h"
++
++#include <algorithm>
++#include <functional>
++#include <sstream>
++
++namespace mSysMonitor
++{
++  namespace
++  {
++    void initDevMode(DEVMODE& mode)
++    {
++      ZeroMemory(&mode, sizeof(DEVMODE));
++      mode.dmSize = sizeof(DEVMODE);
++      mode.dmDriverExtra = 0;
++    }
++
++    void initDisplayDevice(DISPLAY_DEVICE& dev)
++    {
++      ZeroMemory(&dev, sizeof(DISPLAY_DEVICE));
++      dev.cb = sizeof(DISPLAY_DEVICE);
++    }
++  }
++
++  DisplayDeviceInfo::DisplayDeviceInfo(unsigned int displayNum, unsigned int monNum,
++    const DISPLAY_DEVICE& displayDevice, const DISPLAY_DEVICE& displayDeviceMonitor,
++      MASSAI::trace::TraceInterface& trc):
++      info(),
++      failed(false),
++      trc(trc)
++  {
++    if(displayDevice.DeviceName[0])
++    {
++      readDeviceFlags(displayDevice.StateFlags);
++      readMonitorFlags(displayDeviceMonitor.StateFlags);
++      readName(displayDeviceMonitor.DeviceName, displayDevice.DeviceName);
++      readDeviceMode(displayDevice.DeviceName);
++    }
++    else
++    {
++      failed = true;
++      trc.writeTrace(MajorError_HERE, "No deviceName found for display: %d/Monitor %d", displayNum, monNum);
++    }
++  }
++
++  void DisplayDeviceInfo::readDeviceMode(const CHAR* device)
++  {
++    DEVMODE mode;
++    initDevMode(mode);
++    if(EnumDisplaySettingsEx(device, ENUM_CURRENT_SETTINGS, &mode, EDS_ROTATEDMODE))
++    {
++      readDeviceMode(mode);
++    }
++    else
++    {
++      failed = true;
++      trc.writeTrace(MajorError_HERE, "EnumDisplaySettingsEx failed for %s", device);
++    }
++  }
++
++  void DisplayDeviceInfo::readDeviceMode(const DEVMODE& mode)
++  {
++    info.width = mode.dmPelsWidth;
++    info.height = mode.dmPelsHeight;
++    info.left = mode.dmPosition.x;
++    info.top = mode.dmPosition.y;
++  }
++
++  void DisplayDeviceInfo::readName(const CHAR* monitor, const CHAR* device)
++  {
++    info.devicename = monitor[0] ? monitor : device;
++  }
++
++  void DisplayDeviceInfo::readDeviceFlags(DWORD flags)
++  {
++    info.attachedToDesktop = (flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
++    info.primaryDevice = (flags & DISPLAY_DEVICE_PRIMARY_DEVICE) != 0;
++  }
++
++  void DisplayDeviceInfo::readMonitorFlags(DWORD flags)
++  {
++    info.active = (flags & DISPLAY_DEVICE_ACTIVE) != 0;
++    info.attached = (flags & DISPLAY_DEVICE_ATTACHED) != 0;
++  }
++
++  DisplayDeviceInfo::~DisplayDeviceInfo()
++  {}
++
++  MonitorInfo DisplayDeviceInfo::getDeviceInfo() const
++  {
++    return info;
++  }
++
++  bool DisplayDeviceInfo::hasError() const
++  {
++    return failed;
++  }
++
++
++  void EnumMonitors::readList()
++  {
++    DISPLAY_DEVICE displayDevice;
++    initDisplayDevice(displayDevice);
++    DWORD dispNum = 0;
++    // get all display devices
++    while(EnumDisplayDevices(NULL, dispNum, &displayDevice, EDD_GET_DEVICE_INTERFACE_NAME))
++    {
++      readDisplayDevice(dispNum, displayDevice);
++
++      initDisplayDevice(displayDevice);
++      dispNum++;
++    }
++  }
++
++  void EnumMonitors::readDisplayDevice(DWORD dispNum, const DISPLAY_DEVICE& displayDevice)
++  {
++    DISPLAY_DEVICE displayDeviceMi;
++    initDisplayDevice(displayDeviceMi);
++    DWORD monNum = 0;
++    while(EnumDisplayDevices(displayDevice.DeviceName, monNum, &displayDeviceMi, 0))
++    {
++      readMonitorDevice(dispNum, displayDevice, monNum, displayDeviceMi);
++      initDisplayDevice(displayDeviceMi);
++      monNum++;
++    }
++  }
++
++  void EnumMonitors::readMonitorDevice(DWORD dispNum, const DISPLAY_DEVICE& displayDevice, DWORD monNum, const DISPLAY_DEVICE& displayDeviceMi)
++  {
++    if(displayDeviceMi.DeviceString[0] && !(displayDeviceMi.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER))
++    {
++      DisplayDeviceInfo deviceInfo = DisplayDeviceInfo(dispNum, monNum, displayDevice, displayDeviceMi, trc);
++      if(!deviceInfo.hasError())
++      {
++        info.push_back(deviceInfo.getDeviceInfo());
++      }
++    }
++  }
++
++  EnumMonitors::EnumMonitors(MASSAI::trace::TraceInterface& trc):
++    info(),
++    trc(trc)
++  {
++    readList();
++  }
++
++  EnumMonitors::~EnumMonitors()
++  {}
++
++  std::list<MonitorInfo> EnumMonitors::getDeviceInfoList()
++  {
++    return info;
++  }
++
++
++  MonitorList::MonitorList(MASSAI::trace::TraceInterface& trc)
++  {
++    EnumMonitors getList(trc);
++    monitorList = getList.getDeviceInfoList();
++  }
++
++  const std::list<MonitorInfo>& MonitorList::getList() const
++  {
++    return monitorList;
++  }
++
++  std::string MonitorList::getText() const
++  {
++    std::ostringstream out;
++    out << monitorList;
++    return out.str();
++  }
++
++  std::string MonitorInfo::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  std::ostream& operator<<(std::ostream& out, const MonitorInfo& data)
++  {
++    out << "name: " << data.devicename << "; ";
++    out << "position: " << data.left << "/" << data.top << "; ";
++    out << "size: " << data.width << "/" << data.height << "; ";
++    if(data.primaryDevice)
++    {
++      out << "primary; ";
++    }
++    if(data.attached)
++    {
++      out << "attached; ";
++    }
++    if(data.attachedToDesktop)
++    {
++      out << "attachedToDesktop; ";
++    }
++    if(data.active)
++    {
++      out << "active; ";
++    }
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const std::list<MonitorInfo>& data)
++  {
++    for(std::list<mSysMonitor::MonitorInfo>::const_iterator it = data.begin(); it != data.end(); it++)
++    {
++      out << *it << std::endl;
++    }
++    return out;
++  }
++
++}
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

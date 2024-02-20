@@ -1,0 +1,319 @@
+From 2e7bea5af9756a913f2f263fc96eb9549d21bede Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 13 Aug 2012 16:44:34 +0000
+Subject: [PATCH 0246/1000] Mantis 24166
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@389 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Text/makefile.mak              |   8 +
+ .../Massai/cpp/Text/src/TraceEventTimes.cpp   | 281 ++++++++++++++++++
+ 2 files changed, 289 insertions(+)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/TraceEventTimes.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index e70c11f3..20143e1f 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -57,4 +57,12 @@ MY_BIN4_OBJS =          $(_OBJ)\Hex2Bin.obj
+ 
+ ######################################################################
+ 
++MY_BIN5 =               $(_BIN)\TraceEventTimes.exe
++
++MY_BIN5_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
++
++MY_BIN5_OBJS =          $(_OBJ)\TraceEventTimes.obj
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/TraceEventTimes.cpp b/SelfServiceCommon/Massai/cpp/Text/src/TraceEventTimes.cpp
+new file mode 100644
+index 00000000..2a8c86c7
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/TraceEventTimes.cpp
+@@ -0,0 +1,281 @@
++/**
++ **************************************************************************
++ *
++ * @file TraceEventTimes.cpp
++ *
++ * Analyze a tracefile for a sequence of patterns and print the respective
++ * differences (delta) from a start start_pattern.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "text/mArgScan.hpp"
++#include "tools/mInFile.hpp"
++
++#include <list>
++#include <string>
++#include <iomanip>
++#include <sstream>
++
++#include <iostream>
++using namespace std;
++
++
++
++typedef std::list<std::string> stringlist_t;
++
++
++
++namespace
++{
++
++
++   std::string nextline
++      (
++         std::string const & src,
++         size_t & offset,
++         std::string const & start_pattern
++      )
++   {
++      offset = src.find( start_pattern, offset );
++      if( offset != std::string::npos )
++      {
++         size_t off_b = src.find_last_of( "\n\r", offset );
++         size_t off_e = src.find_first_of( "\n\r", offset );
++         if (
++               ( off_b != std::string::npos ) &&
++               ( off_e != std::string::npos )
++            )
++         {
++            return src.substr( off_b + 1, ( off_e - off_b )  - 1 );
++         }
++      }
++      return "";
++   }
++
++
++   int diff( int d1, int d2, int limit, int & over )
++   {
++      over = 0;
++      int diff = d1 - d2;
++      while( diff < 0 )
++      {
++         diff += limit;
++         over += 1;
++      }
++      return diff;
++   }
++
++
++   std::string timeDiff( std::string const & t1, std::string const & t2 )
++   {
++      struct ttime
++      {
++         int    year;
++         int    mont;
++         int    days;
++         int    hour;
++         int    mins;
++         int    secs;
++         int    csec;
++      };
++      ttime t1_time, t2_time, d_time;
++      if (
++            sscanf
++            (
++               t1.c_str(),
++               "%02d.%02d.%04d %02d:%02d:%02d.%02d",
++               &t1_time.days,
++               &t1_time.mont,
++               &t1_time.year,
++               &t1_time.hour,
++               &t1_time.mins,
++               &t1_time.secs,
++               &t1_time.csec
++            ) < 1
++         )
++      {
++         return "";
++      }
++      if (
++            sscanf
++            (
++               t2.c_str(),
++               "%02d.%02d.%04d %02d:%02d:%02d.%02d",
++               &t2_time.days,
++               &t2_time.mont,
++               &t2_time.year,
++               &t2_time.hour,
++               &t2_time.mins,
++               &t2_time.secs,
++               &t2_time.csec
++            ) < 6
++         )
++      {
++         return "";
++      }
++
++      int over( 0 );
++      d_time.csec = diff( t1_time.csec, t2_time.csec, 100, over );
++      d_time.secs = diff( t1_time.secs, t2_time.secs, 60, over );
++      d_time.mins = diff( t1_time.mins, t2_time.mins + over, 60, over );
++      d_time.hour = diff( t1_time.hour, t2_time.hour + over, 60, over );
++
++      std::ostringstream oss;
++      oss << "+ ";
++      bool mdiff( false );
++      if( d_time.hour || mdiff )
++      {
++         mdiff = true;
++         oss << setfill ('0') << setw (2) << d_time.hour << ":";
++      }
++      else
++      {
++         oss << "   ";
++      }
++      if( d_time.mins || mdiff )
++      {
++         mdiff = true;
++         oss << setfill ('0') << setw (2) << d_time.mins << ":";
++      }
++      else
++      {
++         oss << "   ";
++      }
++      if( d_time.secs || mdiff )
++      {
++         mdiff = true;
++         oss << setfill ('0') << setw (2) << d_time.secs << ".";
++      }
++      else
++      {
++         oss << " 0.";
++      }
++      oss << setfill ('0') << setw (1) << d_time.csec / 10;
++      return oss.str();
++   }
++
++
++   std::string timeEx( std::string const & line )
++   {
++      if( line.size() > 22 )
++         return line.substr( 0, 22 );
++      else
++         return "-----------";
++   }
++
++
++   void analyze
++      (
++         std::string const & src,
++         std::string const & start_pattern,
++         stringlist_t followup_patterns
++      )
++   {
++      unsigned offset_fst( 0 );
++      cout << "\n  HH:MM:SS.C |  Traceline" << endl;
++      cout << "-------------+"
++              "-----------------------------------------------------"
++           << endl;
++      while( offset_fst != std::string::npos )
++      {
++         std::string const line_start =
++            nextline( src, offset_fst, start_pattern );
++         std::string const time_start = timeEx( line_start );
++         cout << "\n             | " << line_start.c_str() << endl;
++         if( offset_fst != std::string::npos )
++         {
++            unsigned offset_lst( offset_fst += 1 );
++            std::string const line_lst =
++               nextline( src, offset_lst, start_pattern );
++            std::string subsrc;
++            if( offset_lst != std::string::npos )
++               subsrc = src.substr( offset_fst, offset_lst - offset_fst );
++            else
++               subsrc = src.substr( offset_fst );
++            for(
++                  stringlist_t::const_iterator it =
++                     followup_patterns.begin();
++                  it != followup_patterns.end();
++                  ++it
++               )
++            {
++               size_t sub_off = 0;
++               std::string const line = nextline( subsrc, sub_off, *it );
++               if( !line.empty() )
++               {
++                  cout << timeDiff( timeEx( line ), time_start )
++                       << " | " << line << endl;
++               }
++            }
++            offset_fst = offset_lst;
++         }
++      }
++      cout << "-------------+"
++              "-----------------------------------------------------"
++           << endl;
++   }
++
++
++}
++
++
++
++int main( int argc, char **argv )
++{
++   argScan arg( argc, argv );
++   char const * tracefile = arg.option( "TRACEFILE" );
++   char const * start_pattern = arg.argument( 1 );
++   if( arg.help() || (!tracefile) || (!start_pattern) )
++   {
++      cout << "Usage: TraceEventTimes"
++              " -tracefile:<tracefile> <start-pattern>"
++              " [ <follow-up-pattern> ]*" << endl;
++      return 0;
++   }
++   mInFile<std::string> infile( tracefile );
++   std::string const in = infile.container();
++   if( in.empty() )
++   {
++      cout << "TraceEventTimes: Error, no data in file "
++           << tracefile << "!" << endl;
++      return 1;
++   }
++   stringlist_t followup_patterns;
++   int f_index = 2;
++   char const * fx = arg.argument( f_index++ );
++   while( fx )
++   {
++      followup_patterns.push_back( fx );
++      fx = arg.argument( f_index++ );
++   }
++   cout << "\n* * * * * * * TraceEventTimes * * * * * * *"
++           "\n*"
++           "\n*     analyzing          \""
++        << tracefile << "\"\n*     start-pattern:     \"" << start_pattern
++        << "\"";
++   for(
++         stringlist_t::const_iterator it = followup_patterns.begin();
++         it != followup_patterns.end();
++         ++it
++      )
++   {
++      cout << "\n*     follow-up-pattern: \"" << *it << "\"";
++   }
++   cout << "\n*" << endl;
++   analyze( in, start_pattern, followup_patterns );
++   return 0;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

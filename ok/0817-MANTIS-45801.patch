@@ -1,0 +1,222 @@
+From c51ee0cb85c333c065f88dbe69f2dea975a7f8cb Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 12 Jan 2018 16:35:28 +0000
+Subject: [PATCH 0817/1000] MANTIS 45801 Mantis 45801: MassaiCfgxB: many trace
+ files Make an informative log entry for opening or closing of log files to -
+ get more infortmation for the "many files" problem - prevent "empty file"
+ cause for this error
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1303 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Tools/inc/local_def_msystools.h       | 13 ++-
+ .../Massai/cpp/Tools/src/tracesFiler.cpp      | 97 +++++++++++--------
+ 2 files changed, 66 insertions(+), 44 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index ed534ace..c5706b11 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,21
+-#define FILE_VER_STR     "FileVersion", "1.0.1.21"
++#define FILE_VER_BIN     1,0,1,22
++#define FILE_VER_STR     "FileVersion", "1.0.1.22"
+ 
+ /*!
+ \file
+@@ -7,12 +7,19 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.21
++@version 1.0.1.22
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.22
++\li 12.01.2018
++\li JK - Mantis 45801: MassaiCfgxB: many trace files
++\li Make an informative log entry for opening or closing of log files to
++\li - get more infortmation for the "many files" problem
++\li - prevent "empty file" cause for this error
++
+ \version 1.0.1.21
+ \li 17.01.2017
+ \li MOt - Mantis 0032431: Notification
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+index a1e0ebd2..3b1397ad 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2010-2015 MATERNA Information & Communications
++ * Copyright (c) 2010-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -22,6 +22,8 @@
+ // For _mkdir
+ #include <direct.h>
+ 
++#include "boost/format.hpp"
++
+ 
+ 
+ namespace
+@@ -133,60 +135,54 @@ namespace traces
+       **/
+       void openNewFile( SYSTEMTIME const & T )
+       {
+-         std::string Filename = m_path;
++         std::string new_file_name = m_path;
+          if( m_sub_dir_mode != Subdir_None )
+          {
+-            Filename += "\\";
+-            char MmDd[10];
++            new_file_name += "\\";
+             if( m_sub_dir_mode == Subdir_MM_DD )
+             {
+                // Make subdirectory "Mm_DD"
+-               sprintf
+-               (
+-                  MmDd,
+-                  "%02d_%02d",
+-                  T.wMonth, T.wDay
+-               );
++               new_file_name +=
++                  (
++                     boost::format( "%02d_%02d" )
++                     % T.wMonth % T.wDay
++                  ).str();
+             }
+             else
+             {
+                // Make subdirectory "DDMM"
+-               sprintf
+-               (
+-                  MmDd,
+-                  "%02d%02d",
+-                  T.wDay, T.wMonth
+-               );
++               new_file_name +=
++                  (
++                     boost::format( "%02d%02d" )
++                     % T.wDay % T.wMonth
++                  ).str();
+             }
+-            Filename += MmDd;
+-            createDir( Filename.c_str() );
++            createDir( new_file_name.c_str() );
+          }
+-         Filename += "\\";
+-         Filename += m_base_file_name;
+-         char file_time[32];
++         new_file_name += "\\";
++         new_file_name += m_base_file_name;
+          if( m_sub_dir_mode != Subdir_None )
+          {
+             // The subdirectory contain already the date
+             // -> put hhmmss in filename
+-            sprintf
+-            (
+-               file_time, "_%02d%02d%02d.trc",
+-               T.wHour, T.wMinute, T.wSecond
+-            );
++            new_file_name +=
++               (
++                  boost::format( "_%02d%02d%02d.trc" )
++                  % T.wHour % T.wMinute % T.wSecond
++               ).str();
+          }
+          else
+          {
+             // No subdirectory
+             // -> put yyyymmddhhmmss in filename
+-            sprintf
+-            (
+-               file_time, "_%04d%02d%02d_%02d%02d%02d.trc",
+-               T.wYear, T.wMonth, T.wDay,
+-               T.wHour, T.wMinute, T.wSecond
+-            );
++            new_file_name +=
++               (
++                  boost::format( "_%04d%02d%02d_%02d%02d%02d.trc" )
++                  % T.wYear % T.wMonth % T.wDay
++                  % T.wHour % T.wMinute % T.wSecond
++               ).str();
+          }
+-         Filename += file_time;
+-         m_ostream.open( Filename.c_str() );
++         m_ostream.open( new_file_name.c_str() );
+          m_open_day = T.wDay;
+       }
+ 
+@@ -201,12 +197,24 @@ namespace traces
+       {
+          try
+          {
++            // Time stamp
+             SYSTEMTIME T;
+             GetLocalTime( &T );
++            std::string const sep = "================";
++            std::string const ts =
++               (
++                  boost::format( "%02d:%02d:%02d.%1d " )
++                  % T.wHour % T.wMinute % T.wSecond
++                  % ( T.wMilliseconds / 100 )
++               ).str();
++            // Check status
+             if( !m_open )
+             {
+                // First call to write - open a new trace file.
+                openNewFile( T );
++               m_ostream
++                  << ts << sep << " First trace file "
++                  << sep << std::endl;
+                m_open = true;
+             }
+             else if
+@@ -216,22 +224,29 @@ namespace traces
+                )
+             {
+                // File size exceeds maximum allowed - new trace file.
++               m_ostream
++                  << ts << sep
++                  << " File size limit reached - close trace file "
++                  << sep << std::endl;
+                m_ostream.close();
+                openNewFile( T );
++               m_ostream
++                  << ts << sep << " Follow-up trace file "
++                  << sep << std::endl;
+             }
+             else if( T.wDay != m_open_day )
+             {
+                // Date changed - new trace file.
++               m_ostream
++                  << ts << sep << " New day - close trace file "
++                  << sep << std::endl;
+                m_ostream.close();
+                openNewFile( T );
++               m_ostream
++                  << ts << sep << " Follow-up trace file "
++                  << sep << std::endl;
+             }
+-            char Timestamp[20];
+-            sprintf
+-               (
+-                  Timestamp, "%02d:%02d:%02d.%1d ",
+-                  T.wHour, T.wMinute, T.wSecond, T.wMilliseconds / 100
+-               );
+-            m_ostream << Timestamp << entry << std::endl;
++            m_ostream << ts << entry << std::endl;
+          }
+          catch( ... )
+          {
+-- 
+2.41.0.windows.1
+

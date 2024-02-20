@@ -1,0 +1,484 @@
+From ac47b46fd61e14cea853930566d3b8d6174e83c7 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 17 Nov 2011 13:05:34 +0000
+Subject: [PATCH 0191/1077] mControl 1.0.1.7
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@232 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |  26 ++-
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |   6 +-
+ .../Massai/cpp/Controller/src/serverwin.cpp   |   9 +-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 159 +++++++++++++-----
+ 4 files changed, 152 insertions(+), 48 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index 31c38e23..e5505c47 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -18,6 +18,7 @@
+ #endif
+ 
+ #include "tools/pImplPtr.h"
++#include "systools/threadException.hpp"
+ 
+ 
+ namespace mSysProcess
+@@ -119,16 +120,26 @@ namespace mSysProcess
+       **/
+       virtual child & stdIn( char const * Input ) = 0;
+ 
++      /**
++       *
++       * Wait (unlimited) for the process to terminate.
++       *
++       * @return                A reference to this object.
++       *
++      **/
++      virtual child & waitForTermination() = 0;
++
+       /**
+        *
+        * Wait (limited) for the process to terminate.
+        *
+-       * @param Seconds:        The number of seconds to wait.
++       * @param Seconds:        The number of seconds to wait,
++       *                        wait forever if 0.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      virtual child & waitForTermination( unsigned Seconds = 0 ) = 0;
++      virtual child & waitForTermination( unsigned Seconds ) = 0;
+ 
+    };
+ 
+@@ -151,11 +162,20 @@ namespace mSysProcess
+ 
+       /**
+        *
+-       * Constructor.
++       * Default constructor.
+        *
+       **/
+       parent();
+ 
++      /**
++       *
++       * Constructor.
++       *
++       * @param ThreadExeption: A exception handler to use.
++       *
++      **/
++      explicit parent( threadException const * ThreadExeption );
++
+       /**
+        *
+        * Destructor.
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index fbc3cb37..0dd05ce9 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -12,10 +12,14 @@
+ 
+ /*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+  *
+- *  @version 1.0.1.6
++ *  @version 1.0.1.7
+  *
+  *  \section change1 Change history
+  *
++ *  \date 17.11.2011 \li V1.0.1.7
++ *                   \li JK: Mantis0021539: mcontrol not responding
++ *                   \li - Fix possible lock in SysTools / mSysProcessW32
++ *
+  *  \date 14.09.2011 \li V1.0.1.6
+  *                   \li GiT: Mantis0014919: placeholder for system paths in
+  *                   \li      PLATFORM.STARTUP.SystemCommands
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index a8b70795..601cdace 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -418,7 +418,10 @@ long startUpdate()
+         .setStdOut( StdOut )
+         .setCommandline( szProg );
+     std::auto_ptr<mSysProcess::child> Child( Update.newChild() );
+-    return Child->waitForTermination().getExitCode();
++    return Child
++            ->waitForTermination( 600 ) // Something went terrible wrong,
++                                        // when not done after 600 secs.
++            .getExitCode();
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -1517,7 +1520,9 @@ INITCOMMONCONTROLSEX iccex;
+                                         TRACE(HERE, "Failed to start %s", sExe.c_str());
+                                         return( GetLastError() );
+                                     }
+-                                    Child->waitForTermination();
++                                    Child->waitForTermination( 600 );
++                                       // Something went terrible wrong,
++                                       // when not done after 600 secs.
+                                 }
+                                 else
+                                 {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 25509cfb..81a86a0d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -7,14 +7,14 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2011 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
+ #include "systools/mSysProcess.hpp"
+ 
+-#include "systools/matThread.hpp"
++#include "systools/mSysThread.hpp"
+ #include "systools/software_error.h"
+ #include <string>
+ 
+@@ -72,7 +72,7 @@ namespace
+  *
+ **/
+ class fromChild :
+-   public matThread
++   public mSysThread::thread
+ {
+ 
+ 
+@@ -131,8 +131,8 @@ class fromChild :
+ public:
+ 
+ 
+-   fromChild() :
+-      matThread(),
++   explicit fromChild( threadException const * ThreadExeption ) :
++      mSysThread::thread( ThreadExeption ),
+       M_Active( false ),
+       M_Buffer(),
+       M_HandleOutRead( INVALID_HANDLE_VALUE ),
+@@ -150,9 +150,30 @@ public:
+          if( M_Active )
+          {
+             M_Active = false;
+-            // Blockiert? CloseHandle( M_HandleOutRead );
+-            CloseHandle( M_HandleOutWrite );
++            //
++            // To force a return from ReadFile() in the thread function
++            // we write a dummy string.
++            // Just CloseHandle() will not work.
++            //
++            DWORD BytesWritten = 0;
++            if (
++               !WriteFile
++                  (
++                     M_HandleOutWrite,
++                     "~",
++                     1,
++                     &BytesWritten,
++                     NULL
++                  )
++                  || !BytesWritten
++               )
++            {
++               if( GetLastError() != ERROR_BROKEN_PIPE )
++                  logLastError( M_Logging, "WriteFile" );
++            }
++            //
+             waitTerminated();
++            CloseHandle( M_HandleOutWrite );
+          }
+       }
+       catch( ... )
+@@ -195,6 +216,13 @@ public:
+    }
+ 
+ 
++private:
++
++
++   //! Default constructor - intentionally not implemented.
++   fromChild();
++
++
+ };
+ 
+ 
+@@ -251,10 +279,11 @@ public:
+          bool                           Minimized,
+          mSysProcess::callBack const *  StdErr,
+          bool                           StdIn,
+-         mSysProcess::callBack const *  StdOut
++         mSysProcess::callBack const *  StdOut,
++         threadException const *        ThreadExeption
+       ) :
+-      M_ChildErr(),
+-      M_ChildOut(),
++      M_ChildErr( ThreadExeption ),
++      M_ChildOut( ThreadExeption ),
+       M_Commandline( Commandline ),
+       M_Directory( Directory ),
+       M_HandleInRead( INVALID_HANDLE_VALUE ),
+@@ -427,13 +456,26 @@ public:
+     * See the comment in mSysProcess.hpp" to the interface method.
+     *
+    **/
+-   mSysProcess::child & waitForTermination( unsigned Seconds )
++   mSysProcess::child & waitForTermination()
+    {
+       WaitForSingleObject( M_HandleProcess, INFINITE );
+       return *this;
+    }
+ 
+ 
++   /**
++    *
++    * Implementation method.
++    * See the comment in mSysProcess.hpp" to the interface method.
++    *
++   **/
++   mSysProcess::child & waitForTermination( unsigned Seconds )
++   {
++      WaitForSingleObject( M_HandleProcess, 1000 * Seconds );
++      return *this;
++   }
++
++
+    /**
+     *
+     * Implementation method.
+@@ -480,7 +522,8 @@ private:
+ 
+ /**
+  *
+- * Class mSysProcess::child method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::child method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::child::~child() throw()
+@@ -497,30 +540,29 @@ mSysProcess::child::~child() throw()
+ class mSysProcess::parent::impl
+ {
+ 
++   fromChild                            M_ChildErr;
+ 
+-   fromChild            M_ChildErr;
+-
+-   fromChild            M_ChildOut;
+-
+-   std::string          M_Commandline;
++   fromChild                            M_ChildOut;
+ 
+-   std::string          M_Directory;
++   std::string                          M_Commandline;
+ 
+-   bool                 M_Hide;
++   std::string                          M_Directory;
+ 
+-   callBack const *     M_Logging;
++   bool                                 M_Hide;
+ 
+-   bool                 M_Minimized;
++   callBack const *                     M_Logging;
+ 
+-   bool                 M_Started;
++   bool                                 M_Minimized;
+ 
+-   callBack const *     M_StdErr;
++   bool                                 M_Started;
+ 
+-   bool                 M_StdIn;
++   callBack const *                     M_StdErr;
+ 
+-   callBack const *     M_StdOut;
++   bool                                 M_StdIn;
+ 
++   callBack const *                     M_StdOut;
+ 
++   threadException const * const        M_ThreadExeption;
+ 
+ public:
+ 
+@@ -530,9 +572,9 @@ public:
+     * Constructor.
+     *
+    **/
+-   impl() :
+-      M_ChildErr(),
+-      M_ChildOut(),
++   explicit impl( threadException const * ThreadExeption ) :
++      M_ChildErr( ThreadExeption ),
++      M_ChildOut( ThreadExeption ),
+       M_Commandline(),
+       M_Directory(),
+       M_Hide( false ),
+@@ -541,7 +583,8 @@ public:
+       M_Started( false ),
+       M_StdErr( 0 ),
+       M_StdIn( false ),
+-      M_StdOut( 0 )
++      M_StdOut( 0 ),
++      M_ThreadExeption( ThreadExeption )
+    {
+    }
+ 
+@@ -573,7 +616,8 @@ public:
+                         M_Minimized,
+                         M_StdErr,
+                         M_StdIn,
+-                        M_StdOut
++                        M_StdOut,
++                        M_ThreadExeption
+                      );
+    }
+ 
+@@ -713,17 +757,38 @@ public:
+    }
+ 
+ 
++private:
++
++
++   //! Default constructor - intentionally not implemented.
++   impl();
++
++
+ };
+ 
+ 
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent::parent() :
+-   M_Impl( new impl )
++   M_Impl( new impl( 0 ) )
++{
++}
++
++
++
++/**
++ *
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
++ *
++**/
++mSysProcess::parent::parent( threadException const * ThreadExeption ) :
++   M_Impl( new impl( ThreadExeption ) )
+ {
+ }
+ 
+@@ -731,7 +796,8 @@ mSysProcess::parent::parent() :
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent::~parent() throw()
+@@ -742,7 +808,8 @@ mSysProcess::parent::~parent() throw()
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::child * mSysProcess::parent::newChild()
+@@ -754,7 +821,8 @@ mSysProcess::child * mSysProcess::parent::newChild()
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setCommandline
+@@ -770,7 +838,8 @@ mSysProcess::parent & mSysProcess::parent::setCommandline
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setHide()
+@@ -783,7 +852,8 @@ mSysProcess::parent & mSysProcess::parent::setHide()
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setLogging
+@@ -799,7 +869,8 @@ mSysProcess::parent & mSysProcess::parent::setLogging
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setMinimized()
+@@ -812,7 +883,8 @@ mSysProcess::parent & mSysProcess::parent::setMinimized()
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setStdErr
+@@ -828,7 +900,8 @@ mSysProcess::parent & mSysProcess::parent::setStdErr
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setStdIn()
+@@ -841,7 +914,8 @@ mSysProcess::parent & mSysProcess::parent::setStdIn()
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setStdOut
+@@ -857,7 +931,8 @@ mSysProcess::parent & mSysProcess::parent::setStdOut
+ 
+ /**
+  *
+- * Class mSysProcess::parent method implementation - see "systools/mSysProcess.hpp".
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
+  *
+ **/
+ mSysProcess::parent & mSysProcess::parent::setWorkDirectory
+-- 
+2.41.0.windows.1
+

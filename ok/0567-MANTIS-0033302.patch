@@ -1,0 +1,364 @@
+From 8175808dee8e00aabd1c20d8f925093b27cee418 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 12 Aug 2014 19:25:13 +0000
+Subject: [PATCH 0567/1077] MANTIS 0033302 change mstarter: use only defined
+ system environment variables for substitution
+
+mstarter.exe
+V1.1.1.11
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@710 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mstarter_def.h  |  12 +-
+ .../Massai/cpp/Controller/src/mstarter.cpp    |   9 +-
+ .../cpp/Controller/src/mstarter_args.cpp      |   2 +-
+ .../cpp/Controller/src/mstarter_config.cpp    |  13 +-
+ .../Massai/cpp/ScreenShot/src/ScreenShot.cpp  | 142 ++++++++++++++++++
+ .../cpp/Systools/src/mSysProcessListW32.cpp   |  18 +--
+ 6 files changed, 175 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+index f84236e9..8cff473d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,1,1,10
+-#define FILE_VER_STR     "FileVersion", "1.1.1.10"
++#define FILE_VER_BIN     1,1,1,11
++#define FILE_VER_STR     "FileVersion", "1.1.1.11"
+ 
+ /*!
+ \file
+@@ -7,12 +7,16 @@
+ 
+ \page mstarter.exe Release Notes - mstarter.exe - process manager
+ 
+-@version 1.1.1.10
++@version 1.1.1.11
+ 
+ \section change1 Change history
+ 
+ mstarter.exe
+ 
++\version 1.1.1.11
++\li 12.08.2014
++\li change - SteT  Mantis 0033302: mstarter: use only defined system environment variables for substitution
++
+ \version 1.1.1.10
+ \li 27.03.2014
+ \li change - JK Mantis 29186
+@@ -49,7 +53,7 @@ mstarter.exe
+   PLATFORM.ENVIRONMENT.Variables\n
+   type: text list\n
+   description: substitution variables; format variablename=value
+-\li TerminationExlusion is used for exlusionList in process termination if nstarter
++\li TerminationExclusion is used for exclusionList in process termination of mstarter
+ 
+ \version 1.1.1.3
+ \li 14.08.2012
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+index f86c632d..c009e041 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+@@ -7,7 +7,8 @@
+ #include "systools/mSysProcessList.h"
+ #include "tools/TraceClient.h"
+ #include "trc/trace.h"
+-#include "mcontrol_def.h"
++#include "mstarter_def.h"
++#include "global_def.h"
+ 
+ #include <iostream>
+ 
+@@ -35,8 +36,10 @@ int main(int argc, const char** argv)
+   try
+   {
+     openTrace("mStarter");
+-    writeTrace(HERE, "Version (%d.%d.%d.%d, %s, %s)",
+-      FILE_VER_BIN,
++    writeTrace(HERE, "Version (%s: %s) (%s: %s) (%s: %s) (%s %s)",
++      PRODUCT,
++      PRODUCT_VER_STR,
++      FILE_VER_STR,
+       __DATE__,
+       __TIME__);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
+index 4fbc7901..e19fd14d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_args.cpp
+@@ -20,7 +20,7 @@ namespace
+ 
+   void usage(int argc, const char** argv)
+   {
+-    std::cout << "Usage: " << argv[0] << " <StopSemaphoreName> [-server][-cfg][-watchdog:<timeout>] " << std::endl;
++    std::cout << "Usage: " << argv[0] << " [<StopSemaphoreName>] [-server][-cfg][-watchdog:<timeout>] " << std::endl;
+     std::cout << "StopSemaphoreName: name of event semaphore, posted to stop " << argv[0] << std::endl;
+     std::cout << "server: start in server mode" << std::endl;
+     std::cout << "cfg: create configuraton items" << std::endl;
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+index f12c7227..bc702b8d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+@@ -39,6 +39,7 @@ namespace
+   const std::string configUser=         "mstarter";
+   const selection boolSelection[]= {selection(0, "no", ""), selection(1, "yes", "")};
+ 
++
+   //  base class for config items
+   class ConfigItemBase
+   {
+@@ -444,10 +445,8 @@ namespace mStarter
+   void Config::initEnv()
+   {
+     m_substituteEnv.SetBaseEnvVars();
+-    mText::ReadEnvironment* envReader = mText::getEnvironmentVariablesReader(m_trc);
+-    m_substituteEnv.SetEnvVars(envReader->getEnv());
+-    mText::ReadEnvironment* cfgReader = mText::getConfigReader(configUser, m_trc);
+-    m_substituteEnv.SetEnvVars(cfgReader->getEnv());
++    m_substituteEnv.SetEnvVars(mText::getSystemEnvironment(m_trc));
++    m_substituteEnv.SetEnvVars(mText::getConfigVariables(configUser, m_trc));
+   }
+ 
+   void Config::setListener(mSysProcess::ProcessList* pListener)
+@@ -522,6 +521,12 @@ namespace mStarter
+   {
+     TextList exclusionList;
+     MASSAI::text::split(m_substituteEnv.SubstEnvVars("$TerminationExclusion"), ":", exclusionList);
++    TextList::const_iterator it = exclusionList.begin();
++    TextList::const_iterator end = exclusionList.end();
++    for(; it != end; it++)
++    {
++      m_trc.writeTrace(BasicRuntime_HERE, "exclusion(%s)", (*it).c_str(), (*it).length());
++    }
+     return exclusionList;
+   }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/ScreenShot/src/ScreenShot.cpp b/SelfServiceCommon/Massai/cpp/ScreenShot/src/ScreenShot.cpp
+index 35089cee..88987cd6 100644
+--- a/SelfServiceCommon/Massai/cpp/ScreenShot/src/ScreenShot.cpp
++++ b/SelfServiceCommon/Massai/cpp/ScreenShot/src/ScreenShot.cpp
+@@ -303,3 +303,145 @@ namespace mScreenShot
+     return success;
+   }
+ }
++
++/*
++HRESULT Imaging_SaveToFile(HBITMAP handle, LPTSTR filename, LPCTSTR format)
++{
++  HRESULT res = CoInitializeEx(NULL, COINIT_MULTITHREADED);
++  if((res == S_OK) || (res == S_FALSE))
++  {
++    IImagingFactory* factory=NULL;
++    if (CoCreateInstance(CLSID_ImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_IImagingFactory, (void**)&factory) == S_OK)
++    {
++      UINT count;
++      ImageCodecInfo* imageCodecInfo=NULL;
++      if (factory->GetInstalledEncoders(&count, &imageCodecInfo) == S_OK)
++      {
++        // Get the particular encoder to use
++        LPTSTR formatString;
++        if (wcscmp(format, L"png") == 0)
++        {
++          formatString = _T("image/png");
++        }
++        else if (wcscmp(format, L"jpg") == 0)
++        {
++          formatString = _T("image/jpeg");
++        }
++        else if (wcscmp(format, L"gif") == 0)
++        {
++          formatString = _T("image/gif");
++        }
++        else if (wcscmp(format, L"bmp") == 0)
++        {
++          formatString = _T("image/bmp");
++        }
++        else
++        {
++          CoUninitialize();
++          return S_FALSE;
++        }
++        CLSID encoderClassId;
++        if (count == 0)
++        {
++          CoUninitialize();
++          return S_FALSE;
++        }
++        for(int i=0; i < (int)count; i++)
++        {
++          if (wcscmp(imageCodecInfo[i].MimeType, formatString) == 0)
++          {
++            encoderClassId= imageCodecInfo[i].Clsid;
++            free(imageCodecInfo);
++            break;
++          }
++          else
++          {
++            continue;
++          }
++          CoUninitialize();
++          return S_FALSE;
++        }
++        IImageEncoder* imageEncoder=NULL;
++        if (factory->CreateImageEncoderToFile(&encoderClassId, filename, &imageEncoder) == S_OK)
++        {
++          IImageSink* imageSink = NULL;
++          res = imageEncoder->GetEncodeSink(&imageSink);
++
++          if (res != S_OK)
++          {
++            CoUninitialize();
++            return res;
++          }
++
++          BITMAP bm;
++          GetObject (handle, sizeof(BITMAP), &bm);
++          PixelFormatID pixelFormat;
++          switch (bm.bmBitsPixel)
++          {
++            case 1:
++            {
++              pixelFormat = PixelFormat1bppIndexed;
++              break;
++            }
++            case 4:
++            {
++              pixelFormat = PixelFormat4bppIndexed;
++              break;
++            }
++            case 8:
++            {
++              pixelFormat = PixelFormat8bppIndexed;
++              break;
++            }
++            case 24:
++            {
++              pixelFormat = PixelFormat24bppRGB;
++              break;
++            }
++            default:
++            {
++              pixelFormat = PixelFormat32bppARGB;
++              break;
++            }
++          }
++
++          BitmapData* bmData = new BitmapData();
++          bmData->Height = bm.bmHeight;
++          bmData->Width = bm.bmWidth;
++          bmData->Scan0 = bm.bmBits;
++          bmData->PixelFormat = pixelFormat;
++
++          UINT bitsPerLine = bm.bmWidth * bm.bmBitsPixel;
++          UINT bitAlignment = sizeof(LONG) * 8;
++          UINT bitStride = bitAlignment * (bitsPerLine / bitAlignment);   // The image buffer is always padded to LONG boundaries
++          if ((bitsPerLine % bitAlignment) != 0) bitStride += bitAlignment; // Add a bit more for the leftover values
++          bmData->Stride = (bitStride / 8);
++
++          IBitmapImage* pBitmap;
++          factory->CreateBitmapFromBuffer(bmData, &pBitmap);
++          IImage* pImage;
++          pBitmap->QueryInterface(IID_IImage, (void**)&pImage);
++          res = pImage->PushIntoSink(imageSink);
++          if (res != S_OK)
++          {
++            CoUninitialize();
++            return res;
++          }
++
++          pBitmap->Release();
++          pImage->Release();
++          imageSink->Release();
++          imageEncoder->TerminateEncoder();
++          imageEncoder->Release();
++        }
++      }
++    }
++    CoUninitialize();
++  }
++  else
++  {
++    return res;
++  }
++  return res;
++}
++*/
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 6970b897..a0571d97 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -285,7 +285,7 @@ namespace
+       ProcessStartSet getDiff(const ProcessStartPtrList& minuend, const PropertyList& subtrahend);
+       ProcessStartSet getProcessStartSet(const std::string& group);
+ 
+-      
++
+       ProcessListCallback* m_pListener;
+       eventSemaphore m_break;
+       bool m_stop;
+@@ -810,12 +810,12 @@ namespace
+           "---------------------\n"
+           "%s\n"
+           "COMP(%s)\n"
+-          "CMD(%s)\n"
++          "CMD(%s)(%d)\n"
+           "DSK(%s)\n"
+           "---------------------",
+           process->getProcessId().c_str(),
+           m_properties.group.c_str(),
+-          process->getProgram().c_str(),
++          process->getProgram().c_str(), process->getProgram().length(),
+           m_properties.desktop.c_str()
+         );
+       }
+@@ -826,12 +826,12 @@ namespace
+           "+++++++++++++++++++++\n"
+           "%s\n"
+           "COMP(%s)\n"
+-          "CMD(%s)\n"
++          "CMD(%s)(%d)\n"
+           "DSK(%s)\n"
+           "+++++++++++++++++++++",
+           process->getProcessId().c_str(),
+           m_properties.group.c_str(),
+-          process->getProgram().c_str(),
++          process->getProgram().c_str(), process->getProgram().length(),
+           m_properties.desktop.c_str()
+         );
+         m_processWatchdog.add(process);
+@@ -1416,7 +1416,7 @@ namespace
+     }
+     return result;
+   }
+-  
++
+   std::map<std::string, std::list<child*>> ProcessListImpl::getProcessMap()
+   {
+     std::map<std::string, std::list<child*>> processMap;
+@@ -1686,7 +1686,7 @@ namespace mSysProcess
+     search->search();
+     return search->getList();
+   }
+-  
++
+   std::map<std::string, std::list<child*>> ApplicationList::Impl::getProcessMap()
+   {
+     return ProcessListImpl::getProcessMap();
+@@ -1897,9 +1897,9 @@ namespace mSysProcess
+   {
+     return m_pImpl->findVisibleWin(group);
+   }
+-  
++
+   std::map<std::string, std::list<child*>> ApplicationList::getProcessMap()
+   {
+     return m_pImpl->getProcessMap();
+-  } 
++  }
+ }
+-- 
+2.41.0.windows.1
+

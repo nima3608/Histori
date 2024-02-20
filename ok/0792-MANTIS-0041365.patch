@@ -1,0 +1,696 @@
+From c0bacfaf521e6fbc4dbcf13644307a68ac8ae50a Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 12 Sep 2016 18:48:49 +0000
+Subject: [PATCH 0792/1077] MANTIS 0041365 extension: massaiCORBA: allow to
+ activate console traces
+
+tools.lib
+V1.0.1.17
+extension: added TraceDelegateWithLevelFromEnv.h
+
+mcorba.lib
+V1.0.6.24
+
+\li extension: use TraceDelegateWithLevelFromEnv.h
+- use environment variables to set trace level
+  - mCorba_TRACELEVEL=0-9
+
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1084 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/TraceCallback.h      |   6 +-
+ .../inc/Tools/TraceDelegateWithLevelFromEnv.h |  85 +++++++++
+ .../Interfaces/inc/Tools/TraceLocal.h         |   5 +-
+ .../cpp/MassaiCorba/inc/massaiCORBA_def.h     |  10 +-
+ .../Massai/cpp/MassaiCorba/inc/tracedef.h     |   1 -
+ .../Massai/cpp/MassaiCorba/src/trace.cpp      |  27 +--
+ .../MassaiCorba/test/src/testcase1_clnt1.cpp  |   1 -
+ .../MassaiCorba/test/src/testcase2_clnt1.cpp  |   1 -
+ .../MassaiCorba/test/src/testcase2_clnt2.cpp  |   1 -
+ .../MassaiCorba/test/src/testcase3_clnt1.cpp  |   1 -
+ .../MassaiCorba/test/src/testcase5_srv.cpp    |   1 -
+ .../MassaiCorba/test/src/testcase_srv1.cpp    |   1 -
+ .../cpp/Tools/inc/local_def_msystools.h       |  11 +-
+ .../Massai/cpp/Tools/makefile.mak             |   1 +
+ .../Massai/cpp/Tools/src/TraceCallback.cpp    |  30 ++-
+ .../src/TraceDelegateWithLevelFromEnv.cpp     | 173 ++++++++++++++++++
+ .../Massai/cpp/Tools/src/TraceLocal.cpp       |   7 +
+ 17 files changed, 319 insertions(+), 43 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegateWithLevelFromEnv.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceCallback.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceCallback.h
+index 7af78f17..07066739 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceCallback.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceCallback.h
+@@ -14,8 +14,7 @@
+ #if defined(SHOW_INCLUDE_FILES)
+ #pragma message("including: " __FILE__)
+ #endif
+-#ifndef TRACECALLBACK_H_INCLUDED
+-#define TRACECALLBACK_H_INCLUDED
++#pragma once
+ 
+ #include "Tools/TraceInterface.h"
+ #include "Tools/TraceFormatCB.h"
+@@ -28,6 +27,7 @@ namespace MASSAI
+     {
+       public:
+         TraceCallback(const char* pszApplication, Callback& callback);
++        TraceCallback(const char* pszApplication, bool silent, Callback& callback);
+         virtual ~TraceCallback();
+         /*
+         ---------------------------------------------------------------------------
+@@ -107,7 +107,7 @@ namespace MASSAI
+ 
+       private:
+         TraceFormatCB m_format;
++        bool m_silent;
+     };
+   }
+ }
+-#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
+new file mode 100644
+index 00000000..3dde0244
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
+@@ -0,0 +1,85 @@
++// use environment variables to set trace level
++//   tracelevel <prefix>_TRACELEVEL=0-9
++//   topic <prefix>_TOPIC_<topic>=false/inactive/*
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#pragma once
++
++#include "tools/TraceDelegate.h"
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    class TraceDelegateWithLevelFromEnvironment: public TraceDelegate
++    {
++      public:
++        TraceDelegateWithLevelFromEnvironment(long lTraceLevel, bool defaultTopicState, const char* pszPrefix);
++        TraceDelegateWithLevelFromEnvironment(long lTraceLevel, bool defaultTopicState, const char* pszPrefix, const TraceInterface* pDelegate);
++        virtual ~TraceDelegateWithLevelFromEnvironment();
++
++        bool isActive(const char* pszTopic) const;
++        bool isActive(long lTraceLevel) const;
++
++        /* Trace Text */
++        void writeTraceText
++        (
++           long lTraceLevel,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           const char* pszText
++        ) const;
++
++        /* Trace Dump */
++        void dumpTrace
++        (
++           long lTraceLevel,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           long lDumpSize,
++           const char* pDump
++        ) const;
++
++        /* Start new files */
++        void startNewTraceFile(long lTraceLevel) const;
++
++        /* Trace Text */
++        void writeTraceTextForTopic
++        (
++           const char* pszTopic,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           const char* pszText
++        ) const;
++
++        /* Trace Dump */
++        void dumpTraceForTopic
++        (
++           const char* pszTopic,
++           const char* pszFile,
++           short  sLine,
++           const char* pszFunction,
++           long lDumpSize,
++           const char* pDump
++        ) const;
++
++        /* Start new files */
++        void startNewTraceFileForTopic(const char* pszTopic) const;
++
++      private:
++        bool readTopic(const std::string& topic, bool def) const;
++        long readTraceLevel(long def) const;
++        bool readEnvBool(const std::string& key, bool def) const;
++        long readEnvLong(const std::string& key, long def) const;
++
++        long m_tracelevel;
++        bool m_defaultTopicState;
++        std::string m_prefix;
++    };
++  }
++}
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceLocal.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceLocal.h
+index d14f99cd..68eab965 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceLocal.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceLocal.h
+@@ -14,8 +14,7 @@
+ #if defined(SHOW_INCLUDE_FILES)
+ #pragma message("including: " __FILE__)
+ #endif
+-#ifndef TRACELOCAL_H_INCLUDED
+-#define TRACELOCAL_H_INCLUDED
++#pragma once
+ 
+ #include "Tools/TraceCallback.h"
+ 
+@@ -27,8 +26,8 @@ namespace MASSAI
+     {
+       public:
+         TraceLocal(const char* pszApplication);
++        TraceLocal(const char* pszApplication, bool silent);
+         virtual ~TraceLocal();
+     };
+   }
+ }
+-#endif
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index b4fe23a3..c62c53f7 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -4,17 +4,23 @@
+ 
+ \page mcorba.lib Release Notes - mcorba.lib - Massai CORBA library
+ 
+-@version 1.0.6.23
++@version 1.0.6.24
+ 
+ \section changehistory Change history
+ 
+ mcorba.lib
+ 
++\version 1.0.6.24
++\li 12.09.2016
++\li SteT - Mantis 0041365: massaiCORBA: allow to activate console traces
++\li extension: use TraceDelegateWithLevelFromEnv.h
++- use environment variables to set trace level
++  - mCorba_TRACELEVEL=0-9
++
+ \version 1.0.6.23
+ \li 19.05.2016
+ \li bugfix GiT Mantis 0041217: GPP sometimes not available, minor changes
+ 
+-
+ \version 1.0.6.22
+ \li 15.09.2015
+ \li bugfix GiT Mantis 0038352: massaiCorba: ignored corba endpoint environment variable for listener
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tracedef.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tracedef.h
+index 070c4333..d551f145 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tracedef.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/tracedef.h
+@@ -34,5 +34,4 @@ namespace massaiCorba
+ {
+   void trace   (long lLevel, const char* pszFile, long lLine, const char* pszFunction, const char* pszFormat, ...);
+   void dump    (long lLevel, const char* pszFile, long lLine, const char* pszFunction, const char* pData, long lLen);
+-  long setLevel(long level);
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+index 78976845..8e162f61 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+@@ -14,7 +14,7 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#include "tools/TraceSetLevelDelegate.h"
++#include "tools/TraceDelegateWithLevelFromEnv.h"
+ #include "tools/TraceLocal.h"
+ #include "tracedef.h"
+ 
+@@ -28,14 +28,14 @@ namespace
+     BUFFERSIZE = (1024L * 32L),
+   };
+ 
+-  MASSAI::trace::TraceSetLevelDelegate* pTraceDelegate;
++  MASSAI::trace::TraceDelegateWithLevelFromEnvironment* pTraceDelegate;
+   MASSAI::trace::TraceLocal* pTrace;
+-  MASSAI::trace::TraceSetLevelDelegate& getTrace()
++  MASSAI::trace::TraceInterface& getTrace()
+   {
+     if(pTraceDelegate == 0)
+     {
+-      pTrace = new MASSAI::trace::TraceLocal("mCorba");
+-      pTraceDelegate = new MASSAI::trace::TraceSetLevelDelegate(5, true, pTrace);
++      pTrace = new MASSAI::trace::TraceLocal("mCorba", true);
++      pTraceDelegate = new MASSAI::trace::TraceDelegateWithLevelFromEnvironment(4, false, "mCorba", pTrace);
+     }
+     return *pTraceDelegate;
+   }
+@@ -43,23 +43,6 @@ namespace
+ 
+ namespace massaiCorba
+ {
+-  //---------------------------------------------------------------------------
+-  //
+-  //  function:   long setLevel(long level)
+-  //
+-  //  purpose:    set new trace level and return the old one
+-  //
+-  //  date:       12.04.2001, 12:46
+-  //
+-  //  author:     Materna Information & Communications (AGe)
+-  //
+-  //---------------------------------------------------------------------------
+-  long setLevel(long level)
+-  {
+-    getTrace().setTraceLevel(level);
+-    return 0;
+-  }
+-
+   //---------------------------------------------------------------------------
+   //
+   //  function:   void trace(long lLevel,char *pszFile,long sLine,char *pszFormat, ...)
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase1_clnt1.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase1_clnt1.cpp
+index 270fa912..634051cb 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase1_clnt1.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase1_clnt1.cpp
+@@ -50,7 +50,6 @@ int main(int argc, char** argv)
+   else
+   {
+     openTrace(argv[0]);
+-    massaiCorba::setLevel(9);
+     for(int i = 0; i < create; i++)
+     {
+       try
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt1.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt1.cpp
+index f08bc4a4..53d78ff2 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt1.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt1.cpp
+@@ -61,7 +61,6 @@ int main(int argc, char** argv)
+     MASSAI::trace::TraceLocal trc(argv[0]);
+     Materna::MSSD::eventSemaphore terminate;
+     setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
+-    massaiCorba::setLevel(9);
+     try
+     {
+       writeTrace(BasicRuntime_HERE, "create servant (%s:%d/%s)", host2.c_str(), port2, servant2.c_str());
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt2.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt2.cpp
+index 219d016f..3b2397a5 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt2.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase2_clnt2.cpp
+@@ -133,7 +133,6 @@ int main(int argc, char** argv)
+     Materna::MSSD::eventSemaphore terminate;
+     Materna::MSSD::eventSemaphore block;
+     setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
+-    massaiCorba::setLevel(9);
+     try
+     {
+       writeTrace(BasicRuntime_HERE, "create servant (%s:%d/%s)", host2.c_str(), port2, servant2.c_str());
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase3_clnt1.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase3_clnt1.cpp
+index 83a876ca..21b6d44a 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase3_clnt1.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase3_clnt1.cpp
+@@ -67,7 +67,6 @@ int main(int argc, char** argv)
+     MASSAI::trace::TraceLocal trc(argv[0]);
+     Materna::MSSD::eventSemaphore terminate;
+     setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
+-    massaiCorba::setLevel(9);
+     try
+     {
+       TestCallbackServant callback1("CC1");
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
+index c530a975..d6841152 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase5_srv.cpp
+@@ -56,7 +56,6 @@ int main(int argc, char** argv)
+     MASSAI::trace::TraceLocal trc(argv[0]);
+     //Materna::MSSD::eventSemaphore terminate;
+     //setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
+-    massaiCorba::setLevel(9);
+     try
+     {
+       writeTrace(BasicRuntime_HERE, "create servant (%s:%d/%s); threads(%d)", host.c_str(), port, servant.c_str(), threadcount);
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase_srv1.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase_srv1.cpp
+index 7b8cf096..43a181ab 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase_srv1.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/test/src/testcase_srv1.cpp
+@@ -56,7 +56,6 @@ int main(int argc, char** argv)
+     MASSAI::trace::TraceLocal trc(argv[0]);
+     Materna::MSSD::eventSemaphore terminate;
+     setShutdownHook(SHUTDOWN_NORMAL, &terminate, &trc);
+-    massaiCorba::setLevel(9);
+     try
+     {
+       writeTrace(BasicRuntime_HERE, "create servant (%s:%d/%s); threads(%d)", host.c_str(), port, servant.c_str(), threadcount);
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index ad8a2f96..28e006c1 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,16
+-#define FILE_VER_STR     "FileVersion", "1.0.1.16"
++#define FILE_VER_BIN     1,0,1,17
++#define FILE_VER_STR     "FileVersion", "1.0.1.17"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.16
++@version 1.0.1.17
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.17
++\li 12.09.2016
++\li SteT - Mantis 0041365: massaiCORBA: allow to activate console traces
++\li extension: added TraceDelegateWithLevelFromEnv.h
++
+ \version 1.0.1.16
+ \li 22.01.2016
+ \li SteT - Mantis 0032431: Source out Scheduler in SchedulerInterface
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 10cd149c..03f5d07a 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -50,6 +50,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\ScheduledTask.obj \
+                         $(_OBJ)\SchedulerInterface.obj \
+                         $(_OBJ)\dateTimeTools.obj \
++                        $(_OBJ)\TraceDelegateWithLevelFromEnv.obj \
+                         
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceCallback.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceCallback.cpp
+index 9d5156ad..b914303a 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceCallback.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceCallback.cpp
+@@ -24,13 +24,31 @@ namespace MASSAI
+   namespace trace
+   {
+     TraceCallback::TraceCallback(const char* pszApplication, Callback& callback):
+-      m_format(callback)
++      m_format(callback),
++      m_silent(false)
+     {
+-      writeTraceForTopic(TOPIC, TOPIC_HERE, "--- Trace Init --- (%s)", pszApplication);
++      if(!m_silent)
++      {
++        writeTraceForTopic(TOPIC, TOPIC_HERE, "--- Trace Init --- (%s)", pszApplication);
++      }
+     }
++
++    TraceCallback::TraceCallback(const char* pszApplication, bool silent, Callback& callback):
++      m_format(callback),
++      m_silent(silent)
++    {
++      if(!m_silent)
++      {
++        writeTraceForTopic(TOPIC, TOPIC_HERE, "--- Trace Init --- (%s)", pszApplication);
++      }
++    }
++
+     TraceCallback::~TraceCallback()
+     {
+-      writeTraceTextForTopic(TOPIC, TOPIC_HERE, "--- Trace Close ---");
++      if(!m_silent)
++      {
++        writeTraceTextForTopic(TOPIC, TOPIC_HERE, "--- Trace Close ---");
++      }
+     }
+     /*
+     ---------------------------------------------------------------------------
+@@ -48,6 +66,7 @@ namespace MASSAI
+     {
+       m_format.text(lTraceLevel, 0, pszFile, sLine, pszFunction, pszText);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -65,6 +84,7 @@ namespace MASSAI
+     {
+       m_format.dump(lTraceLevel, 0, pszFile, sLine, pszFunction, lDumpSize, pDump);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+       Start new files
+@@ -74,6 +94,7 @@ namespace MASSAI
+     {
+       writeTraceText(lTraceLevel, TOPIC_HERE, NEWFILE);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+        Trace Text
+@@ -90,6 +111,7 @@ namespace MASSAI
+     {
+       m_format.text(-1, pszTopic, pszFile, sLine, pszFunction, pszText);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -107,6 +129,7 @@ namespace MASSAI
+     {
+       m_format.dump(-1, pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+       Start new files
+@@ -116,6 +139,7 @@ namespace MASSAI
+     {
+       writeTraceTextForTopic(pszTopic, TOPIC_HERE, NEWFILE);
+     }
++
+     /*
+     ---------------------------------------------------------------------------
+        move file
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegateWithLevelFromEnv.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegateWithLevelFromEnv.cpp
+new file mode 100644
+index 00000000..3360f5ae
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegateWithLevelFromEnv.cpp
+@@ -0,0 +1,173 @@
++// use environment variables to set trace level
++
++#include "Tools/TraceDelegateWithLevelFromEnv.h"
++
++namespace MASSAI
++{
++  namespace trace
++  {
++    TraceDelegateWithLevelFromEnvironment::TraceDelegateWithLevelFromEnvironment
++    (long lTraceLevel, bool defaultTopicState, const char* pszPrefix):
++      TraceDelegate(),
++      m_tracelevel(lTraceLevel),
++      m_defaultTopicState(defaultTopicState),
++      m_prefix(pszPrefix)
++    {
++      m_tracelevel = readTraceLevel(m_tracelevel);
++    }
++
++    TraceDelegateWithLevelFromEnvironment::TraceDelegateWithLevelFromEnvironment
++    (
++      long lTraceLevel, bool defaultTopicState, const char* pszPrefix, const TraceInterface* pDelegate
++    ):
++      TraceDelegate(pDelegate),
++      m_tracelevel(lTraceLevel),
++      m_defaultTopicState(defaultTopicState),
++      m_prefix(pszPrefix)
++    {
++      m_tracelevel = readTraceLevel(m_tracelevel);
++    }
++
++    TraceDelegateWithLevelFromEnvironment::~TraceDelegateWithLevelFromEnvironment()
++    {}
++
++    bool TraceDelegateWithLevelFromEnvironment::isActive(const char* pszTopic) const
++    {
++      return readTopic(pszTopic, m_defaultTopicState);
++    }
++
++    bool TraceDelegateWithLevelFromEnvironment::isActive(long lTraceLevel) const
++    {
++      return lTraceLevel <= m_tracelevel;
++    }
++
++    /* Trace Text */
++    void TraceDelegateWithLevelFromEnvironment::writeTraceText
++    (
++       long lTraceLevel,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       const char* pszText
++    ) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::writeTraceText(lTraceLevel, pszFile, sLine, pszFunction, pszText);
++      }
++    }
++
++    /* Trace Dump */
++    void TraceDelegateWithLevelFromEnvironment::dumpTrace
++    (
++       long lTraceLevel,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       long lDumpSize,
++       const char* pDump
++    ) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::dumpTrace(lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump);
++      }
++    }
++
++    /* Start new files */
++    void TraceDelegateWithLevelFromEnvironment::startNewTraceFile(long lTraceLevel) const
++    {
++      if(isActive(lTraceLevel))
++      {
++        TraceDelegate::startNewTraceFile(lTraceLevel);
++      }
++    }
++
++    /* Trace Text */
++    void TraceDelegateWithLevelFromEnvironment::writeTraceTextForTopic
++    (
++       const char* pszTopic,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       const char* pszText
++    ) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::writeTraceTextForTopic(pszTopic, pszFile, sLine, pszFunction, pszText);
++      }
++    }
++
++    /* Trace Dump */
++    void TraceDelegateWithLevelFromEnvironment::dumpTraceForTopic
++    (
++       const char* pszTopic,
++       const char* pszFile,
++       short  sLine,
++       const char* pszFunction,
++       long lDumpSize,
++       const char* pDump
++    ) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::dumpTraceForTopic(pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump);
++      }
++    }
++
++    /* Start new files */
++    void TraceDelegateWithLevelFromEnvironment::startNewTraceFileForTopic(const char* pszTopic) const
++    {
++      if(isActive(pszTopic))
++      {
++        TraceDelegate::startNewTraceFileForTopic(pszTopic);
++      }
++    }
++
++    bool TraceDelegateWithLevelFromEnvironment::readTopic(const std::string& topic, bool def) const
++    {
++      std::string key(m_prefix);
++      key.append("_TOPIC_");
++      key.append(topic);
++      return readEnvBool(key, def);
++    }
++
++    long TraceDelegateWithLevelFromEnvironment::readTraceLevel(long def) const
++    {
++      std::string key(m_prefix);
++      key.append("_TRACELEVEL");
++      return readEnvLong(key, def);
++    }
++
++    bool TraceDelegateWithLevelFromEnvironment::readEnvBool(const std::string& key, bool def) const
++    {
++      bool result= def;
++      const char* value= getenv(key.c_str());
++      if(value != 0)
++      {
++        if(_stricmp(value, "false") == 0
++          || _stricmp(value, "inactive") == 0)
++        {
++          result= false;
++        }
++        else
++        {
++          result= true;
++        }
++      }
++      return result;
++    }
++
++    long TraceDelegateWithLevelFromEnvironment::readEnvLong(const std::string& key, long def) const
++    {
++      long result= def;
++      const char* value= getenv(key.c_str());
++      if(value != 0)
++      {
++        result= atoi(value);
++      }
++      return result;
++    }
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceLocal.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceLocal.cpp
+index 5a8a3093..c6487a0f 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceLocal.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceLocal.cpp
+@@ -24,7 +24,9 @@ namespace
+         std::cout << head << data << std::endl;
+       }
+   };
++
+   LocalTrace* pTrace= 0;
++
+   LocalTrace* getLocalTrace()
+   {
+     if(pTrace == 0)
+@@ -42,6 +44,11 @@ namespace MASSAI
+     TraceLocal::TraceLocal(const char* pszApplication):
+       TraceCallback(pszApplication, *getLocalTrace())
+     {}
++
++    TraceLocal::TraceLocal(const char* pszApplication, bool silent):
++      TraceCallback(pszApplication, silent, *getLocalTrace())
++    {}
++
+     TraceLocal::~TraceLocal()
+     {}
+   }
+-- 
+2.41.0.windows.1
+

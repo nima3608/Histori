@@ -1,0 +1,256 @@
+From 65b3df033d64f439f41c1b11fa4f6f083832dbd3 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 31 Aug 2011 11:23:21 +0000
+Subject: [PATCH 0138/1076] Interface files makeup
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@173 90b65887-3827-0410-9a23-83215b262276
+---
+ .../generic/fsm/mStateMachineDoc.hpp          | 70 ++++++++++++++-----
+ .../Interfaces/generic/tools/pImplPtr.h       |  6 +-
+ .../Interfaces/inc/cfgclnt/nConfig.hpp        | 14 ++--
+ .../Interfaces/inc/text/mArgScan.hpp          |  4 +-
+ 4 files changed, 63 insertions(+), 31 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
+index c2525980..e43ee655 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2009 MATERNA Information & Communications
++ * Copyright (c) 2001-2011 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -79,6 +79,15 @@ namespace StateMachine
+       {
+       }
+ 
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~graphDocCluster()
++      {
++      }
++
+       /**
+        *
+        * Does a place name match for cluster membership?
+@@ -129,11 +138,11 @@ namespace StateMachine
+    class graphDocSubGraph: public graphDocCluster
+    {
+ 
+-   public:
+-
+       //! Subgraph nodes
+       std::list<std::string>  M_Nodes;
+ 
++   public:
++
+       /**
+        *
+        * Constructor.
+@@ -144,7 +153,8 @@ namespace StateMachine
+        *
+       **/
+       graphDocSubGraph( char const * Name, char const * Prefix ) :
+-         graphDocCluster(Name, Prefix)
++         graphDocCluster(Name, Prefix),
++         M_Nodes()
+       {
+       }
+ 
+@@ -158,6 +168,26 @@ namespace StateMachine
+          M_Nodes.push_back(node);
+       };
+ 
++      /**
++       *
++       * Subgraph begin.
++       *
++      **/
++      std::list<std::string>::const_iterator graphBegin() const
++      {
++         return M_Nodes.begin();
++      }
++
++      /**
++       *
++       * Subgraph end.
++       *
++      **/
++      std::list<std::string>::const_iterator graphEnd() const
++      {
++         return M_Nodes.end();
++      }
++
+    private:
+ 
+       //! Default constructor - intentionally not implemented.
+@@ -319,6 +349,7 @@ namespace StateMachine
+       **/
+       placeFlags( placeFlags const & Src ) :
+          M_Label( Src.M_Label ),
++         M_Printed( Src.M_Printed ),
+          M_Reference( Src.M_Reference ),
+          M_Relation( Src.M_Relation )
+       {
+@@ -387,9 +418,10 @@ namespace StateMachine
+       **/
+       void relate( graphDocRelation Relation )
+       {
+-         unsigned Temp = M_Relation;
+-         Temp |= Relation;
+-         M_Relation = (graphDocRelation)Temp;
++         /* Emumeration bit-set */
++         unsigned Temp = static_cast<unsigned>( M_Relation );
++         Temp |= static_cast<unsigned>( Relation );
++         M_Relation = static_cast<graphDocRelation>( Temp );
+       }
+ 
+       /**
+@@ -991,21 +1023,21 @@ namespace StateMachine
+       **/
+       void printSubgraphs( std::ostream & OS )
+       {
+-        //print subgraphs if exist
++         //print subgraphs if exist
+          std::list<graphDocSubGraph>::iterator I = M_SubGraphs.begin();
+          while( I != M_SubGraphs.end() )
+          {
+-             OS << "subgraph cluster" << (*I).name() << " {\n";
+-             printAttribute( OS,(*I).name(),REL_SGRAPH_BACK);
+-             std::list<std::string>::const_iterator NodeIt =
+-               (*I).M_Nodes.begin();
+-             while( NodeIt != (*I).M_Nodes.end() )
+-             {
+-                printAttribute( OS,(*NodeIt).c_str(),REL_SGRAPH_NODE);
+-                NodeIt++;
+-             }
+-             OS << "}" << std::endl;
+-             ++I;
++            OS << "subgraph cluster" << (*I).name() << " {\n";
++            printAttribute( OS,(*I).name(),REL_SGRAPH_BACK);
++            std::list<std::string>::const_iterator NodeIt =
++               I->graphBegin();
++            while( NodeIt != I->graphEnd() )
++            {
++               printAttribute( OS,(*NodeIt).c_str(),REL_SGRAPH_NODE);
++               ++NodeIt;
++            }
++            OS << "}" << std::endl;
++            ++I;
+          }
+       }
+ 
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/pImplPtr.h b/SelfServiceCommon/Interfaces/generic/tools/pImplPtr.h
+index 363fa35c..182db918 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/pImplPtr.h
++++ b/SelfServiceCommon/Interfaces/generic/tools/pImplPtr.h
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2007 MATERNA Information & Communications.
++ * Copyright (c) 2007-2011 MATERNA Information & Communications.
+  *
+  **************************************************************************
+ **/
+@@ -124,10 +124,10 @@ private:
+    pImplPtr();
+ 
+    //! Copy constructor - intentionally not implemented.
+-   pImplPtr( pImplPtr const & );
++   pImplPtr( pImplPtr const & Src );
+ 
+    //! Assignment - intentionally not implemented.
+-   pImplPtr& operator=( pImplPtr const & );
++   pImplPtr& operator=( pImplPtr const & Src );
+ 
+ };
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
+index 6a97316d..626d15ec 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
+@@ -126,10 +126,10 @@ namespace nConfig
+       cfgSystem();
+ 
+       //! Copy constructor - intentionally not implemented.
+-      cfgSystem( cfgSystem const & );
++      cfgSystem( cfgSystem const & Src );
+ 
+       //! Assignment - intentionally not implemented.
+-      cfgSystem & operator=( cfgSystem const & );
++      cfgSystem & operator=( cfgSystem const & Src );
+ 
+    };
+ 
+@@ -206,10 +206,10 @@ namespace nConfig
+    private:
+ 
+       //! Copy constructor - intentionally not implemented.
+-      gclBase( gclBase const & );
++      gclBase( gclBase const & Src );
+ 
+       //! Assignment - intentionally not implemented.
+-      gclBase & operator=( gclBase const & );
++      gclBase & operator=( gclBase const & Src );
+ 
+    };
+ 
+@@ -259,7 +259,7 @@ namespace nConfig
+        * Destructor.
+        *
+       **/
+-      ~exception() throw();
++      virtual ~exception() throw();
+ 
+       /**
+        *
+@@ -268,7 +268,7 @@ namespace nConfig
+        * @return The (zero terminated) string.
+        *
+       **/
+-      char const * what() const throw();
++      virtual char const * what() const throw();
+ 
+    private:
+ 
+@@ -276,7 +276,7 @@ namespace nConfig
+       exception();
+ 
+       //! Assignment - intentionally not implemented.
+-      exception & operator=( exception const & );
++      exception & operator=( exception const & Src );
+ 
+    };
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp b/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
+index a831fcb3..22d1253f 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/mArgScan.hpp
+@@ -231,14 +231,14 @@ private:
+     * Copy constructor - intentionally not implemented.
+     *
+    **/
+-   argScan( argScan const & );
++   argScan( argScan const & Src );
+ 
+    /**
+     *
+     * Assignment operator - intentionally not implemented.
+     *
+    **/
+-   argScan & operator=( argScan const & );
++   argScan & operator=( argScan const & Src );
+ 
+ };
+ 
+-- 
+2.41.0.windows.1
+

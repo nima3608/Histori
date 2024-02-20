@@ -1,0 +1,348 @@
+From 830396689544dad4d38e3ea94c0a78c172bfacbe Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 17 Aug 2012 12:22:20 +0000
+Subject: [PATCH 0250/1000] Mantis 24166
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@393 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Text/makefile.mak              |  28 +-
+ .../Massai/cpp/Text/src/ShowPectab.cpp        | 261 ++++++++++++++++++
+ 2 files changed, 279 insertions(+), 10 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 7d4c9345..5b4cb939 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -26,43 +26,51 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+ 
+ ######################################################################
+ 
+-MY_BIN1 =               $(_BIN)\HexDump.exe
++MY_BIN1 =               $(_BIN)\Hex2Bin.exe
+ 
+ MY_BIN1_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
+ 
+-MY_BIN1_OBJS =          $(_OBJ)\HexDump.obj
++MY_BIN1_OBJS =          $(_OBJ)\Hex2Bin.obj
+ 
+ ######################################################################
+ 
+-MY_BIN2 =               $(_BIN)\HexDump2Bin.exe
++MY_BIN2 =               $(_BIN)\HexDump.exe
+ 
+ MY_BIN2_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
+ 
+-MY_BIN2_OBJS =          $(_OBJ)\HexDump2Bin.obj
++MY_BIN2_OBJS =          $(_OBJ)\HexDump.obj
+ 
+ ######################################################################
+ 
+-MY_BIN3 =               $(_BIN)\TestSplit.exe
++MY_BIN3 =               $(_BIN)\HexDump2Bin.exe
+ 
+ MY_BIN3_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
+ 
+-MY_BIN3_OBJS =          $(_OBJ)\TestSplit.obj
++MY_BIN3_OBJS =          $(_OBJ)\HexDump2Bin.obj
+ 
+ ######################################################################
+ 
+-MY_BIN4 =               $(_BIN)\Hex2Bin.exe
++MY_BIN4 =               $(_BIN)\ShowPectab.exe
+ 
+ MY_BIN4_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
+ 
+-MY_BIN4_OBJS =          $(_OBJ)\Hex2Bin.obj
++MY_BIN4_OBJS =          $(_OBJ)\ShowPectab.obj
+ 
+ ######################################################################
+ 
+-MY_BIN5 =               $(_BIN)\TraceEventTimes.exe
++MY_BIN5 =               $(_BIN)\TestSplit.exe
+ 
+ MY_BIN5_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
+ 
+-MY_BIN5_OBJS =          $(_OBJ)\TraceEventTimes.obj
++MY_BIN5_OBJS =          $(_OBJ)\TestSplit.obj
++
++######################################################################
++
++MY_BIN6 =               $(_BIN)\TraceEventTimes.exe
++
++MY_BIN6_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
++
++MY_BIN6_OBJS =          $(_OBJ)\TraceEventTimes.obj
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp b/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
+new file mode 100644
+index 00000000..f3b176af
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
+@@ -0,0 +1,261 @@
++/**
++ **************************************************************************
++ *
++ * @file ShowPectab.cpp
++ *
++ * Read a file conatining a AEA pectab and display the field layout.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++
++#include "mInfile.hpp"
++
++#include <iostream>
++#include <string>
++
++using namespace std;
++
++
++#define LAST_COL        72
++#define LAST_ROW        17
++
++
++
++char const c_background( '.' );
++
++
++
++bool isDigit( char c )
++{
++   return( ( c >= '0' ) && ( c <= '9' ) );
++}
++
++
++
++bool isRow( char c )
++{
++   return( ( c <= ( 'A' + LAST_ROW ) ) && ( c >= 'A' ) );
++}
++         
++
++
++enum
++   {
++      sta_none,
++      sta_id0,
++      sta_id1,
++      sta_len0,
++      sta_len1,
++      sta_posy,
++      sta_posx0,
++      sta_posx1
++   } sta( sta_none );
++
++
++   
++bool use_again( false );
++
++   
++   
++void reset()
++{
++   sta = sta_none;
++   use_again = true;
++}
++
++
++
++int main( int argc, char ** argv )
++{
++   if( argc < 2 )
++   {
++      cout << "ShowPectab <pectabfile>" << endl;
++      return 1;
++   }
++   mInFile<std::string> inf( argv[1] );
++   std::string ins = inf.container();
++   cout << "ShowPectab \"" << argv[1] << "\"\n" << endl;;
++   char element[3];
++   element[2] = 0;
++
++   int length = 0;
++   int row = 0;
++   int column = 0;
++   
++   char array[LAST_ROW + 1][LAST_COL + 3];
++   memset( &array[0][0], c_background, sizeof(array ) );
++   for( int r=0; r<=LAST_ROW; ++r )
++   {
++      array[r][LAST_COL] = ' ';
++      array[r][LAST_COL + 1] = static_cast<char>( 'A' + r );
++      array[r][LAST_COL + 2] = '\n';
++   }
++   array[LAST_ROW][LAST_COL + 2] = 0;
++
++   char const * ptr = ins.c_str();
++   char c = *ptr++;
++   while( c )
++   {
++      switch( sta )
++      {
++      case sta_id0:
++         element[0] = c;
++         sta = sta_id1;
++         break;
++      case sta_id1:
++         element[1] = c;
++         sta = sta_len0;
++         break;
++      case sta_len0:
++         if( isDigit( c ) )
++         {
++            length = c - '0';
++            sta = sta_len1;
++         }
++         else
++         {
++            reset();
++         }
++         break;
++      case sta_len1:
++         if( isDigit( c ) )
++         {
++            length = ( length * 10 ) + c - '0';
++            sta = sta_posy;
++         }
++         else
++         {
++            reset();
++         }
++         break;
++      case sta_posy:
++         if( isRow( c ) )
++         {
++            row = c - 'A';
++            sta = sta_posx0;
++         }
++         else
++         {
++            reset();
++         }
++         break;
++      case sta_posx0:
++         if( isDigit( c ) )
++         {
++            column = c - '0';
++            sta = sta_posx1;
++         }
++         else
++         {
++            reset();
++         }
++         break;
++      case sta_posx1:
++         if( isDigit( c ) )
++         {
++            bool collision( false );
++            column = ( column * 10 ) + c - '0';
++            column -= 1;
++            //
++            switch( length )
++            {
++            case 0:
++               break;
++            case 1:
++               if( array[row][column] != c_background )
++               {
++                  collision = true;
++               }
++               else
++               {
++                  array[row][column] = 'X';
++               }
++               break;
++            default:
++               if( array[row][column] != c_background )
++               {
++                  collision = true;
++               }
++               else
++               {
++                  array[row][column] = element[0];
++                  if( array[row][column + 1] != c_background )
++                  {
++                     collision = true;
++                  }
++                  else
++                  {
++                     array[row][column + 1] = element[1];
++                     for( int i=2; i<length; ++i )
++                     {
++                        if( array[row][column + i] != c_background )
++                        {
++                           collision = true;
++                           i = length;
++                        }
++                        else
++                        {
++                           array[row][column + i] = '_';
++                        }
++                     }
++                  }
++               }
++            }
++            //
++            cout
++               << "  Element " << element
++               << " row=" << (char)( 'A' + row ) 
++               << " column=" << column 
++               << " length=" << length;
++            if( collision )
++            {
++               cout << " -> collision!";
++            }
++            cout << endl;
++            //
++            sta = sta_posy;
++         }
++         else
++         {
++            reset();
++         }
++         break;
++      default:
++         if( c == '#' )
++         {
++            sta = sta_id0;
++         }
++      }
++      if( use_again )
++      {
++         use_again = false;
++      }
++      else
++      {
++         c = *ptr++;
++      }
++   }
++   cout  << "\n"
++            "         1         2         3         4"
++            "         5         6         7  \n"
++            "1234567890123456789012345678901234567890"
++            "12345678901234567890123456789012\n"
++            "\n"
++         << &array[0][0] << endl;
++   return 0;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

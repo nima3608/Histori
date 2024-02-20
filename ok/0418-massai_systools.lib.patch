@@ -1,0 +1,2644 @@
+From 27d1a5c6468b8db78cd3fbaf4eb3a09e00772b62 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Jun 2013 19:44:41 +0000
+Subject: [PATCH 0418/1076] massai_systools.lib V1.0.0.5 Mantis 0026902:
+ Internet Explorer Process doesn't close ApplicationList, ProcessList closes
+ child processes; except processes of an exlusion list; mSysProcessList.h add
+ ProcessTree for finding child processes; mSysProcessTree.h add compare
+ operators for Timestamp, Duration; mSysTime.h mSysProcess::child provide
+ program name and creation time; mSysProcess.hpp
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@513 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |   7 +
+ .../Interfaces/inc/systools/mSysProcessList.h |  16 +-
+ .../Interfaces/inc/systools/mSysProcessTree.h |  57 +
+ .../Interfaces/inc/systools/mSysTime.h        |  21 +-
+ .../Interfaces/inc/systools/mSysWindow.h      |   4 +-
+ .../Massai/cpp/Systools/inc/mSysProcessW32.h  |   9 +-
+ .../Massai/cpp/Systools/makefile.mak          |  11 +-
+ .../cpp/Systools/src/TestSysProcessTree.cpp   |  75 ++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   7 +-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 976 +++++++++++++-----
+ .../cpp/Systools/src/mSysProcessTreeW32.cpp   | 355 +++++++
+ .../cpp/Systools/src/mSysProcessW32.cpp       |  93 +-
+ .../Massai/cpp/Systools/src/mSysTimeW32.cpp   | 102 +-
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  25 +-
+ 14 files changed, 1472 insertions(+), 286 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTree.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index b6f805c8..dd40b2e6 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -22,6 +22,7 @@
+ #include "tools/pImplPtr.h"
+ #include "systools/threadException.hpp"
+ #include "systools/mSysWait.h"
++#include "systools/mSysTime.h"
+ #include <string>
+ #include <map>
+ 
+@@ -216,6 +217,12 @@ namespace mSysProcess
+       **/
+       class Internal;
+       virtual const Internal& getId() const= 0;
++
++      // get module name of process
++      virtual std::string getProgram() const = 0;
++
++      // get creation time of process
++      virtual mSysTime::Timestamp getCreationTime() const = 0;
+    };
+ 
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index edb45ce8..a3cc6f1b 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -12,10 +12,13 @@
+ #include "tools/ResetTime.h"
+ #include "systools/mSysWindow.h"
+ #include <list>
++#include <string>
+ 
+ 
+ namespace mSysProcess
+ {
++  typedef std::list<std::string> TextList;
++
+   enum Show
+   {
+     SHOW,
+@@ -23,12 +26,20 @@ namespace mSysProcess
+     MINIMIZED
+   };
+ 
++  enum Termination
++  {
++    PT_NORMAL,
++    PT_EXTRA_TIME      // for special processes like appControl, which wait for other processes
++  };
++
+   // settings for a process
+   class ProcessProperties
+   {
+     public:
+       ProcessProperties();
+       bool operator<(const ProcessProperties& cmp) const;
++      void parse(const std::string& options);
++
+       std::string group;
+       std::string commandLine;
+       std::string workingDir;
+@@ -37,6 +48,7 @@ namespace mSysProcess
+       std::string desktop;
+       Show show;
+       long timeout;
++      Termination termination;
+   };
+   typedef std::list<ProcessProperties> PropertyList;
+ 
+@@ -76,7 +88,7 @@ namespace mSysProcess
+   class ProcessList
+   {
+     public:
+-      ProcessList(MASSAI::trace::TraceInterface& trc, const WatchdogSettings& settings);
++      ProcessList(const WatchdogSettings& settings, const TextList& terminationExlusionList, MASSAI::trace::TraceInterface& trc);
+       ~ProcessList();
+       void setListener(ProcessListCallback* pListener);
+       void start(ProcessListSettings* settings);
+@@ -96,7 +108,7 @@ namespace mSysProcess
+   class ApplicationList
+   {
+     public:
+-      ApplicationList(MASSAI::trace::TraceInterface& trc, const WatchdogSettings& settings);
++      ApplicationList(const WatchdogSettings& settings, const TextList& terminationExlusionList, MASSAI::trace::TraceInterface& trc);
+       ~ApplicationList();
+       void start(const PropertyList& processes);
+       void stop(const std::string& group);
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
+new file mode 100644
+index 00000000..30d21e37
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessTree.h
+@@ -0,0 +1,57 @@
++// find child processes
++
++#ifndef MSYSPROCESSTREE_H_INCLUDED
++#define MSYSPROCESSTREE_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "systools/mSysProcess.hpp"
++#include "systools/mSysTime.h"
++#include "tools/TraceInterface.h"
++#include <list>
++#include <string>
++
++
++namespace mSysProcess
++{
++  class ProcessNode;
++  typedef std::list<const ProcessNode*> ProcessNodeList;
++
++  // single process
++  class ProcessNode
++  {
++    public:
++      virtual ~ProcessNode();
++      virtual const ProcessNode* parent() const = 0;
++      virtual ProcessNodeList childs() const = 0;
++      virtual child* getProcess(const callBack* logging) const = 0;
++      virtual mSysTime::Timestamp getCreation() const = 0;
++      virtual std::string getId() const = 0;
++  };
++
++  // create-hierarchy of processes
++  class ProcessTree
++  {
++    public:
++      virtual ~ProcessTree();
++      // ProcessNodes are hold/freed by ProcessTree
++      // do not use ProcessNodes after deleting ProcessTree
++      virtual const ProcessNode* getNode(const child& process) const = 0;
++      virtual ProcessNodeList getChilds(const child& process) const = 0;
++      virtual ProcessNodeList processes() const = 0;
++  };
++
++  ProcessTree* createProcessTree(MASSAI::trace::TraceInterface& trc);
++
++
++  bool operator==(const ProcessNode& left, const ProcessNode& right);
++  bool operator!=(const ProcessNode& left, const ProcessNode& right);
++
++  bool operator<(const ProcessNode& left, const ProcessNode& right);
++  bool operator>(const ProcessNode& left, const ProcessNode& right);
++  bool operator<=(const ProcessNode& left, const ProcessNode& right);
++  bool operator>=(const ProcessNode& left, const ProcessNode& right);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+index 7b0b099c..c4301cbf 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysTime.h
+@@ -1,6 +1,5 @@
+-/**
+- * time; current time, system up time, sleep
+-**/
++// time; current time, system up time, sleep
++
+ #ifndef MSYSTIME_H_INCLUDED
+ #define MSYSTIME_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+@@ -20,6 +19,7 @@ namespace mSysTime
+       int second;
+       int milliseconds;
+   };
++
+   class Duration
+   {
+     public:
+@@ -29,10 +29,25 @@ namespace mSysTime
+       int seconds;
+       int milliseconds;
+   };
++
+   Timestamp getTimestamp();
+   unsigned long getUpTime();
+   Duration getDuration(unsigned long time_ms);
+   void sleep(unsigned long time_ms);
++
++  bool operator<(const Timestamp& left, const Timestamp& right);
++  bool operator>(const Timestamp& left, const Timestamp& right);
++  bool operator<=(const Timestamp& left, const Timestamp& right);
++  bool operator>=(const Timestamp& left, const Timestamp& right);
++  bool operator==(const Timestamp& left, const Timestamp& right);
++  bool operator!=(const Timestamp& left, const Timestamp& right);
++
++  bool operator<(const Duration& left, const Duration& right);
++  bool operator>(const Duration& left, const Duration& right);
++  bool operator<=(const Duration& left, const Duration& right);
++  bool operator>=(const Duration& left, const Duration& right);
++  bool operator==(const Duration& left, const Duration& right);
++  bool operator!=(const Duration& left, const Duration& right);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index 2e157d78..a9e4b545 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -20,6 +20,8 @@ namespace mSysWindow
+   {
+     public:
+       virtual ~Window();
++      // Warning: this may simulate pressing shift in the current process
++      //   to get the right to activate the window
+       virtual void activate()= 0;
+       virtual void show()= 0;
+       virtual void hide()= 0;
+@@ -27,8 +29,6 @@ namespace mSysWindow
+       virtual bool isVisible()= 0;
+       virtual std::string getTitle()= 0;
+       virtual std::string getClass()= 0;
+-      // Warning: this may simulate pressing F5 in the current process
+-      //   to get the right to activate the window
+       virtual bool isActive()= 0;
+   };
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessW32.h
+index 2d6a752f..9985d925 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessW32.h
+@@ -1,10 +1,3 @@
+-/**
+- **************************************************************************
+- *
+- * @file mSysProcessW32.h
+- *
+- **************************************************************************
+-**/
+ #ifndef MSYSPROCESSW32_H_INCLUDED
+ #define MSYSPROCESSW32_H_INCLUDED
+ #ifdef SHOW_INCLUDE_FILES
+@@ -23,6 +16,8 @@ namespace mSysProcess
+       Internal();
+       DWORD  id;
+   };
++
++  child* createProcess(DWORD pid, DWORD ppid, const std::string& module, const callBack* logging);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 07774def..056c51a2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -41,7 +41,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\Console.obj \
+                         $(_OBJ)\mMutexCSW32.obj \
+                         $(_OBJ)\mSysWindowW32.obj \
+-                        $(_OBJ)\mSysServiceMonitorW32.obj
++                        $(_OBJ)\mSysServiceMonitorW32.obj \
++                        $(_OBJ)\mSysProcessTreeW32.obj
+ 
+ 
+ ######################################################################
+@@ -88,4 +89,12 @@ MY_BIN5_OBJS =          $(_OBJ)\testcaseException.obj \
+                         $(_OBJ)\TestSysThread.obj
+ 
+ ######################################################################
++
++MY_BIN6 =               $(_BIN)\TestSysProcessTree.exe
++
++MY_BIN6_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS)
++
++MY_BIN6_OBJS =          $(_OBJ)\TestSysProcessTree.obj
++
++#######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTree.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTree.cpp
+new file mode 100644
+index 00000000..047b1633
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysProcessTree.cpp
+@@ -0,0 +1,75 @@
++// Test mSysProcessTree
++
++#include "systools/mSysProcessTree.h"
++#include "tools/TraceLocal.h"
++#include <iostream>
++
++using namespace mSysProcess;
++using MASSAI::trace::TraceLocal;
++
++namespace
++{
++  class Logging: public mSysProcess::callBack
++  {
++    public:
++      Logging(MASSAI::trace::TraceInterface& trc):
++        m_trc(trc)
++      {}
++
++      void lineOut(const char* line) const
++      {
++        m_trc.writeTraceText(MajorError_HERE, line);
++      }
++
++    private:
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++
++  void printTree(const ProcessNode* node, Logging& log, const std::string& indentation)
++  {
++    child* process = node->getProcess(&log);
++    std::cout << indentation << process->getProcessId() << std::endl;
++    delete process;
++    ProcessNodeList list = node->childs();
++    ProcessNodeList::const_iterator it = list.begin();
++    ProcessNodeList::const_iterator end = list.end();
++    std::string childIndentation = indentation + " ";
++    for(; it != end; it++)
++    {
++      printTree(*it, log, childIndentation);
++    }
++  }
++}
++
++int main( int argc, char **argv )
++{
++  TraceLocal trc("TestSysProcessTree");
++  Logging log(trc);
++  ProcessTree* tree = createProcessTree(trc);
++
++  ProcessNodeList list = tree->processes();
++  { // print process information
++    ProcessNodeList::const_iterator it = list.begin();
++    ProcessNodeList::const_iterator end = list.end();
++    for(; it != end; it++)
++    {
++      const ProcessNode* node = *it;
++      child* process = node->getProcess(&log);
++      trc.writeTrace(MajorError_HERE, "%s\n", process->getProcessInformation());
++      delete process;
++    }
++  }
++  { // print process tree
++    ProcessNodeList::const_iterator it = list.begin();
++    ProcessNodeList::const_iterator end = list.end();
++    for(; it != end; it++)
++    {
++      const ProcessNode* node = *it;
++      if(!node->parent())
++      {
++        printTree(node, log, "");
++      }
++    }
++  }
++  delete tree;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 4ee38cd0..852bf302 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -5,10 +5,15 @@ VERSION_ID_DT(systools, 1, 0, 0, 5);
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
+-\date 17.06.2013
++\date 27.06.2013
+ \li V1.0.0.5
+ \li Mantis 0026902: Internet Explorer Process doesn't close
+ 
++ApplicationList, ProcessList closes child processes; except processes of an exlusion list; mSysProcessList.h
++add ProcessTree for finding child processes; mSysProcessTree.h
++add compare operators for Timestamp, Duration; mSysTime.h
++mSysProcess::child provide program name and creation time; mSysProcess.hpp
++
+ \date 05.02.2013 \li V1.0.0.4
+                  \li Mantis 0025897: GPPDev: NCR K8 workaround for crash of printer driver
+                      add serviceMonitor to systools (monitor status of windows services)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index c2b04df0..74a75d1c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -5,6 +5,7 @@
+ #include "systools/mSysProcessList.h"
+ 
+ #include "boost/shared_ptr.hpp"
++#include "boost/regex.hpp"
+ #include "systools/mAutoMutexCS.h"
+ #include "systools/mEventSem.hpp"
+ #include "systools/mMutexCS.h"
+@@ -14,6 +15,7 @@
+ #include "systools/mSysThread.hpp"
+ #include "systools/mSysTime.h"
+ #include "systools/mSysWindow.h"
++#include "systools/mSysProcessTree.h"
+ #include "tools/ResetTime.h"
+ #include "tools/TraceInterface.h"
+ #include "text/stoupper.h"
+@@ -39,6 +41,11 @@ using mSysSynchronize::Synchronize;
+ using mSysSynchronize::SimpleSynchronize;
+ using mSysSynchronize::Internal;
+ 
++using boost::smatch;
++using boost::regex_search;
++using boost::regex;
++using boost::regbase;
++
+ using namespace Materna::MSSD;
+ using namespace Materna::Stoupper;
+ using namespace mSysProcess;
+@@ -47,65 +54,164 @@ namespace
+ {
+   typedef std::set<ProcessProperties> PropertySet;
+ 
++  const regex option_pattern
++  (
++    "WND *= *([^\" ]+)"
++    "|WND *= *\"([^\"]+)\""
++    "|WNDCLASS *= *\"([^\"]+)\""
++    "|CWD *= *\"([^\"]+)\""
++    "|(?:SHOW *= *(YES)|(NO)|(HIDE)|(MINIMIZED))"
++    "|(?:WAIT *= *([0-9]+)|(terminate))"
++    "|(SHOW)"
++    "|(EXTRA_TERMINATION_TIME)",
++    regbase::normal | regbase::icase
++  );
++
++  enum OptionIndex
++  {
++    OPT_TITLE= 1,
++    OPT_TITLE_,
++    OPT_CLASS,
++    OPT_WORKING_DIR,
++    OPT_SHOW_YES,
++    OPT_SHOW_NO,
++    OPT_SHOW_HIDE,
++    OPT_SHOW_MINIMIZED,
++    OPT_WAIT,
++    OPT_TERMINATE,
++    OPT_SHOW_SHOW,
++    OPT_EXTRA_TIME,
++  };
++
++  enum ChildProcess
++  {
++    CP_MAIN,
++    CP_SUB,
++  };
++
++  enum TerminationPhase
++  {
++    CP_MAIN_ONLY,
++    CP_ALL_EXCEPT_EXTRA_TIME,
++    CP_ALL,
++  };
++
+   enum WindowSearchType
+   {
+     WND_TITLE_CLASS,
+     WND_VISIBLE,
+     WND_ALL,
+   };
+-  // callback for Process notification
+-  class Process;
++
++  // callback for ProcessStart notification
++  class ProcessStart;
++  class ProcessHolder;
+   class ProcessCallback
+   {
+     public:
+-      ProcessCallback();
+       virtual ~ProcessCallback();
+-      virtual void notify(Process& process)= 0;
+-      virtual void match(Process& process)= 0;
++      virtual void notify(ProcessStart& process) = 0;
++      virtual void match(ProcessHolder& process) = 0;
++      virtual bool exclude(const std::string& program) = 0;
+   };
+ 
+   // control child process
+-  class Process:
++  class ProcessHolder:
+     public mSysWindow::Process,
+-    public WaitNotification,
+-    private callBack
++    public WaitNotification
+   {
+     public:
+-      Process(ProcessCallback& cb, ProcessProperties properties,
+-        TraceInterface& trc, const WatchdogSettings& settings);
+-      virtual ~Process();
+-      void start();
+-      void setStopping();
+-      void setWindowSearch(WindowSearchType search);
++      ProcessHolder(child* process, ChildProcess mainChild, Termination termination,
++        ProcessStart* pStarter, TraceInterface& trc);
++      virtual ~ProcessHolder();
+       bool sendBreak();
+       bool sendCtrlC();
+       bool kill();
+-      const ProcessProperties& getProperties() const;
++      bool isRunning() const;
++      bool isStopped() const;
++      void waitForTermination(unsigned int seconds);
++
++      // mSysWindow::Process
+       virtual child* getProcess();
+       virtual std::string getDesktop();
++      virtual bool match(Window& window);
++
++      // WaitNotification
+       virtual const Internal& getInternal() const;
+       virtual void notify();
+-      virtual bool match(Window& window);
+-      virtual void lineOut(const char* line) const;
+-      Time getResetTime() const;
++
++      std::string getProcessId() const;
++      std::string getProgram() const;
++
++      bool match(TerminationPhase phase) const;
++
++    private:
++      typedef std::auto_ptr<child> ChildPtr;
++
++      std::string getGroup() const;
++
++      ChildPtr m_pProcess;
++      ProcessStart* m_pStarter;
++      TraceInterface& m_trc;
++      ChildProcess m_mainChild;
++      Termination m_termination;
++  };
++
++  typedef std::set<ProcessHolder*> ProcessHolderSet;
++  typedef std::set<std::string> IdSet;
++
++  class ProcessStart: private callBack
++  {
++    public:
++      ProcessStart(ProcessProperties properties, ProcessCallback& cb,
++        const WatchdogSettings& settings, Synchronize& processWatchdog,
++        TraceInterface& trc);
++      virtual ~ProcessStart();
++
++      void start();
++      const ProcessProperties& getProperties() const;
++
+       bool isStopped() const;
++      bool isRunning() const;
++
++      void refreshProcessList(const ProcessTree& total);
++      child* getProcess() const;
++
++      void setStopping();
++      Time getResetTime() const;
+       bool needsReset() const;
+ 
++      void setWindowSearch(WindowSearchType search);
++      void getProcessList(ProcessHolderSet& processes);
++      bool match(ProcessHolder& process, Window& window);
++      void notify();
++      std::string getGroup() const;
++      std::string getDesktop();
++
+     private:
+-      typedef std::auto_ptr<child> ProcessPtr;
+-      ProcessCallback& m_cb;
++      typedef boost::shared_ptr<ProcessHolder> ProcessHolderPtr;
++      typedef std::list<ProcessHolderPtr> ProcessHolderPtrList;
++      typedef std::list<ProcessHolder*> ProcessHolderList;
++
++      virtual void lineOut(const char* line) const;
++      void refreshProcessList(const ProcessNode& node);
++
++      ProcessHolder* m_pFirst;
++      ProcessHolderPtrList m_childs;
+       TraceInterface& m_trc;
+-      ProcessPtr m_pProcess;
+       ProcessProperties m_properties;
+       ResetTime m_reset;
+-      bool m_stopping;
++      ProcessCallback& m_cb;
+       bool m_watchDog;
++      bool m_stopping;
+       WindowSearchType m_search;
++      Synchronize& m_processWatchdog;
++      IdSet m_pids;
+   };
+ 
+-  typedef std::set<Process*> ProcessSet;
+-  typedef boost::shared_ptr<Process> ProcessPtr;
+-  typedef std::list<ProcessPtr> ProcessPtrList;
++  typedef std::set<ProcessStart*> ProcessStartSet;
++  typedef boost::shared_ptr<ProcessStart> ProcessStartPtr;
++  typedef std::list<ProcessStartPtr> ProcessStartPtrList;
+ 
+   // store search result for a group (in ApplicationList)
+   typedef boost::shared_ptr<WindowSearch> WindowSearchPtr;
+@@ -117,7 +223,8 @@ namespace
+     private ProcessCallback
+   {
+     public:
+-      ProcessListImpl(TraceInterface& trc, const WatchdogSettings& settings);
++      ProcessListImpl(const WatchdogSettings& settings, const TextList& terminationExclusionList,
++        TraceInterface& trc);
+       void setListener(ProcessListCallback* pListener);
+       ProcessListCallback* getListener();
+       TraceInterface& getTrc();
+@@ -138,35 +245,44 @@ namespace
+       void stop(const std::string& group);
+ 
+     private:
+-      virtual void notify(Process& process);
+-      virtual void match(Process& process);
++      virtual void notify(ProcessStart& process);
++      virtual void match(ProcessHolder& process);
++      virtual bool exclude(const std::string& program);
+ 
+-      void stoppingProcesses(const ProcessSet& processSet);
+-      WindowList searchWindows(WindowSearchType search, ProcessSet& processSet);
++      void stoppingProcesses(const ProcessStartSet& processSet);
++      WindowList searchWindows(WindowSearchType search, ProcessStartSet& startSet,
++        ProcessHolderSet& processSet, TerminationPhase type);
++      WindowSearchPtr prepareSearchWindows(const WindowSearchPtr oldsearch,
++        WindowSearchType search, ProcessStartSet& startSet,
++        ProcessHolderSet& processSet, TerminationPhase type);
+       WindowSearchPtr prepareSearchWindows(const WindowSearchPtr oldsearch,
+-        WindowSearchType search, ProcessSet& processSet);
++        WindowSearchType search, ProcessStartSet& startSet);
++      void refreshProcessList(ProcessStartSet& processSet);
++      void getProcessList(ProcessStartSet& startSet, ProcessHolderSet& processSet);
+       void closeWindows(const WindowList& winList);
+-      void sendBreak(ProcessSet& processSet);
+-      void sendCtrlC(ProcessSet& processSet);
+-      void kill(const ProcessSet& processSet);
+-      void wait(const ProcessSet& processSet);
+-      void stop(const ProcessSet& processSet);
++      void sendBreak(ProcessHolderSet& processSet, TerminationPhase type);
++      void sendCtrlC(ProcessHolderSet& processSet, TerminationPhase type);
++      void kill(ProcessHolderSet& processSet);
++      void wait(ProcessHolderSet& processSet);
++      void stop(ProcessStartSet& processSet);
++
+       PropertySet getPropertySet(const PropertyList& list);
+-      PropertySet getPropertySet(const ProcessPtrList& list);
+-      PropertyList getDiff(const PropertyList& minuend, const ProcessPtrList& subtrahend);
+-      ProcessSet getDiff(const ProcessPtrList& minuend, const PropertyList& subtrahend);
+-      ProcessSet getProcessSet(const std::string& group);
++      PropertySet getPropertySet(const ProcessStartPtrList& list);
++      PropertyList getDiff(const PropertyList& minuend, const ProcessStartPtrList& subtrahend);
++      ProcessStartSet getDiff(const ProcessStartPtrList& minuend, const PropertyList& subtrahend);
++      ProcessStartSet getProcessStartSet(const std::string& group);
+ 
+ 
+       ProcessListCallback* m_pListener;
+       eventSemaphore m_break;
+       bool m_stop;
+       Mutex m_accessListener;
+-      ProcessPtrList m_processPtrList;
++      ProcessStartPtrList m_processPtrList;
+       TraceInterface& m_trc;
+       Synchronize m_processWatchdog;
+-      ProcessSet m_windowSearch;
++      ProcessHolderSet m_windowSearch;
+       WatchdogSettings m_settings;
++      TextList m_terminationExclusionList;
+   };
+ 
+   // store windows of a process group (in ApplicationList)
+@@ -195,10 +311,6 @@ namespace
+     }
+   }
+ 
+-  // callback for Process notification
+-  ProcessCallback::ProcessCallback()
+-  {}
+-
+   ProcessCallback::~ProcessCallback()
+   {}
+ 
+@@ -225,69 +337,224 @@ namespace
+     }
+   }
+ 
+-  // control child process
+-  Process::Process(ProcessCallback& cb, ProcessProperties properties, TraceInterface& trc, const WatchdogSettings& settings):
+-    m_cb(cb),
+-    m_pProcess(),
+-    m_properties(properties),
++  ProcessHolder::ProcessHolder
++  (
++    child* process,
++    ChildProcess mainChild,
++    Termination termination,
++    ProcessStart* pStarter,
++    TraceInterface& trc
++  ):
++    m_pProcess(process),
++    m_pStarter(pStarter),
+     m_trc(trc),
+-    m_reset(trc, m_properties.group, settings.resetMin, settings.resetMax, settings.resetRecover),
+-    m_stopping(false),
+-    m_watchDog(settings.useWatchDog),
+-    m_search(WND_ALL)
+-  {
+-    start();
+-  }
++    m_mainChild(mainChild),
++    m_termination(termination)
++  {}
+ 
+-  Process::~Process()
++  ProcessHolder::~ProcessHolder()
+   {}
+ 
+-  child* Process::getProcess()
++  child* ProcessHolder::getProcess()
+   {
+     return m_pProcess.get();
+   }
+ 
+-  std::string Process::getDesktop()
++  std::string ProcessHolder::getDesktop()
+   {
+-    return m_properties.desktop;
++    return m_pStarter->getDesktop();
+   }
+ 
+-  const Internal& Process::getInternal() const
++  bool ProcessHolder::match(Window& window)
+   {
+-    return m_pProcess.get()->getInternal();
++    return m_pStarter->match(*this, window);
+   }
+ 
+-  void Process::notify()
++  std::string ProcessHolder::getGroup() const
++  {
++    return m_pStarter->getGroup();
++  }
++
++  std::string ProcessHolder::getProcessId() const
++  {
++    return m_pProcess->getProcessId();
++  }
++
++  std::string ProcessHolder::getProgram() const
++  {
++    return m_pProcess->getProgram();
++  }
++
++  bool ProcessHolder::match(TerminationPhase phase) const
++  {
++    switch(phase)
++    {
++      case CP_MAIN_ONLY:              return m_mainChild == CP_MAIN;
++      case CP_ALL_EXCEPT_EXTRA_TIME:  return m_termination != PT_EXTRA_TIME;
++      default:                        return true;
++    }
++  }
++
++  void ProcessHolder::notify()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE,
+       "process terminated"
+-      "\n#####################\n"
++      "\n=====================\n"
+       "terminated (%s)\n"
+-      "%s\n"
+-      "#####################",
+-      m_properties.group.c_str(),
++      "%s"
++      "=====================",
++      getGroup().c_str(),
+       m_pProcess->getProcessInformation().c_str());
+-    if(needsReset())
++    if(m_mainChild == CP_MAIN)
+     {
+-      m_reset.setError();
++      m_pStarter->notify();
+     }
+-    m_cb.notify(*this);
+   }
+ 
+-  Time Process::getResetTime() const
++  const Internal& ProcessHolder::getInternal() const
++  {
++    return m_pProcess.get()->getInternal();
++  }
++
++  bool ProcessHolder::isRunning() const
++  {
++    return m_pProcess->getStatus() == STATUS_RUNNING;
++  }
++
++  bool ProcessHolder::isStopped() const
++  {
++    return m_pProcess->getStatus() == STATUS_TERMINATED;
++  }
++
++  bool ProcessHolder::sendBreak()
++  {
++    bool result = true;
++    if(isRunning())
++    {
++      m_trc.writeTrace(BasicRuntime_HERE,
++        "send break\t(%s)\tCOMP(%s)\tCMD(%s)",
++        getProcessId().c_str(),
++        getGroup().c_str(),
++        getProgram().c_str()
++      );
++      result = m_pProcess->sendBreak();
++    }
++    return result;
++  }
++
++  bool ProcessHolder::sendCtrlC()
++  {
++    bool result = true;
++    if(isRunning())
++    {
++      m_trc.writeTrace(BasicRuntime_HERE,
++        "send ctrl-c\t(%s)\tCOMP(%s)\tCMD(%s)",
++        getProcessId().c_str(),
++        getGroup().c_str(),
++        getProgram().c_str()
++      );
++      result = m_pProcess->sendCtrlC();
++    }
++    return result;
++  }
++
++  bool ProcessHolder::kill()
++  {
++    bool result = true;
++    if(isRunning())
++    {
++      m_trc.writeTrace(BasicRuntime_HERE,
++        "kill\t(%s)\tCOMP(%s)\tCMD(%s)",
++        getProcessId().c_str(),
++        getGroup().c_str(),
++        getProgram().c_str()
++      );
++      m_pProcess->kill();
++    }
++    return result;
++  }
++
++  void ProcessHolder::waitForTermination(unsigned int seconds)
++  {
++    if(isRunning())
++    {
++      m_trc.writeTrace(BasicRuntime_HERE,
++        "wait(%ds) for\t(%s)\tCOMP(%s)\tCMD(%s)",
++        seconds,
++        getProcessId().c_str(),
++        getGroup().c_str(),
++        getProgram().c_str()
++      );
++      m_pProcess->waitForTermination(seconds);
++    }
++  }
++
++  // control child process
++  ProcessStart::ProcessStart
++  (
++    ProcessProperties properties,
++    ProcessCallback& cb,
++    const WatchdogSettings& settings,
++    Synchronize& processWatchdog,
++    TraceInterface& trc
++  ):
++    m_pFirst(),
++    m_childs(),
++    m_cb(cb),
++    m_properties(properties),
++    m_reset(trc, m_properties.group, settings.resetMin, settings.resetMax, settings.resetRecover),
++    m_watchDog(settings.useWatchDog),
++    m_search(WND_ALL),
++    m_stopping(false),
++    m_trc(trc),
++    m_processWatchdog(processWatchdog),
++    m_pids()
++  {}
++
++  ProcessStart::~ProcessStart()
++  {}
++
++  Time ProcessStart::getResetTime() const
+   {
+     return m_reset.getResetTime();
+   }
+ 
+-  void Process::lineOut(const char* line) const
++  bool ProcessStart::isRunning() const
+   {
+-    m_trc.writeTraceText(MajorWarning_HERE, line);
++    bool result = false;
++    ProcessHolderPtrList::const_iterator it = m_childs.begin();
++    ProcessHolderPtrList::const_iterator end = m_childs.end();
++    for(; it != end; it++)
++    {
++      if((*it)->isRunning())
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
+   }
+ 
+-  bool Process::match(Window& window)
++  bool ProcessStart::isStopped() const
+   {
+     bool result = false;
+-    if(m_pProcess->getStatus() == STATUS_RUNNING)
++    ProcessHolderPtrList::const_iterator it = m_childs.begin();
++    ProcessHolderPtrList::const_iterator end = m_childs.end();
++    for(; it != end; it++)
++    {
++      if((*it)->isStopped())
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
++  bool ProcessStart::match(ProcessHolder& process, Window& window)
++  {
++    bool result = false;
++    if(isRunning())
+     {
+       switch(m_search)
+       {
+@@ -300,7 +567,8 @@ namespace
+               if(m_properties.windowTitle.size() > 0)
+               {
+                 std::string title = window.getTitle();
+-                result = stoupper(title).find(stoupper(m_properties.windowTitle)) != std::string::npos;
++                result = stoupper(title).find(stoupper(m_properties.windowTitle))
++                           != std::string::npos;
+               }
+               else
+               {
+@@ -335,12 +603,12 @@ namespace
+         m_properties.group.c_str(),
+         m_properties.commandLine.c_str()
+       );
+-      m_cb.match(*this);
++      m_cb.match(process);
+     }
+     return result;
+   }
+ 
+-  void Process::start()
++  void ProcessStart::start()
+   {
+     parent factory;
+     factory.setLogging(*this);
+@@ -367,7 +635,10 @@ namespace
+       // case SHOW:
+     }
+     m_reset.resetError();
+-    m_pProcess = ProcessPtr(factory.newChild());
++    m_pFirst = new ProcessHolder(factory.newChild(), CP_MAIN, m_properties.termination, this, m_trc);
++    m_childs.push_front(ProcessHolderPtr(m_pFirst));
++    m_processWatchdog.add(m_pFirst);
++
+     m_trc.writeTrace(BasicRuntime_HERE,
+       "process started\n"
+       "*********************\n"
+@@ -381,7 +652,7 @@ namespace
+       "SHOW(%d)(%s)\n"
+       "WAIT(%d)\n"
+       "*********************",
+-      m_pProcess->getProcessId().c_str(),
++      m_pFirst->getProcessId().c_str(),
+       m_properties.group.c_str(),
+       m_properties.commandLine.c_str(),
+       m_properties.desktop.c_str(),
+@@ -393,75 +664,152 @@ namespace
+     );
+   }
+ 
+-  void Process::setStopping()
++  void ProcessStart::refreshProcessList(const ProcessTree& total)
+   {
+-    m_stopping = true;
++    ProcessHolderList check;
++    {
++      ProcessHolderPtrList::const_iterator it = m_childs.begin();
++      ProcessHolderPtrList::const_iterator end = m_childs.end();
++      for(; it != end; it++)
++      {
++        check.push_back(it->get());
++      }
++    }
++    {
++      ProcessHolderList::const_iterator it = check.begin();
++      ProcessHolderList::const_iterator end = check.end();
++      for(; it != end; it++)
++      {
++        ProcessNodeList childs = total.getChilds(*(*it)->getProcess());
++        ProcessNodeList::const_iterator it = childs.begin();
++        ProcessNodeList::const_iterator end = childs.end();
++        for(; it != end; it++)
++        {
++          const ProcessNode* node = *it;
++          refreshProcessList(*node);
++        }
++      }
++    }
+   }
+ 
+-  void Process::setWindowSearch(WindowSearchType search)
++  void ProcessStart::refreshProcessList(const ProcessNode& node)
+   {
+-    m_search = search;
++    if(m_pids.find(node.getId()) == m_pids.end())
++    {
++      m_pids.insert(node.getId());
++      ProcessHolder* process = new ProcessHolder(node.getProcess(this), CP_SUB, m_properties.termination, this, m_trc);
++      if(m_cb.exclude(process->getProgram()))
++      {
++        m_trc.writeTrace(BasicRuntime_HERE,
++          "process found and ignored\n"
++          "---------------------\n"
++          "%s\n"
++          "COMP(%s)\n"
++          "CMD(%s)\n"
++          "DSK(%s)\n"
++          "---------------------",
++          process->getProcessId().c_str(),
++          m_properties.group.c_str(),
++          process->getProgram().c_str(),
++          m_properties.desktop.c_str()
++        );
++      }
++      else
++      {
++        m_trc.writeTrace(BasicRuntime_HERE,
++          "process found\n"
++          "+++++++++++++++++++++\n"
++          "%s\n"
++          "COMP(%s)\n"
++          "CMD(%s)\n"
++          "DSK(%s)\n"
++          "+++++++++++++++++++++",
++          process->getProcessId().c_str(),
++          m_properties.group.c_str(),
++          process->getProgram().c_str(),
++          m_properties.desktop.c_str()
++        );
++        m_processWatchdog.add(process);
++        m_childs.push_back(ProcessHolderPtr(process));
++        ProcessNodeList childs = node.childs();
++        ProcessNodeList::const_iterator it = childs.begin();
++        ProcessNodeList::const_iterator end = childs.end();
++        for(; it != end; it++)
++        {
++          refreshProcessList(*(*it));
++        }
++      }
++    }
+   }
+ 
+-  bool Process::sendBreak()
++  child* ProcessStart::getProcess() const
+   {
+-    bool result = true;
+-    if(m_pProcess->getStatus() == STATUS_RUNNING)
++    child* result = 0;
++    if(m_pFirst)
+     {
+-      m_trc.writeTrace(BasicRuntime_HERE,
+-        "send break\t(%s)\tCOMP(%s)\tCMD(%s)",
+-        m_pProcess->getProcessId().c_str(),
+-        m_properties.group.c_str(),
+-        m_properties.commandLine.c_str()
+-      );
+-      result = m_pProcess->sendBreak();
++      result = m_pFirst->getProcess();
+     }
+     return result;
+   }
+ 
+-  bool Process::sendCtrlC()
++  std::string ProcessStart::getGroup() const
+   {
+-    bool result = true;
+-    if(m_pProcess->getStatus() == STATUS_RUNNING)
+-    {
+-      m_trc.writeTrace(BasicRuntime_HERE,
+-        "send ctrl-c\t(%s)\tCOMP(%s)\tCMD(%s)",
+-        m_pProcess->getProcessId().c_str(),
+-        m_properties.group.c_str(),
+-        m_properties.commandLine.c_str()
+-      );
+-      result = m_pProcess->sendCtrlC();
+-    }
+-    return result;
++    return m_properties.group;
+   }
+ 
+-  bool Process::kill()
++  std::string ProcessStart::getDesktop()
+   {
+-    bool result = true;
+-    if(m_pProcess->getStatus() == STATUS_RUNNING)
++    return m_properties.desktop;
++  }
++
++  void ProcessStart::setStopping()
++  {
++    m_stopping = true;
++  }
++
++  void ProcessStart::setWindowSearch(WindowSearchType search)
++  {
++    m_search = search;
++  }
++
++  void ProcessStart::getProcessList(ProcessHolderSet& processes)
++  {
++    ProcessHolderPtrList::iterator it = m_childs.begin();
++    ProcessHolderPtrList::iterator end = m_childs.end();
++    for(; it != end; it++)
+     {
+-      m_trc.writeTrace(BasicRuntime_HERE,
+-        "kill\t(%s)\tCOMP(%s)\tCMD(%s)",
+-        m_pProcess->getProcessId().c_str(),
+-        m_properties.group.c_str(),
+-        m_properties.commandLine.c_str()
+-      );
+-      m_pProcess->kill();
++      processes.insert(it->get());
+     }
+-    return result;
+   }
+ 
+-  bool Process::isStopped() const
++  void ProcessStart::lineOut(const char* line) const
+   {
+-    return m_pProcess->getStatus() == STATUS_TERMINATED;
++    m_trc.writeTraceText(MajorWarning_HERE, line);
+   }
+ 
+-  bool Process::needsReset() const
++  void ProcessStart::notify()
++  {
++    m_trc.writeTrace(BasicRuntime_HERE,
++      "process terminated"
++      "\n#####################\n"
++      "terminated (%s)\n"
++      "(%s)\n"
++      "#####################",
++      m_properties.group.c_str(),
++      m_properties.commandLine.c_str());
++    if(needsReset())
++    {
++      m_reset.setError();
++    }
++    m_cb.notify(*this);
++  }
++
++  bool ProcessStart::needsReset() const
+   {
+     return m_watchDog && !m_stopping && isStopped();
+   }
+ 
+-  const ProcessProperties& Process::getProperties() const
++  const ProcessProperties& ProcessStart::getProperties() const
+   {
+     return m_properties;
+   }
+@@ -485,7 +833,8 @@ namespace
+   }
+ 
+   // control list of child processes
+-  ProcessListImpl::ProcessListImpl(TraceInterface& trc, const WatchdogSettings& settings):
++  ProcessListImpl::ProcessListImpl(const WatchdogSettings& settings,
++    const TextList& terminationExclusionList, TraceInterface& trc):
+     WaitListener(),
+     m_pListener(0),
+     m_break(),
+@@ -495,7 +844,8 @@ namespace
+     m_processPtrList(),
+     m_processWatchdog(m_trc),
+     m_windowSearch(),
+-    m_settings(settings)
++    m_settings(settings),
++    m_terminationExclusionList(terminationExclusionList)
+   {}
+ 
+   void ProcessListImpl::setListener(ProcessListCallback* pListener)
+@@ -515,7 +865,7 @@ namespace
+     WaitListener::notify(pNotification);
+   }
+ 
+-  void ProcessListImpl::notify(Process& process)
++  void ProcessListImpl::notify(ProcessStart& process)
+   {
+     ProcessListCallback* pListener= getListener();
+     if(pListener)
+@@ -554,13 +904,13 @@ namespace
+     for(; it != end && !m_stop; it++)
+     {
+       const ProcessProperties& prop = *it;
+-      Process* process = new Process(*this, prop, m_trc, m_settings);
+-      m_processPtrList.push_back(ProcessPtr(process));
++      ProcessStart* process = new ProcessStart(prop, *this, m_settings, m_processWatchdog, m_trc);
++      process->start();
++      m_processPtrList.push_back(ProcessStartPtr(process));
+       if(pListener)
+       {
+         pListener->started(prop);
+       }
+-      m_processWatchdog.add(process);
+       if(prop.timeout > 0)
+       {
+          m_trc.writeTrace(BasicRuntime_HERE,
+@@ -590,9 +940,9 @@ namespace
+ 
+   void ProcessListImpl::update(const PropertyList& propertyList)
+   {
+-    ProcessSet oldProcessSet = getDiff(m_processPtrList, propertyList);
++    ProcessStartSet oldProcessStartSet = getDiff(m_processPtrList, propertyList);
+     PropertyList newPropertyList = getDiff(propertyList, m_processPtrList);
+-    stop(oldProcessSet);
++    stop(oldProcessStartSet);
+     start(newPropertyList);
+   }
+ 
+@@ -600,13 +950,13 @@ namespace
+   {
+     ProcessListCallback* pListener= getListener();
+     Time wait = 0;
+-    ProcessPtrList::iterator it =  m_processPtrList.begin();
+-    ProcessPtrList::iterator end =  m_processPtrList.end();
++    ProcessStartPtrList::iterator it =  m_processPtrList.begin();
++    ProcessStartPtrList::iterator end =  m_processPtrList.end();
+     while(it != end && !m_stop)
+     {
+-      ProcessPtrList::iterator next = it;
++      ProcessStartPtrList::iterator next = it;
+       next++;
+-      Process* process = (*it).get();
++      ProcessStart* process = (*it).get();
+       if(process->isStopped())
+       {
+         if(process->needsReset())
+@@ -619,7 +969,6 @@ namespace
+             {
+               pListener->started(process->getProperties());
+             }
+-            m_processWatchdog.add(process);
+           }
+           else if(wait <= 0 || resetTime < wait)
+           {
+@@ -649,24 +998,24 @@ namespace
+     }
+   }
+ 
+-  void ProcessListImpl::stoppingProcesses(const ProcessSet& processSet)
++  void ProcessListImpl::stoppingProcesses(const ProcessStartSet& processSet)
+   {
+-    ProcessSet::const_iterator it = processSet.begin();
+-    ProcessSet::const_iterator end = processSet.end();
++    ProcessStartSet::const_iterator it = processSet.begin();
++    ProcessStartSet::const_iterator end = processSet.end();
+     for(; it != end; it++)
+     {
+       (*it)->setStopping();
+     }
+   }
+ 
+-  ProcessSet ProcessListImpl::getProcessSet(const std::string& group)
++  ProcessStartSet ProcessListImpl::getProcessStartSet(const std::string& group)
+   {
+-    ProcessPtrList::iterator it =  m_processPtrList.begin();
+-    ProcessPtrList::iterator end =  m_processPtrList.end();
+-    ProcessSet result;
++    ProcessStartPtrList::iterator it =  m_processPtrList.begin();
++    ProcessStartPtrList::iterator end =  m_processPtrList.end();
++    ProcessStartSet result;
+     for(; it != end; it++)
+     {
+-      Process* process = (*it).get();
++      ProcessStart* process = (*it).get();
+       if(process->getProperties().group == group)
+       {
+         result.insert(process);
+@@ -675,25 +1024,81 @@ namespace
+     return result;
+   }
+ 
+-  WindowSearchPtr ProcessListImpl::searchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, const std::string& group)
++  void ProcessListImpl::getProcessList(ProcessStartSet& startSet, ProcessHolderSet& processSet)
++  {
++    ProcessStartSet::const_iterator it = startSet.begin();
++    ProcessStartSet::const_iterator end = startSet.end();
++    for(; it != end; it++)
++    {
++      (*it)->getProcessList(processSet);
++    }
++  }
++
++  void ProcessListImpl::refreshProcessList(ProcessStartSet& processSet)
++  {
++    ProcessTree* total = createProcessTree(m_trc);
++    ProcessStartSet::const_iterator it = processSet.begin();
++    ProcessStartSet::const_iterator end = processSet.end();
++    for(; it != end; it++)
++    {
++      (*it)->refreshProcessList(*total);
++    }
++    delete total;
++  }
++
++  WindowSearchPtr ProcessListImpl::searchWindows(const WindowSearchPtr oldsearch,
++    WindowSearchType search, const std::string& group)
+   {
+-    return prepareSearchWindows(oldsearch, search, getProcessSet(group));
++    return prepareSearchWindows(oldsearch, search, getProcessStartSet(group));
+   }
+ 
+   void ProcessListImpl::stop(const std::string& group)
+   {
+-    stop(getProcessSet(group));
++    stop(getProcessStartSet(group));
++  }
++
++  WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch,
++    WindowSearchType search, ProcessStartSet& startSet)
++  {
++    ProcessHolderSet processSet;
++    refreshProcessList(startSet);
++    getProcessList(startSet, processSet);
++    return prepareSearchWindows(oldsearch, search, startSet, processSet, CP_ALL);
++  }
++
++  WindowList ProcessListImpl::searchWindows(WindowSearchType search, ProcessStartSet& startSet,
++    ProcessHolderSet& processSet, TerminationPhase type)
++  {
++    WindowSearchPtr searchWindow =
++      prepareSearchWindows(WindowSearchPtr(), search, startSet, processSet, type);
++    searchWindow->search();
++    processSet = m_windowSearch;
++    return searchWindow->getList();
+   }
+ 
+-  WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, ProcessSet& processSet)
++  WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch,
++    WindowSearchType search, ProcessStartSet& startSet, ProcessHolderSet& processSet,
++    TerminationPhase type)
+   {
+     WindowSearchData data;
+-    ProcessSet::const_iterator it = processSet.begin();
+-    ProcessSet::const_iterator end = processSet.end();
+-    for(; it != end; it++)
+     {
+-      (*it)->setWindowSearch(search);
+-      data.processSet.insert(*it);
++      ProcessStartSet::const_iterator it = startSet.begin();
++      ProcessStartSet::const_iterator end = startSet.end();
++      for(; it != end; it++)
++      {
++        (*it)->setWindowSearch(search);
++      }
++    }
++    {
++      ProcessHolderSet::const_iterator it = processSet.begin();
++      ProcessHolderSet::const_iterator end = processSet.end();
++      for(; it != end; it++)
++      {
++        if((*it)->match(type))
++        {
++          data.processSet.insert(*it);
++        }
++      }
+     }
+     m_windowSearch = processSet;
+     data.useProcessId = true;
+@@ -708,23 +1113,15 @@ namespace
+     }
+   }
+ 
+-  WindowList ProcessListImpl::searchWindows(WindowSearchType search, ProcessSet& processSet)
++  void ProcessListImpl::sendBreak(ProcessHolderSet& processSet, TerminationPhase type)
+   {
+-    WindowSearchPtr searchWindow = prepareSearchWindows(WindowSearchPtr(), search, processSet);
+-    searchWindow->search();
+-    processSet = m_windowSearch;
+-    return searchWindow->getList();
+-  }
+-
+-  void ProcessListImpl::sendBreak(ProcessSet& processSet)
+-  {
+-    ProcessSet::iterator it = processSet.begin();
+-    ProcessSet::iterator end = processSet.end();
++    ProcessHolderSet::iterator it = processSet.begin();
++    ProcessHolderSet::iterator end = processSet.end();
+     while(it != end)
+     {
+-      ProcessSet::iterator next = it;
++      ProcessHolderSet::iterator next = it;
+       next++;
+-      if((*it)->sendBreak())
++      if((*it)->match(type) && (*it)->sendBreak())
+       {
+         processSet.erase(it);
+       }
+@@ -732,15 +1129,15 @@ namespace
+     }
+   }
+ 
+-  void ProcessListImpl::sendCtrlC(ProcessSet& processSet)
++  void ProcessListImpl::sendCtrlC(ProcessHolderSet& processSet, TerminationPhase type)
+   {
+-    ProcessSet::iterator it = processSet.begin();
+-    ProcessSet::iterator end = processSet.end();
++    ProcessHolderSet::iterator it = processSet.begin();
++    ProcessHolderSet::iterator end = processSet.end();
+     while(it != end)
+     {
+-      ProcessSet::iterator next = it;
++      ProcessHolderSet::iterator next = it;
+       next++;
+-      if((*it)->sendCtrlC())
++      if((*it)->match(type) && (*it)->sendCtrlC())
+       {
+         processSet.erase(it);
+       }
+@@ -748,56 +1145,77 @@ namespace
+     }
+   }
+ 
+-  void ProcessListImpl::kill(const ProcessSet& processSet)
++  void ProcessListImpl::kill(ProcessHolderSet& processSet)
+   {
+-    ProcessSet::const_iterator it = processSet.begin();
+-    ProcessSet::const_iterator end = processSet.end();
++    ProcessHolderSet::const_iterator it = processSet.begin();
++    ProcessHolderSet::const_iterator end = processSet.end();
+     for(; it != end; it++)
+     {
+       (*it)->kill();
+     }
+   }
+ 
+-  void ProcessListImpl::wait(const ProcessSet& processSet)
++  void ProcessListImpl::wait(ProcessHolderSet& processSet)
+   {
+     int terminationTime = m_settings.waitTimeout;
+     unsigned long start = mSysTime::getUpTime();
+-    ProcessSet::const_iterator it = processSet.begin();
+-    ProcessSet::const_iterator end = processSet.end();
++    ProcessHolderSet::iterator it = processSet.begin();
++    ProcessHolderSet::iterator end = processSet.end();
+     for(; it != end; it++)
+     {
+-      child* pProcess = (*it)->getProcess();
+-      if(pProcess && pProcess->getStatus() == STATUS_RUNNING)
++      unsigned long now = mSysTime::getUpTime();
++      int remain = terminationTime - (now - start);
++      if(remain/1000 <= 0)
+       {
+-        const ProcessProperties& prop = (*it)->getProperties();
+-        m_trc.writeTrace(BasicRuntime_HERE,
+-          "wait for\t(%s)\tCOMP(%s)\tCMD(%s)",
+-          pProcess->getProcessId().c_str(),
+-          prop.group.c_str(),
+-          prop.commandLine.c_str()
+-        );
+-
+-        unsigned long now = mSysTime::getUpTime();
+-        int remain = terminationTime - (now - start);
+-        if(remain <= 0)
+-        {
+-          break;
+-        }
+-        pProcess->waitForTermination(remain/1000);
++        break;
+       }
++      (*it)->waitForTermination(remain/1000);
+     }
+   }
+ 
+-  void ProcessListImpl::match(Process& process)
++  void ProcessListImpl::match(ProcessHolder& process)
+   {
+     m_windowSearch.erase(&process);
+   }
+ 
++
++  bool ends_with(const std::string& text, const std::string& postfix)
++  {
++    bool result = false;
++    std::string::size_type length = text.length();
++    std::string::size_type end = postfix.length();
++    if(length >= end)
++    {
++      result = text.compare(length - end, end, postfix) == 0;
++    }
++    return result;
++  }
++
++  bool ProcessListImpl::exclude(const std::string& program)
++  {
++    bool result = false;
++    TextList::const_iterator it = m_terminationExclusionList.begin();
++    TextList::const_iterator end = m_terminationExclusionList.end();
++    for(; it != end; it++)
++    {
++      if(ends_with(program, *it))
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
+   /*
+-    - send WM_CLOSE to windows found by title/class
+-    - send Ctrl-Break to remaining processes
+-    - send WM_CLOSE to visible windows of remaining processes
+-    - send WM_CLOSE to all windows of remaining processes
++    - send WM_CLOSE to windows found by title/class of all processes
++    - send Ctrl-Break to remaining main processes
++    - send WM_CLOSE to visible windows of remaining main processes
++    - send WM_CLOSE to all windows of remaining main processes
++    - wait for process termination
++
++    - send Ctrl-Break to remaining processes, except special processes like appcontrol.exe
++    - send WM_CLOSE to all windows of remaining processes, except special processes like appcontrol.exe
+     - wait for process termination
+ 
+     - send Ctrl-Break to remaining processes
+@@ -807,23 +1225,33 @@ namespace
+     - call TerminateProcess for remaining processes
+     - wait for process termination
+   */
+-  void ProcessListImpl::stop(const ProcessSet& processSet)
++  void ProcessListImpl::stop(ProcessStartSet& processSet)
+   {
+     stoppingProcesses(processSet);
+-    ProcessSet remain = processSet;
+-    closeWindows(searchWindows(WND_TITLE_CLASS, remain));
+-    sendBreak(remain);
+-    closeWindows(searchWindows(WND_VISIBLE, remain));
+-    closeWindows(searchWindows(WND_ALL, remain));
+-    wait(processSet);
++    refreshProcessList(processSet);
++    ProcessHolderSet all;
++    getProcessList(processSet, all);
++
++    ProcessHolderSet remain;
++    getProcessList(processSet, remain);
++    closeWindows(searchWindows(WND_TITLE_CLASS, processSet, remain, CP_ALL));
++    sendBreak(remain, CP_MAIN_ONLY);
++    closeWindows(searchWindows(WND_VISIBLE, processSet, remain, CP_MAIN_ONLY));
++    closeWindows(searchWindows(WND_ALL, processSet, remain, CP_MAIN_ONLY));
++    wait(all);
+ 
+-    remain = processSet;
+-    sendBreak(remain);
+-    closeWindows(searchWindows(WND_ALL, remain));
+-    wait(processSet);
++    getProcessList(processSet, remain);
++    sendCtrlC(remain, CP_ALL_EXCEPT_EXTRA_TIME);
++    closeWindows(searchWindows(WND_ALL, processSet, remain, CP_ALL_EXCEPT_EXTRA_TIME));
++    wait(all);
+ 
+-    kill(processSet);
+-    wait(processSet);
++    getProcessList(processSet, remain);
++    sendCtrlC(remain, CP_ALL);
++    closeWindows(searchWindows(WND_ALL, processSet, remain, CP_ALL));
++    wait(all);
++
++    kill(all);
++    wait(all);
+   }
+ 
+   PropertySet ProcessListImpl::getPropertySet(const PropertyList& list)
+@@ -838,11 +1266,11 @@ namespace
+     return result;
+   }
+ 
+-  PropertySet ProcessListImpl::getPropertySet(const ProcessPtrList& list)
++  PropertySet ProcessListImpl::getPropertySet(const ProcessStartPtrList& list)
+   {
+     PropertySet result;
+-    ProcessPtrList::const_iterator it = list.begin();
+-    ProcessPtrList::const_iterator end = list.end();
++    ProcessStartPtrList::const_iterator it = list.begin();
++    ProcessStartPtrList::const_iterator end = list.end();
+     for(; it != end; it++)
+     {
+       result.insert((*it)->getProperties());
+@@ -850,7 +1278,8 @@ namespace
+     return result;
+   }
+ 
+-  PropertyList ProcessListImpl::getDiff(const PropertyList& minuend, const ProcessPtrList& subtrahend)
++  PropertyList ProcessListImpl::getDiff(const PropertyList& minuend,
++    const ProcessStartPtrList& subtrahend)
+   {
+     PropertySet set = getPropertySet(subtrahend);
+     PropertyList result;
+@@ -867,12 +1296,13 @@ namespace
+     return result;
+   }
+ 
+-  ProcessSet ProcessListImpl::getDiff(const ProcessPtrList& minuend, const PropertyList& subtrahend)
++  ProcessStartSet ProcessListImpl::getDiff(const ProcessStartPtrList& minuend,
++    const PropertyList& subtrahend)
+   {
+     PropertySet set = getPropertySet(subtrahend);
+-    ProcessSet result;
+-    ProcessPtrList::const_iterator it = minuend.begin();
+-    ProcessPtrList::const_iterator end = minuend.end();
++    ProcessStartSet result;
++    ProcessStartPtrList::const_iterator it = minuend.begin();
++    ProcessStartPtrList::const_iterator end = minuend.end();
+     for(; it != end; it++)
+     {
+       const ProcessProperties& prop = (*it)->getProperties();
+@@ -893,7 +1323,7 @@ namespace mSysProcess
+     private ProcessListImpl
+   {
+     public:
+-      ProcessList::Impl(TraceInterface& trc, const WatchdogSettings& settings);
++      ProcessList::Impl(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc);
+       void start(ProcessListSettings* pSettings);
+       void stop();
+       void checkProcessList();
+@@ -922,7 +1352,7 @@ namespace mSysProcess
+     private ProcessListImpl
+   {
+     public:
+-      Impl(TraceInterface& trc, const WatchdogSettings& settings);
++      Impl(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc);
+       ~Impl();
+       void start(const PropertyList& processes);
+       void stop(const std::string& group);
+@@ -936,9 +1366,9 @@ namespace mSysProcess
+   };
+ 
+   // control list of child processes
+-  ProcessList::Impl::Impl(TraceInterface& trc, const WatchdogSettings& settings):
++  ProcessList::Impl::Impl(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc):
+     thread(0),
+-    ProcessListImpl(trc, settings),
++    ProcessListImpl(settings, terminationExclusionList, trc),
+     m_pSettings(0),
+     m_event(),
+     m_access(),
+@@ -1084,8 +1514,8 @@ namespace mSysProcess
+   }
+ 
+   // control list of child processes
+-  ApplicationList::Impl::Impl(TraceInterface& trc, const WatchdogSettings& settings):
+-    ProcessListImpl(trc, settings),
++  ApplicationList::Impl::Impl(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc):
++    ProcessListImpl(settings, terminationExclusionList, trc),
+     m_searchMap()
+   {
+     startWatchdog();
+@@ -1139,35 +1569,93 @@ namespace mSysProcess
+     workingDir(),
+     windowTitle(),
+     windowClass(),
++    desktop(),
+     show(HIDE),
+     timeout(0),
+-    desktop()
++    termination(PT_NORMAL)
+   {}
+ 
+   bool ProcessProperties::operator<(const ProcessProperties& cmp) const
+   {
+     return group < cmp.group
+-      || (group == cmp.group
+-        && commandLine < cmp.commandLine
+-         || (commandLine == cmp.commandLine
+-           && (workingDir < cmp.workingDir
+-             || (workingDir == cmp.workingDir
+-               && (windowTitle < cmp.windowTitle
+-                 || (windowTitle == cmp.windowTitle
+-                   && (windowClass < cmp.windowClass
+-                     || (windowClass == cmp.windowClass
+-                       && (desktop < cmp.desktop
+-                         || (desktop == cmp.desktop
+-                             && (show < cmp.show)))))))))));
++       || (group == cmp.group
++       && (commandLine < cmp.commandLine
++       || (commandLine == cmp.commandLine
++       && (workingDir < cmp.workingDir
++       || (workingDir == cmp.workingDir
++       && (windowTitle < cmp.windowTitle
++       || (windowTitle == cmp.windowTitle
++       && (windowClass < cmp.windowClass
++       || (windowClass == cmp.windowClass
++       && (desktop < cmp.desktop
++       || (desktop == cmp.desktop
++       && (show < cmp.show))))))))))));
++  }
++
++  void ProcessProperties::parse(const std::string& options)
++  {
++    if(options.size() > 0)
++    {
++      smatch parsed;
++      std::string::const_iterator position= options.begin();
++      std::string::const_iterator end= options.end();
++      while(regex_search(position, end, parsed, option_pattern))
++      {
++        if(parsed[OPT_TITLE].matched)                // WND=([^" ]+)
++        {
++          windowTitle = parsed[OPT_TITLE];
++        }
++        else if(parsed[OPT_TITLE_].matched)          // WND=([^"]+)
++        {
++          windowTitle = parsed[OPT_TITLE_];
++        }
++        else if(parsed[OPT_CLASS].matched)           // WNDCLASS="([^"]+)"
++        {
++          windowClass= parsed[OPT_CLASS];
++        }
++        else if(parsed[OPT_WORKING_DIR].matched)     // CWD="([^"]+)"
++        {
++          workingDir= parsed[OPT_WORKING_DIR];
++        }
++        else if(parsed[OPT_SHOW_YES].matched         // SHOW=(YES)
++          || parsed[OPT_SHOW_SHOW].matched)          // (SHOW)
++        {
++          show = mSysProcess::SHOW;
++        }
++        else if(parsed[OPT_SHOW_NO].matched          // SHOW=(NO)
++         ||parsed[OPT_SHOW_HIDE].matched)            // SHOW=(HIDE)
++        {
++          show = mSysProcess::HIDE;
++        }
++        else if(parsed[OPT_SHOW_MINIMIZED].matched)  // SHOW=(MINIMIZED)
++        {
++          show = mSysProcess::MINIMIZED;
++        }
++        else if(parsed[OPT_TERMINATE].matched)       // WAIT=(terminate)
++        {
++          timeout= -1;
++        }
++        else if(parsed[OPT_WAIT].matched)            // WAIT=([0-9]+)
++        {
++          timeout= atol(std::string(parsed[OPT_WAIT]).c_str());
++        }
++        else if(parsed[OPT_EXTRA_TIME].matched)     // (EXTRA_TERMINATION_TIME)
++        {
++          termination = PT_EXTRA_TIME;
++        }
++        position= parsed[0].second;
++      }
++    }
+   }
+ 
++
+   // settings for ProcessList
+   ProcessListSettings::~ProcessListSettings()
+   {}
+ 
+   // control list of child processes
+-  ProcessList::ProcessList(TraceInterface& trc, const WatchdogSettings& settings):
+-    m_pImpl(new Impl(trc, settings))
++  ProcessList::ProcessList(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc):
++    m_pImpl(new Impl(settings, terminationExclusionList, trc))
+   {}
+ 
+   ProcessList::~ProcessList()
+@@ -1200,8 +1688,8 @@ namespace mSysProcess
+   {}
+ 
+   // control list of child processes
+-  ApplicationList::ApplicationList(TraceInterface& trc, const WatchdogSettings& settings):
+-    m_pImpl(new Impl(trc, settings))
++  ApplicationList::ApplicationList(const WatchdogSettings& settings, const TextList& terminationExclusionList, TraceInterface& trc):
++    m_pImpl(new Impl(settings, terminationExclusionList, trc))
+   {}
+ 
+   ApplicationList::~ApplicationList()
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
+new file mode 100644
+index 00000000..28bd6cee
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTreeW32.cpp
+@@ -0,0 +1,355 @@
++// find child processes
++
++#pragma warning (disable: 4786)
++
++#include "systools/mSysProcessTree.h"
++#include "mSysTimeW32.h"
++#include "mSysErrorW32.h"
++#include "mSysProcessW32.h"
++#include <memory>
++#include <map>
++#include <sstream>
++#include <tlhelp32.h>
++
++using MASSAI::trace::TraceInterface;
++using mSysTime::Timestamp;
++
++using namespace mSysProcess;
++
++namespace
++{
++  class ProcessNodeImpl;
++
++  typedef DWORD PID;
++
++  typedef std::list<const ProcessNodeImpl*> ProcessNodeImplList;
++  typedef std::tr1::shared_ptr<ProcessNodeImpl> ProcessNodePtr;
++  typedef std::map<PID, ProcessNodePtr> ProcessNodeImplMap;
++
++  // single process
++  class ProcessNodeImpl: public ProcessNode
++  {
++    public:
++      ProcessNodeImpl(PID pid, PID ppid, const std::string& module, TraceInterface& trc);
++      virtual ~ProcessNodeImpl();
++      virtual const ProcessNode* parent() const;
++      virtual ProcessNodeList childs() const;
++      virtual child* getProcess(const callBack* logging) const;
++
++      void setParent(const ProcessNodeImpl* parent);
++      void addChild(const ProcessNodeImpl* child);
++      PID getPID() const;
++      PID getPPID() const;
++      Timestamp getCreation() const;
++      virtual std::string getId() const;
++
++    private:
++      void init();
++      void readTime(HANDLE process);
++
++      ProcessNodeImplList m_child;
++      const ProcessNodeImpl* m_parent;
++      std::string m_id;
++      PID m_pid;
++      PID m_ppid;
++      std::string m_module;
++      Timestamp m_creation;
++      TraceInterface& m_trc;
++  };
++
++  // create-hierarchy of processes
++  class ProcessTreeImpl: public ProcessTree
++  {
++    public:
++      ProcessTreeImpl(TraceInterface& trc);
++      virtual ~ProcessTreeImpl();
++      virtual const ProcessNode* getNode(const child& process) const;
++      virtual ProcessNodeList getChilds(const child& process) const;
++      virtual ProcessNodeList processes() const;
++      void init();
++
++    private:
++      ProcessNodeImpl* getNode(PID pid);
++
++      ProcessNodeImplMap m_nodes;
++      TraceInterface& m_trc;
++  };
++
++  ProcessNodeImpl::ProcessNodeImpl(PID pid, PID ppid, const std::string& module, TraceInterface& trc):
++    m_child(),
++    m_parent(0),
++    m_id(),
++    m_pid(pid),
++    m_ppid(ppid),
++    m_module(module),
++    m_creation(),
++    m_trc(trc)
++  {
++    init();
++    std::ostringstream format;
++    format << m_pid << ", "
++           << m_ppid << "; "
++           << m_creation.year << "-"
++           << m_creation.month << "-"
++           << m_creation.day << " "
++           << m_creation.hour << ":"
++           << m_creation.minute << ":"
++           << m_creation.second << "."
++           << m_creation.milliseconds;
++    m_id = format.str();
++  }
++
++  void ProcessNodeImpl::init()
++  {
++    if(m_pid)
++    {
++      HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, false, m_pid);
++      if(process == 0)
++      {
++        unsigned long errorCode = mSysError::getErrorCode();
++        if(errorCode != ERROR_ACCESS_DENIED)
++        {
++          mSysError::traceLastError(m_trc, MajorError_HERE, "OpenProcess", errorCode);
++        }
++      }
++      else
++      {
++        readTime(process);
++        CloseHandle(process);
++      }
++    }
++  }
++
++  void ProcessNodeImpl::readTime(HANDLE process)
++  {
++    FILETIME creation;
++    FILETIME exit;
++    FILETIME kernel;
++    FILETIME user;
++    if(!GetProcessTimes(process, &creation, &exit, &kernel, &user))
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "GetProcessTimes", mSysError::getErrorCode());
++    }
++    else
++    {
++      m_creation = mSysTime::getTimestamp(creation);
++    }
++  }
++
++  ProcessNodeImpl::~ProcessNodeImpl()
++  {}
++
++  const ProcessNode* ProcessNodeImpl::parent() const
++  {
++    return m_parent;
++  }
++
++  ProcessNodeList ProcessNodeImpl::childs() const
++  {
++    ProcessNodeList result;
++    ProcessNodeImplList::const_iterator it = m_child.begin();
++    ProcessNodeImplList::const_iterator end = m_child.end();
++    for(; it != end; it++)
++    {
++      result.push_back(*it);
++    }
++    return result;
++  }
++
++  child* ProcessNodeImpl::getProcess(const callBack* logging) const
++  {
++    return mSysProcess::createProcess(m_pid, m_ppid, m_module, logging);
++  }
++
++  void ProcessNodeImpl::setParent(const ProcessNodeImpl* parent)
++  {
++    m_parent = parent;
++  }
++
++  void ProcessNodeImpl::addChild(const ProcessNodeImpl* child)
++  {
++    m_child.push_back(child);
++  }
++
++  PID ProcessNodeImpl::getPID() const
++  {
++    return m_pid;
++  }
++
++  PID ProcessNodeImpl::getPPID() const
++  {
++    return m_ppid;
++  }
++
++  Timestamp ProcessNodeImpl::getCreation() const
++  {
++    return m_creation;
++  }
++
++  std::string ProcessNodeImpl::getId() const
++  {
++    return m_id;
++  }
++
++  ProcessTreeImpl::ProcessTreeImpl(TraceInterface& trc):
++    m_trc(trc)
++  {}
++
++  ProcessTreeImpl::~ProcessTreeImpl()
++  {}
++
++  const ProcessNode* ProcessTreeImpl::getNode(const child& process) const
++  {
++    const ProcessNode* result = 0;
++    PID pid = process.getId().id;
++    ProcessNodeImplMap::const_iterator it = m_nodes.find(pid);
++    if(it != m_nodes.end())
++    {
++      result = it->second.get();
++    }
++    return result;
++  }
++
++  ProcessNodeList ProcessTreeImpl::getChilds(const child& process) const
++  {
++    const ProcessNode* node = getNode(process);
++    if(node)
++    {
++      return node->childs();
++    }
++    else
++    {
++      ProcessNodeList result;
++      Timestamp creation = process.getCreationTime();
++      PID ppid = process.getId().id;
++      ProcessNodeImplMap::const_iterator it = m_nodes.begin();
++      ProcessNodeImplMap::const_iterator end = m_nodes.end();
++      for(; it != end; it++)
++      {
++        const ProcessNodeImpl* child = it->second.get();
++        if(child && child->getPPID() == ppid && creation <= child->getCreation())
++        {
++          result.push_back(child);
++        }
++      }
++      return result;
++    }
++  }
++
++  ProcessNodeImpl* ProcessTreeImpl::getNode(PID pid)
++  {
++    ProcessNodeImpl* result = 0;
++    ProcessNodeImplMap::const_iterator it = m_nodes.find(pid);
++    if(it != m_nodes.end())
++    {
++      result = it->second.get();
++    }
++    return result;
++  }
++
++  ProcessNodeList ProcessTreeImpl::processes() const
++  {
++    ProcessNodeList result;
++    ProcessNodeImplMap::const_iterator it = m_nodes.begin();
++    ProcessNodeImplMap::const_iterator end = m_nodes.end();
++    for(; it != end; it++)
++    {
++      result.push_back(it->second.get());
++    }
++    return result;
++  }
++
++  void ProcessTreeImpl::init()
++  {
++    HANDLE processList = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
++    if(processList == INVALID_HANDLE_VALUE)
++    {
++      mSysError::traceLastError(m_trc, MajorError_HERE, "CreateToolhelp32Snapshot", mSysError::getErrorCode());
++    }
++    else
++    {
++      PROCESSENTRY32 processEntry;
++      processEntry.dwSize = sizeof(PROCESSENTRY32);
++      if(!Process32First(processList, &processEntry))
++      {
++        mSysError::traceLastError(m_trc, MajorError_HERE, "Process32First", mSysError::getErrorCode());
++      }
++      else
++      {
++        do
++        {
++          PID pid = processEntry.th32ProcessID;
++          PID ppid = processEntry.th32ParentProcessID;
++          ProcessNodeImpl* node = new ProcessNodeImpl(pid, ppid, processEntry.szExeFile, m_trc);
++          // m_trc.writeTrace(BasicRuntime_HERE, "process: pid(%d), ppid(%d) (%s)", pid, ppid, processEntry.szExeFile);
++          m_nodes[pid]= ProcessNodePtr(node);
++        } while(Process32Next(processList, &processEntry));
++
++        ProcessNodeImplMap::iterator it = m_nodes.begin();
++        ProcessNodeImplMap::iterator end = m_nodes.end();
++        for(; it != end; it++)
++        {
++          ProcessNodeImpl* pChild = it->second.get();
++          if(pChild->getPPID() != pChild->getPID())
++          {
++            ProcessNodeImpl* pParent = getNode(pChild->getPPID());
++            if(pParent && pParent->getCreation() <= pChild->getCreation())
++            {
++              pChild->setParent(pParent);
++              pParent->addChild(pChild);
++            }
++          }
++        }
++      }
++      CloseHandle(processList);
++    }
++  }
++}
++
++namespace mSysProcess
++{
++  ProcessNode::~ProcessNode()
++  {}
++
++  ProcessTree::~ProcessTree()
++  {}
++
++  ProcessTree* createProcessTree(TraceInterface& trc)
++  {
++    ProcessTreeImpl* result= new ProcessTreeImpl(trc);
++    result->init();
++    return result;
++  }
++
++  bool operator==(const ProcessNode& left, const ProcessNode& right)
++  {
++    return left.getId() == right.getId() && left.getCreation() == right.getCreation();
++  }
++
++  bool operator!=(const ProcessNode& left, const ProcessNode& right)
++  {
++    return !(left == right);
++  }
++
++  bool operator<(const ProcessNode& left, const ProcessNode& right)
++  {
++    return left.getId() < right.getId()
++       || (left.getId() == right.getId()
++       && (left.getCreation() < right.getCreation()));
++  }
++
++  bool operator>(const ProcessNode& left, const ProcessNode& right)
++  {
++    return right < left;
++  }
++
++  bool operator<=(const ProcessNode& left, const ProcessNode& right)
++  {
++    return !(right < left);
++  }
++
++  bool operator>=(const ProcessNode& left, const ProcessNode& right)
++  {
++    return !(left < right);
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 1b1aed97..714f8caa 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -304,6 +304,7 @@ namespace
+   class myChild: public mSysProcess::child
+   {
+     public:
++      myChild(DWORD pid, DWORD ppid, const std::string& module, const mSysProcess::callBack* logging);
+ 
+       myChild
+       (
+@@ -336,6 +337,8 @@ namespace
+ 
+       std::string getProcessInformation() const;
+       std::string getProcessId() const;
++      std::string getProgram() const;
++      mSysTime::Timestamp getCreationTime() const;
+ 
+       const mSysSynchronize::Internal& getInternal() const;
+       const Internal& getId() const;
+@@ -346,6 +349,8 @@ namespace
+       bool sendEvent(DWORD event);
+ 
+     private:
++      void openProcess();
++
+       fromChild                        M_ChildErr;
+       fromChild                        M_ChildOut;
+       MASSAI::text::StringBuffer       M_Commandline;
+@@ -365,8 +370,8 @@ namespace
+       bool                             M_ReuseConsole;
+       bool                             M_NewProcessGroup;
+       child::Internal                  M_Internal;
++      DWORD                            M_Parent;
+ 
+-      myChild();
+       myChild( myChild const & );
+       myChild & operator=( myChild const & );
+   };
+@@ -378,6 +383,44 @@ namespace
+    * control child process, implementation of mSysProcess::child
+    *
+   **/
++  myChild::myChild(DWORD pid, DWORD ppid, const std::string& module, const mSysProcess::callBack* logging):
++    M_ChildErr(0),
++    M_ChildOut(0),
++    M_Commandline(module),
++    M_Directory(),
++    M_HandleInRead(INVALID_HANDLE_VALUE),
++    M_HandleInWrite(INVALID_HANDLE_VALUE),
++    M_HandleProcess(INVALID_HANDLE_VALUE),
++    M_Logging(logging),
++    M_Started(true),
++    M_StdErr(0),
++    M_StdIn(0),
++    M_StdOut(0),
++    M_ProcessId(pid),
++    M_Environment(""),
++    M_Title(""),
++    M_Desktop(""),
++    M_ReuseConsole(),
++    M_NewProcessGroup(),
++    M_Internal(),
++    M_Parent(ppid)
++  {
++    openProcess();
++  }
++
++  void myChild::openProcess()
++  {
++    M_HandleProcess = OpenProcess(PROCESS_TERMINATE|PROCESS_QUERY_INFORMATION|SYNCHRONIZE, false, M_ProcessId);
++    if(M_HandleProcess == 0)
++    {
++      logLastError(M_Logging, "OpenProcess");
++      M_HandleProcess = INVALID_HANDLE_VALUE;
++    }
++    M_Internal.handle = M_HandleProcess;
++    M_Internal.id = M_ProcessId;
++  }
++
++
+   /**
+    *
+    * Constructor.
+@@ -418,7 +461,8 @@ namespace
+      M_Desktop(Desktop),
+      M_ReuseConsole(ReuseConsole),
+      M_NewProcessGroup(NewProcessGroup),
+-     M_Internal()
++     M_Internal(),
++     M_Parent(GetCurrentProcessId())
+   {
+      STARTUPINFO Si;
+      bool inheritHandles= false;
+@@ -681,6 +725,7 @@ namespace
+      }
+      return *this;
+   }
++
+   /**
+    *
+    * Implementation method.
+@@ -694,6 +739,7 @@ namespace
+     M_HandleInWrite= INVALID_HANDLE_VALUE;
+     return *this;
+   }
++
+   /**
+    *
+    * Implementation method.
+@@ -704,6 +750,7 @@ namespace
+   {
+     return sendEvent(CTRL_BREAK_EVENT);
+   }
++
+   /**
+    *
+    * Implementation method.
+@@ -714,6 +761,7 @@ namespace
+   {
+     return sendEvent(CTRL_C_EVENT);
+   }
++
+   /**
+    *
+    * send BREAK/CTRL-C to the process
+@@ -729,6 +777,7 @@ namespace
+     }
+     return result;
+   }
++
+   /**
+    *
+    * Implementation method.
+@@ -743,6 +792,7 @@ namespace
+     }
+     return *this;
+   }
++
+   /**
+    *
+    * write the process state to ostream
+@@ -763,6 +813,7 @@ namespace
+       out << std::endl;
+     }
+   }
++
+   /**
+    *
+    * write the process used time to ostream
+@@ -791,6 +842,7 @@ namespace
+       logLastError(M_Logging, "GetProcessTimes");
+     }
+   }
++
+   /**
+    *
+    * write the process resource counters to ostream
+@@ -847,7 +899,7 @@ namespace
+   {
+     mSysProcess::status state= getStatus();
+     std::ostringstream out;
+-    out << "Process\t" << M_ProcessId << std::endl;
++    out << "Process\t" << M_ProcessId << "\tParent\t" << M_Parent << std::endl;
+     out << M_Commandline.data() << std::endl;
+     out << getStatusText(state).c_str() << "\t" << state << std::endl;
+     if(state != mSysProcess::STATUS_FAILED)
+@@ -868,10 +920,36 @@ namespace
+   {
+     mSysProcess::status state= getStatus();
+     std::ostringstream out;
+-    out << "Process\t" << M_ProcessId << "\t" << getStatusText(state).c_str() << "\t" << state;
++    out << "Process\t" << M_ProcessId << "\tParent\t" << M_Parent << "\t" << getStatusText(state).c_str() << "\t" << state;
+     return out.str();
+   }
+ 
++  // get module name of process
++  std::string myChild::getProgram() const
++  {
++    return std::string(M_Commandline.data(), M_Commandline.size());
++  }
++
++  // get creation time of process
++  mSysTime::Timestamp myChild::getCreationTime() const
++  {
++    mSysTime::Timestamp result;
++    FILETIME creation;
++    FILETIME exit;
++    FILETIME kernel;
++    FILETIME user;
++    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    {
++      result = mSysTime::getTimestamp(creation);
++    }
++    else
++    {
++      logLastError(M_Logging, "GetProcessTimes");
++    }
++    return result;
++  }
++
++
+   /**
+    *
+    * Implementation method.
+@@ -882,6 +960,7 @@ namespace
+   {
+     return M_Internal;
+   }
++
+   /**
+    *
+    * Implementation method.
+@@ -906,7 +985,6 @@ mSysProcess::child::~child() throw()
+ }
+ 
+ 
+-
+ /**
+  *
+  * Implementation class.
+@@ -1504,6 +1582,11 @@ mSysProcess::child::Internal::Internal():
+   id(0)
+ {}
+ 
++mSysProcess::child* mSysProcess::createProcess(DWORD pid, DWORD ppid, const std::string& module, const callBack* logging)
++{
++  return new myChild(pid, ppid, module, logging);
++}
++
+ 
+ /**
+  **************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+index 3c877bca..3f776890 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+@@ -1,6 +1,5 @@
+-/**
+- * time; current time, system up time, sleep
+-**/
++// time; current time, system up time, sleep
++
+ #include "systools/mSysTime.h"
+ #include "mSysTimeW32.h"
+ 
+@@ -14,6 +13,7 @@ namespace mSysTime
+     GetLocalTime(&systemtime);
+     return getTimestamp(systemtime);
+   }
++
+   Duration getDuration(unsigned long time_ms)
+   {
+     Duration result;
+@@ -33,6 +33,7 @@ namespace mSysTime
+ 
+     return result;
+   }
++
+   Duration getDuration(const FILETIME& filetime)
+   {
+     LONGLONG time = filetime.dwHighDateTime;
+@@ -43,6 +44,7 @@ namespace mSysTime
+     time/= 10000;
+     return getDuration(time);
+   }
++
+   Timestamp getTimestamp(const FILETIME& filetime)
+   {
+     // 100 nano seconds since 1.Janur 1601
+@@ -50,6 +52,7 @@ namespace mSysTime
+     FileTimeToSystemTime(&filetime, &systemtime);
+     return getTimestamp(systemtime);
+   }
++
+   Timestamp getTimestamp(const SYSTEMTIME& systemtime)
+   {
+     Timestamp result;
+@@ -63,12 +66,105 @@ namespace mSysTime
+     result.milliseconds= systemtime.wMilliseconds;
+     return result;
+   }
++
+   unsigned long getUpTime()
+   {
+     return GetTickCount();
+   }
++
+   void sleep(unsigned long time_ms)
+   {
+     Sleep(time_ms);
+   }
++
++  bool operator<(const Timestamp& left, const Timestamp& right)
++  {
++    return left.year < right.year
++       || (left.year == right.year
++       && (left.month < right.month
++       || (left.month == right.month
++       && (left.day < right.day
++       || (left.day == right.day
++       && (left.hour < right.hour
++       || (left.hour == right.hour
++       && (left.minute < right.minute
++       || (left.minute == right.minute
++       && (left.second < right.second
++       || (left.second == right.second
++       && (left.milliseconds < right.milliseconds))))))))))));
++  }
++
++  bool operator>(const Timestamp& left, const Timestamp& right)
++  {
++    return right < left;
++  }
++
++  bool operator<=(const Timestamp& left, const Timestamp& right)
++  {
++    return !(right < left);
++  }
++
++  bool operator>=(const Timestamp& left, const Timestamp& right)
++  {
++    return !(left < right);
++  }
++
++  bool operator==(const Timestamp& left, const Timestamp& right)
++  {
++    return left.year == right.year
++        && left.month == right.month
++        && left.day == right.day
++        && left.hour == right.hour
++        && left.minute == right.minute
++        && left.second == right.second
++        && left.milliseconds == right.milliseconds;
++  }
++
++  bool operator!=(const Timestamp& left, const Timestamp& right)
++  {
++    return !(left == right);
++  }
++
++  bool operator<(const Duration& left, const Duration& right)
++  {
++    return left.days < right.days
++       || (left.days == right.days
++       && (left.hours < right.hours
++       || (left.hours == right.hours
++       && (left.minutes < right.minutes
++       || (left.minutes == right.minutes
++       && (left.seconds < right.seconds
++       || (left.seconds == right.seconds
++       && (left.milliseconds < right.milliseconds))))))));
++  }
++
++  bool operator>(const Duration& left, const Duration& right)
++  {
++    return right < left;
++  }
++
++  bool operator<=(const Duration& left, const Duration& right)
++  {
++    return !(right < left);
++  }
++
++  bool operator>=(const Duration& left, const Duration& right)
++  {
++    return !(left < right);
++  }
++
++  bool operator==(const Duration& left, const Duration& right)
++  {
++    return left.days == right.days
++        && left.hours == right.hours
++        && left.minutes == right.minutes
++        && left.seconds == right.seconds
++        && left.milliseconds == right.milliseconds;
++  }
++
++  bool operator!=(const Duration& left, const Duration& right)
++  {
++    return !(left == right);
++  }
++
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index cfab5ee2..d7b97e19 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -1,6 +1,4 @@
+-/**
+- * control windows of other processes
+-**/
++// control windows of other processes
+ 
+ #pragma warning (disable:4786)
+ #include "systools/mSysWindow.h"
+@@ -17,9 +15,7 @@ using mSysProcess::child;
+ using MASSAI::text::StringBuffer;
+ namespace
+ {
+-  /*
+-   * control a window
+-   */
++   // control a window
+   class WindowW32: public Window
+   {
+     public:
+@@ -34,7 +30,6 @@ namespace
+       virtual std::string getTitle();
+       virtual std::string getClass();
+ 
+-
+       DWORD getProcessId() const;
+     private:
+       void readTitle();
+@@ -72,9 +67,7 @@ namespace
+ 
+   typedef std::map<HWND, WindowW32> WindowMap;
+ 
+-  /*
+-   * control a window
+-   */
++   // control a window
+   WindowW32::WindowW32(HWND hwnd, const std::string& desktop, TraceInterface& trc):
+     m_hwnd(hwnd),
+     m_processId(0),
+@@ -165,15 +158,15 @@ namespace
+ 
+   void WindowW32::simulateInput()
+   {
+-    const KEYBDINPUT pressF5   = {VK_F5, 0,               0, 0, 0};
+-    const KEYBDINPUT releaseF5 = {VK_F5, 0, KEYEVENTF_KEYUP, 0, 0};
++    const KEYBDINPUT pressShift   = {VK_SHIFT, 0,               0, 0, 0};
++    const KEYBDINPUT releaseShift = {VK_SHIFT, 0, KEYEVENTF_KEYUP, 0, 0};
+     INPUT input[] =
+     {
+       {INPUT_KEYBOARD},
+       {INPUT_KEYBOARD},
+     };
+-    input[0].ki = pressF5;
+-    input[1].ki = releaseF5;
++    input[0].ki = pressShift;
++    input[1].ki = releaseShift;
+     UINT count = sizeof(input)/sizeof(*input);
+     int size = sizeof(*input);
+     if(SendInput(count, input, size) != count)
+@@ -207,10 +200,6 @@ namespace
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "show (%d)(%s)", m_hwnd, m_title.c_str());
+     ShowWindow(m_hwnd, SW_SHOW);
+-    if(!isTopMost())
+-    {
+-      setTopMost();
+-    }
+   }
+ 
+   void WindowW32::hide()
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,283 @@
+From 72b0a9321fb04243adc86050d7fc0f8622095db2 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 23 Aug 2012 11:07:13 +0000
+Subject: [PATCH 0333/1077] mcorba.lib, mcorbas.lib V1.0.6.19 23.08.2012
+ bugfix, Mantis:24158 call ACE::init, ACE::fini around use of ORB_init,
+ ORB::destroy bugfix, use correct POA for servant deactivation bugfix, fixed
+ reading port after hostname in configuration from CORBA.SERVANTS.*
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@399 90b65887-3827-0410-9a23-83215b262276
+---
+ .../generic/massaiCorba/corbasrvr_VC10.h       | 15 ++-------------
+ .../generic/massaiCorba/corbasrvr_VC10.hpp     |  2 --
+ .../Interfaces/inc/massaiCorba/corbaorb_vc10.h |  2 ++
+ .../inc/massaiCorba/corbasrvrbase_vc10.h       |  2 ++
+ .../cpp/MassaiCorba/inc/massaiCORBA_def.h      | 11 ++++++++---
+ .../Massai/cpp/MassaiCorba/inc/orbContainer.h  |  1 +
+ .../Massai/cpp/MassaiCorba/inc/orbimpl.h       |  3 +++
+ .../Massai/cpp/MassaiCorba/src/corbacfg.cpp    |  4 ++--
+ .../Massai/cpp/MassaiCorba/src/corbaorb.cpp    |  5 +++++
+ .../Massai/cpp/MassaiCorba/src/corbasrvr.cpp   |  4 ++++
+ .../cpp/MassaiCorba/src/orbContainer.cpp       | 18 ++++++++++++++++++
+ .../Massai/cpp/MassaiCorba/src/orbimpl_tao.cpp | 10 ++++++++++
+ 12 files changed, 57 insertions(+), 20 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
+index 01ce4505..8eb74ca1 100644
+--- a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
++++ b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
+@@ -33,12 +33,6 @@ std::string corbaChildServant<T>::getIOR(CORBA::ORB_ptr orb)
+   return ior.in();
+ }
+ 
+-template<class T>
+-PortableServer::POA_ptr corbaChildServant<T>::getPOA()
+-{
+-  return servant->_default_POA()
+-}
+-
+ template<class T>
+ corbaChildServant<T>::corbaChildServant(T& servant, const char* pszServantName):
+   corbaChildServantBase(pszServantName)
+@@ -62,17 +56,12 @@ PortableServer::Servant corbaServantEx<T>::getServant()
+ template<class T>
+ std::string corbaServantEx<T>::getIOR(CORBA::ORB_ptr orb)
+ {
++  CORBA::Object_var object = servant->_this();
+   // Turn your object reference into an IOR string
+-  CORBA::String_var ior = orb->object_to_string(servant->_this());
++  CORBA::String_var ior = orb->object_to_string(object);
+   return ior.in();
+ }
+ 
+-template<class T>
+-PortableServer::POA_ptr corbaServantEx<T>::getPOA()
+-{
+-  return servant->_default_POA();
+-}
+-
+ 
+ /** This constructor reads the port from the configuration.
+     \li Configuration item = \b [[MASSAI]] \b [COMPONENTS] \b "pszServantName" = \b (host:)port
+diff --git a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
+index de3ad260..cf12e78d 100644
+--- a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
++++ b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
+@@ -21,7 +21,6 @@ template<class T> class corbaChildServant: public massaiCorba::corbaChildServant
+     T* servant;
+ 
+     virtual PortableServer::Servant getServant();
+-    virtual PortableServer::POA_ptr getPOA();
+     virtual std::string getIOR(CORBA::ORB_ptr orb);
+ };
+ 
+@@ -87,7 +86,6 @@ template<class T> class corbaServantEx: public massaiCorba::corbaServantExBase
+     T *servant;
+ 
+     virtual PortableServer::Servant getServant();
+-    virtual PortableServer::POA_ptr getPOA();
+     virtual std::string getIOR(CORBA::ORB_ptr orb);
+ };
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb_vc10.h b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb_vc10.h
+index 45eaeb5e..af0e9d21 100644
+--- a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb_vc10.h
++++ b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb_vc10.h
+@@ -22,6 +22,8 @@
+ 
+ namespace massaiCorba
+ {
++  void cleanup();
++
+   /** Implementation of the base class for all CORBA clients and servers */
+   class corbaOrb
+   {
+diff --git a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbasrvrbase_vc10.h b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbasrvrbase_vc10.h
+index bb523cfe..bd605263 100644
+--- a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbasrvrbase_vc10.h
++++ b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbasrvrbase_vc10.h
+@@ -85,6 +85,8 @@ namespace massaiCorba
+       bool removeServant(corbaChildServantBase* childServant);
+ 
+     protected:
++      virtual PortableServer::POA_ptr getPOA();
++
+       PortableServer::POA_var poa;
+ 
+       bool createServant(const char *pszServantName);
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index 34dd8faa..f3b1fe9d 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -9,15 +9,20 @@
+  *
+  ************************************************************************/
+ 
+-// #define FILE_VER_BIN     1,0,6,18
+-// #define FILE_VER_STR     "FileVersion", "1.0.6.18\0"
++// #define FILE_VER_BIN     1,0,6,19
++// #define FILE_VER_STR     "FileVersion", "1.0.6.19\0"
+ 
+ /*! \page mcorba.lib, mcorbas.lib Massai CORBA library - Release Notes
+  *
+- *  @version 1.0.6.18
++ *  @version 1.0.6.19
+  *
+  *  \section change1 Change history
+  *
++ *  \date 23.08.2012 \li V1.0.6.19
++ *                   \li SteT - bugfix, Mantis 24158 call ACE::init, ACE::fini around use of ORB_init, ORB::destroy
++ *                              bugfix, use correct POA for servant deactivation
++ *                              bugfix, fixed reading port after hostname in configuration from CORBA.SERVANTS.*
++ *
+  *  \date 13.03.2012 \li V1.0.6.18
+  *                   \li SteT - enhancement, Mantis 0018942: mCorba: creation order of servant orb and client orb and synchronisation problems
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbContainer.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbContainer.h
+index 6c428960..c5712e9e 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbContainer.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbContainer.h
+@@ -89,6 +89,7 @@ namespace massaiCorba
+       ~ORBContainer();
+       CORBA::ORB_var createORB(const ORBSettings& settings);
+       void freeORB(CORBA::ORB_ptr orb);
++      void cleanup();
+ 
+     private:
+       ORBData* createORBData(const ORBSettings& settings);
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbimpl.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbimpl.h
+index b6358b6b..56f237fa 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbimpl.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/orbimpl.h
+@@ -23,6 +23,9 @@ namespace massaiCorbaImpl
+   void clearInvocationTimeout(CORBA::ORB_ptr orb_ptr, bool bForCurrentThread);
+   long getInvocationTimeout(CORBA::ORB_ptr orb_ptr, bool bForCurrentThread);
+   void setDefaultORB(CORBA::ORB_ptr orb);
++
++  void init();
++  void fini();
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbacfg.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbacfg.cpp
+index 80f38c4f..6e6399fc 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbacfg.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbacfg.cpp
+@@ -80,12 +80,12 @@ namespace
+ //---------------------------------------------------------------------------
+ long getConfigPort(const char *pszServantName)
+ {
+-  long lPort = -1;
++  long lPort = 0;
+   std::string port = getServantConfig(pszServantName);
+   int pos = port.find(':');
+   if(pos != std::string::npos)
+   {
+-    lPort = atol(port.c_str() + pos);
++    lPort = atol(port.c_str() + pos + 1);
+   }
+   else
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+index 61198e6d..401f8a83 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+@@ -87,6 +87,11 @@ namespace
+ 
+ namespace massaiCorba
+ {
++  void cleanup()
++  {
++    getORBContainer().cleanup();
++  }
++
+   //---------------------------------------------------------------------------
+   //
+   //  purpose:    class constructor for servants
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+index 37032a64..7e6e24de 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+@@ -140,6 +140,10 @@ namespace massaiCorba
+       return activateServer();
+     }
+   }
++  PortableServer::POA_ptr corbaServantExBase::getPOA()
++  {
++    return poa;
++  }
+ 
+   void corbaServantExBase::cleanup()
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
+index cd84d6bf..57024609 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
+@@ -98,6 +98,7 @@ namespace massaiCorba
+     threadList(),
+     refcount(0)
+   {
++    massaiCorbaImpl::init();
+     orbId = id + massaiCorbaImpl::orbEndpoint(settings);
+     createORB();
+     startProcessing();
+@@ -168,6 +169,7 @@ namespace massaiCorba
+         delete pThread;
+       }
+     }
++    massaiCorbaImpl::fini();
+     trace(_HERE_5, "ORB (%s) destroy done", orbId.c_str());
+   }
+ 
+@@ -274,4 +276,20 @@ namespace massaiCorba
+       }
+     }
+   }
++
++  void ORBContainer::cleanup()
++  {
++    AutoMutexCS mx(m_access);
++    if(m_client != 0)
++    {
++      m_client->refcount--;
++      if(m_client->refcount <= 0)
++      {
++        m_dataByPtr.erase(m_client->orb);
++        m_dataBySettings.erase(m_client->settings);
++        delete m_client;
++      }
++      m_client = 0;
++    }
++  }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbimpl_tao.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbimpl_tao.cpp
+index a338db8f..29402fb9 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbimpl_tao.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbimpl_tao.cpp
+@@ -5,6 +5,7 @@
+ #include "tools.h"
+ #include "tracedef.h"
+ #include "tao/ORB_Core.h"
++#include "ace/Init_ACE.h"
+ 
+ #if defined(_TAO_1_4_)  || defined(_TAO_1_5_) || defined (_TAO_2_0_)
+ #include "tao/Messaging/Messaging.h"
+@@ -95,6 +96,15 @@ namespace
+ 
+ namespace massaiCorbaImpl
+ {
++  void init()
++  {
++    ACE::init();
++  }
++  void fini()
++  {
++    ACE::fini();
++  }
++
+   std::string orbEndpoint(const ORBSettings& settings)
+   {
+     std::ostringstream out;
+-- 
+2.41.0.windows.1
+

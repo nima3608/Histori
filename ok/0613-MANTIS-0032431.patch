@@ -1,0 +1,562 @@
+From 03c8633ef725c7c40a2ee5f79ed647ae3148dfd8 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 13 Nov 2014 14:00:53 +0000
+Subject: [PATCH 0613/1077] MANTIS 0032431 -corrected header inclusion problems
+ -added a worker pointer in GlobalConfig
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@768 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h | 20 ++---
+ .../Massai/cpp/mControl/inc/mControl_dialog.h | 16 ++--
+ .../cpp/mControl/inc/mControl_logging.h       |  4 +-
+ .../cpp/mControl/inc/mControl_notification.h  | 15 +---
+ .../Massai/cpp/mControl/inc/mControl_reboot.h |  9 +--
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  6 +-
+ .../Massai/cpp/mControl/inc/mControl_worker.h | 18 ++---
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |  5 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 78 +++++++++++--------
+ .../cpp/mControl/src/mControl_dialog.cpp      |  4 +
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 17 ++--
+ .../cpp/mControl/src/mControl_worker.cpp      |  6 +-
+ 12 files changed, 101 insertions(+), 97 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 369b461f..6d3bb6d7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -10,8 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#ifndef CONFIG_H
+-#define CONFIG_H
++#ifndef MCONTROL_CONFIG_H
++#define MCONTROL_CONFIG_H
+ 
+ //Project includes
+ #include "..\inc\mControl_def.h"
+@@ -35,10 +35,10 @@
+ #include "poco\ThreadPool.h"
+ 
+ 
+-using Poco::ThreadPool;
+-
+ namespace mControl
+ {
++    class Worker;
++
+     class GlobalConfig
+     {
+     private:
+@@ -55,13 +55,14 @@ namespace mControl
+         long        m_currLoadPercent;
+         float       m_tmp;
+ 
+-        ThreadPool  m_threadPool;
++        Poco::ThreadPool  m_threadPool;
+ 
+         alert*      m_alert;
+ 
+         CEnvSubst   m_EnvS;
+ 
+-        NotificationQueue  m_queue;
++        Poco::NotificationQueue  m_queue;
++        Worker*            m_worker;
+ 
+     public:
+         GlobalConfig();
+@@ -88,10 +89,10 @@ namespace mControl
+         
+         alert* getAlert(){ return m_alert; }
+ 
+-        ThreadPool& getThreadPool(){ return m_threadPool; }
++        Poco::ThreadPool& getThreadPool(){ return m_threadPool; }
+         CEnvSubst& getEnvS(){ return m_EnvS; }
+-        NotificationQueue& getQueue(){ return m_queue; }
+-
++        Poco::NotificationQueue& getQueue(){ return m_queue; }
++        Worker* getWorker(){ return m_worker; }
+ 
+     
+         /**
+@@ -109,6 +110,7 @@ namespace mControl
+         void setTmp(float t){ m_tmp = t; }
+         void setAlert(alert* a){ m_alert = a; }
+         void setTerminated(bool ter);
++        void setWorker(Worker* w){ m_worker = w; }
+     };
+ 
+ 	class WindowConfig
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index 0797ecd4..4efa7f24 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -10,8 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#ifndef DIALOG_H
+-#define DIALOG_H
++#ifndef MCONTROL_DIALOG_H
++#define MCONTROL_DIALOG_H
+ 
+ //Project includes
+ #include "..\inc\mControl_def.h"
+@@ -26,16 +26,12 @@
+ #include "Poco/Notification.h"
+ 
+ 
+-using Poco::Runnable;
+-using Poco::NotificationQueue;
+-using Poco::Notification;
+-
+ namespace mControl
+ {
+-    class Dialog  : public Runnable
++    class Dialog  : public Poco::Runnable
+     {
+     private:
+-        NotificationQueue &         m_notificationQueue; 
++        Poco::NotificationQueue &         m_notificationQueue; 
+         WindowConfig                m_windowConfig;
+         GlobalConfig &              m_globalConfig;
+ 
+@@ -80,13 +76,13 @@ namespace mControl
+         /**
+         * getter Methods
+         */
+-        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+         WindowConfig& getWindowConfig(){ return m_windowConfig; }
+ 
+ 
+ 
+         //Constructor
+-        Dialog(NotificationQueue& queue, HINSTANCE hInst, GlobalConfig& config);
++        Dialog(Poco::NotificationQueue& queue, HINSTANCE hInst, GlobalConfig& config);
+         //Destructor
+ 	    ~Dialog();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+index 8f9ed723..92430ab9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+@@ -10,8 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#ifndef LOGGING_H
+-#define LOGGING_H
++#ifndef MCONTROL_LOGGING_H
++#define MCONTROL_LOGGING_H
+ 
+ //MATERNA includes
+ #include "massaiCorba/orbIncDefs.h"
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+index 39158ea7..2e32f26e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+@@ -24,19 +24,12 @@
+ #include "Poco/AutoPtr.h"
+ 
+ 
+-using Poco::Notification;
+-using Poco::NotificationQueue;
+-using Poco::ThreadPool;
+-using Poco::Runnable;
+-using Poco::AutoPtr;
+-using namespace std;
+-
+ namespace mControl 
+ {
+-    class MControlNotification : public Notification 
++    class MControlNotification : public Poco::Notification 
+     {
+       private: 
+-        string      m_info;
++        std::string      m_info;
+         int         m_parentID;
+         int         m_cmd;
+ 
+@@ -44,7 +37,7 @@ namespace mControl
+         /**
+         * getter Methods
+         */
+-        string data() const;
++        std::string data() const;
+         int getId() const;
+         int getCmd() const;
+         void printString();
+@@ -52,7 +45,7 @@ namespace mControl
+ 
+ 
+         //Constructor
+-	    MControlNotification (string data, int id, int cmd);
++	    MControlNotification (std::string data, int id, int cmd);
+         //Destructor
+         ~MControlNotification ();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+index efd7943d..621b0707 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+@@ -28,16 +28,13 @@
+ #include "Poco/Runnable.h"
+ 
+ 
+-using Poco::Runnable;
+-using Poco::NotificationQueue;
+-
+ namespace mControl
+ {
+     class KioskReboot : public Runnable
+     {
+       private:
+         long                        m_startDelay;
+-        NotificationQueue &         m_notificationQueue;  
++        Poco::NotificationQueue &         m_notificationQueue;  
+         GlobalConfig&               m_globalConfig;
+         MControlServant*            m_servant;
+ 
+@@ -81,13 +78,13 @@ namespace mControl
+         /**
+         * getter Methods
+         */
+-        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+         long getDelay(){ return m_startDelay; }
+ 
+ 
+ 
+         //Constructor
+-	      KioskReboot(long sDelay, NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
++	      KioskReboot(long sDelay, Poco::NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
+         //Destructor
+ 	      ~KioskReboot();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 30157b77..85c31062 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -16,15 +16,15 @@
+ *               from windows functions.
+ */
+ 
+-#ifndef TOOLS_H
+-#define TOOLS_H
++#ifndef MCONTROL_TOOLS_H
++#define MCONTROL_TOOLS_H
+ 
+ //Project includes
+ #include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_config.h"
+ 
+ //MATERNA includes
+-#include "systools\mSysProcessList.h"
++#include "systools/mSysProcessList.h"
+ #include "systools/mEventSem.hpp"
+ #include "trc/trace.h"
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 64324b62..653ad8da 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -10,12 +10,11 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#ifndef WORKER_H
+-#define WORKER_H
++#ifndef MCONTROL_WORKER_H
++#define MCONTROL_WORKER_H
+ 
+ //Project includes
+-#include "..\inc\mControl_def.h"
+-#include "..\inc\mControl_tools.h"
++#include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_dialog.h"
+ #include "..\inc\mControl_process.h"
+ 
+@@ -24,15 +23,12 @@
+ #include "Poco/Runnable.h"
+ 
+ 
+-using Poco::Runnable;
+-using Poco::NotificationQueue;
+-
+ namespace mControl
+ {
+-    class Worker : public Runnable
++    class Worker : public Poco::Runnable
+     {
+     private:
+-        NotificationQueue &         m_notificationQueue; 
++        Poco::NotificationQueue &         m_notificationQueue; 
+         GlobalConfig&               m_globalConfig;
+         Dialog&                     m_dialog;
+         cfgListSysCommands*         m_shutDownCommands;
+@@ -41,9 +37,9 @@ namespace mControl
+         mcProcessControl *          m_processStarter;
+ 
+     public:
+-        Worker(NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
++        Worker(Poco::NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+ 
+-        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+ 
+         /**
+         * Needs to be implemented from the Runnable interface.
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index a8679962..147c8835 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -9,8 +9,8 @@
+  *
+  ************************************************************************/
+ 
+-#ifndef DEF_H
+-#define DEF_H
++#ifndef MCONTROL_DEF_H
++#define MCONTROL_DEF_H
+ 
+     #define FILE_VER_BIN     1,0,2,16
+     #define FILE_VER_STR     "FileVersion", "1.0.2.16\0"
+@@ -82,6 +82,7 @@
+ #endif
+ 
+ //WINDOWS includes
++//TODO: find an other way to include this files
+ #ifndef WINDOWS_INC
+ #define WINDOWS_INC
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index bf9f8e42..69f2d481 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -14,6 +14,7 @@
+ #include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_tools.h"
+ #include "..\inc\mControl_dialog.h"
++#include "..\inc\mControl_worker.h"
+ 
+ //Windows includes
+ #include <Commctrl.h>
+@@ -45,7 +46,8 @@ namespace mControl
+         m_alert(NULL),
+         m_EnvS(),
+         m_queue(),
+-        m_terminate(false)
++        m_terminate(false),
++        m_worker(NULL)
+     {
+     }
+ 
+@@ -606,48 +608,59 @@ namespace mControl
+ 
+             //original as in the old mControl
+             //TODO: implement the fuctions in the comments
+-            case WM_CLOSE:                                          
++            case WM_CLOSE: 
++            {
+                 TRACE(HERE,"WM_CLOSE");
+ 
+                 TRACE(HERE,"shutting down controller...");
+ 
+-                //waitForStarterTermination();
++                Worker* worker = m_globalConfig.getWorker();
++                if( worker )
++                {
++                    worker->waitForStarterTermination();
+ 
+-                // execute system commands after platform stopped
+-                //execSysCmdsShutdown();
++                    // execute system commands after platform stopped
++                    worker->execSysCmdsShutdown();
++                }
++                else
++                    TRACE(HERE,"ERROR: no worker available");
++                
+ 
+-                //if(pAlert) delete pAlert;
++                if(m_globalConfig.getAlert()) delete m_globalConfig.getAlert();
+ 
+                 PostQuitMessage(0);
++            }
++            break;
+ 
+-                break;
+-
+-          case WM_START_DELAY_TIMER:
+-              TRACE(SecondaryRuntime_HERE,"WM_START_DELAY_TIMER");
+-              if( initialStart != INISTATUS_INITIAL )
+-              {
+-                return 0;
+-              }
+-              if((int)wParam<=0)
+-              {
+-                TRACE(HERE,"No start delay timer set - normal startup");
+-                InvalidateRect (hWnd, NULL, TRUE);
+-                UpdateWindow (hWnd);
+-                initialStart = INISTATUS_STARTED;
+-                PostMessage(hWnd,WM_MASSAISTART,0,0);
+-              }
+-              else
+-              {
+-                TRACE(HERE,"Start delay timer seconds:%d",wParam);
+-                initialStart = INISTATUS_WAIT;
+-                SetTimer( hWnd, START_DELAY_TIMER, wParam*1000, NULL );
++            case WM_START_DELAY_TIMER:
++            {
++                TRACE(SecondaryRuntime_HERE,"WM_START_DELAY_TIMER");
++                if( initialStart != INISTATUS_INITIAL )
++                {
++                    break;
++                }
++                if((int)wParam<=0)
++                {
++                    TRACE(HERE,"No start delay timer set - normal startup");
++                    InvalidateRect (hWnd, NULL, TRUE);
++                    UpdateWindow (hWnd);
++                    initialStart = INISTATUS_STARTED;
++                    PostMessage(hWnd,WM_MASSAISTART,0,0);
++                }
++                else
++                {
++                    TRACE(HERE,"Start delay timer seconds:%d",wParam);
++                    initialStart = INISTATUS_WAIT;
++                    SetTimer( hWnd, START_DELAY_TIMER, wParam*1000, NULL );
+ 
+-                ShowWindow(m_hWndInfo_1,SW_SHOW);
+-                UpdateWindow(m_hWndInfo_1);
+-              }
+-              return 0;
++                    ShowWindow(m_hWndInfo_1,SW_SHOW);
++                    UpdateWindow(m_hWndInfo_1);
++                }
++            }
++            break;
+ 
+             case WM_MCONTROL_PROGRESS:
++            {
+                 TRACE(SecondaryRuntime_HERE,"WM_MCONTROL_PROGRESS");
+                 
+                 if(wParam)
+@@ -666,7 +679,8 @@ namespace mControl
+                     if(this->m_globalConfig.serverMode() && lParam >= 0 && m_globalConfig.getCurrLoadPercent() >= 100)
+                         ShowWindow(hWnd,SW_MINIMIZE);
+                 }
+-                return 0;
++            }
++            break;
+             
+             /*
+         Restoring the mcontrol from the taskbar results in an automatic trigger of "go into service" rendering
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 437e73d9..134bb538 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -11,6 +11,7 @@
+ //---------------------------------------------------------------------------
+ 
+ //Project includes
++#include "..\inc\mControl_worker.h"
+ #include "..\inc\mControl_dialog.h"
+ #include "..\inc\mControl_notification.h"
+ 
+@@ -30,6 +31,9 @@
+ #include "Poco/AutoPtr.h"
+ 
+ 
++using Poco::Runnable;
++using Poco::NotificationQueue;
++using Poco::Notification;
+ using Poco::AutoPtr;
+ using namespace std;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 778fba4d..1bd7ce43 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -132,13 +132,14 @@ int mDaemon_main( int argc, char const * const * argv )
+ {
+     TRACE(HERE,"entering mDaemon_main...");
+   
+-    //NotificationQueue mainMsgQueue = NotificationQueue();   
++    Dialog      mainDialog  = Dialog(globalConfig.getQueue(), globalHInstance, globalConfig);
++
++    Worker worker(globalConfig.getQueue(), globalConfig, mainDialog);
++
++    globalConfig.setWorker(&worker);
+ 
+     Scheduler   scheduler   = Scheduler(globalConfig.getQueue(), globalConfig);
+     
+-    Dialog      mainDialog  = Dialog(globalConfig.getQueue(), globalHInstance, globalConfig);
+-    
+-    
+     argScan     args( argc, argv );
+    
+     long        rc = 0;
+@@ -396,10 +397,10 @@ int mDaemon_main( int argc, char const * const * argv )
+         //******************************************************************************************
+         //  initialize and starting servant, scheduler and rebooter 
+         //******************************************************************************************      
+-        MControlServant servant     = MControlServant(globalConfig.getQueue());
++        MControlServant servant(globalConfig.getQueue());
+         corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl", 19998);
+ 
+-        KioskReboot     rebooter    = KioskReboot(100, globalConfig.getQueue(), globalConfig, &servant);     
++        KioskReboot     rebooter (100, globalConfig.getQueue(), globalConfig, &servant);     
+         rebooter.saveRebootDate();
+         
+         
+@@ -422,8 +423,8 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+         OS_Sleep(100);
+ 
+-        Worker worker(globalConfig.getQueue(), globalConfig, mainDialog);
+-
++        
++        //start working up the commands of rebooter and scheduler
+         globalConfig.getThreadPool().start( worker );
+         //globalConfig.getThreadPool().joinAll();
+         
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 47aadb3d..dce63993 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -13,6 +13,7 @@
+ //Project includes
+ #include "..\inc\mControl_worker.h"
+ #include "..\inc\mControl_notification.h"
++#include "..\inc\mControl_tools.h"
+ 
+ //Windows includes
+ #include <Commctrl.h>
+@@ -24,13 +25,12 @@
+ #include "systools/matDaemon.h"
+ 
+ 
+-using Poco::NotificationQueue;
+ using namespace std;
+ 
+ 
+ namespace mControl
+ {
+-    Worker::Worker(NotificationQueue& queue, GlobalConfig& config, Dialog& dialog) :
++    Worker::Worker(Poco::NotificationQueue& queue, GlobalConfig& config, Dialog& dialog) :
+         m_notificationQueue(queue),
+         m_globalConfig(config),
+         m_dialog(dialog),
+@@ -46,7 +46,7 @@ namespace mControl
+         TRACE(HERE,"Worker-Thread runTask() started...");
+ 
+         //dequeue a Notification out of the Queue
+-        AutoPtr<Notification> pNf;
++        Poco::AutoPtr<Poco::Notification> pNf;
+         MControlNotification* pWorkNf;
+         long rc;
+ 
+-- 
+2.41.0.windows.1
+

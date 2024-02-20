@@ -1,0 +1,246 @@
+From 9ad33fa97dfd5fdcec61cacc63748ab115bca7c7 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 29 Jun 2015 12:21:16 +0000
+Subject: [PATCH 0670/1076] MANTIS 37062 Mantis 37062: State-machine timer
+ time() getter with optional walker reference. - More comments
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@872 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/fsm/mSTTimer.hpp       | 38 ++++++++++++++---
+ .../generic/fsm/mStateMachineTime.hpp         | 32 ++++++++++++---
+ .../generic/fsm/mStateMachineTimeX.hpp        | 41 ++++++++++++++++---
+ 3 files changed, 94 insertions(+), 17 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mSTTimer.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mSTTimer.hpp
+index 6fa58314..2ad1c59a 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mSTTimer.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mSTTimer.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -155,7 +155,11 @@ namespace Materna
+       virtual void time( TA const & ) = 0;
+ 
+ 
+-      //! Thread function
++      /**
++       *
++       * Thread function.
++       *
++      **/
+       void function()
+       {
+          M_TimerThreadId = mSysThread::id();
+@@ -202,6 +206,13 @@ namespace Materna
+    public:
+ 
+ 
++      /**
++       *
++       * Constructor.
++       *
++       * @param ThreadException:        Exception handler reference.
++       *
++      **/
+       explicit sTTimer( threadException const * ThreadException ) :
+          mSysThread::thread( ThreadException ),
+          M_StartMutex(),
+@@ -213,14 +224,22 @@ namespace Materna
+       }
+ 
+ 
+-      //! Destructor
++      /**
++       *
++       * Destructor.
++       *
++      **/
+       virtual ~sTTimer()
+       {
+          M_SttActive = false;
+       }
+ 
+ 
+-      //! Stop the timer
++      /**
++       *
++       * Stop the timer.
++       *
++      **/
+       void timerStop() throw()
+       {
+          // First check, if the last command to the queue was also a STOP.
+@@ -252,7 +271,16 @@ namespace Materna
+       }
+ 
+ 
+-      //! Start the timer
++      /**
++       *
++       * Start the timer.
++       *
++       * @param Ticks:          Number of ticks (milliseconds).
++       *
++       * @param ItemA:          The data to give at timeout (template
++       *                        argument).
++       *
++      **/
+       void timerStart( unsigned Ticks, TA const & ItemA ) throw()
+       {
+          // Make sure, that stop and start is not interrupted by another
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
+index 9ad23e32..4265181e 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTime.hpp
+@@ -9,7 +9,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2011 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -175,11 +175,13 @@ namespace StateMachine
+ 
+       /**
+        *
+-       * Return an attribute, which has been set by the constructor.
+-       * This method may be overloaded to e.g. provide a "dynamic"
+-       * time value.
++       * Return the time-out time.
+        *
+-       * @return        The "time" attribute.
++       * This implementation will return an attribute, which has been set
++       * by the constructor. The method may be overloaded to e.g. provide
++       * a "dynamic" time value.
++       *
++       * @return        The time-out value (in milliseconds).
+        *
+       **/
+       virtual unsigned time() const
+@@ -187,6 +189,24 @@ namespace StateMachine
+          return M_Time;
+       }
+ 
++      /**
++       *
++       * Return the time-out time.
++       *
++       * If this method has not been overloaded, the virtual method with
++       * no walker reference is called. Overload it, if a walker reference
++       * is needed to obtain a time-out value.
++       *
++       * @param TmWlk:  Refers the timedWalker, which has timer data.
++       *
++       * @return        The time-out value (in milliseconds).
++       *
++      **/
++      virtual unsigned time( walker<EVT> & TmWlk ) const
++      {
++         return time();
++      }
++
+       /**
+        *
+        * Has the timeout() method been called for this place?
+@@ -553,7 +573,7 @@ namespace StateMachine
+          if( !W )
+             throw inputException( S_TimedEx );
+          timedEvent<EVT> StartIt( this, *M_Event );
+-         W->timerStart( time(), StartIt );
++         W->timerStart( time( TmWlk ), StartIt );
+       }
+    }
+ 
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTimeX.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTimeX.hpp
+index 8a46e8fa..5231e2c0 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTimeX.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineTimeX.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2005-2010 MATERNA Information & Communications
++ * Copyright (c) 2005-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -26,7 +26,12 @@ namespace StateMachine
+ {
+ 
+ 
+-
++   /**
++    *
++    * Extend timedWalker by "restart" capabilities, implemented by
++    * the restartTimer() methods.
++    *
++   **/
+    template<class EVT> class extendedTimedWalker :
+       public timedWalker<EVT>
+    {
+@@ -72,18 +77,42 @@ namespace StateMachine
+       {
+       }
+ 
+-      void restartTimer(long time = -1)
++      /**
++       *
++       * Restart a running timer without state change. The place's
++       * default timeout event will be fired upon time-out.
++       *
++       * @param time:                   A new time-out time. Use -1
++       *                                for the place's default time.
++       *
++      **/
++      void restartTimer( long time = -1 )
+       {
+          timedPlace<EVT> const * CurrPlace =
+             dynamic_cast<timedPlace<EVT> const *>( &currentPlace() );
+          if( CurrPlace && CurrPlace->timing() )
+          {
+             timedEvent<EVT> StartIt( CurrPlace, *CurrPlace->event() );
+-            timerStart( ((time < 0) ? CurrPlace->time() : time), StartIt );
++            timerStart
++               (
++                  ((time < 0) ? CurrPlace->time( *this ) : time),
++                  StartIt
++               );
+          }
+       }
+ 
+-      void restartTimer(EVT const & Evt, long time = -1)
++      /**
++       *
++       * Restart a running timer without state change.
++       *
++       * @param Evt:                    Specify the event to be fired
++       *                                upon time-out.
++       *
++       * @param time:                   A new time-out time. Use -1
++       *                                for the place's default time.
++       *
++      **/
++      void restartTimer( EVT const & Evt, long time = -1 )
+       {
+          timedPlace<EVT> const * CurrPlace =
+             dynamic_cast<timedPlace<EVT> const *>( &currentPlace() );
+@@ -93,7 +122,7 @@ namespace StateMachine
+          if( time < 0 )
+          {
+            if( CurrPlace && CurrPlace->timing() )
+-              timerStart( CurrPlace->time(), StartIt );
++              timerStart( CurrPlace->time( *this ), StartIt );
+          }
+          else
+            timerStart( time, StartIt );
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1234 @@
+From b0fa7bb3dee9f804149f90471621b4b40deebff3 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 4 Dec 2014 12:52:45 +0000
+Subject: [PATCH 0548/1000] MANTIS 0032431 Implemented: -rebootKiosk:    -run()
+ as in the old mcontrol    -init() as in the old mControl
+
+-servant:
+   -replaced old msg-sending with the new NotificationQueue
+
+-formatting the code
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@789 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_reboot.h |  77 +++---
+ .../cpp/mControl/inc/mControl_scheduler.h     |  50 ++--
+ .../cpp/mControl/inc/mControl_servant.h       |   5 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |   2 +
+ .../Massai/cpp/mControl/inc/mControl_worker.h |   9 +
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |  22 +-
+ .../cpp/mControl/src/mControl_config.cpp      |  68 ++---
+ .../Massai/cpp/mControl/src/mControl_main.cpp |  99 ++++----
+ .../cpp/mControl/src/mControl_reboot.cpp      | 237 +++++++++++++-----
+ .../cpp/mControl/src/mControl_scheduler.cpp   |  16 +-
+ .../cpp/mControl/src/mControl_servant.cpp     |  88 ++++---
+ .../cpp/mControl/src/mControl_tools.cpp       |   4 +-
+ .../cpp/mControl/src/mControl_worker.cpp      |   3 +-
+ 13 files changed, 427 insertions(+), 253 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+index b0497458..24838acb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+@@ -10,6 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//TODO: documentation
++
+ #ifndef MCONTROL_REBOOT_H
+ #define MCONTROL_REBOOT_H
+ 
+@@ -27,23 +29,58 @@
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Runnable.h"
+ 
++//Boost inlcudes
++#include "boost/date_time/posix_time/posix_time.hpp"
++#include "boost/date_time/gregorian/gregorian.hpp"
++
+ 
+ namespace mControl
+ {
+     class KioskReboot : public Poco::Runnable
+     {
+-      private:
++    private:
+         long                        m_startDelay;
++
++        long                        m_delayRange;
++
++        boost::posix_time::ptime*   m_rebootTime;  
++
++        boost::gregorian::date*     m_lastRebootDate;
++
++        cfgNum*                     m_cfgDelayRange;
++
++        cfgNum*                     m_cfgStartDelay;
++
++        cfgStr*                     m_cfgRebootTime;
++
++        cfgStr*                     m_cfgRebootDate;        
++
+         Poco::NotificationQueue &   m_notificationQueue;  
++
+         GlobalConfig&               m_globalConfig;
++
+         MControlServant*            m_servant;
+ 
++
++    public:
++        /**
++        *   Constructor
++        */
++	    KioskReboot(Poco::NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
++        
++        
++        /**
++        *   Destructor
++        */
++	    ~KioskReboot();
++
++
+         /**
+-        * may needed, when using the Task class of Poco
++        *   Configures all Attributes with the from MCC given Values. 
+         */
+-        void doTask();
++        void init();
++
+ 
+-      public:
+         //TODO: implement correct functionality
+         /**
+         * Needs to be implemented from the Runnable interface.
+@@ -52,41 +89,25 @@ namespace mControl
+         void run();
+ 
+ 
+-        //TODO: implement without FILE?
+         /**
+-        * default implementation
+-        *
+-        * Saves the last reboot
+-        * @return long - successful completion
++        *   Saves the last reboot as Date in the configuratin-value
++        *   RebootDate in MCC.
+         */
+-        long saveRebootDate();
+-
++        void saveRebootDateToMCC();
+ 
+-        //TODO: implement without FILE?
++        
+         /**
+-        *
+-        * Reads the last reboot-date of the Kiosk in a file,
+-        * The File is administrated by the controllerServant-attribute of the class.
+-        *
+-        * @param lastDate : mDate* - pointer to the date Variable
+-        * @return long - successful
++        *   Reads the last reboot-datefrom the configuratin-value
++        *   RebootDate in MCC and saves it in m_lastRebootDate
+         */
+-        long getRebootDate(mDate* lastDate);
++        void setRebootDateFromMCC();
+ 
+         
+-
+         /**
+         * getter Methods
+         */
+         Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-        long getDelay(){ return m_startDelay; }
+-
+-
+-
+-        //Constructor
+-	      KioskReboot(long sDelay, Poco::NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
+-        //Destructor
+-	      ~KioskReboot();
++        long getDelay(){ return m_startDelay; } 
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+index 5b2e06ed..6388ee77 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+@@ -10,6 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//TODO: documentation
++
+ #ifndef MCONTROL_SCHEDULER_H
+ #define MCONTROL_SCHEDULER_H
+ 
+@@ -33,10 +35,6 @@
+ #include "boost/date_time/gregorian/gregorian.hpp"
+ #include "boost/date_time/posix_time/posix_time.hpp"
+ 
+-/**
+-* For the Date and Time configuration use mTime und mDate
+-*/
+-
+ 
+ namespace mControl
+ {
+@@ -44,22 +42,28 @@ namespace mControl
+     {
+     private:
+         std::string                 m_cmd;
++
+         long                        m_scheduleMonthly;
++
+         long                        m_scheduleWeekly;
+ 
+         boost::gregorian::date      m_creationDate;
++
+         boost::posix_time::ptime    m_executionTime;
++
+         cfgListScheduledCommands *  m_sysCmdlist;    
+ 
++
+     public:
+         /**
+         *   Constructor
++        *
+         */
+         ScheduledTask(long hour, long min, std::string cmd, std::string scheduleFrequency);
+ 
+         
+         /**
+-        *   Getter Methods
++        *   Getter-Methods
+         **/
+         boost::posix_time::ptime    getTime(){ return m_executionTime; }
+         std::string                 getCmd(){ return m_cmd; }
+@@ -72,50 +76,58 @@ namespace mControl
+ 
+     class Scheduler : public Poco::Runnable
+     {
+-      private:
++    private:
+         Poco::NotificationQueue &   m_notificationQueue;      
++
+         GlobalConfig &              m_globalConfig;
++
+         cfgListScheduledCommands *  m_sysCmdList;            //List of configuratoin items/applications
++        
+         std::list<ScheduledTask *>  m_taskList;
+         
+ 
+         /**
+-        * creates a new command List to get scheduled
++        *   Creates a new List of sytem-commands as configured 
++        *   in the MCC. These commands are gonna be scheduled in 
++        *   the run()-Method of this Scheduler
+         */
+         void newList();      
+ 
+ 
+         /**
+-        * Deletes all the commands of the scheduled list.
++        *   Resets the list of commands to get scheduled. 
+         */
+         void deleteList();
+ 
+ 
+-        /**
+-        * may needed, when using the Task class of Poco
+-        */
+-        void doTask();
+-
+     public:
+         /**
+-        * Needs to be implemented from the Runnable interface.
+-        * Here the MCC processes are scheduled.
++        *   Needs to be implemented from the Runnable interface.
++        *   Here the MCC processes are scheduled.
+         */
+         void run();
+ 
+ 
+ 
+         /**
+-        * getter Methods
++        * Getter-Methods
+         */
+         Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+ 
+ 
+ 
+-
+-        //Constructor
++        /**
++        *   Constructor
++        *
++        *   @param queue: The reference to the NotificationQueue where all commands are send to the worker-thread
++        *   @param config:  The refernce to the GlobalConfig-Object of the main-function
++        */
+ 	    Scheduler(Poco::NotificationQueue & queue, GlobalConfig & config);
+-        //Destructor
++        
++        
++        /**
++        *   Destructor
++        */
+ 	    ~Scheduler();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+index 71ea9d4f..18c84167 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+@@ -30,6 +30,7 @@ namespace mControl
+     {
+     private:
+         Poco::NotificationQueue &       m_notificationQueue; 
++
+         bool                            m_kioskBusy;
+ 
+ 
+@@ -194,8 +195,8 @@ namespace mControl
+         /**
+         * Attribut getter Methods
+         */
+-        bool isKioskBusy() { return m_kioskBusy; }
+-        Poco::NotificationQueue&  getQueue(){ return m_notificationQueue; }
++        bool                        isKioskBusy() { return m_kioskBusy; }
++        Poco::NotificationQueue&    getQueue(){ return m_notificationQueue; }
+ 
+ 
+         /**
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 0b83c9ad..1025c1dd 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -10,6 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//TODO: documentation
++
+ /**
+ *   REMEMBER:   Include this header always at firt.
+ *               Otherwise there is the probability of redefinition 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 42f7e04f..9a5fbc1e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -10,6 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//TODO: documentation
++
+ #ifndef MCONTROL_WORKER_H
+ #define MCONTROL_WORKER_H
+ 
+@@ -28,13 +30,20 @@ namespace mControl
+     {
+     private:
+         Poco::NotificationQueue &   m_notificationQueue; 
++
+         GlobalConfig&               m_globalConfig;
++
+         Dialog&                     m_dialog;
++
+         cfgListSysCommands*         m_shutDownCommands;
++
+         cfgListSysCommands*         m_startUpCommands;
++
+         mcProcessListMonitor        m_processListMonitor;
++
+         mcProcessControl *          m_processStarter;
+ 
++
+     public:
+         Worker(Poco::NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 3ff0b1d3..2da386ee 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -29,11 +29,12 @@
+     #define RESTART "restart massai"
+ 
+     //Thread ID's
+-    #define REBOOTER_ID     100
+-    #define SCHEDULER_ID    101
+-    #define DIALOG_ID       102
+-    #define WORKER_ID       103
+-    #define CONFIG_ID       104
++    #define REBOOTER_ID     10000
++    #define SCHEDULER_ID    10001
++    #define DIALOG_ID       10002
++    #define WORKER_ID       10003
++    #define CONFIG_ID       10004
++    #define SERVANT_ID      10005
+ 
+ 
+     //WIN-Api specific names
+@@ -65,7 +66,7 @@
+     #define SEM_NAME       "mPlatformStartup"
+     #define STARTER_NAME   "mstarter.exe"
+     #define UPDATE_NAME    "mUpdat.exe"
+-    #define REBOOT_KIOSK   123
++    #define REBOOT_KIOSK   10000000001
+ 
+     #define GetCurrentDir _getcwd
+ 
+@@ -87,3 +88,12 @@
+     #include <time.h>
+ 
+ #endif
++
++
++#ifndef GLOBAL_INCLUDES_MCONTROL
++#define GLOBAL_INCLUDES_MCONTROL
++
++#include "systools\mSysTime.h"
++
++#endif
++
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index f47cdd88..31e23184 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -227,11 +227,11 @@ namespace mControl
+                    m_globalConfig.isStarted() ?"true":"false");
+         if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
+         {
+-          TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
+-                     s,
+-                     m_globalConfig.noSNMPActive()?"true":"false",
+-                     m_globalConfig.isStarted()?"true":"false");
+-          return;
++            TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
++                        s,
++                        m_globalConfig.noSNMPActive()?"true":"false",
++                        m_globalConfig.isStarted()?"true":"false");
++            return;
+         }
+ 
+         static bool initial = true;
+@@ -241,39 +241,45 @@ namespace mControl
+ 
+         if(initial && !m_globalConfig.serverMode())
+         {
+-          initial = false;
+-          repetitions = 10;
++            initial = false;
++            repetitions = 10;
+         }
+ 
+         while(repetitions--)
+         {
+-          if(s && *s)
+-          {
++            if(s && *s)
++            {
+             if(m_globalConfig.getAlert())
+             {
+-              alert::eventData e(s);
+-
+-              try
+-              {
+-                 m_globalConfig.getAlert()->send(e);
+-                 return;
+-              }
+-              catch( alertException & ex )
+-              {
+-                TRACE(HERE,"alertException: %s",ex.toString().c_str());
+-                delete m_globalConfig.getAlert();
+-                createAlert();
+-              }
+-              catch( ... )
+-              {
+-                TRACE(HERE,"unknown exception in SendAlert()");
+-              }
++                alert::eventData e(s);
++
++                try
++                {
++                    m_globalConfig.getAlert()->send(e);
++                    return;
++                }
++                catch( alertException & ex )
++                {
++                    TRACE(HERE,"alertException: %s",ex.toString().c_str());
++                    delete m_globalConfig.getAlert();
++                    createAlert();
++                }
++                catch( ... )
++                {
++                    TRACE(HERE,"unknown exception in SendAlert()");
++                }
+             }
+             else
+-              TRACE(HERE,"Alert [%s] not sent.");
+-          }
+-          if(repetitions)
+-            OS_Sleep(3000);
++                TRACE(HERE,"Alert [%s] not sent.");
++            }
++
++            if(repetitions)
++            {
++                TRACE(HERE,"sendAlert sleep for ... ");
++
++                //TODO: correct the time to 3000
++                mSysTime::sleep( 50 );
++            }
+         }
+     }
+ 
+@@ -638,6 +644,8 @@ namespace mControl
+                     InvalidateRect (hWnd, NULL, TRUE);
+                     UpdateWindow (hWnd);
+                     initialStart = INISTATUS_STARTED;
++
++                    m_globalConfig.getQueue().enqueueNotification( new MControlNotification("WM_MASSAISTART", CONFIG_ID, WM_MASSAISTART) );
+                     PostMessage(hWnd,WM_MASSAISTART,0,0);
+                 }
+                 else
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index ce7fff11..58f8d10c 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -111,7 +111,7 @@ int WINAPI WinMain ( HINSTANCE hInst, HINSTANCE, char * cmdline, int )
+         //DelayTime for Debbuging-Mode
+         int delay = 2500;
+         TRACE(HERE,"Debug Delay [%d]", delay);
+-        OS_Sleep(delay);
++        mSysTime::sleep(delay);
+     }
+ 
+     globalHInstance = hInst;
+@@ -135,27 +135,26 @@ int mDaemon_main( int argc, char const * const * argv )
+     /********************************
+     *   create Dialog object and start to build the window
+     */
+-    Dialog      mainDialog  = Dialog(globalConfig->getQueue(), globalHInstance, *globalConfig);
+-
+-    Worker worker(globalConfig->getQueue(), *globalConfig, mainDialog);
++    argScan         args( argc, argv );
++   
++    long            rc = 0;
++    long            lWait = 60000;
++    long            lDelay = -1;
+ 
+-    globalConfig->setWorker(&worker);
++    bool            useGlobalNamespace = false;
+ 
+-    argScan     args( argc, argv );
+-   
+-    long        rc = 0;
+-    long        lWait = 60000;
+-    long        lDelay = -1;
++    HANDLE          isRunning;
+ 
+-    bool        useGlobalNamespace = false;
++    OSVERSIONINFO   version;
+ 
+-    HANDLE      isRunning;
++    std::string     userDir;
+ 
+-    OSVERSIONINFO version;
++    DWORD           myStyle = WS_POPUP;
+ 
+-    std::string userDir;
++    Dialog          mainDialog  = Dialog(globalConfig->getQueue(), globalHInstance, *globalConfig);
+ 
+-    DWORD       myStyle = WS_POPUP;
++    Worker          worker(globalConfig->getQueue(), *globalConfig, mainDialog);
++    globalConfig->setWorker(&worker); 
+     
+     
+     
+@@ -182,7 +181,6 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+ 
+ 
+-
+     //******************************************************************************************
+     //  try create within the global name space, so that this program also
+     //  on terminal server services runs only once 08.01.2004 (AGe)
+@@ -191,21 +189,21 @@ int mDaemon_main( int argc, char const * const * argv )
+     version.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+     if(GetVersionEx (&version))
+     {
+-      useGlobalNamespace = 5 <= version.dwMajorVersion;
++        useGlobalNamespace = 5 <= version.dwMajorVersion;
+     }
+ 
+     isRunning = CreateEventA(NULL,FALSE,TRUE,useGlobalNamespace?"Global\\massaiController":"massaiController");
+ 
+     if((GetLastError() == ERROR_ALREADY_EXISTS) || (isRunning == 0))
+     {
+-      char szMsg[512];
++        char szMsg[512];
+ 
+-      sprintf(szMsg,"MASSAI is already active.\n\n"
++        sprintf(szMsg,"MASSAI is already active.\n\n"
+                     "You can't have more than one instance on one machine. (%d)", GetLastError());
+ 
+-      MessageBox(NULL,TEXT(szMsg),TEXT(szClassName),MB_ICONERROR) ;
++        MessageBox(NULL,TEXT(szMsg),TEXT(szClassName),MB_ICONERROR) ;
+ 
+-      exit(-1);
++        exit(-1);
+     }
+ 
+ 
+@@ -239,43 +237,43 @@ int mDaemon_main( int argc, char const * const * argv )
+     char const * const szService = args.option( "SERVICE" );
+     if( szService)
+     {
+-      TRACE(HERE,"%s found option [service:], name = %s\n", Tools::timeStamp(),szService);
++        TRACE(HERE,"%s found option [service:], name = %s\n", Tools::timeStamp(),szService);
+ 
+-      rc = Tools::waitForService(szService,lWait);
++        rc = Tools::waitForService(szService,lWait);
+     }
+ 
+     if( args.help() )
+     {
+-      MessageBox
++        MessageBox
+         (
+-          NULL,
+-          TEXT
++            NULL,
++            TEXT
+             (
+-               "USAGE:\tmControl "
+-               "{ -help |\n\t\t-normal <params> |\n"
+-               "\t\t-install [-param:\"<params>\"] |\n"
+-               "\t\t-deinstall }\n\n"
+-               "<params>: [-delaybeforestart:seconds]"
+-               " [-wait[:timeout]]\n\t[-service:<servicename>]"
+-               " [-server][-usershell]\n\t[-nolog] [-nosnmp]\n\n"
+-               "-delaybeforestart\n\tSet delay in seconds to wait"
+-               " before startup\n"
+-               "-wait\tSet timeout in ms for initial waiting for"
+-               " dependencies,\n\t- default is 60000\n"
+-               "\t- wait forever, if no timeout is given\n"
+-               "-service\tSet dependency\n"
+-               "-server\tRun in server mode, default is kiosk mode\n"
+-               "-usershell\tRun as windows user shell, default is not run as user shell\n"
+-               "-enableportablemcc\n\tEnables the detection of"
+-               " a mcc on removable devices\n"
+-               "-nolog\tEvent logging disabled\n"
+-               "-nosnmp\tFor event logging use logservice instead of"
+-               " massaisnmp,\n\tdo not send start platform event"
++                "USAGE:\tmControl "
++                "{ -help |\n\t\t-normal <params> |\n"
++                "\t\t-install [-param:\"<params>\"] |\n"
++                "\t\t-deinstall }\n\n"
++                "<params>: [-delaybeforestart:seconds]"
++                " [-wait[:timeout]]\n\t[-service:<servicename>]"
++                " [-server][-usershell]\n\t[-nolog] [-nosnmp]\n\n"
++                "-delaybeforestart\n\tSet delay in seconds to wait"
++                " before startup\n"
++                "-wait\tSet timeout in ms for initial waiting for"
++                " dependencies,\n\t- default is 60000\n"
++                "\t- wait forever, if no timeout is given\n"
++                "-service\tSet dependency\n"
++                "-server\tRun in server mode, default is kiosk mode\n"
++                "-usershell\tRun as windows user shell, default is not run as user shell\n"
++                "-enableportablemcc\n\tEnables the detection of"
++                " a mcc on removable devices\n"
++                "-nolog\tEvent logging disabled\n"
++                "-nosnmp\tFor event logging use logservice instead of"
++                " massaisnmp,\n\tdo not send start platform event"
+             ),
+             szClassName,
+             MB_ICONEXCLAMATION
+         );
+-      exit( 0 );
++        exit( 0 );
+     }
+ 
+ 
+@@ -307,7 +305,6 @@ int mDaemon_main( int argc, char const * const * argv )
+     //******************************************************************************************
+     try
+     {
+-        
+         TRACE(HERE,"handle the args parameter...");
+ 
+         if( args.option( "SERVER" ) || mDaemon_isService() )
+@@ -403,8 +400,8 @@ int mDaemon_main( int argc, char const * const * argv )
+         corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl", 19998);
+ 
+         
+-        KioskReboot     rebooter (100, globalConfig->getQueue(), *globalConfig, &servant);     
+-        rebooter.saveRebootDate();
++        KioskReboot     rebooter ( globalConfig->getQueue(), *globalConfig, &servant);     
++        rebooter.saveRebootDateToMCC();
+         
+         
+         // but start only if not in server mode !!!
+@@ -426,7 +423,7 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+         globalConfig->getThreadPool().start( scheduler );
+ 
+-        //Deprecated: OS_Sleep(100);
++        mSysTime::sleep( 100 );
+ 
+         
+         //start working up the commands of rebooter and scheduler
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+index 30739dfa..4c038a2a 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+@@ -13,19 +13,52 @@
+ //Project includes
+ #include "..\inc\mControl_reboot.h"
+ #include "..\inc\mControl_notification.h"
++#include "..\inc\mControl_tools.h"
+ 
+ //MATERNA includes
+ #include "trc/trace.h"
+ 
+ 
++using namespace std;
++using boost::posix_time::ptime;
++using boost::gregorian::date;
++
++
++#define RTIME_ITEM "PLATFORM.REBOOT.RebootTime"
++#define RTIME_EXPL "Specifies when to reboot the kiosk (in format HH:MM), or leave blank if kiosk should not rebooted."
++#define RTIME_DEF  "03:00"
++
++
++#define RDATE_ITEM "PLATFORM.REBOOT.RebootDate"
++#define RDATE_EXPL "Saves the last reboot-date of the kiosk (in format DD:MM:YYYY)"
++#define RDATE_DEF  ""
++
++
+ namespace mControl
+ {
+-    KioskReboot::KioskReboot(long sDelay, Poco::NotificationQueue& queue, GlobalConfig& config, MControlServant* servant) : 
+-        m_startDelay(),
++    KioskReboot::KioskReboot(Poco::NotificationQueue& queue, GlobalConfig& config, MControlServant* servant) : 
++        m_startDelay(0),
++        m_delayRange(0),
++        m_rebootTime(NULL),
++        m_lastRebootDate(NULL),
++        m_cfgDelayRange(NULL),
++        m_cfgStartDelay(NULL),
++        m_cfgRebootTime(NULL),
++        m_cfgRebootDate(NULL),
+         m_notificationQueue(queue),
+-        m_globalConfig(config)
++        m_globalConfig(config),
++        m_servant(NULL)
+     {
+         m_servant = servant;
++        
++        try
++        {
++            init();
++        }
++        catch (nConfig::exception ce)
++        {
++           TRACE(HERE,"Config Exception: config service not yet ready, started ??");
++        }
+     }
+ 
+ 
+@@ -34,87 +67,171 @@ namespace mControl
+     }
+ 
+ 
+-    long KioskReboot::saveRebootDate()
+-    {  
+-        FILE *fp;
+-        mDate date = mDate::today();
+-        mTime time = mTime();
+-
+-        if(m_servant)
+-          fp = fopen(m_servant->getRebootFileName().c_str(),"wb");
+-        else
+-          fp = fopen(REBOOT_FILE_NAME,"rb");
+-
+-        if(fp)
++    void KioskReboot::init()
++    {
++        /**
++        *   Initialisize configuration values for use
++        **/
++        if( m_cfgRebootTime == NULL )
++            m_cfgRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
++
++        //wait for config service to be ready
++        while( m_cfgRebootTime && !m_cfgRebootTime->get() )
+         {
+-          fwrite(&date,sizeof(mDate),1,fp);
+-          fwrite(&time,sizeof(mTime),1,fp);
++            TRACE(HERE,"config service not yet ready, started ??");
+ 
+-          fclose(fp);
++            delete(m_cfgRebootTime);
+ 
+-          return(0);
++            m_cfgRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
++
++            //TODO: correct the sleep time to 1000
++            TRACE(HERE,"wait for config service to be ready, sleep for a while...");
++            mSysTime::sleep( 50 );
+         }
+-        else
+-          return(-1);
+-    }
+ 
++        if ( m_cfgDelayRange == NULL )
++            m_cfgDelayRange = new cfgNum("PLATFORM.REBOOT.DelayRange",
++                                        "Specifies reboot the delay range in minutes for the kiosk. This protects servers from overloading. The value is computed randomly within the given range.");
+ 
+-    long KioskReboot::getRebootDate(mDate *pDate)
+-    {
+-        FILE *fp;
+-        mDate date;
++        if ( m_cfgStartDelay == NULL )
++            m_cfgStartDelay = new cfgNum ("PLATFORM.REBOOT.StartCheckingAfter",
++                                        "Specifies the delay time in minutes before reboot-checks are started, to let the platform come up completely.",
++                                        15,0,60);
+ 
+-        if(m_servant)
+-            fp = fopen(m_servant->getRebootFileName().c_str(),"rb");
+-        else
+-            fp = fopen(REBOOT_FILE_NAME,"rb");
++        /**
++        *   get the configuration values
++        **/
++        m_startDelay = m_cfgStartDelay->get();
+ 
+-        if(fp && pDate)
++        this->setRebootDateFromMCC();
++
++        //TODO: check if really random should used here?
++        if( m_cfgDelayRange->get() > 0)
+         {
+-            fread(pDate,sizeof(mDate),1,fp);
+-            fclose(fp);
++            srand(static_cast<unsigned int>(time(NULL)));
++
++            m_delayRange = rand() % m_cfgDelayRange->get();
++        }
++        else
++            m_delayRange = 0;
+ 
+-            return(0);
++        //get Reboot Time
++        if( *m_cfgRebootTime->get() )
++        {
++            vector<string> timeConfiguration ( Tools::tokenize( m_cfgRebootTime->get(), ':' ) );
++
++            if( timeConfiguration.size() == 2 )
++            {
++                m_rebootTime = new ptime( date(), boost::posix_time::time_duration( stoi(timeConfiguration[0]), stoi(timeConfiguration[1]), 0, 0) );
++            }
++            else
++                TRACE(HERE,"ERROR: configuration of reboot-time is in wrong format");
+         }
+         else
+-            return(-1);
++            TRACE(HERE,"Reboot Time has been deleted from configuration.");   
+     }
+ 
+-                                                                                                    
++
++    //TODO: check for the right time to reboot
+     void KioskReboot::run()
+     {
+-        TRACE(HERE,"KioskReboot-Thread run() started...");
+-        
+-        mDate* lastRebootDate = new mDate();
+-        long correctDate = this->getRebootDate( lastRebootDate );
++        bool rebootedToday;
++        long rc;
+ 
+-        //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate->dayOfMonth(), lastRebootDate->monthOfYear(), lastRebootDate->year() );
++        TRACE(HERE,"reboot checker waiting for %d min.", m_startDelay);
+ 
++        //TODO: correct the time
++        mSysTime::sleep(m_startDelay);
+         
+-        if(correctDate)
+-        {
+-            m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAIREBOOT_REMOTE", REBOOTER_ID, WM_MASSAIREBOOT_REMOTE) );
+-        }
+-        else
++        TRACE(HERE,"rebooter run() started...");   
++
++        while( m_servant )
+         {
+-            TRACE(HERE,"incorrect Date");
++            //get date of today
++            date todaysDate ( Tools::getActualTimeDate().date() );
++
++            rebootedToday = 
++                todaysDate.year_month_day().day == m_lastRebootDate->year_month_day().day &&
++                todaysDate.year_month_day().month == m_lastRebootDate->year_month_day().month &&
++                todaysDate.year_month_day().year == m_lastRebootDate->year_month_day().year;
++
++            if( rebootedToday )
++                TRACE(HERE,"Reboot skipped, already done today!");
++
++            if( !rebootedToday && !m_servant->isKioskBusy() )
++            {
++                rc = m_servant->rebootKiosk();
++
++                if(!rc)
++                {
++                    TRACE(HERE,"REBOOTING KIOSK NOW...");
++
++                    this->saveRebootDateToMCC();
++
++                    // we can terminate this thread now !!
++
++                    //TODO: terminate Thread
++                }
++                else
++                {
++                    TRACE(HERE,"FAILED to reboot kiosk, rc = [%d] sleep for a minute",rc);
++
++                    //TODO: sleep a minute, correct the time
++                    mSysTime::sleep( 50 );
++                }
++            }
++            else
++            {
++                if( rebootedToday )
++                {
++                    //TODO: sleep an hour, correct the time
++                    TRACE(HERE,"Reboot already done, sleep for an hour");
++                    mSysTime::sleep( 50 );
++                }
++                else
++                {
++                    //TODO: sleep a minute, correct the time
++                    TRACE(HERE,"Reboot not done, sleep for a minute and check again");
++                    mSysTime::sleep( 50 );
++
++                    //re-initialize
++                    this->init();
++                }
++            }
+         }
+-        
+     }
+ 
+-    //TODO: implement correct functionality
+-    void KioskReboot::doTask()
++
++    void KioskReboot::saveRebootDateToMCC()
++    {  
++        stringstream sStream;
++
++        sStream << Tools::getActualTimeDate().date().year_month_day().day.as_number() 
++                << "."  
++                << Tools::getActualTimeDate().date().year_month_day().month.as_number()
++                << "."
++                << Tools::getActualTimeDate().date().year_month_day().year;
++
++        m_cfgRebootDate->set( sStream.str().c_str() );
++    }   
++
++    void KioskReboot::setRebootDateFromMCC()
+     {
+-        /*
+-        TRACE(HERE,"starting %s...", name() );
+-        
+-        while (! isCancelled()) {
+-            // Do some work. Cannot block indefinitely, otherwise it
+-            // will never test the isCancelled() condition.
+-            doTask();
++        if( m_cfgRebootDate == NULL )
++            m_cfgRebootDate = new cfgStr(RDATE_ITEM,RDATE_EXPL,RDATE_DEF);
++
++        if( *m_cfgRebootDate->get() )
++        {
++            vector<string> dateConfiguration ( Tools::tokenize( m_cfgRebootDate->get(), '.' ) );
++
++            if( dateConfiguration.size() == 3 )
++            {
++                m_lastRebootDate = new date( stoi(dateConfiguration[2]), stoi(dateConfiguration[1]), stoi(dateConfiguration[0]) );
++            }
++            else
++                TRACE(HERE,"ERROR: configuration of reboot-date is in wrong format");
+         }
+-        doTask();
+-        TRACE(HERE,"canceling %s...", name() );
+-        */
++        else
++            TRACE(HERE,"Reboot Time has been deleted from configuration.");
+     }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index dc21662d..b95706f0 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -66,6 +66,7 @@ namespace mControl
+                     day = stoi (scheduleFrequency);
+                 }
+                 catch (const std::invalid_argument& ia) {
++                    TRACE(HERE, "ERROR: invalid argument exception [%s]",ia.what() );
+                     day = 0;
+                 } 
+ 
+@@ -330,21 +331,6 @@ namespace mControl
+         //TODO: sleep, return mechanism
+         //return (0);
+     }
+-
+-
+-    void Scheduler::doTask()
+-    {
+-        /*
+-        TRACE(HERE,"starting %s...", name() );
+-        while (! isCancelled()) {
+-            // Do some work. Cannot block indefinitely, otherwise it
+-            // will never test the isCancelled() condition.
+-            doTask();
+-        }
+-        TRACE(HERE,"canceling %s...", name() );
+-        */
+-    }
+-
+ //
+ // ScheduledTask end of implementation
+ //---------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+index 401e1063..64c45b08 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+@@ -40,7 +40,7 @@ namespace mControl
+     {
+     }
+ 
+-    //TODO: implement Notficiation for WM_MASSAISTOP_REMOTE
++
+     long MControlServant::shutdownOS(bool fReboot, bool fForced)
+     {
+         TRACE(HERE,"shutdownOS(...) ...");
+@@ -61,13 +61,15 @@ namespace mControl
+                 // act gracefully ...
+                 if( m_kioskBusy )
+                 {
+-                rc = -1;
+-                TRACE( HERE, "kiosk is busy, rc = %d", rc );
++                    rc = -1;
++                    TRACE( HERE, "kiosk is busy, rc = %d", rc );
+                 }
+                 else
+                 {
+-                // stop platform first
+-                rc = 0;//SendMessage(serverWindow,WM_MASSAISTOP_REMOTE,0,0);
++                    // stop platform first
++                    //TODO: check mechanism
++                    //rc = 
++                    m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_REMOTE", SERVANT_ID, WM_MASSAISTOP_REMOTE) );
+                 }
+             }
+             if( !rc )
+@@ -93,23 +95,23 @@ namespace mControl
+         std::string userDir;
+         try
+         {
+-          TCHAR app_path[MAX_PATH] = {0};
+-          if(SHGetSpecialFolderPath(NULL, app_path, CSIDL_LOCAL_APPDATA, FALSE))
+-          {
+-            PathAddBackslash(reinterpret_cast<LPTSTR>(app_path));
+-            std::string buf(app_path); buf.append("materna");
+-            if(PathIsDirectory(buf.c_str()))
+-            {
+-              PathAppend(app_path,"materna\\");
+-            }
+-            buf.assign(app_path); buf.append("MIPS");
+-            if(PathIsDirectory(buf.c_str()))
++            TCHAR app_path[MAX_PATH] = {0};
++            if(SHGetSpecialFolderPath(NULL, app_path, CSIDL_LOCAL_APPDATA, FALSE))
+             {
+-              PathAppend(app_path,"MIPS\\");
+-            }
+-            userDir.assign(app_path).append(REBOOT_FILE_NAME);
+-          } else
+-          userDir.assign(".\\"REBOOT_FILE_NAME);
++                PathAddBackslash(reinterpret_cast<LPTSTR>(app_path));
++                std::string buf(app_path); buf.append("materna");
++                if(PathIsDirectory(buf.c_str()))
++                {
++                    PathAppend(app_path,"materna\\");
++                }
++                buf.assign(app_path); buf.append("MIPS");
++                if(PathIsDirectory(buf.c_str()))
++                {
++                    PathAppend(app_path,"MIPS\\");
++                }
++                userDir.assign(app_path).append(REBOOT_FILE_NAME);
++            } else
++                userDir.assign(".\\"REBOOT_FILE_NAME);
+         }
+         catch(...)
+         {
+@@ -244,43 +246,48 @@ namespace mControl
+     }
+ 
+ 
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::shutdownPlatform()
+     {
+         TRACE(HERE,"shutdownPlatform(): Kiosk busy: %s",Tools::noYes(m_kioskBusy));
+-        long rc;
++        long rc = 0;
+ 
+         if(m_kioskBusy)
+           return(-1);
+ 
+-        //TODO: implement Notification for WM_MASSAISTOP_REMOTE
+-        rc = 0;//SendMessage(serverWindow,WM_MASSAISTOP_REMOTE,0,0);
++        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_REMOTE", SERVANT_ID, WM_MASSAISTOP_REMOTE) );
++
+ 
+         TRACE(HERE,"requested platform shutdown, rc = %d",rc);
+         return(rc);
+     }
+ 
+-    //TODO: implement Notification for WM_MASSAISTART_REMOTE
++
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::startPlatform()
+     {
+         TRACE(HERE,"startPlatform() ...");
++        long rc = 0;
+ 
+-        long rc = 0;//SendMessage(serverWindow,WM_MASSAISTART_REMOTE,0,0);
++        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTART_REMOTE", SERVANT_ID, WM_MASSAISTART_REMOTE) );
+ 
+         TRACE(HERE,"requested platform start, rc = %d",rc);
+         return(rc);
+     }
+ 
+ 
+-    //TODO: implement Notification for WM_MASSAIREBOOT_REMOTE
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::rebootKiosk()
+     {
+         TRACE(HERE,"rebootKiosk() ...");
+-        long rc;
++        long rc = 0;
+ 
+         if(!m_kioskBusy)
+         {
+-            rc = 0;//SendMessage(serverWindow,WM_MASSAIREBOOT_REMOTE,0,0);
+-            OS_Sleep(5000);
++            m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAIREBOOT_REMOTE", SERVANT_ID, WM_MASSAIREBOOT_REMOTE) );
++
++            //TODO: correct the time to 5000
++            mSysTime::sleep( 100 );
+         }
+ 
+         rc = shutdownOS(true);
+@@ -290,7 +297,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: implement Notification for WM_MASSAISHUTDOWN_REMOTE
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::shutdownKiosk()
+     {
+         TRACE(HERE,"shutdownKiosk() ...");
+@@ -298,8 +305,10 @@ namespace mControl
+ 
+         if(!m_kioskBusy)
+         {
+-            rc = 0;//SendMessage(serverWindow,WM_MASSAISHUTDOWN_REMOTE,0,0);
+-            OS_Sleep(5000);
++            m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISHUTDOWN_REMOTE", SERVANT_ID, WM_MASSAISHUTDOWN_REMOTE) );
++            
++            //TODO: correct the time to 5000
++            mSysTime::sleep( 100 );;
+         }
+ 
+         rc = shutdownOS(false);
+@@ -309,7 +318,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: implement Notification for WM_MASSAISTOP_REMOTE
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::forcedShutdownPlatform()
+     {
+         TRACE(HERE,"forcedShutdownPlatform() ...");
+@@ -317,25 +326,26 @@ namespace mControl
+ 
+         m_kioskBusy = false;
+ 
+-        rc = 0;//SendMessage(serverWindow,WM_MASSAISTOP_REMOTE,0,0);
++        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_REMOTE", SERVANT_ID, WM_MASSAISTOP_REMOTE) );
+ 
+         TRACE(HERE,"requested forced platform shutdown, rc = %d",rc);
+         return(rc);
+     }
+ 
+ 
+-    //TODO: implement Notification for WM_MASSAISTOP_REMOTE
++    //TODO: check mechanism for notification
+     CORBA::Long MControlServant::forcedRestartPlatform()
+     {
+         TRACE(HERE,"forcedRestartPlatform() ...");
+-
++        long rc = 0;
++        
+         m_kioskBusy = false;
+ 
+-        long rc = 0;//SendMessage(serverWindow,WM_MASSAISTOP_REMOTE,0,0);
++        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_REMOTE", SERVANT_ID, WM_MASSAISTOP_REMOTE) );
+ 
+         TRACE(HERE,"requested forced platform restart, stop rc = %d",rc);
+ 
+-        rc = 0;//SendMessage(serverWindow,WM_MASSAISTART_REMOTE,0,0);
++        m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTART_REMOTE", SERVANT_ID, WM_MASSAISTART_REMOTE) );
+ 
+         TRACE(HERE,"requested forced platform restart, start rc = %d",rc);
+         return rc;
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index a714584d..9cac16cf 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -643,9 +643,9 @@ namespace mControl
+         char cCurrentPath[FILENAME_MAX];
+ 
+         if (!GetCurrentDir(cCurrentPath, sizeof(cCurrentPath)))
+-            {
++        {
+             return errno;
+-            }
++        }
+ 
+         cCurrentPath[sizeof(cCurrentPath) - 1] = '\0'; /* not really required */
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index e828d2c7..3d82473f 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -360,7 +360,8 @@ namespace mControl
+                     while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
+                     DispatchMessage(&msg);
+ 
+-                    OS_Sleep(500);
++                    TRACE(HERE,"waitForStarterTermination sleep for 500ms");
++                    mSysTime::sleep(500);
+                 }
+ 
+                 SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETPOS,0,0);
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,197 @@
+From 41f756a864f9da0eca87c7fbafa8c7e746fdbab4 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 8 Oct 2015 13:58:48 +0000
+Subject: [PATCH 0690/1077] MANTIS 37866 Mantis 37866: serialcon: reconnect on
+ real COM port not possible - In case of error matAsyncOpen() now will always
+ try to set the port status to closed. For the user this has the advantage,
+ that the status can be determined by the returncode: - MATRC_OK -> Opened
+ successfully - MATRC_ERROR -> Closed - MATRC_IGNORED -> Nothing changed, port
+ was already open
+
+Also after failed open another call to matAsyncOpen() may succeed without the necessity of a matAsyncClose()
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@910 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/SerialCon/src/matAsyncW32.c    | 93 ++++++++++++-------
+ 1 file changed, 59 insertions(+), 34 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+index e24ec7d3..118d7fa2 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 1998-2010 MATERNA Information & Communications.
++ * Copyright (c) 1998-2015 MATERNA Information & Communications.
+  *
+  **************************************************************************
+ **/
+@@ -219,6 +219,47 @@ static void ts( struct matAsyncPrivate const * Prv )
+ 
+ 
+ 
++/**
++ *
++ * Close a handle, avoid to close it multiple times.
++ *
++**/
++static void closeHandle( HANDLE * handle )
++{
++   if( *handle != INVALID_HANDLE_VALUE )
++   {
++      CloseHandle( *handle );
++      *handle = INVALID_HANDLE_VALUE;
++   }
++}
++
++
++
++/**
++ *
++ * Close port implementation - no pre-conditions.
++ *
++**/
++static void closePort( mtHdl H )
++{
++   H->SessionStatus = SESSION_STATUS_CLOSING;
++   closeHandle( &H->OverlapRx.hEvent );
++   closeHandle( &H->OverlapSt.hEvent );
++   closeHandle( &H->OverlapTx.hEvent );
++   closeHandle( &H->CommH );
++   /* Wait for all data calls to return */
++   WaitForSingleObject( H->ReadMutex, INFINITE );
++   WaitForSingleObject( H->ReadStateMutex, INFINITE );
++   WaitForSingleObject( H->WriteMutex, INFINITE );
++   /* And free the mutexes for a possible new session. */
++   ReleaseMutex( H->ReadMutex );
++   ReleaseMutex( H->ReadStateMutex );
++   ReleaseMutex( H->WriteMutex );
++   H->SessionStatus = SESSION_STATUS_CLOSED;
++}
++
++
++
+ /**
+  *
+  * Fill the buffer szLastError with the given error.
+@@ -694,6 +735,7 @@ MATRC matAsyncOpen( mtHdl H )
+    if( H->CommH == INVALID_HANDLE_VALUE )
+    {
+       fillLastError( H, "CreateFile" );
++      closePort( H );
+       return MATRC_ERROR;
+    }
+    /*
+@@ -702,6 +744,7 @@ MATRC matAsyncOpen( mtHdl H )
+    if( !SetupComm( H->CommH, 0x10000, 0x10000 ) )
+    {
+       fillLastError( H, "SetupComm" );
++      closePort( H );
+       return MATRC_ERROR;
+    }
+    /*
+@@ -721,6 +764,7 @@ MATRC matAsyncOpen( mtHdl H )
+    )
+    {
+       fillLastError( H, "PurgeComm" );
++      closePort( H );
+       return MATRC_ERROR;
+    }
+    /*
+@@ -731,6 +775,7 @@ MATRC matAsyncOpen( mtHdl H )
+       if( !GetCommState( H->CommH, &D ) )
+       {
+          fillLastError( H, "GetCommState" );
++         closePort( H );
+          return MATRC_ERROR;
+       }
+       /*
+@@ -791,6 +836,7 @@ MATRC matAsyncOpen( mtHdl H )
+       if( !SetCommState( H->CommH, &D ) )
+       {
+          fillLastError( H, "SetCommState" );
++         closePort( H );
+          return MATRC_ERROR;
+       }
+    }
+@@ -799,62 +845,41 @@ MATRC matAsyncOpen( mtHdl H )
+     */
+    Ret = setupTimes( H );
+    if( Ret != MATRC_OK )
++   {
++      closePort( H );
+       return Ret;
++   }
+    Ret = setupLnDTR( H );
+    if( Ret != MATRC_OK )
++   {
++      closePort( H );
+       return Ret;
++   }
+    Ret = setupLnRTS( H );
+    if( Ret != MATRC_OK )
++   {
++      closePort( H );
+       return Ret;
++   }
+    H->SessionStatus = SESSION_STATUS_OPENED;
+    return MATRC_OK;
+ }
+ 
+ 
+ 
+-/**
+- *
+- * Close a handle, avoid to close it multiple times.
+- *
+-**/
+-static void closeHandle( HANDLE * handle )
+-{
+-   if( *handle != INVALID_HANDLE_VALUE )
+-   {
+-      CloseHandle( *handle );
+-      *handle = INVALID_HANDLE_VALUE;
+-   }
+-}
+-
+-
+-
+ /**
+  *
+  * Public function.
+  *
+ **/
+-MATRC matAsyncClose ( mtHdl H )
++MATRC matAsyncClose( mtHdl H )
+ {
+    TRACE1( "close" )
+-   if(H->SessionStatus != SESSION_STATUS_OPENED
+-     && H->SessionStatus != SESSION_STATUS_OPENING)
++   if( H->SessionStatus != SESSION_STATUS_OPENED )
+    {
+       return MATRC_IGNORED;
+    }
+-   H->SessionStatus = SESSION_STATUS_CLOSING;
+-   closeHandle( &H->OverlapRx.hEvent );
+-   closeHandle( &H->OverlapSt.hEvent );
+-   closeHandle( &H->OverlapTx.hEvent );
+-   closeHandle( &H->CommH );
+-   /* Wait for all data calls to return */
+-   WaitForSingleObject( H->ReadMutex, INFINITE );
+-   WaitForSingleObject( H->ReadStateMutex, INFINITE );
+-   WaitForSingleObject( H->WriteMutex, INFINITE );
+-   /* And free the mutexes for a possible new session. */
+-   ReleaseMutex( H->ReadMutex );
+-   ReleaseMutex( H->ReadStateMutex );
+-   ReleaseMutex( H->WriteMutex );
+-   H->SessionStatus = SESSION_STATUS_CLOSED;
++   closePort( H );
+    return MATRC_OK;
+ }
+ 
+-- 
+2.41.0.windows.1
+

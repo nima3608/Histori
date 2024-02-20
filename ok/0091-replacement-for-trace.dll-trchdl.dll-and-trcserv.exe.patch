@@ -1,0 +1,511 @@
+From 827341077516f9f2fd2d25f2b6d7e4384f00e4d4 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 4 Nov 2011 13:44:47 +0000
+Subject: [PATCH 0091/1000] replacement for trace.dll, trchdl.dll and
+ trcserv.exe: process writes traces to file, using same interface as trace.dll
+ and trchdl.dll needs no trcserv.exe trace.dll trcHDL.dll traceNoConfig.dll
+ trcHDLNoConfig.dll traces.lib tracehdls.lib traceCompletes.lib
+ tracehdlCompletes.lib traceNoConfigs.lib tracehdlNoConfigs.lib
+ traceNoConfigCompletes.lib tracehdlNoConfigCompletes.lib
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@208 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Trace/DLLNoConfig/makefile.mak |  2 +-
+ .../Massai/cpp/Trace/inc/TraceCmdQueue.h      |  2 +-
+ .../Massai/cpp/Trace/inc/TraceFormat.h        | 14 +++---
+ .../Massai/cpp/Trace/inc/TraceMgr.h           |  2 -
+ .../Massai/cpp/Trace/inc/TraceProcessor.h     |  1 -
+ .../Massai/cpp/Trace/inc/TraceSystem.h        |  3 +-
+ .../Massai/cpp/Trace/src/TestTraceHdlLib.cpp  |  2 -
+ .../Massai/cpp/Trace/src/TestTraceLib.cpp     |  2 -
+ .../Massai/cpp/Trace/src/TraceCmdQueue.cpp    | 29 ++++++-----
+ .../Massai/cpp/Trace/src/TraceFormat.cpp      | 48 ++++++++++---------
+ .../Massai/cpp/Trace/src/TraceSession.cpp     | 18 +++----
+ .../Massai/cpp/Trace/src/TraceSrvConfig.cpp   |  1 -
+ .../Massai/cpp/Trace/src/TraceSystem.cpp      | 10 ++--
+ .../Massai/cpp/Trace/src/TraceTrace.cpp       |  6 +--
+ .../Massai/cpp/Trace/src/local_def.cpp        | 11 -----
+ 15 files changed, 72 insertions(+), 79 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/cpp/Trace/src/local_def.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak b/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
+index cb4cf40f..b0467a19 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Trace/DLLNoConfig/makefile.mak
+@@ -27,7 +27,7 @@ MY_DLL1_LDFLAGS =        $(DLL_LDFLAGS)
+ 
+ ######################################################################
+ 
+-MY_DLL2 =                $(_DLL)\trcHDLNoConfig.dll
++MY_DLL2 =                $(_DLL)\traceHDLNoConfig.dll
+ 
+ MY_DLL2_RES =            $(_OBJ)\TraceHDLDLL.res
+     
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmdQueue.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmdQueue.h
+index 632d7018..afc52f41 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmdQueue.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceCmdQueue.h
+@@ -50,9 +50,9 @@ namespace MASSAI
+         CommandList m_commandList;
+         Materna::MSSD::Mutex m_access;
+         Materna::MSSD::eventSemaphore m_event;
+-        Materna::MSSD::eventSemaphore m_readEvent;
+         bool m_stop;
+         bool m_started;
++        int m_waitCount;
+         TraceProcessor& m_processor;
+ 
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceFormat.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceFormat.h
+index 2c67d47d..015dbf7d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceFormat.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceFormat.h
+@@ -22,7 +22,7 @@
+ 
+ #include "TraceSystem.h"
+ #include <ostream>
+-#include <map>
++#include <string>
+ 
+ namespace MASSAI
+ {
+@@ -37,14 +37,14 @@ namespace MASSAI
+           ProcessId processId, const Timestamp& timestamp);
+         std::string backupPath(const Timestamp& timestamp);
+         void head(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-          long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-          const char* pszFunction);
++          long traceLevel, const std::string& topic, const std::string& file, long line,
++          const std::string& function);
+         void text(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-          long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-          const char* pszFunction, const char* pszData);
++          long traceLevel, const std::string& topic, const std::string& file, long line,
++          const std::string& function, const std::string& data);
+         void dump(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-          long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-          const char* pszFunction, const char* pData, long size);
++          long traceLevel, const std::string& topic, const std::string& file, long line,
++          const std::string& function, const std::string& data);
+     };
+     TraceFormat& getTraceFormat();
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
+index 7afbb955..9af5aac4 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceMgr.h
+@@ -23,8 +23,6 @@
+ #include "TraceProcessor.h"
+ #include "TraceCmdQueue.h"
+ #include "TraceConfig.h"
+-#include <list>
+-#include <set>
+ 
+ namespace MASSAI
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+index 797dcd31..39571a91 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+@@ -21,7 +21,6 @@
+ #pragma warning(disable:4786)
+ 
+ #include "TraceSession.h"
+-#include "TraceSystem.h"
+ #include <map>
+ #include <set>
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSystem.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSystem.h
+index 761ee17e..42134189 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSystem.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSystem.h
+@@ -44,7 +44,8 @@ namespace MASSAI
+     ProcessId getProcessId();
+     Timestamp getTimestamp();
+     boost::filesystem::path getBasePath();
+-    void sysTrace(const char* pszText);
++    void sysTrace(const std::string& text);
++    void sleep(long milliseconds);
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+index 4a0a7406..a0013dae 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceHdlLib.cpp
+@@ -15,8 +15,6 @@
+ #include "trc/TrcHdlClt.h"
+ #include "tools/localtrace.h"
+ #include "systools/mSysException.hpp"
+-#include <iostream>
+-
+ 
+ int main(int argc, char** argv)
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+index 766dd768..64f69a4c 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TestTraceLib.cpp
+@@ -15,8 +15,6 @@
+ #include "trc/TraceClt.h"
+ #include "tools/localtrace.h"
+ #include "systools/mSysException.hpp"
+-#include <iostream>
+-
+ 
+ int main(int argc, char** argv)
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmdQueue.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmdQueue.cpp
+index 3087aebc..e3d69af4 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmdQueue.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceCmdQueue.cpp
+@@ -18,6 +18,7 @@
+ #include "TraceProcessor.h"
+ #include "TraceCmd.h"
+ #include "TraceTrace.h"
++#include "TraceSystem.h"
+ #include "systools/mAutoMutexCS.h"
+ #include "systools/mSysException.hpp"
+ #include "trc/tracedef.h"
+@@ -32,8 +33,9 @@ namespace
+ {
+   enum
+   {
+-    WAIT_UPPER_BOUND= 100,
+-    WAIT_LOWER_BOUND= 50,
++    UPPER_BOUND= 100000,
++    WAIT_BOUND= 10000,
++    WAIT_COUNT= 100,
+   };
+ }
+ 
+@@ -47,7 +49,8 @@ namespace MASSAI
+       m_event(),
+       m_stop(false),
+       m_started(false),
+-      m_processor(processor)
++      m_processor(processor),
++      m_waitCount(0)
+     {}
+     TraceCmdQueue::~TraceCmdQueue()
+     {
+@@ -79,17 +82,23 @@ namespace MASSAI
+         AutoMutexCS mx(m_access);
+         if(!m_stop)
+         {
+-          m_commandList.push_back(pCmd);
+-          if(m_commandList.size() > WAIT_UPPER_BOUND)
++          if(m_commandList.size() <= UPPER_BOUND)
+           {
+-            m_readEvent.reset();
++            m_commandList.push_back(pCmd);
++          }
++          if(m_waitCount > 0)
++          {
++            m_waitCount--;
++          }
++          else if(m_commandList.size() > WAIT_BOUND)
++          {
++            m_waitCount= WAIT_COUNT;
+             wait= true;
+           }
+           send= true;
+           m_event.post();
+           if(!m_started)
+           {
+-            wait= false;
+             matThreadRC rc= start();
+             if(rc == THREADRC_OK)
+             {
+@@ -104,7 +113,7 @@ namespace MASSAI
+       }
+       if(wait)
+       {
+-        m_readEvent.wait();
++        sleep(1);
+       }
+     }
+     void TraceCmdQueue::process(TraceCmd* pCmd)
+@@ -139,10 +148,6 @@ namespace MASSAI
+       {
+         pCmd= m_commandList.front();
+         m_commandList.pop_front();
+-        if(m_commandList.size() < WAIT_LOWER_BOUND)
+-        {
+-          m_readEvent.post();
+-        }
+       }
+       else
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
+index 4df70e20..a91571df 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
+@@ -26,12 +26,12 @@ namespace
+ {
+   MASSAI::trace::TraceFormat* pFormat= 0;
+ 
+-  std::string truncate(const char* pszFile)
++  std::string truncate(const std::string& file)
+   {
+     std::string result;
+     try
+     {
+-      result= fs::path(pszFile, fs::native).leaf();
++      result= fs::path(file, fs::native).leaf();
+     }
+     catch(std::exception& ex)
+     {
+@@ -69,10 +69,10 @@ namespace MASSAI
+       return result;
+     }
+     void TraceFormat::head(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-      long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-      const char* pszFunction)
++      long traceLevel, const std::string& topic, const std::string& file, long line,
++      const std::string& function)
+     {
+-      std::string file= truncate(pszFile);
++      std::string fileTruncated= truncate(file);
+       // date time threadid tracelevel/topic file line
+ 
+       // date
+@@ -90,35 +90,37 @@ namespace MASSAI
+         out << std::right << std::setfill('0') << std::dec;
+         out << std::setw(1) << traceLevel;
+       }
+-      else if(pszTopic != 0)
++      else if(topic != "")
+       {
+         out << std::left << std::setfill(' ');
+-        out << std::setw(8) << pszTopic;
++        out << std::setw(8) << topic.c_str();
+       }
+       out << "\t";
+       // file
+       out << std::left << std::setfill(' ');
+-      out << std::setw(20) << file.c_str() << "\t";
++      out << std::setw(20) << fileTruncated.c_str() << "\t";
+       // line
+       out << std::right << std::setfill('0') << std::dec;
+       out << "(" << std::setw(4) << line << ")\t";
+     }
+     void TraceFormat::text(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-      long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-      const char* pszFunction, const char* pszData)
++      long traceLevel, const std::string& topic, const std::string& file, long line,
++      const std::string& function, const std::string& data)
+     {
+-      head(out, threadId, timestamp, traceLevel, pszTopic, pszFile, line, pszFunction);
+-      out << pszData << std::endl;
++      head(out, threadId, timestamp, traceLevel, topic, file, line, function);
++      out << data << std::endl;
+     }
+ 
+     // printf ist effizienter als ostream
+     void TraceFormat::dump(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-      long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-      const char* pszFunction, const char* pData, long size)
++      long traceLevel, const std::string& topic, const std::string& file, long line,
++      const std::string& function, const std::string& data)
+     {
+-      head(out, threadId, timestamp, traceLevel, pszTopic, pszFile, line, pszFunction);
++      head(out, threadId, timestamp, traceLevel, topic, file, line, function);
+       out << std::endl;
++      const char* pData= data.data();
+       const unsigned char* puData= reinterpret_cast<const unsigned char*>(pData);
++      long size= data.size();
+       out << std::uppercase;
+       for(long i = 0; i < size; i += 16)
+       {
+@@ -187,10 +189,10 @@ namespace MASSAI
+       out << ".trc";
+     }
+     void TraceFormat::head(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-      long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-      const char* pszFunction)
++      long traceLevel, const std::string& topic, const std::string& file, long line,
++      const std::string& function)
+     {
+-      std::string file= truncate(pszFile);
++      std::string file= truncate(file);
+       // date time threadid tracelevel/topic file line
+ 
+       // date
+@@ -211,10 +213,10 @@ namespace MASSAI
+         out << std::right << std::setfill('0') << std::dec;
+         out << std::setw(1) << traceLevel;
+       }
+-      else if(pszTopic != 0)
++      else if(topic != 0)
+       {
+         out << std::left << std::setfill(' ');
+-        out << std::setw(8) << pszTopic;
++        out << std::setw(8) << topic;
+       }
+       out << "\t";
+       // file
+@@ -225,10 +227,10 @@ namespace MASSAI
+       out << "(" << std::setw(4) << line << ")\t";
+     }
+     void TraceFormat::dump(std::ostream& out, ThreadId threadId, const Timestamp& timestamp,
+-      long traceLevel, const char* pszTopic, const char* pszFile, long line,
+-      const char* pszFunction, const char* pData, long size)
++      long traceLevel, const std::string& topic, const std::string& file, long line,
++      const std::string& function, const std::string& pData, long size)
+     {
+-      head(out, threadId, timestamp, traceLevel, pszTopic, pszFile, line, pszFunction);
++      head(out, threadId, timestamp, traceLevel, topic, file, line, function);
+       out << std::endl;
+       const unsigned char* puData= reinterpret_cast<const unsigned char*>(pData);
+       out << std::uppercase;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index 824c43c3..03bce1b2 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -24,8 +24,8 @@
+ #include "boost/filesystem/operations.hpp"
+ #include "boost/filesystem/convenience.hpp"
+ #include <fstream>
+-#include <iostream>
+ #include <algorithm>
++#include <iostream>
+ 
+ namespace fs = boost::filesystem;
+ 
+@@ -266,14 +266,14 @@ namespace MASSAI
+       std::ostream& out= getOut();
+       TraceFormat& fmt= getTraceFormat();
+       fmt.text(out, cmd.threadId, cmd.timestamp, cmd.traceLevel,
+-        cmd.topic.c_str(), cmd.file.c_str(), cmd.line, cmd.function.c_str(), cmd.data.c_str());
++        cmd.topic, cmd.file, cmd.line, cmd.function, cmd.data);
+     }
+     void TraceSession::dump(const TraceCmd& cmd)
+     {
+       std::ostream& out= getOut();
+       TraceFormat& fmt= getTraceFormat();
+       fmt.dump(out, cmd.threadId, cmd.timestamp, cmd.traceLevel,
+-        cmd.topic.c_str(), cmd.file.c_str(), cmd.line, cmd.function.c_str(), cmd.data.data(), cmd.data.size());
++        cmd.topic, cmd.file, cmd.line, cmd.function, cmd.data);
+     }
+     void TraceSession::cooked(const TraceCmd& cmd)
+     {
+@@ -285,7 +285,7 @@ namespace MASSAI
+       std::ostream& out= getOut();
+       TraceFormat& fmt= getTraceFormat();
+       fmt.text(out, cmd.threadId, cmd.timestamp, cmd.traceLevel,
+-        cmd.topic.c_str(), cmd.file.c_str(), cmd.line, cmd.function.c_str(), "start new file");
++        cmd.topic, cmd.file, cmd.line, cmd.function, "start new file");
+       close();
+       open();
+     }
+@@ -295,8 +295,8 @@ namespace MASSAI
+       TraceFormat& fmt= getTraceFormat();
+       std::string trace= "moveFile: ";
+       trace += cmd.data;
+-      fmt.text(out, cmd.threadId, cmd.timestamp, -1, "TRACE", cmd.file.c_str(),
+-        cmd.line, cmd.function.c_str(), trace.c_str());
++      fmt.text(out, cmd.threadId, cmd.timestamp, -1, "TRACE", cmd.file,
++        cmd.line, cmd.function, trace);
+       try
+       {
+         m_config.setSessionPath(cmd.data);
+@@ -313,7 +313,7 @@ namespace MASSAI
+     }
+     void TraceSession::changeTopic(const TraceCmd& cmd, bool isActive)
+     {
+-      m_config.setTopic(cmd.data.c_str(), isActive);
++      m_config.setTopic(cmd.data, isActive);
+     }
+     void TraceSession::changeDirectory(const TraceCmd& cmd)
+     {
+@@ -321,8 +321,8 @@ namespace MASSAI
+       TraceFormat& fmt= getTraceFormat();
+       std::string trace= "TraceDirectory changed: ";
+       trace += cmd.data;
+-      fmt.text(out, cmd.threadId, cmd.timestamp, -1, "TRACE", cmd.file.c_str(),
+-        cmd.line, cmd.function.c_str(), trace.c_str());
++      fmt.text(out, cmd.threadId, cmd.timestamp, -1, "TRACE", cmd.file,
++        cmd.line, cmd.function, trace);
+       try
+       {
+         m_config.setPath(cmd.data);
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
+index 377ac4ba..87c5ac9f 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
+@@ -16,7 +16,6 @@
+ #include "trc/tracedef.h"
+ #include "trc/TraceSettings.h"
+ #include "cfgclnt/nConfigText.hpp"
+-#include "cfgclnt/nConfigNumber.hpp"
+ #include "cfgclnt/nConfigSelection.hpp"
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
+index 36f9a133..07df0940 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSystem.cpp
+@@ -18,7 +18,7 @@
+ #include "trc/tracedef.h"
+ #include "boost/filesystem/operations.hpp"
+ #include <windows.h>
+-#include <iostream>
++// #include <iostream>
+ 
+ namespace fs = boost::filesystem;
+ 
+@@ -92,10 +92,14 @@ namespace MASSAI
+       }
+       return result;
+     }
+-    void sysTrace(const char* pszText)
++    void sysTrace(const std::string& text)
+     {
+-      OutputDebugString(pszText);
++      OutputDebugString(text.c_str());
+       // std::cout << pszText << std::endl;
+     }
++    void sleep(long milliseconds)
++    {
++      Sleep(milliseconds);
++    }
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceTrace.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceTrace.cpp
+index dfc3e630..e465993e 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceTrace.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceTrace.cpp
+@@ -30,9 +30,9 @@ namespace MASSAI
+       ThreadId threadId= getThreadId();
+       std::ostringstream out;
+       TraceFormat& format= getTraceFormat();
+-      format.text(out, threadId, timestamp, level, 0, pszFile,
+-        line, pszFunction, pszData);
+-      sysTrace(out.str().c_str());
++      format.text(out, threadId, timestamp, level, "", pszFile?pszFile:"",
++        line, pszFunction?pszFunction:"", pszData);
++      sysTrace(out.str());
+     }
+     void tracetrace(long level, const char* pszFile, long line,
+       const char* pszFunction, const char* pszFormat, ...)
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/local_def.cpp
+deleted file mode 100644
+index 92edef91..00000000
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/local_def.cpp
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#include "Tools/VERSIONLIB.h"
+-
+-/*! \page trace trace library - Release Notes
+- *
+- *
+- *  \date 27.10.2011 \li V1.0.0.0
+- *                   \li SteT Initial Version
+- *
+- */
+-
+-VERSION_ID_DT(text, 1, 0, 0, 0);
+-- 
+2.41.0.windows.1
+

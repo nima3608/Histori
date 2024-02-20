@@ -1,0 +1,223 @@
+From 386d42f3ca6bbd603cd718a2ddedfdf20e800b06 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 13 Nov 2014 12:27:16 +0000
+Subject: [PATCH 0535/1000] MANTIS 0032431 -moved waitForStarterTermination()
+ from dialog to worker
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@767 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  7 --
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  7 ++
+ .../cpp/mControl/src/mControl_dialog.cpp      | 74 ------------------
+ .../cpp/mControl/src/mControl_worker.cpp      | 75 +++++++++++++++++++
+ 4 files changed, 82 insertions(+), 81 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index a3b7d824..0797ecd4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -54,13 +54,6 @@ namespace mControl
+         void run();
+ 	  
+ 
+-        //TODO: implement with new process configuration
+-        /**
+-        * Waits until starter has terminated
+-        */
+-        void waitForStarterTermination();
+-
+-
+         /**
+         *   load bitmap from file
+         */
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 977af045..64324b62 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -84,6 +84,13 @@ namespace mControl
+         *   create a public semaphor and start all progs via MSTART.EXE
+         */
+         long startAll();
++
++
++        //TODO: implement with new process configuration
++        /**
++        * Waits until starter has terminated
++        */
++        void waitForStarterTermination();
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 25ad9901..437e73d9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -54,80 +54,6 @@ namespace mControl
+     }
+ 
+ 
+-    void Dialog::waitForStarterTermination()
+-    {
+-        /*
+-        long   lExitCode;
+-        MSG    msg;
+-        HANDLE hProcess;
+-        list<long>::iterator prI;
+-        list<long>::iterator tmpI;
+-
+-            SendMessage(m_impl.getDialog().getWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
+-
+-            try
+-            {
+-              if(m_processList)
+-              {
+-                TRACE(HERE,"waiting for starter termination ...");
+-                hStarter->signalStop();
+-                while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
+-                {
+-                  for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
+-                  {
+-                     try
+-                     {
+-                       TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),prList.size());
+-
+-                       hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
+-
+-                       if(hProcess)
+-                       {
+-                         if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
+-                         {
+-                           lCurrentProcesses--;
+-
+-                           flTmp = (float)lCurrentProcesses/(float)lAllProcesses;
+-
+-                           lCurrLoadPercent = (long)(flTmp *100);
+-
+-                           SendMessage(hwndLoad,PBM_SETPOS,lCurrLoadPercent,0);
+-
+-                           UpdateWindow(hwndLoad);
+-
+-                           if(prList.size() > 0)
+-                             prList.erase(tmpI);
+-                         }
+-
+-                         // close this handle always !!
+-
+-                         CloseHandle(hProcess);
+-                       }
+-                     }
+-                     catch( ... ) {};
+-                  }
+-
+-                  while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
+-                    DispatchMessage(&msg);
+-
+-                  OS_Sleep(500);
+-                }
+-
+-                SendMessage(hwndLoad,PBM_SETPOS,0,0);
+-                UpdateWindow(hwndLoad);
+-
+-                TRACE(HERE,"waiting for starter termination, done.");
+-
+-                delete hStarter;
+-
+-                hStarter = NULL;
+-              }
+-            }
+-            catch( ... ) {};
+-            */
+-    }
+-
+-
+     HBITMAP Dialog::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
+     {
+         BITMAPFILEHEADER * pbmfh;
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 879003ea..47aadb3d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -300,4 +300,79 @@ namespace mControl
+         else
+             return 1;
+     }
++
++
++    void Worker::waitForStarterTermination()
++    {
++        TRACE(HERE,"waitForStarterTermination ...");
++        /*
++        long   lExitCode;
++        MSG    msg;
++        HANDLE hProcess;
++        list<long>::iterator prI;
++        list<long>::iterator tmpI;
++
++            SendMessage(m_impl.getDialog().getWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
++
++            try
++            {
++              if(m_processList)
++              {
++                TRACE(HERE,"waiting for starter termination ...");
++                hStarter->signalStop();
++                while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
++                {
++                  for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
++                  {
++                     try
++                     {
++                       TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),prList.size());
++
++                       hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
++
++                       if(hProcess)
++                       {
++                         if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
++                         {
++                           lCurrentProcesses--;
++
++                           flTmp = (float)lCurrentProcesses/(float)lAllProcesses;
++
++                           lCurrLoadPercent = (long)(flTmp *100);
++
++                           SendMessage(hwndLoad,PBM_SETPOS,lCurrLoadPercent,0);
++
++                           UpdateWindow(hwndLoad);
++
++                           if(prList.size() > 0)
++                             prList.erase(tmpI);
++                         }
++
++                         // close this handle always !!
++
++                         CloseHandle(hProcess);
++                       }
++                     }
++                     catch( ... ) {};
++                  }
++
++                  while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
++                    DispatchMessage(&msg);
++
++                  OS_Sleep(500);
++                }
++
++                SendMessage(hwndLoad,PBM_SETPOS,0,0);
++                UpdateWindow(hwndLoad);
++
++                TRACE(HERE,"waiting for starter termination, done.");
++
++                delete hStarter;
++
++                hStarter = NULL;
++              }
++            }
++            catch( ... ) {};
++            */
++    }
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

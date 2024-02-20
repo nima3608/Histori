@@ -1,0 +1,268 @@
+From f870ee47508da614c02383bca8c28ec3bea0d9a0 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 2 Mar 2022 14:41:40 +0000
+Subject: [PATCH 1062/1077] MANTIS 62439 massaiCfgXB.exe version 2.5.1 - MANTIS
+ 62439: setMeta() fix for selections - Ignore setMeta() for selection items to
+ be created.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1714 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  13 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Selection.cpp   | 172 +++++++++++-------
+ 3 files changed, 126 insertions(+), 72 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index cd5df953..42ebc093 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -623,8 +623,17 @@
+ //! @par     Change:
+ //! - MANTIS 56506: Config service file read confusion
+ //! - Re-design XML file parsing to avoid exceptions and double reads
+-#define FILE_VER_BIN 2,5,0,0
+-#define FILE_VER_DTS "2.5.0.0"
++// #define FILE_VER_BIN 2,5,0,0
++// #define FILE_VER_DTS "2.5.0.0"
++//
++//! @version 2.5.1
++//! @date    02.03.2022
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 62439: setMeta() fix for selections
++//! - Ignore setMeta() for selection items to be created.
++#define FILE_VER_BIN 2,5,1,0
++#define FILE_VER_DTS "2.5.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index ef42bb8d..8ad5862a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -627,8 +627,17 @@
+ //! @par     Change:
+ //! - MANTIS 56506: Config service file read confusion
+ //! - Re-design XML file parsing to avoid exceptions and double reads
+-#define FILE_VER_BIN 2,5,0,0
+-#define FILE_VER_DTS "2.5.0.0"
++// #define FILE_VER_BIN 2,5,0,0
++// #define FILE_VER_DTS "2.5.0.0"
++//
++//! @version 2.5.1
++//! @date    02.03.2022
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 62439: setMeta() fix for selections
++//! - Ignore setMeta() for selection items to be created.
++#define FILE_VER_BIN 2,5,1,0
++#define FILE_VER_DTS "2.5.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+index a761bc1e..fddf754e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+@@ -33,6 +33,7 @@
+ #endif
+ 
+ #include "cfgMetaSelection.hpp"
++#include "cfgRightsMan.hpp"
+ #include "cfgValueSelection.hpp"
+ 
+ #include "trc/TraceClt.h"
+@@ -589,87 +590,122 @@ class serviceCfgSelection :
+       );
+       try
+       {
+-         cfgMetaSelection::cfgType_Selection_List Values;
+-
+-         unsigned RanNumber = 0;
+-         unsigned const RanLen = Range.length();
+-         while( RanNumber < RanLen )
++         bool item_in_operation = false;
++         try
+          {
+-            writeTrace
+-            (
+-               SecondaryRuntime_HERE, SCS "setMeta - selection %d=%s",
+-               Range[RanNumber].selLong,
+-               Range[RanNumber].selString.in()
+-            );
+-            cfgMetaSelection::select
+-               Select
+-               (
+-                  Range[RanNumber].selLong,
+-                  Range[RanNumber].selString.in(),
+-                  Range[RanNumber].selExplanation.in()
+-               );
+-            Values.push_back( Select );
+-            ++RanNumber;
++            cfgMeta const * const old_meta
++               = M_ConfigEntity->itemGetMeta
++                  (
++                     Acc.Authorization,
++                     cfgEntity::PURP_METASET,
++                     Acc.Item
++                  );
++            if( old_meta )
++            {
++               std::string R;
++               old_meta->getRights( Acc.Authorization, R );
++               if( !cfgRightsMan::mayCreate( R ) )
++               {
++                  item_in_operation = true;
++               }
++            }
+          }
+-         cfgMetaSelection SelMeta
+-                     (
+-                        std::string(Desc.Rights),
+-                        std::string(Desc.Explanation),
+-                        Values
+-                     );
+-         //
+-         // The previous value?
+-         //
+-         try
++         catch( ... )
+          {
+-            Materna::MSSD::autoMutex valmux
++         }
++         if( item_in_operation )
++         {
++            //
++            // Setup new meta data
++            //
++            cfgMetaSelection::cfgType_Selection_List Values;
++            unsigned RanNumber = 0;
++            unsigned const RanLen = Range.length();
++            while( RanNumber < RanLen )
++            {
++               writeTrace
+                (
+-                  M_ConfigEntity->valueMutex()
++                  SecondaryRuntime_HERE, SCS "setMeta - selection %d=%s",
++                  Range[RanNumber].selLong,
++                  Range[RanNumber].selString.in()
+                );
+-            cfgValue const * const rawref
+-               = M_ConfigEntity->itemGetRawValue( Acc.Item );
+-            if( rawref )
++               cfgMetaSelection::select
++                  Select
++                  (
++                     Range[RanNumber].selLong,
++                     Range[RanNumber].selString.in(),
++                     Range[RanNumber].selExplanation.in()
++                  );
++               Values.push_back( Select );
++               ++RanNumber;
++            }
++            cfgMetaSelection SelMeta
++                        (
++                           std::string(Desc.Rights),
++                           std::string(Desc.Explanation),
++                           Values
++                        );
++            //
++            // Set the previous value?
++            //
++            try
+             {
+-               cfgValueSelection const * const sel_value =
+-                  dynamic_cast<cfgValueSelection const *>( rawref );
+-               if( sel_value )
+-               {
+-                  CORBA::Long const old_scalar = sel_value->scalar();
+-                  //
+-                  // Configured selection value found.
+-                  //
+-                  M_ConfigEntity->itemDelete
+-                                 (
+-                                    Acc.Authorization, Acc.Item
+-                                 );
+-                  M_ConfigEntity->itemCreate
+-                                 (
+-                                    SelMeta, Acc.Item,
+-                                    new cfgValueSelection( old_scalar )
+-                                 );
+-                  writeTrace
++               Materna::MSSD::autoMutex valmux
+                   (
+-                     SecondaryRuntime_HERE,
+-                     SCS "setMeta - replace scalar=%d.",
+-                     old_scalar
++                     M_ConfigEntity->valueMutex()
+                   );
++               cfgValue const * const rawref
++                  = M_ConfigEntity->itemGetRawValue( Acc.Item );
++               if( rawref )
++               {
++                  cfgValueSelection const * const sel_value =
++                     dynamic_cast<cfgValueSelection const *>( rawref );
++                  if( sel_value )
++                  {
++                     CORBA::Long const old_scalar = sel_value->scalar();
++                     //
++                     // Configured selection value found.
++                     //
++                     M_ConfigEntity->itemDelete
++                                    (
++                                       Acc.Authorization, Acc.Item
++                                    );
++                     M_ConfigEntity->itemCreate
++                                    (
++                                       SelMeta, Acc.Item,
++                                       new cfgValueSelection( old_scalar )
++                                    );
++                     writeTrace
++                     (
++                        SecondaryRuntime_HERE,
++                        SCS "setMeta - replace scalar=%d.",
++                        old_scalar
++                     );
++                  }
+                }
+             }
++            catch( cfgEntity_WrongParameter & )
++            {
++               // The initial string does not match any selection item
++               writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  SCS "setMeta - ignore wrong initial string"
++               );
++            }
++            catch( cfgEntity_NotFound & )
++            {
++               // Ok - not yet established.
++            }
+          }
+-         catch( cfgEntity_WrongParameter & )
+-         {
+-            // The initial string does not match any selection item
+-            writeTrace
+-            (
+-               SecondaryRuntime_HERE,
+-               SCS "setMeta - ignore wrong initial string"
+-            );
+-         }
+-         catch( cfgEntity_NotFound & )
++         else
+          {
+-            // Ok - not yet established.
++               writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  SCS "setMeta - ignored, not yet created"
++               );
+          }
+-         //
+       }
+       catch( cfgEntity_NotAuthorized & )
+       {
+-- 
+2.41.0.windows.1
+

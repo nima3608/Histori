@@ -1,0 +1,141 @@
+From ba67822250d2cdb0ed222000b11eb3cc85492ef0 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 28 Feb 2018 13:29:03 +0000
+Subject: [PATCH 294/462] copy_IPS_Admin_Any.pl V0.0.0.2
+
+create package for
+Generic AdminApplication
+
+
+
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@485 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/copy_IPS_Admin_Any.pl       | 115 ++++++++++++++++++
+ 1 file changed, 115 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/copy_IPS_Admin_Any.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/copy_IPS_Admin_Any.pl b/SelfServiceBuild/Build/scripts/copy_IPS_Admin_Any.pl
+new file mode 100644
+index 0000000..8b79b97
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/copy_IPS_Admin_Any.pl
+@@ -0,0 +1,115 @@
++#!/usr/bin/perl -w
++#
++use strict;
++our $VERSION="0.0.0.2";
++
++use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
++use File::Spec;
++use File::DosGlob;
++use File::Copy::Recursive qw(fcopy dircopy);
++use File::Path qw(make_path);
++use Getopt::Long;
++use DateTime;
++
++my $destPath = "";
++my $sourceRepoPath = "";
++my $version = "0.0.0.0";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("destpath=s"   => \$destPath,
++            "sourcepath=s" => \$sourceRepoPath,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count < 2 or $argv_count > 2 or ($destPath eq "") or $help )
++{
++  print STDERR "usage: $0 --destpath=\"PATH\" --sourcepath=\"PATH\" \n" ;
++  print STDERR "example: --destpath=\"\\\\file07.one.materna.com\\ONE\\Projekte\\London_Gatwick_Airport\\02_DEV_QA_OC\\020_DEV_Entwicklung\\Übergabe_QA\\IPS_Admin_Any_V1.2.17\" \n";
++  print STDERR "         --sourcepath=\"\\\\BOB\\Subversion\\Platform\\RC-4.15.9357\" \n";
++  exit 0;
++}
++
++if (! -e $sourceRepoPath)
++{
++  die "$sourceRepoPath does not exist!\n";
++}
++if (! -e $destPath)
++{
++  print "$destPath does not exist but will be created\n";
++}  
++
++make_path(File::Spec->catdir($destPath,"IPS_Admin"));
++$destPath = "$destPath\\IPS_Admin";
++#make_path(File::Spec->catdir($destPath,"html"),
++#          File::Spec->catdir($destPath,"lib"));
++
++dircopy(File::Spec->catdir($sourceRepoPath,"SelfServicePlatform\\Applications\\AdminApplication\\html.Any"), 
++        File::Spec->catdir($destPath,"html")) or die $!;
++
++my $libDir = File::Spec->catfile($destPath,"lib");
++
++my $srcDir = File::Spec->catdir($sourceRepoPath,"SelfServiceBuild\\Build\\output\\jar");
++myCopyFile($srcDir,$libDir,"ApplicationAdapter.jar");
++myCopyFile($srcDir,$libDir,"AdminApplication.jar");
++myCopyFile($srcDir,$libDir,"cuss.jar");
++myCopyFile($srcDir,$libDir,"cuss.sbd.xsd.jar");
++myCopyFile($srcDir,$libDir,"massai-admin-app.jar");
++myCopyFile($srcDir,$libDir,"massai-app-adapter.jar");
++myCopyFile($srcDir,$libDir,"massai-corba-settings.jar");
++myCopyFile($srcDir,$libDir,"massai-soap-settings.jar");
++myCopyFile($srcDir,$libDir,"massai-tools.jar");
++
++myCopyFile($srcDir,$libDir,"commons-lang-2.4.jar");
++myCopyFile($srcDir,$libDir,"woden-api-1.0M8.jar");
++myCopyFile($srcDir,$libDir,"commons-codec-1.2.jar");
++myCopyFile($srcDir,$libDir,"authenticationWClient-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"soapAuthenticationClient-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"soapUtilities-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"messageReceiverDirect-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"axiom-api-1.2.8.jar");
++myCopyFile($srcDir,$libDir,"axiom-impl-1.2.8.jar");
++myCopyFile($srcDir,$libDir,"axis2-1.5.1.jar");
++myCopyFile($srcDir,$libDir,"axis2-transport-local-1.5.1.jar");
++myCopyFile($srcDir,$libDir,"commons-httpclient-3.0.1.jar");
++myCopyFile($srcDir,$libDir,"commons-logging-1.1.1.jar");
++myCopyFile($srcDir,$libDir,"mail-1.4.jar");
++myCopyFile($srcDir,$libDir,"neethi-2.0.4.jar");
++myCopyFile($srcDir,$libDir,"wsdl4j-1.6.2.jar");
++
++myCopyFile($srcDir,$libDir,"eventReportingClient-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"guava-23.3-android.jar");
++myCopyFile($srcDir,$libDir,"jackson-jr-all-2.9.0.jar");
++myCopyFile($srcDir,$libDir,"joda-time-2.3.jar");
++myCopyFile($srcDir,$libDir,"util-1.1-SNAPSHOT.jar");
++
++my $orbDir = File::Spec->catdir($sourceRepoPath,"SelfServiceCommon\\Massai\\java\\OpenORB-1.3.1\\OpenORB\\dist");
++myCopyFile($orbDir,$libDir,"avalon-framework.jar");
++myCopyFile($orbDir,$libDir,"excalibur-configuration.jar");
++myCopyFile($orbDir,$libDir,"logkit.jar");
++myCopyFile($orbDir,$libDir,"openorb-1.3.1.jar");
++myCopyFile($orbDir,$libDir,"openorb_tools-1.3.1.jar");
++
++my $thirdPartyDir = File::Spec->catdir("\\\\BOB\\C\\Globals", "Globals\\ThirdParty");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"jetty\\9.2.10.v20150310\\lib"),$libDir,"servlet-api-3.1.jar");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"jetty-all\\9.2.10.v20150310"),$libDir,"jetty-all-9.2.10.v20150310.jar");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"XMLBeans\\xmlbeans-2.5.0\\lib"),$libDir,"xbean.jar");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"log4j\\1.2.16"),$libDir,"log4j-1.2.16.jar");
++
++myCopyFile(File::Spec->catdir($thirdPartyDir,"authenticationWClient\\1.1-SNAPSHOT"),$libDir,"axis2-transport-http-1.5.1.jar");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"authenticationWClient\\1.1-SNAPSHOT"),$libDir,"httpcore-4.0.jar");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"authenticationWClient\\1.1-SNAPSHOT"),$libDir,"XmlSchema-1.4.2.jar");
++
++
++sub myCopyFile
++{
++  my $srcDir = shift;
++  my $destDir = shift;
++  my $fname = shift;
++  
++  fcopy(File::Spec->catfile($srcDir,$fname),     
++        File::Spec->catfile($destDir,$fname)) or die "$! :\nfrom: $srcDir\nto: $destDir\nfile: $fname";
++}
++  
++exit 0;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,847 @@
+From 4ba37b896aec9ebb26fc5479c20608f9e48a412a Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 3 Jan 2011 16:41:50 +0000
+Subject: [PATCH 0080/1077] Mantis 10547: TrcServ: trace client functions
+ return type: void Mantis 9695: TrcServ: write ThreadId
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@100 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Services/cpp/TrcServ/inc/CltData.h        |   8 +-
+ .../Services/cpp/TrcServ/inc/TrcData.h        |   1 +
+ .../Services/cpp/TrcServ/inc/TrcPrtcl.h       |  26 +-
+ .../Services/cpp/TrcServ/inc/TrcServ_def.h    |   9 +-
+ .../Services/cpp/TrcServ/src/CltData.cpp      | 135 +++++++--
+ .../Services/cpp/TrcServ/src/TrcClt.cpp       |  17 +-
+ .../Services/cpp/TrcServ/src/TrcPrtcl.cpp     | 270 +++++++++++++++++-
+ .../Services/cpp/TrcServ/src/tracetest.cpp    |   3 -
+ 8 files changed, 418 insertions(+), 51 deletions(-)
+
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/CltData.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/CltData.h
+index 706218ab..3e4f0194 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/CltData.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/CltData.h
+@@ -58,7 +58,9 @@ class BasicTraceFile
+               const char* pszFile, long lLine, const char* pszFunction,
+               const char* pszText,
+               const char* pszModule,
+-              const char* pszTopic= 0)=0;
++              const char* pszTopic,
++              long lThreadId,
++              long lTracelevel)=0;
+     virtual void Cooked(const char* pszApplication, long lInstance, long lFileInstance,
+               const char* pszText,
+               const char* pszModule)=0;
+@@ -67,7 +69,9 @@ class BasicTraceFile
+               const char* pszFile, long lLine, const char* pszFunction,
+               long lSize, const char* pDump,
+               const char* pszModule,
+-              const char* pszTopic= 0)=0;
++              const char* pszTopic,
++              long lThreadId,
++              long lTracelevel)=0;
+     virtual void MoveTraceFile(const char* pszTrcPath, const char* pszCltPath,
+               const char* pszApplication, long lInstance, long lFileInstance,
+               const char* pszModule)= 0;
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcData.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcData.h
+index 1e78e9b5..6bfb8dd6 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcData.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcData.h
+@@ -48,6 +48,7 @@ enum DataName
+   DN_SPATH,
+   DN_LTRACKID,
+   DN_SCOOKED,
++  DN_LTHREADID,
+ };
+ 
+ 
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcPrtcl.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcPrtcl.h
+index f963a25d..3dd06ae7 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcPrtcl.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcPrtcl.h
+@@ -146,8 +146,8 @@ const char* non_null(const char* pszText);
+   TRC_OUTOFMEMORY
+ */
+ long writeCmdStop01(long OwnHandle, long PartnerHandle, cxBuffer* cxBuf= 0);
+-long writeText01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
+-long writeDump01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++//long writeText01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++//long writeDump01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
+ long writeCmdNewFile01(long OwnHandle, long PartnerHandle, long lTraceLevel, cxBuffer* cxBuf= 0);
+ long writeCmdInit01(long OwnHandle, long PartnerHandle, long lInstance, const char *pszApplication, cxBuffer* cxBuf= 0);
+ long writeCmdInit02(long OwnHandle, long PartnerHandle, long lInstance, const char *pszApplication, const char* pszModule, cxBuffer* cxBuf= 0);
+@@ -156,24 +156,34 @@ long writeCmdData01(long OwnHandle, long PartnerHandle, aMap Data, cxBuffer* cxB
+ long writeCmdParameter01(long OwnHandle, long PartnerHandle, long lTraceLevel, long lTraceMask, long lLevelAsMask, cxBuffer* cxBuf= 0);
+ long writeCmdShutdown01(long OwnHandle, long PartnerHandle, cxBuffer* cxBuf= 0);
+ 
+-long writeText02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
+-long writeDump02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++//long writeText02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++//long writeDump02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
+ long writeCmdNewFile02(long OwnHandle, long PartnerHandle, const char *pszTopic, cxBuffer* cxBuf= 0);
+ long writeCmdTopicState01(long OwnHandle, long PartnerHandle, const char *pszTopic, long lState, cxBuffer* cxBuf= 0);
+ //   22.10.2001 ts added openTraceSLT/Init03 for short life time processes => server sends no message to client
+ long writeCmdInit03(long OwnHandle, long PartnerHandle, long lInstance, const char *pszApplication, const char* pszModule, cxBuffer* cxBuf= 0);
+ 
+-long writeCrypt01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
+-long writeCrypt02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++//long writeCrypt01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++//long writeCrypt02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
+ 
+ long writeCmdMove01(long OwnHandle, long PartnerHandle, const char *pszPath, cxBuffer* cxBuf= 0);
+ 
+-long writeTrack01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
+-long writeTrack02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++//long writeTrack01(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++//long writeTrack02(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
+ 
+ long writeCooked01(long OwnHandle, long PartnerHandle, const char *pszText, cxBuffer* cxBuf= 0);
+ 
+ 
++long writeText03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++long writeText04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++long writeDump03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++long writeDump04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++long writeCrypt03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++long writeCrypt04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++long writeTrack03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++long writeTrack04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++
++
+ /*
+   possibly return codes for ReadTrace
+   CXRC_OK
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+index aa656ee4..a4fda4ac 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+@@ -12,10 +12,13 @@
+ 
+ /*! \mainpage TrcServ
+  *
+- *  @version V 2.3.20.1
++ *  @version V 2.3.20.2
+  *
+  *  \section change1 Change history
+  *
++ *  \date 03.01.2010 \li V 2.3.20.2 SteT Mantis 10547: trace client functions return type: void
++ *                                       Mantis 9695: write ThreadId
++ *
+  *  \date 03.01.2010 \li V 2.3.20.1 SteT writeTraceCooked added
+  *
+  *  \date 22.09.2010 \li V 2.3.20.0 SteT set default tracel level to BasicRuntime
+@@ -47,8 +50,8 @@
+  *
+  */
+ 
+-#define FILE_VER_BIN     2,3,20,1
+-#define FILE_VER_STR     "FileVersion", "2.3.20.1\0"
++#define FILE_VER_BIN     2,3,20,2
++#define FILE_VER_STR     "FileVersion", "2.3.20.2\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Trace Service\0"
+ #define INTERNALNAME     "InternalName"     ,"TrcServ.exe\0"
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/CltData.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/CltData.cpp
+index 43435373..bb4970eb 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/CltData.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/CltData.cpp
+@@ -64,11 +64,15 @@ virtual BasicTraceFile::~BasicTraceFile();
+ virtual void BasicTraceFile::Text(long lDay, long lMonth, long lYear, long lHours, long lMinutes, long lSeconds, long lHundredths,
+           const char* pszApplication, long lInstance, long lFileInstance,
+           const char* pszFile, long lLine, const char* pszFunction,
+-          const char* pszText, const char* pszModule, const char* pszTopic= 0);
++          const char* pszText, const char* pszModule, const char* pszTopic,
++          long lThreadId,
++          long lTracelevel);
+ virtual void BasicTraceFile::Dump(long lDay, long lMonth, long lYear, long lHours, long lMinutes, long lSeconds, long lHundredths,
+           const char* pszApplication, long lInstance, long lFileInstance,
+           const char* pszFile, long lLine, const char* pszFunction,
+-          long lSize, const char* pDump, const char* pszModule, const char* pszTopic= 0);
++          long lSize, const char* pDump, const char* pszModule, const char* pszTopic,
++          long lThreadId,
++          long lTracelevel);
+ virtual void BasicTraceFile::MoveTraceFile(const char* pszTrcPath, const char* pszCltPath,
+           const char* pszApplication, long lInstance, long lFileInstance,
+           const char* pszModule);
+@@ -167,13 +171,17 @@ class DiskTraceFile: public BasicTraceFile
+               const char* pszFile, long lLine, const char* pszFunction,
+               const char* pszText,
+               const char* pszModule,
+-              const char* pszTopic= 0);
++              const char* pszTopic,
++              long lThreadId,
++              long lTracelevel);
+     virtual void Dump(long lDay, long lMonth, long lYear, long lHours, long lMinutes, long lSeconds, long lHundredths,
+               const char* pszApplication, long lInstance, long lFileInstance,
+               const char* pszFile, long lLine, const char* pszFunction,
+               long lSize, const char* pDump,
+               const char* pszModule,
+-              const char* pszTopic= 0);
++              const char* pszTopic,
++              long lThreadId,
++              long lTracelevel);
+     virtual void MoveTraceFile(const char* pszTrcPath, const char* pszCltPath,
+               const char* pszApplication, long lInstance, long lFileInstance,
+               const char* pszModule);
+@@ -475,7 +483,9 @@ void DiskTraceFile::Cooked
+                    const char* pszFunction,
+                    const char* pszText,
+                    const char* pszModule,
+-                   const char* pszTopic
++                   const char* pszTopic,
++                   long lThreadId,
++                   long lTracelevel
+                  )
+ 
+  COMMENTS:  write the Data formatted to File
+@@ -502,7 +512,9 @@ void DiskTraceFile::Text
+        const char* pszFunction,
+        const char* pszText,
+        const char* pszModule,
+-       const char* pszTopic
++       const char* pszTopic,
++       long lThreadId,
++       long lTracelevel
+      )
+ {
+   long lExtended, lLeft, lShortLine;
+@@ -552,15 +564,27 @@ void DiskTraceFile::Text
+ 
+     sprintf(szBuffer, "%02d:%02d:%02d.%02d ", lHours, lMinutes, lSeconds, lHundredths);
+     msLine.catData(szBuffer);
++    if(lThreadId != -1)
++    {
++      sprintf(szBuffer, "[%04x] ", lThreadId);
++      msLine.catData(szBuffer);
++    }
++    if(lTracelevel != -1)
++    {
++      sprintf(szBuffer, "%d ", lTracelevel);
++      msLine.catData(szBuffer);
++    }
++    if(pszTopic)
++    {
++      msLine.catData(pszTopic);
++      msLine.catData(" ");
++    }
+     msLine.catData(pszFile);
+     sprintf(szBuffer," (%04d), ", lLine);
+     msLine.catData(szBuffer);
+     if(pszFunction)
+-      msLine.catData(pszFunction);
+-    if (pszTopic)
+     {
+-      msLine.catData(", ");
+-      msLine.catData(pszTopic);
++      msLine.catData(pszFunction);
+     }
+     msLine.catData("\n");
+     lLeft= 0;
+@@ -609,6 +633,21 @@ void DiskTraceFile::Text
+ 
+     sprintf(szBuffer, "%02d:%02d:%02d.%02d ", lHours, lMinutes, lSeconds, lHundredths);
+     msLine.catData(szBuffer);
++    if(lThreadId != -1)
++    {
++      sprintf(szBuffer, "[%04x] ", lThreadId);
++      msLine.catData(szBuffer);
++    }
++    if(lTracelevel != -1)
++    {
++      sprintf(szBuffer, "%d ", lTracelevel);
++      msLine.catData(szBuffer);
++    }
++    if(pszTopic)
++    {
++      msLine.catData(pszTopic);
++      msLine.catData(" ");
++    }
+     // cut path from file name
+     pText = strrchr(pszFile,'\\');
+     if(pText != 0)
+@@ -717,7 +756,9 @@ void DiskTraceFile::Text
+                    long lSize,
+                    const char* pDump,
+                    const char* pszModule,
+-                   const char* pszTopic
++                   const char* pszTopic,
++                   long lThreadId,
++                   long lTracelevel
+                  )
+ 
+  COMMENTS:  write the Data formatted to File
+@@ -745,7 +786,9 @@ void DiskTraceFile::Dump
+        long lSize,
+        const char* pDump,
+        const char* pszModule,
+-       const char* pszTopic
++       const char* pszTopic,
++       long lThreadId,
++       long lTracelevel
+      )
+ {
+   matString msLine, msOut;
+@@ -795,15 +838,27 @@ void DiskTraceFile::Dump
+ 
+     sprintf(szBuffer, "%02d:%02d:%02d.%02d ", lHours, lMinutes, lSeconds, lHundredths);
+     msLine.catData(szBuffer);
++    if(lThreadId != -1)
++    {
++      sprintf(szBuffer, "[%04x] ", lThreadId);
++      msLine.catData(szBuffer);
++    }
++    if(lTracelevel != -1)
++    {
++      sprintf(szBuffer, "%d ", lTracelevel);
++      msLine.catData(szBuffer);
++    }
++    if(pszTopic)
++    {
++      msLine.catData(pszTopic);
++      msLine.catData(" ");
++    }
+     msLine.catData(pszFile);
+     sprintf(szBuffer," (%04d), ", lLine);
+     msLine.catData(szBuffer);
+     if(pszFunction)
+-      msLine.catData(pszFunction);
+-    if (pszTopic)
+     {
+-      msLine.catData(", ");
+-      msLine.catData(pszTopic);
++      msLine.catData(pszFunction);
+     }
+     msLine.catData("\n");
+   }
+@@ -847,6 +902,21 @@ void DiskTraceFile::Dump
+ 
+     sprintf(szBuffer, "%02d:%02d:%02d.%02d ", lHours, lMinutes, lSeconds, lHundredths);
+     msLine.catData(szBuffer);
++    if(lThreadId != -1)
++    {
++      sprintf(szBuffer, "[%04x] ", lThreadId);
++      msLine.catData(szBuffer);
++    }
++    if(lTracelevel != -1)
++    {
++      sprintf(szBuffer, "%d ", lTracelevel);
++      msLine.catData(szBuffer);
++    }
++    if(pszTopic)
++    {
++      msLine.catData(pszTopic);
++      msLine.catData(" ");
++    }
+     // cut path from file name
+     pText = strrchr(pszFile,'\\');
+     if(pText != 0)
+@@ -1759,7 +1829,6 @@ void ApplicationData::changeTopic(const aObject& Name, long lState)
+ ---------------------------------------------------------------------------*/
+ void ApplicationData::writeTrace(long lTraceLevel, const char* pszFile, short  sLine, const char* pszFunction, const char* pszText, const char* pszModule, const char* pApplication, long lInstance)
+ {
+-
+   requestFileAccess();
+   DATETIME timestamp;
+ 
+@@ -1782,7 +1851,10 @@ void ApplicationData::writeTrace(long lTraceLevel, const char* pszFile, short  s
+       sLine,
+       pszFunction,
+       pszText,
+-      pszModule
++      pszModule,
++      0,
++      GetCurrentThreadId(),
++      lTraceLevel
+     );
+   }
+   releaseFileAccess();
+@@ -1824,7 +1896,10 @@ void ApplicationData::Text01(long ClientApp, long lInstance, aMap& Data)
+       Data.get(DN_LLINE).numObject(),
+       Data.get(DN_SFUNCTION).strObject(),
+       Data.get(DN_STEXT).strObject(),
+-      Data.get(DN_SMODULE).strObject()
++      Data.get(DN_SMODULE).strObject(),
++      0,
++      Data.get(DN_LTHREADID).numObject(),
++      lTraceLevel
+     );
+   }
+   releaseFileAccess();
+@@ -1866,7 +1941,10 @@ void ApplicationData::Dump01(long ClientApp, long lInstance, aMap& Data)
+       Data.get(DN_SFUNCTION).strObject(),
+       Data.get(DN_BDUMP).count(),
+       Data.get(DN_BDUMP).strObject(),
+-      Data.get(DN_SMODULE).strObject()
++      Data.get(DN_SMODULE).strObject(),
++      0,
++      Data.get(DN_LTHREADID).numObject(),
++      lTraceLevel
+     );
+   }
+   releaseFileAccess();
+@@ -1910,8 +1988,9 @@ void ApplicationData::Text02(long ClientApp, long lInstance, aMap& Data)
+       Data.get(DN_SFUNCTION).strObject(),
+       Data.get(DN_STEXT).strObject(),
+       Data.get(DN_SMODULE).strObject(),
+-      Data.get(DN_STOPIC).strObject()
+-
++      Data.get(DN_STOPIC).strObject(),
++      Data.get(DN_LTHREADID).numObject(),
++      Data.get(DN_LTRACELEVEL).numObject()
+     );
+   }
+   releaseFileAccess();
+@@ -1956,7 +2035,9 @@ void ApplicationData::Dump02(long ClientApp, long lInstance, aMap& Data)
+       Data.get(DN_BDUMP).count(),
+       Data.get(DN_BDUMP).strObject(),
+       Data.get(DN_SMODULE).strObject(),
+-      Data.get(DN_STOPIC).strObject()
++      Data.get(DN_STOPIC).strObject(),
++      Data.get(DN_LTHREADID).numObject(),
++      Data.get(DN_LTRACELEVEL).numObject()
+     );
+   }
+   releaseFileAccess();
+@@ -2205,7 +2286,9 @@ void ApplicationData::Crypt01(long ClientApp, long lInstance, aMap& Data, Applic
+       Data.get(DN_SFUNCTION).strObject(),
+       encrypted.size(),
+       encrypted.c_str(),
+-      Data.get(DN_SMODULE).strObject()
++      Data.get(DN_SMODULE).strObject(),
++      0,
++      Data.get(DN_LTHREADID).numObject()
+     );
+   }
+   releaseFileAccess();
+@@ -2255,7 +2338,9 @@ void ApplicationData::Crypt02(long ClientApp, long lInstance, aMap& Data, Applic
+       encrypted.size(),
+       encrypted.c_str(),
+       Data.get(DN_SMODULE).strObject(),
+-      Data.get(DN_STOPIC).strObject()
++      Data.get(DN_STOPIC).strObject(),
++      0,
++      Data.get(DN_LTHREADID).numObject()
+     );
+   }
+   releaseFileAccess();
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
+index c21702af..2a1be996 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcClt.cpp
+@@ -710,7 +710,7 @@ long TraceClient::writeText(long lTraceLevel, const char *pszFile, short  sLine,
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeText01(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, pszText, pcxBuf);
++      rc = writeText03(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, pszText, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -820,7 +820,7 @@ long TraceClient::writeDump(long lTraceLevel, const char *pszFile, short  sLine,
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeDump01(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
++      rc = writeDump03(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -987,7 +987,7 @@ long TraceClient::writeText(const char* pszTopic, const char *pszFile, short  sL
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeText02(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, pszText, pcxBuf);
++      rc = writeText04(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, pszText, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1105,7 +1105,7 @@ long TraceClient::writeDump(const char* pszTopic, const char *pszFile, short  sL
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeDump02(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
++      rc = writeDump04(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1247,7 +1247,7 @@ long TraceClient::cryptTrace(long lTraceLevel, const char *pszFile, short  sLine
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeCrypt01(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
++      rc = writeCrypt03(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1313,7 +1313,7 @@ long TraceClient::cryptTrace(const char* pszTopic, const char *pszFile, short  s
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeCrypt02(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
++      rc = writeCrypt04(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, lDumpSize, pDump, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1446,7 +1446,7 @@ long TraceClient::traceTrack(long lTraceLevel, const char *pszFile, short  sLine
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeTrack01(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, trackid, pszTrack, pcxBuf);
++      rc = writeTrack03(lOwnClientHandle, lServiceServerHandle, lTraceLevel, pszFile, sLine, pszFunction, trackid, pszTrack, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1513,7 +1513,7 @@ long TraceClient::traceTrack(const char *pszTopic, const char *pszFile, short  s
+     {
+       // osSleep(1);  // give up the remainder of their current time slice.
+       writeMutex.request();
+-      rc = writeTrack02(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, trackid, pszTrack, pcxBuf);
++      rc = writeTrack04(lOwnClientHandle, lServiceServerHandle, pszTopic, pszFile, sLine, pszFunction, trackid, pszTrack, pcxBuf);
+       writeMutex.release();
+       switch(rc)
+       {
+@@ -1570,7 +1570,6 @@ long TraceClient::traceTrack(const char *pszTopic, const char *pszFile, short  s
+ long TraceClient::traceCooked(const char* pszText)
+ {
+   long result, rc;
+-  int iTopicState;
+   #ifndef TRCLIGHT
+   if(!iConnected && !Thread.iThreadRunning)
+     connect();
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcPrtcl.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcPrtcl.cpp
+index f5b64078..7f2ca84c 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcPrtcl.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcPrtcl.cpp
+@@ -122,6 +122,15 @@ struct CmdParameter01
+ 
+   long writeCooked01(long OwnHandle, long PartnerHandle, const char *pszText, cxBuffer* cxBuf= 0);
+ 
++  long writeText03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++  long writeText04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf= 0);
++  long writeDump03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++  long writeDump04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++  long writeCrypt03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++  long writeCrypt04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf= 0);
++  long writeTrack03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++  long writeTrack04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf= 0);
++
+ 
+ ***************************************************************************/
+ 
+@@ -158,6 +167,13 @@ struct CmdParameter01
+ 
+   static long readCooked01(aMap &Data, char *pCopyBuffer, const char *pBuffer, long lSize);
+ 
++  static void setTimestamp(aMap& data);
++  static void setThreadId(aMap& data);
++  static void setLevel(aMap& data, long lTraceLevel);
++  static void setTopic(aMap& data, const char *pszTopic);
++  static void setLocation(aMap& data, const char *pszFile, short  sLine, const char *pszFunction);
++
++
+ /***************************************************************************
+ 
+   Function Definition
+@@ -910,6 +926,7 @@ static long readText01(aMap &Data, char *pCopyBuffer, const char *pBuffer, long
+   {
+     memcpy(&FixedData, pPos, sizeof(Text01));        // read fixed Data
+     pPos += sizeof(Text01);
++
+     Data.set(DN_LTRACELEVEL, FixedData.lTraceLevel);
+     Data.set(DN_LLINE,       FixedData.sLine);
+     Data.set(DN_LHOURS,      FixedData.timestamp.hours);
+@@ -3518,7 +3535,7 @@ static long readTrack02(aMap &Data, char *pCopyBuffer, const char *pBuffer, long
+ 
+  COMMENTS:  read the Command sent by writeCooked01
+ 
+- DATE:      09.08.2007
++ DATE:      03.01.2011
+ 
+  AUTHOR:    MATERNA Information & Communications  (SteT)
+ 
+@@ -3548,6 +3565,257 @@ static long readCooked01(aMap &Data, char *pCopyBuffer, const char *pBuffer, lon
+   return result;
+ }
+ 
++/*---------------------------------------------------------------------------
++
++ FUNCTION:  void setTimestamp(aMap& data)
++
++ COMMENTS:  write current timestamp to data
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++static void setTimestamp(aMap& data)
++{
++  DATETIME timestamp;
++  osGetDateTime(&timestamp);
++  data.set(DN_LHOURS,      timestamp.hours);
++  data.set(DN_LMINUTES,    timestamp.minutes);
++  data.set(DN_LSECONDS,    timestamp.seconds);
++  data.set(DN_LHUNDREDTHS, timestamp.hundredths);
++  data.set(DN_LDAY,        timestamp.day);
++  data.set(DN_LMONTH,      timestamp.month);
++  data.set(DN_LYEAR,       timestamp.year);
++}
++
++/*---------------------------------------------------------------------------
++
++ FUNCTION:  void setThreadId(aMap& data)
++
++ COMMENTS:  write current thread id to data
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++static void setThreadId(aMap& data)
++{
++  data.set(DN_LTHREADID,   GetCurrentThreadId());
++}
++/*---------------------------------------------------------------------------
++
++ FUNCTION:  void setLevel(aMap& data, long lTraceLevel)
++
++ COMMENTS:  write tracelevel to data
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++static void setLevel(aMap& data, long lTraceLevel)
++{
++  data.set(DN_LTRACELEVEL, lTraceLevel);
++}
++/*---------------------------------------------------------------------------
++
++ FUNCTION:  void setTopic(aMap& data, const char *pszTopic)
++
++ COMMENTS:  write topic to data
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++static void setTopic(aMap& data, const char *pszTopic)
++{
++  data.set(DN_STOPIC, pszTopic);
++}
++/*---------------------------------------------------------------------------
++
++ FUNCTION:  void setLocation(aMap& data, const char *pszFile, short  sLine, const char *pszFunction)
++
++ COMMENTS:  write file, line, function to data
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++static void setLocation(aMap& data, const char *pszFile, short  sLine, const char *pszFunction)
++{
++  data.set(DN_SFILE,       pszFile);
++  data.set(DN_LLINE,       sLine);
++  data.set(DN_SFUNCTION,   pszFunction);
++}
++
++
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace text to service
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeText03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setLevel(data, lTraceLevel);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_STEXT, pszText);
++  data.set(DN_LTYPE, TT_TEXT01);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace text to service
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeText04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, const char *pszText, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setTopic(data, pszTopic);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_STEXT, pszText);
++  data.set(DN_LTYPE, TT_TEXT02);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace dump to service
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeDump03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setLevel(data, lTraceLevel);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_BDUMP, aObject(pDump, lDumpSize));
++  data.set(DN_LTYPE, TT_DUMP01);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace dump to service
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeDump04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setTopic(data, pszTopic);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_BDUMP, aObject(pDump, lDumpSize));
++  data.set(DN_LTYPE, TT_DUMP02);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace dump to service, for encrypted logging
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeCrypt03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setLevel(data, lTraceLevel);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_BDUMP, aObject(pDump, lDumpSize));
++  data.set(DN_LTYPE, TT_CRYPT01);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send trace dump to service, for encrypted logging
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeCrypt04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long lDumpSize, const char *pDump, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setTopic(data, pszTopic);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_BDUMP, aObject(pDump, lDumpSize));
++  data.set(DN_LTYPE, TT_CRYPT02);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send card track to service, for encrypted logging
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeTrack03(long OwnHandle, long PartnerHandle, long lTraceLevel, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setLevel(data, lTraceLevel);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_LTRACKID, trackId);
++  data.set(DN_STEXT, pszTrack);
++  data.set(DN_LTYPE, TT_TRACK01);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++/*---------------------------------------------------------------------------
++
++ COMMENTS:  send card track to service, for encrypted logging
++
++ DATE:      03.01.2011
++
++ AUTHOR:    MATERNA Information & Communications  (SteT)
++
++---------------------------------------------------------------------------*/
++long writeTrack04(long OwnHandle, long PartnerHandle, const char *pszTopic, const char *pszFile, short  sLine, const char *pszFunction, long trackId, const char *pszTrack, cxBuffer* cxBuf)
++{
++  aMap data;
++  setTimestamp(data);
++  setThreadId(data);
++  setTopic(data, pszTopic);
++  setLocation(data, pszFile, sLine, pszFunction);
++  data.set(DN_LTRACKID, trackId);
++  data.set(DN_STEXT, pszTrack);
++  data.set(DN_LTYPE, TT_TRACK02);
++  return writeCmdData01(OwnHandle, PartnerHandle, data, cxBuf);
++}
++
+ /*************************************************************************************************
+       End Of File  TraceProtocol.cpp
+ ************************************************************************************************/
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+index 3cc6269c..15c2a935 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+@@ -1,6 +1,5 @@
+ #include "TraceClt.h"
+ #include "string.h"
+-// #include "TraceTestHdl.h"
+ 
+ #ifndef __IBMCPP__
+ #include <iostream>
+@@ -18,14 +17,12 @@ void main(int argc, char** argv)
+     openTrace(argv[1]);
+   else if (argc > 2)
+     return;
+-//   TraceTest hdl("xxx");
+   char szBuffer[256];
+   do
+   {
+     std::cout << "Type Tracetext: ";
+     std::cin >> szBuffer;
+     int length= strlen(szBuffer);
+-//    hdl.trace(szBuffer);
+     for(int i= 0; i < 100; i++)
+     {
+       wrtTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, szBuffer);
+-- 
+2.41.0.windows.1
+

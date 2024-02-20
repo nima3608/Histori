@@ -1,0 +1,563 @@
+From c2d9c1394cc7e1968f88aa777a3783dfe1415dff Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 12 Jun 2014 13:39:44 +0000
+Subject: [PATCH 0550/1077] MANTIS 0030693 MANTIS 0030693: AEA device handler
+ simulation
+
+aeaPrintProcessor.cpp/.h:
+-added attributes to characterize a PrintJob of an AEAPrinter
+-added getMethods for each attribute
+
+aeaBinSetup.cpp/.h:
+-corrected setup Method
+
+aeaContext.cpp/.h:
+-added new Commands, which the Simulator should handle, including:
+   -Version request
+   -change ContextMode
+   -TransactionCode request
+
+aeaSimulator_BoardingPassImpl.cpp:
+-changed AEACouponResponse to AEAConstResponse
+-moved the place for counting Jobs to the correct place
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@686 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/AEAParser/aeaPrintProcessor.h         |  21 ++
+ .../Massai/cpp/AEAParser/inc/aeaBinSetup.h    |   2 +-
+ .../Massai/cpp/AEAParser/inc/aeaContext.h     |  15 +-
+ .../Massai/cpp/AEAParser/src/aeaBinSetup.cpp  |  14 +-
+ .../Massai/cpp/AEAParser/src/aeaContext.cpp   | 182 ++++++++++++++++--
+ .../cpp/AEAParser/src/aeaPrintProcessor.cpp   |  77 +++++++-
+ .../src/aeaSimulator_BoardingPassImpl.cpp     |   4 +-
+ 7 files changed, 280 insertions(+), 35 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
+index 15b377c4..e1ab8c60 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaPrintProcessor.h
+@@ -54,6 +54,26 @@ namespace MASSAI
+         virtual void process(const std::string& context, AEABagtagPrintJob& job);
+         virtual void process(const std::string& context, AEATicketPrintJob& job);
+         virtual void process(const std::string& context, AEAReceiptPrintJob& job);
++        
++        virtual int getNumberOfPrintedBagTags();
++        virtual int getNumberOfGoodReadBarCodes();
++        virtual int getNumberOfGoodReadMagnetics();
++        virtual int getNumberOfPrintedBoardingPass();
++        virtual int getNumberOfPrintedReceipts();
++        virtual int getNumberOfVoidedCoupons();
++        virtual std::string getVersion();
++
++        virtual void setVoided(int v);
++        virtual void reset();
++
++      private:
++        int m_PrintedBagTags;
++        int m_GoodReadBarCodes;
++        int m_GoodReadMagnetics;
++        int m_PrintedBoardingPass;
++        int m_PrintedReceipts;
++        int m_Voided;
++        std::string m_Version;
+     };
+     class AEAPrintProcessorContext
+     {
+@@ -79,6 +99,7 @@ namespace MASSAI
+         void process(AEABagtagPrintJob& job);
+         void process(AEATicketPrintJob& job);
+         void process(AEAReceiptPrintJob& job);
++
+       private:
+         std::string m_context;
+         ContextType m_contextType;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaBinSetup.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaBinSetup.h
+index 03532c45..3e6dd078 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaBinSetup.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaBinSetup.h
+@@ -55,7 +55,7 @@ namespace MASSAI
+       public:
+         BinSetup();
+         ~BinSetup();
+-        std::string setup(const std::string& input, MASSAI::trace::TraceDelegate& trace);
++        bool setup(const std::string& input, MASSAI::trace::TraceDelegate& trace);
+         StockSet getStocks(Media media) const;
+         StockSetting getMedia(Stock stock) const;
+         std::string status(bool includeSCNRInfo) const;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+index afefa6bb..72742f38 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaContext.h
+@@ -23,6 +23,7 @@
+ #include "AEAParser/aeaBoardingPassPectab.h"
+ #include "AEAParser/aeaBoardingPassTemplate.h"
+ #include "AEAParser/aeaResponse.h"
++#include "aeaBinSetup.h"
+ #include <list>
+ #include <string>
+ 
+@@ -44,15 +45,23 @@ namespace MASSAI
+       protected:
+         bool inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace);
+         bool inputTransactionCode(const std::string& cmd, AEAResult& rsp);
+-      private:
++        bool AEAContextBase::inputMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);
++        bool getVersion(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);
++        bool getAEAVersion(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);  
++        bool getBinSetup(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);
++        bool AEAContextBase::changeToTicketingMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);
++        bool AEAContextBase::changeToCheckInMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace);
++
++    private:
+         bool clearLogos(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace);
+-        bool loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace);
+         bool getLogoStatus(const std::string& cmd, AEAResult& rsp);
++        bool loadLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace);
+         void logostatus(std::string& logos);
+ 
+         Logos m_logos;
+         Order m_logoOrder;
+-
++        BinSetup m_binSetup;
++        
+         std::string m_contextId;
+         std::string m_transactionCode;
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBinSetup.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBinSetup.cpp
+index ac2c84c9..be01567c 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBinSetup.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBinSetup.cpp
+@@ -158,10 +158,9 @@ namespace MASSAI
+     {}
+     BinSetup::~BinSetup()
+     {}
+-    std::string BinSetup::setup(const std::string& input, MASSAI::trace::TraceDelegate& trace)
++    bool BinSetup::setup(const std::string& input, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+-      std::string response;
+       Iterator it= input.begin();
+       Iterator end= input.end();
+       Iterator readBegin;
+@@ -181,7 +180,7 @@ namespace MASSAI
+           if(stock <= currentStock)
+           {
+             trace.writeTrace(MajorWarning_HERE, "Invalid stock order (%.1000s)", std::string(readBegin, it).c_str());
+-            return false;
++            result= false;
+           }
+           else
+           {
+@@ -259,15 +258,12 @@ namespace MASSAI
+         }
+         generateStockMap();
+       }
+-      else
+-      {
+-        response= "ERR2BT";
+-      }
+-      return response;
++      return result;
+     }
++    
+     std::string BinSetup::status(bool includeSCNRInfo) const
+     {
+-      std::string result= "BT";
++      std::string result= "BTOK";
+       for(Stock stock= 1; stock <= 3; stock++)
+       {
+         MediaMap::const_iterator it= m_mediaMap.find(stock);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+index a368eae0..809b9ea2 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+@@ -22,16 +22,37 @@ using namespace MASSAI::AEA;
+ 
+ namespace
+ {
+-  const char* TRANSACTION_CODE= "CT";
+-  const char* TEMPLATE_STATUS=  "TA";
+-  const char* TEMPLATE_CLEAR=   "TC";
+-  const char* TEMPLATE_LOAD=    "TT";
+-  const char* PECTAB_STATUS=    "PS";
+-  const char* PECTAB_CLEAR=     "PC";
+-  const char* PECTAB_LOAD=      "PT";
+-  const char* LOGO_STATUS=      "LS";
+-  const char* LOGO_CLEAR=       "LC";
+-  const char* LOGO_LOAD=        "LT";
++  //TransactionCode
++  const char* TRANSACTION_CODE=    "CT";
++  
++  //FirmwareVersion
++  const char* VERSION_REQUEST=    "PV";
++  const char* VERSION=            "01";
++  
++  //AEA Version
++  const char* AEAVERSION_REQUEST= "AV";
++  const char* AEAVERSION=         "02";
++  
++  //LOGO
++  const char* LOGO_STATUS=        "LS";
++  const char* LOGO_CLEAR=         "LC";
++  const char* LOGO_LOAD=          "LT";
++  
++  //TEMPLATE
++  const char* TEMPLATE_STATUS=    "TA";
++  const char* TEMPLATE_CLEAR=     "TC";
++  const char* TEMPLATE_LOAD=      "TT";
++  
++  //PECTAB
++  const char* PECTAB_STATUS=      "PS";
++  const char* PECTAB_CLEAR=       "PC";
++  const char* PECTAB_LOAD=        "PT";
++
++  //Ticketing - CheckIn
++  const char* CHECKIN_MODE=       "XC";
++  const char* TICKETING_MODE=     "XT";
++    
++  //RETURN
+   const char* RETURN_OK=                "OK";
+   const char* RETURN_FORMATERROR=       "ERR8";
+   const char* RETURN_LOADLOGOERROR=     "ERRL";
+@@ -42,11 +63,15 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
++/******************************************************************************
++ * 
++ * AEAContextBase
++ *
++**/
+     AEAContextBase::AEAContextBase(const std::string& contextId, const std::string& transactionCode):
+       m_contextId(contextId),
+       m_transactionCode(transactionCode)
+-    {}
+-
++    {}    
+     bool AEAContextBase::inputLogo(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+@@ -68,7 +93,45 @@ namespace MASSAI
+       }
+       return acceptInput;
+     }
++    
++    bool AEAContextBase::getBinSetup(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++      bool isSetBinSetup= true;
++      isSetBinSetup= m_binSetup.setup(cmd, trace);
++      if(isSetBinSetup)
++      {
++        std::string response= m_transactionCode + m_binSetup.status(false);
++        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++      }
++      return isSetBinSetup;
++    }
++      
++    bool AEAContextBase::getVersion(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++      bool isVersionRequest = false;
++        if(Tokenizer::readText(cmd, VERSION_REQUEST))
++        {
++          isVersionRequest= true;
++     
++          std::string response= m_transactionCode + VERSION_REQUEST + RETURN_OK + VERSION;
++          rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        }
++        return isVersionRequest;
++    }
+ 
++    bool AEAContextBase::getAEAVersion(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++          bool isAEAVersionRequest = false;
++          if(Tokenizer::readText(cmd, AEAVERSION_REQUEST))
++          {
++              isAEAVersionRequest= true;
++     
++              std::string response= m_transactionCode + AEAVERSION_REQUEST + RETURN_OK + AEAVERSION;
++              rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++          }
++          return isAEAVersionRequest;
++    }
++	
+     bool AEAContextBase::inputTransactionCode(const std::string& cmd, AEAResult& rsp)
+     {
+       bool isTransactionCodeRequest= false;
+@@ -193,6 +256,51 @@ namespace MASSAI
+       return isLogoStatusRequest;
+     }
+ 
++    bool AEAContextBase::inputMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++      bool acceptInput = true;
++
++      if(changeToCheckInMode(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext CheckInMode");
++      }
++      else if(changeToTicketingMode(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext TicketingMode");
++      }
++      else
++      {
++        acceptInput= false;
++      }
++      return acceptInput;
++    }
++
++    bool AEAContextBase::changeToCheckInMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++      bool isChangeToCheckInMode = false;
++      if(Tokenizer::readText(cmd, CHECKIN_MODE))
++      {
++        isChangeToCheckInMode= true;
++
++        std::string response= m_transactionCode + CHECKIN_MODE + RETURN_OK;
++        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++      }
++      return isChangeToCheckInMode;
++    }
++
++    bool AEAContextBase::changeToTicketingMode(const std::string& cmd, AEAResult& rsp, MASSAI::trace::TraceDelegate& trace)
++    {
++      bool isChangeToTicketingMode = false;
++      if(Tokenizer::readText(cmd, TICKETING_MODE))
++      {
++        isChangeToTicketingMode= true;
++
++        std::string response= m_transactionCode + TICKETING_MODE + RETURN_OK;
++        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++      }
++      return isChangeToTicketingMode;
++    }
++
+     void AEAContextBase::logostatus(std::string& logos)
+     {
+       Order::iterator it= m_logoOrder.begin();
+@@ -235,6 +343,11 @@ namespace MASSAI
+     }
+ 
+ 
++/******************************************************************************
++ * 
++ * BagTagAEAContext
++ *
++**/
+     BagtagAEAContext::BagtagAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
+@@ -242,7 +355,24 @@ namespace MASSAI
+     bool BagtagAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+-      if(inputTransactionCode(cmd, rsp))
++	  
++      if(inputMode(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext inputMode");
++      }
++      else if(getBinSetup(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext BinSetup");
++      }
++      else if(getAEAVersion(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext AEAVersion");
++      }
++      else if(getVersion(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext FirmwareVersion");
++      }
++      else if(inputTransactionCode(cmd, rsp))
+       {
+         trace.writeTraceText(BasicRuntime_HERE, "AEAContext TransactionCode");
+       }
+@@ -406,14 +536,36 @@ namespace MASSAI
+     }
+ 
+ 
++/******************************************************************************
++ * 
++ * BoardingAEAContext
++ *
++**/
+     BoardingAEAContext::BoardingAEAContext(const std::string& contextId, const std::string& transactionCode):
+       AEAContextBase(contextId, transactionCode)
+     {}
+-
++    
+     bool BoardingAEAContext::input(const std::string& cmd, AEAResult& rsp, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool acceptInput= true;
+-      if(inputTransactionCode(cmd, rsp))
++	  
++      if(inputMode(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext inputMode");
++      }
++      else if(getBinSetup(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext BinSetup");
++      }
++      else if(getAEAVersion(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext AEAVersion");
++      }
++      else if(getVersion(cmd, rsp, trace))
++      {
++        trace.writeTraceText(BasicRuntime_HERE, "AEAContext FirmwareVersion");
++      }
++      else if(inputTransactionCode(cmd, rsp))
+       {
+         trace.writeTraceText(BasicRuntime_HERE, "AEAContext TransactionCode");
+       }
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
+index df8d0095..ffb17f51 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaPrintProcessor.cpp
+@@ -21,13 +21,21 @@ namespace MASSAI
+ {
+   namespace AEA
+   {
+-    AEAPrintProcessor::AEAPrintProcessor()
++    AEAPrintProcessor::AEAPrintProcessor():
++      m_PrintedBagTags(0),
++      m_GoodReadBarCodes(0),
++      m_GoodReadMagnetics(0),
++      m_PrintedBoardingPass(0),
++      m_PrintedReceipts(0),
++      m_Voided(0),
++      m_Version("V01")
+     {}
+     AEAPrintProcessor::~AEAPrintProcessor()
+     {}
++
+     bool AEAPrintProcessor::parseContent(const std::string& context)
+     {
+-      return false;
++      return true;
+     }
+     bool AEAPrintProcessor::parseContent(const std::string& context, const ContextType& type, LogoData& logo)
+     {
+@@ -45,6 +53,7 @@ namespace MASSAI
+     {
+       return parseContent(context);
+     }
++    
+     void AEAPrintProcessor::processLoad(const std::string& context, const ContextType& type, LogoData& logo)
+     {}
+     void AEAPrintProcessor::processLoad(const std::string& context, PectabData& pectab)
+@@ -61,12 +70,69 @@ namespace MASSAI
+     {}
+     void AEAPrintProcessor::processClear(const std::string& context, TemplateData& template_)
+     {}
++    
+     void AEAPrintProcessor::process(const std::string& context, AEABagtagPrintJob& job)
+-    {}
++    {
++      m_PrintedBagTags+= job.printCount;
++    }
+     void AEAPrintProcessor::process(const std::string& context, AEATicketPrintJob& job)
+-    {}
++    {
++      int count=0;
++      for (
++            std::list<boost::shared_ptr<AEATicketPrintJobPart> >::iterator it = job.printJobParts.begin(); 
++            it != job.printJobParts.end(); 
++            it++
++          )
++      {
++        count+= (*it)->printCount;
++      }
++      m_PrintedBoardingPass = count;
++    }
+     void AEAPrintProcessor::process(const std::string& context, AEAReceiptPrintJob& job)
+-    {}
++    {
++      m_PrintedReceipts++;
++    }
++    
++    int AEAPrintProcessor::getNumberOfPrintedBagTags()
++    {
++      return m_PrintedBagTags;
++    }   
++    int AEAPrintProcessor::getNumberOfPrintedBoardingPass()
++    {
++      return m_PrintedBoardingPass;
++    }
++    int AEAPrintProcessor::getNumberOfPrintedReceipts()
++    {
++      return m_PrintedReceipts;
++    }
++    int AEAPrintProcessor::getNumberOfVoidedCoupons()
++    {
++      return m_Voided;
++    }
++    std::string AEAPrintProcessor::getVersion()
++    {
++      return m_Version;
++    }
++    int AEAPrintProcessor::getNumberOfGoodReadBarCodes()
++    {
++      return m_GoodReadBarCodes;
++    }
++    int AEAPrintProcessor::getNumberOfGoodReadMagnetics()
++    {
++      return m_GoodReadMagnetics;
++    }
++
++    void AEAPrintProcessor::setVoided(int v)
++    {
++      m_Voided = v;
++    }
++    void AEAPrintProcessor::reset()
++    {
++      m_PrintedReceipts       = 0;
++      m_PrintedBagTags        = 0;
++      m_PrintedBoardingPass   = 0;
++      m_Voided                = 0;
++    }
+ 
+     AEAPrintProcessorContext::AEAPrintProcessorContext(const std::string& context, const ContextType& type, AEAPrintProcessor* pProcessor):
+       m_context(context),
+@@ -160,6 +226,7 @@ namespace MASSAI
+         m_pProcessor->processLoad(m_context, template_);
+       }
+     }
++
+     void AEAPrintProcessorContext::processClear(LogoData& logo)
+     {
+       if(m_pProcessor)
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+index 2fe3291e..c066869b 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+@@ -40,7 +40,7 @@ namespace
+ 
+   AEAResult responseIncorrectField(const std::string& transactionCode, char delimiter, const std::string& field)
+   {
+-    return AEAResult(new AEACouponResponse(transactionCode, delimiter, RETURN_PRINTINCORRECT_FIELD, 3));
++    return AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_FORMAT_ERROR, transactionCode + RETURN_PRINTINCORRECT_FIELD + delimiter + field));
+   }
+ }
+ 
+@@ -179,7 +179,6 @@ namespace MASSAI
+                 {
+                   job->printCount= 1;
+                 }
+-                jobCount+= job->printCount;
+                 if(Tokenizer::readChar(delimiter, it, end, readBegin, it)) // delimiter
+                 {
+                   while(Tokenizer::readFieldId(it, end, readBegin, it)) // Field Id
+@@ -262,6 +261,7 @@ namespace MASSAI
+             }
+             else
+             {
++              jobCount+= job->printCount;
+               if(pPectab != 0)
+               {
+                 if(true) // if(!pPectab->useTemplateFile())
+-- 
+2.41.0.windows.1
+

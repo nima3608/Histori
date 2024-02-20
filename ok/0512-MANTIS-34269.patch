@@ -1,0 +1,198 @@
+From 294a0617af04aebb2a79097520a7a30ac4d08057 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 17 Oct 2014 14:04:42 +0000
+Subject: [PATCH 0512/1000] MANTIS 34269 Library Text:cEnvSubsts - provide
+ functions for platform installation paths
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@739 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/cEnvSubst.hpp         | 12 +++-
+ .../Massai/cpp/Text/src/cEnvSubst.cpp         | 69 +++++++++++++------
+ 2 files changed, 60 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+index 69a417ee..a264b7c6 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+@@ -28,6 +28,13 @@
+ #pragma once
+ #endif // _MSC_VER > 1000
+ 
++namespace {
++  struct Compare_
++  {
++    bool operator() (const std::string&, const std::string&) const;
++  };
++};
++
+ class CEnvSubst
+ {
+ public:
+@@ -37,7 +44,7 @@ public:
+     HKCU
+   };
+ private:
+-  std::map<std::string,std::string> env;
++  std::map<std::string,std::string,Compare_> env;
+ 
+   bool regReadSZ(ROOT_KEY keyHandle, const std::string& subKey, const std::string& valueName, bool expand, std::string& result);
+   bool getPlfPath(int csidl, std::string& path);  
+@@ -48,6 +55,9 @@ public:
+   void SetBaseEnvVars();
+   void SetEnvVars(const std::map<std::string,std::string> setEnv);
+   void ClearEnvVars();
++  
++  std::string getPlfInstallPath();
++  std::string getPlfInstallDataPath();
+ 
+   std::string SubstEnvVars(const char* str) const;
+   std::string SubstEnvVars(const std::string& str) const;
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+index 400dabef..578454eb 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+@@ -21,6 +21,21 @@
+ #include <Shlobj.h>
+ #include <Shlwapi.h>
+ 
++namespace {
++  bool Compare_::operator () (const std::string& s1, const std::string& s2) const
++  {
++    if(s1.length()>s2.length())
++      return true;
++    else
++    if(s1.length()==s2.length())
++    {
++      if(s1.compare(s2) > 0)
++        return true;
++    }
++    return false;
++  }
++}
++
+ CEnvSubst::CEnvSubst()
+ {}
+ 
+@@ -37,7 +52,7 @@ std::string CEnvSubst::stripFN(const std::string & str)
+   }
+   return ret;
+ }
+-  
++
+ bool CEnvSubst::regReadSZ(CEnvSubst::ROOT_KEY keyHandle, const std::string& subKey, const std::string& valueName, bool expand, std::string& result)
+ {
+ #define MAX_STR_LENGTH (1024*32)
+@@ -123,6 +138,28 @@ bool CEnvSubst::getPlfPath(int csidl, std::string& path)
+     return ret;
+ }
+ 
++std::string CEnvSubst::getPlfInstallPath()
++{
++  std::string dummy;
++  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Path",false,dummy))
++    dummy = stripFN(dummy);
++  else
++    if(getPlfPath(CSIDL_PROGRAM_FILESX86,dummy))
++      dummy = stripFN(dummy);
++  return dummy;
++}
++
++std::string CEnvSubst::getPlfInstallDataPath()
++{
++  std::string dummy;
++  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Data_Path",false,dummy))
++    dummy= stripFN(dummy);
++  else
++    if(getPlfPath(CSIDL_LOCAL_APPDATA,dummy))
++      dummy= stripFN(dummy);  
++  return dummy;
++}
++
+ void CEnvSubst::SetBaseEnvVars()
+ {
+   env["PROGRAMFILES"] = "c:\\Program Files";
+@@ -138,17 +175,9 @@ void CEnvSubst::SetBaseEnvVars()
+   
+   std::string dummy;
+ 
+-  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Path",false,dummy))
+-    env["PLFINSTALLPATH"]= stripFN(dummy);
+-  else
+-    if(getPlfPath(CSIDL_PROGRAM_FILESX86,dummy))
+-      env["PLFINSTALLPATH"]= stripFN(dummy);
++  env["PLFINSTALLPATH"] = getPlfInstallPath();
+     
+-  if(regReadSZ(HKLM,"SOFTWARE\\Materna\\MIPS","Mips_PLF_Install_Data_Path",false,dummy))
+-    env["PLFINSTALLDATAPATH"]= stripFN(dummy);
+-  else
+-    if(getPlfPath(CSIDL_LOCAL_APPDATA,dummy))
+-      env["PLFINSTALLDATAPATH"]= stripFN(dummy);   
++  env["PLFINSTALLDATAPATH"] = getPlfInstallDataPath();
+   
+   try
+   {
+@@ -163,7 +192,7 @@ void CEnvSubst::SetBaseEnvVars()
+ #endif
+ 		);
+     std::string dummy;
+-    for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++    for(std::map<std::string, std::string, Compare_>::iterator it=env.begin(); it !=env.end(); ++it)
+     {
+ 
+       //printf("\nSubstEnvVars %s %s",str.c_str(),(std::string("\\$")+ (*it).first).c_str());
+@@ -179,7 +208,7 @@ void CEnvSubst::SetBaseEnvVars()
+   }
+ 
+   TRACE(HERE_8,"Substitution constants:");
+-  for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++  for(std::map<std::string, std::string, Compare_>::iterator it=env.begin(); it !=env.end(); ++it)
+   {
+     TRACE(HERE_8,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
+   }
+@@ -187,7 +216,7 @@ void CEnvSubst::SetBaseEnvVars()
+ 
+ void CEnvSubst::SetEnvVars(const std::map<std::string,std::string> setEnv)
+ {
+-  std::map<std::string, std::string>::const_iterator it;
++  std::map<std::string, std::string, Compare_>::const_iterator it;
+ 
+   try
+   {
+@@ -205,12 +234,12 @@ void CEnvSubst::SetEnvVars(const std::map<std::string,std::string> setEnv)
+ 		   );
+ 
+     std::string dummy;
+-    for(it=setEnv.begin(); it !=setEnv.end(); ++it)
++    for(std::map<std::string,std::string>::const_iterator itp=setEnv.begin(); itp !=setEnv.end(); ++itp)
+     {
+-      //printf("\nSubstEnvVars %s %s",str.c_str(),(std::string("\\$")+ (*it).first).c_str());
+-      dummy = boost::regex_replace((*it).second, ReplaceStr1, "\\\\\\\\", boost::match_default | boost::format_perl);
++      //printf("\nSubstEnvVars %s %s",str.c_str(),(std::string("\\$")+ (*itp).first).c_str());
++      dummy = boost::regex_replace((*itp).second, ReplaceStr1, "\\\\\\\\", boost::match_default | boost::format_perl);
+       dummy = boost::regex_replace(dummy, ReplaceStr2, "\\\\$", boost::match_default | boost::format_perl);
+-      env[(*it).first]=dummy;
++      env[(*itp).first]=dummy;
+     }
+   }
+   catch(...)
+@@ -238,7 +267,7 @@ std::string CEnvSubst::SubstEnvVars(const char* str) const
+ std::string CEnvSubst::SubstEnvVars(const std::string& str) const
+ {
+   TRACE(HERE_8,"Substitution constants:");
+-  for(std::map<std::string, std::string>::const_iterator it=env.begin(); it !=env.end(); ++it)
++  for(std::map<std::string, std::string, Compare_>::const_iterator it=env.begin(); it !=env.end(); ++it)
+   {
+     TRACE(HERE_8,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
+   }
+@@ -246,7 +275,7 @@ std::string CEnvSubst::SubstEnvVars(const std::string& str) const
+   std::string dummy(str);
+   try
+   {
+-    for(std::map<std::string, std::string>::const_iterator it=env.begin(); it !=env.end(); ++it)
++    for(std::map<std::string, std::string, Compare_>::const_iterator it=env.begin(); it !=env.end(); ++it)
+     {
+       boost::regex ReplaceStr( (std::string("$")+ (*it).first).c_str(),
+              boost::regex::icase | boost::regex::literal);
+-- 
+2.41.0.windows.1
+

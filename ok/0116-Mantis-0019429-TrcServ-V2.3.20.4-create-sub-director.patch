@@ -1,0 +1,182 @@
+From 672f946bb909e540f3bac2e5b6f14ac5b35d5017 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 1 Jun 2011 16:59:49 +0000
+Subject: [PATCH 0116/1076] Mantis 0019429; TrcServ; V2.3.20.4; create sub
+ directories in unc paths
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@145 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Services/cpp/TrcServ/inc/TrcServ_def.h    | 12 +++++----
+ .../Services/cpp/TrcServ/makefile.mak         | 20 +++++++++++++++
+ .../Services/cpp/TrcServ/src/TraceFile.cpp    | 25 ++++++++++++++++---
+ .../Services/cpp/TrcServ/src/TrcServ.cpp      |  2 +-
+ .../Services/cpp/TrcServ/src/tracetest.cpp    |  2 ++
+ 5 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+index 0e202e98..55d7f18b 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
++++ b/SelfServiceCommon/Services/cpp/TrcServ/inc/TrcServ_def.h
+@@ -10,13 +10,15 @@
+  ************************************************************************/
+ 
+ 
+-/*! \page trcserv TrcServ - Release Notes
++/*! \page TrcServ.exe - Trace Service
+  *
+- *  @version V 2.3.20.3
++ *  @version V 2.3.20.4
+  *
+  *  \section change1 Change history
+  *
+  *
++ *  \date 01.06.2011 \li V 2.3.20.4 SteT Mantis 0019429: create sub directories in unc paths
++ *
+  *  \date 17.05.2011 \li V 2.3.20.3 GiT removed flush after each line (performance problems with virus scanner)
+  *
+  *  \date 03.01.2010 \li V 2.3.20.2 SteT Mantis 10547: trace client functions return type: void
+@@ -28,7 +30,7 @@
+  *
+  *  \date 09.09.2010 \li V 2.3.19.0 SteT do not link mcrypt.lib (not used)
+  *
+- *  \date 10.08.2010 \li V 2.3.18.0 SteT MANTIS 15554: allow unc path for trace directories
++ *  \date 10.08.2010 \li V 2.3.18.0 SteT Mantis 15554: allow unc path for trace directories
+  *
+  *  \date 26.09.2007 \li V 2.3.17.0 SteT EDB 27828: bugfix access violation in string handling
+  *
+@@ -53,8 +55,8 @@
+  *
+  */
+ 
+-#define FILE_VER_BIN     2,3,20,3
+-#define FILE_VER_STR     "FileVersion", "2.3.20.3\0"
++#define FILE_VER_BIN     2,3,20,4
++#define FILE_VER_STR     "FileVersion", "2.3.20.4\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Trace Service\0"
+ #define INTERNALNAME     "InternalName"     ,"TrcServ.exe\0"
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+index d25a863a..3dbcfbd5 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
++++ b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+@@ -187,6 +187,26 @@ MY_BIN5_LINKLIBS = \
+     $(SYS_ACETAO)
+ 
+ 
++######################################################################
++
++MY_BIN6 = \
++    $(_BIN)\trcstreamtest.exe
++
++MY_BIN6_RES = \
++    $(_OBJ)\tracetestdll.res
++
++MY_BIN6_OBJS = \
++    $(_OBJ)\trcstreamtest.obj
++
++MY_BIN6_USER_LIBS = \
++    $(LIB_CXAPI) \
++    $(LIB_MSYSTOOLS) \
++    $(_LIB)\tracehdl.lib
++
++MY_BIN6_LINKLIBS = \
++    $(SYS_ACETAO)
++
++
+ ######################################################################
+ 
+ 
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
+index 4833a81a..ce94c52e 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TraceFile.cpp
+@@ -28,6 +28,7 @@
+ #include <string.h>
+ #include <fstream.h>
+ #include <windows.h>
++#include <Shlobj.h>
+ 
+ #include "traceFile.h"
+ 
+@@ -442,20 +443,38 @@ static bool makeDirectory(const char* pPath)
+   return (CreateDirectory(pPath, 0) == 0);
+ }
+ 
++#ifndef INVALID_FILE_ATTRIBUTES
++#define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
++#endif
++
+ static void checkPathName(char* pszPath)
+ {
+   char *pFileName;
+   char *pStart;
+-  struct stat fileinfo;
+   if(pszPath)
+   {
+     pStart = pFileName = pszPath;
++    if(pStart[0] == cBackSlash && pStart[1] == cBackSlash)
++    {
++      // SteT: 1.6.2001: do not create server in UNC-pathes
++      pFileName= pStart + 2;
++      while(*pFileName != 0 && *pFileName != cBackSlash)
++      {
++        pFileName++;
++      }
++      if(*pFileName != 0)
++      {
++        pFileName++;
++      }
++    }
+     while(*pFileName)
+     {
+       if(*pFileName == cBackSlash)
+       {
+         *pFileName = 0;
+-        if(stat(pStart, &fileinfo) != 0)
++
++        DWORD attributes = GetFileAttributes(pStart);
++        if(attributes == INVALID_FILE_ATTRIBUTES)
+         {
+           if(pFileName > pStart && *(pFileName-1) != ':')    // ts 03.09.2001 do not create devices(in MS stat return != 0 for devices)
+           {
+@@ -466,7 +485,7 @@ static void checkPathName(char* pszPath)
+             }
+           }
+         }
+-        else if(!(fileinfo.st_mode && S_IFDIR))
++        else if((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+         {
+           *pFileName = cBackSlash;
+           break;          // is not a directory, could not continue
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
+index 63a2b844..56e1b14e 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/TrcServ.cpp
+@@ -374,7 +374,7 @@ void ReadLoop::function()
+ {
+   Stopped.reset();
+   // 18.10.2001 2.2.4 ts use high priority for reading thread, to avoid loss of traces in a busy system
+-  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
++  // SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+   iRunning = 1;
+   while (!iEnd)
+   {
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+index aeb3ee37..4b5fd7ad 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+@@ -26,9 +26,11 @@ void main(int argc, char** argv)
+     for(int i= 0; i < 100; i++)
+     {
+       wrtTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, szBuffer);
++      wrtTrace(1, __FILE__, __LINE__, __FUNCTION__, szBuffer);
+     }
+     cryptTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+     cryptTrace(1, __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
++    dumpTrace(1, __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+     dumpTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, length, szBuffer);
+     traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 1, szBuffer);
+     traceTrack(1, __FILE__, __LINE__, __FUNCTION__, 2, szBuffer);
+-- 
+2.41.0.windows.1
+

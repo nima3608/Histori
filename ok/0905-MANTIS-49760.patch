@@ -1,0 +1,1622 @@
+From fcb1e807da35c3da8d74beaa81250af2edd516cc Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 22 Mar 2018 13:10:44 +0000
+Subject: [PATCH 0905/1077] MANTIS 49760 massaiCfgXMgrB.exe version 2.2.0 -
+ MANTIS 49760: MAC: new getMeta() method to get metadata from platform -
+ Implement getMeta() methods
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1327 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgMeta_def.h     |  11 +-
+ .../Massai/cpp/CfgTools/src/CfgMeta.cpp       | 364 ++++++++++--------
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  13 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Number2.cpp     | 130 +++----
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       | 151 ++++----
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp   | 161 ++++----
+ .../Massai/idl/Massai/cfgmgr.idl              | 239 +++++++-----
+ 8 files changed, 573 insertions(+), 509 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
+index 762eb721..a2f192fd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
+@@ -17,9 +17,14 @@
+ // Mantis 49209: Extend Meta-Data for Text-Lists
+ // - implement options -maxnumber -minnumber
+ //   for textlist meta data.
+-//
+-#define FILE_VER_BIN 1,0,1,0
+-#define FILE_VER_DTS "1.0.1.0\0"
++// #define FILE_VER_BIN 1,0,1,0
++// #define FILE_VER_DTS "1.0.1.0\0"
++//
++// 22.03.2018  JK
++// Mantis 49760: MAC: new getMeta() method to get metadata from platform
++// Use "#ifdef USE_WITH_META" to emply getMeta() rather than getWithMeta()
++#define FILE_VER_BIN 1,0,2,0
++#define FILE_VER_DTS "1.0.2.0\0"
+ //
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+index 0eeb1a5e..c72e44ec 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+@@ -86,10 +86,10 @@ namespace
+ 
+    void condChangeInt
+       (
+-         CORBA::Long & dst,
+-         bool & changed_meta,
+-         argScan & arg_scan,
+-         char const * arg_option
++         CORBA::Long &  dst,
++         bool &         changed_meta,
++         argScan &      arg_scan,
++         char const *   arg_option
+       )
+    {
+       char const * new_value = arg_scan.option( arg_option );
+@@ -134,10 +134,10 @@ namespace
+ 
+    bool handleNumberMeta
+       (
+-         argScan & arg_scan,
+-         char const * cfg_host,
+-         char const * auth,
+-         char const * item_name
++         argScan &      arg_scan,
++         char const *   cfg_host,
++         char const *   auth,
++         char const *   item_name
+       )
+    {
+       Config::Number2 *         cfg_proxy = 0;
+@@ -158,12 +158,20 @@ namespace
+       {
+          try
+          {
++#ifdef USE_WITH_META
+             Config::Number2::metaData_var md;
+             int const val = cfg_proxy->getWithMeta( acc, md );
+             std::cout
+                << DSPLLIN "getWithMeta(" << item_name << ") "
+                << "= \"" << val << "\""
+                << std::endl;
++#else
++            Config::Number2::metaData_var md
++               = cfg_proxy->getMeta( acc );
++            std::cout
++               << DSPLLIN "getMeta(" << item_name << ") "
++               << std::endl;
++#endif
+             bool changed_meta = false;
+             //
+             char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
+@@ -216,10 +224,10 @@ namespace
+ 
+    bool handleTextMeta
+       (
+-         argScan & arg_scan,
+-         char const * cfg_host,
+-         char const * auth,
+-         char const * item_name
++         argScan &      arg_scan,
++         char const *   cfg_host,
++         char const *   auth,
++         char const *   item_name
+       )
+    {
+       Config::Text2 *           cfg_proxy = 0;
+@@ -240,6 +248,7 @@ namespace
+       {
+          try
+          {
++#ifdef USE_WITH_META
+             Config::Text2::metaData_var md;
+             char const * val = cfg_proxy->getWithMeta( acc, md );
+             if( val )
+@@ -248,83 +257,90 @@ namespace
+                   << DSPLLIN "getWithMeta(" << item_name << ") "
+                   << "= \"" << val << "\""
+                   << std::endl;
+-               bool changed_meta = false;
+-               //
+-               char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
+-               if( new_xpl )
+-               {
+-                  changed_meta = true;
+-                  md->Desc.Explanation = CORBA::string_dup( new_xpl );
+-                  std::cout << "\t-> changed explanation" << std::endl;
+-               }
+-               //
+-               char const * new_rights = arg_scan.option( "SET-RIGHTS" );
+-               if( new_rights )
+-               {
+-                  changed_meta = true;
+-                  md->Desc.Rights = CORBA::string_dup( new_rights );
+-                  std::cout << "\t-> changed rights" << std::endl;
+-               }
+-               //
+-               condChangeInt
+-                  (
+-                     md->MaxLength, changed_meta,
+-                     arg_scan, "SET-MAXLENGTH"
+-                  );
+-               //
+-               condChangeInt
+-                  (
+-                     md->MinLength, changed_meta,
+-                     arg_scan, "SET-MINLENGTH"
+-                  );
+-               //
+-               char const * new_regex = arg_scan.option( "SET-REGEX" );
+-               if( new_regex )
+-               {
+-                  changed_meta = true;
+-                  md->RegEx = CORBA::string_dup( new_regex );
+-                  std::cout << "\t-> changed RegEx" << std::endl;
+-               }
+-               //
+-               char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
+-               if( new_sem )
++            }
++#else
++            Config::Text2::metaData_var md
++               = cfg_proxy->getMeta( acc );
++            std::cout
++               << DSPLLIN "getMeta(" << item_name << ") "
++               << std::endl;
++#endif
++            bool changed_meta = false;
++            //
++            char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
++            if( new_xpl )
++            {
++               changed_meta = true;
++               md->Desc.Explanation = CORBA::string_dup( new_xpl );
++               std::cout << "\t-> changed explanation" << std::endl;
++            }
++            //
++            char const * new_rights = arg_scan.option( "SET-RIGHTS" );
++            if( new_rights )
++            {
++               changed_meta = true;
++               md->Desc.Rights = CORBA::string_dup( new_rights );
++               std::cout << "\t-> changed rights" << std::endl;
++            }
++            //
++            condChangeInt
++               (
++                  md->MaxLength, changed_meta,
++                  arg_scan, "SET-MAXLENGTH"
++               );
++            //
++            condChangeInt
++               (
++                  md->MinLength, changed_meta,
++                  arg_scan, "SET-MINLENGTH"
++               );
++            //
++            char const * new_regex = arg_scan.option( "SET-REGEX" );
++            if( new_regex )
++            {
++               changed_meta = true;
++               md->RegEx = CORBA::string_dup( new_regex );
++               std::cout << "\t-> changed RegEx" << std::endl;
++            }
++            //
++            char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
++            if( new_sem )
++            {
++               semanticDump const * ptr = l_semantic_dump;
++               bool found = false;
++               while( !found && ptr->stt )
+                {
+-                  semanticDump const * ptr = l_semantic_dump;
+-                  bool found = false;
+-                  while( !found && ptr->stt )
++                  if( !strcmp( ptr->stt, new_sem ) )
+                   {
+-                     if( !strcmp( ptr->stt, new_sem ) )
+-                     {
+-                        found = true;
+-                        changed_meta = true;
+-                        md->Semantic = ptr->stc;
+-                        std::cout << "\t-> changed Semantic" << std::endl;
+-                     }
+-                     ptr += 1;
+-                  }
+-                  if( !found )
+-                  {
+-                     std::cout
+-                        << "\t-> unknown semantic \""
+-                        << new_sem << "\""
+-                        << std::endl;
++                     found = true;
++                     changed_meta = true;
++                     md->Semantic = ptr->stc;
++                     std::cout << "\t-> changed Semantic" << std::endl;
+                   }
++                  ptr += 1;
+                }
+-               //
+-               if( changed_meta )
++               if( !found )
+                {
+-                  cfg_proxy->setMeta2( acc, md );
++                  std::cout
++                     << "\t-> unknown semantic \""
++                     << new_sem << "\""
++                     << std::endl;
+                }
+-               std::cout
+-                  << "\tExplanation = "
+-                     "\"" << plain( md->Desc.Explanation ) << "\""
+-                     "\n\tRights = \"" << md->Desc.Rights << "\""
+-                     "\n\tMaxLength = " << md->MaxLength
+-                  << "\n\tMinLength = " << md->MinLength
+-                  << "\n\tRegEx = \"" << md->RegEx << "\""
+-                     "\n\tSemantic = " << c_str( md->Semantic )
+-                  << std::endl;
+             }
++            //
++            if( changed_meta )
++            {
++               cfg_proxy->setMeta2( acc, md );
++            }
++            std::cout
++               << "\tExplanation = "
++                  "\"" << plain( md->Desc.Explanation ) << "\""
++                  "\n\tRights = \"" << md->Desc.Rights << "\""
++                  "\n\tMaxLength = " << md->MaxLength
++               << "\n\tMinLength = " << md->MinLength
++               << "\n\tRegEx = \"" << md->RegEx << "\""
++                  "\n\tSemantic = " << c_str( md->Semantic )
++               << std::endl;
+          }
+          catch( Config::Node::notFound & )
+          {
+@@ -337,10 +353,10 @@ namespace
+ 
+    bool handleTextlistMeta
+       (
+-         argScan & arg_scan,
+-         char const * cfg_host,
+-         char const * auth,
+-         char const * item_name
++         argScan &      arg_scan,
++         char const *   cfg_host,
++         char const *   auth,
++         char const *   item_name
+       )
+    {
+       Config::Textlist2 *       cfg_proxy = 0;
+@@ -361,6 +377,7 @@ namespace
+       {
+          try
+          {
++#ifdef USE_WITH_META
+             Config::Textlist2::metaData_var md;
+             Config::Textlist::strings const * val =
+                cfg_proxy->getWithMeta( acc, md );
+@@ -374,97 +391,104 @@ namespace
+                {
+                   std::cout << HINDENT1 << (*val)[Idx].in() << std::endl;
+                }
+-               bool changed_meta = false;
+-               //
+-               char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
+-               if( new_xpl )
+-               {
+-                  changed_meta = true;
+-                  md->Desc.Explanation = CORBA::string_dup( new_xpl );
+-                  std::cout << "\t-> changed explanation" << std::endl;
+-               }
+-               //
+-               char const * new_rights = arg_scan.option( "SET-RIGHTS" );
+-               if( new_rights )
+-               {
+-                  changed_meta = true;
+-                  md->Desc.Rights = CORBA::string_dup( new_rights );
+-                  std::cout << "\t-> changed rights" << std::endl;
+-               }
+-               //
+-               condChangeInt
+-                  (
+-                     md->MaxLength, changed_meta,
+-                     arg_scan, "SET-MAXLENGTH"
+-                  );
+-               //
+-               condChangeInt
+-                  (
+-                     md->MinLength, changed_meta,
+-                     arg_scan, "SET-MINLENGTH"
+-                  );
+-               //
+-               condChangeInt
+-                  (
+-                     md->MaxNumber, changed_meta,
+-                     arg_scan, "SET-MAXNUMBER"
+-                  );
+-               //
+-               condChangeInt
+-                  (
+-                     md->MinNumber, changed_meta,
+-                     arg_scan, "SET-MINNUMBER"
+-                  );
+-               //
+-               char const * new_regex = arg_scan.option( "SET-REGEX" );
+-               if( new_regex )
+-               {
+-                  changed_meta = true;
+-                  md->RegEx = CORBA::string_dup( new_regex );
+-                  std::cout << "\t-> changed RegEx" << std::endl;
+-               }
+-               //
+-               char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
+-               if( new_sem )
++            }
++#else
++            Config::Textlist2::metaData_var md
++               = cfg_proxy->getMeta( acc );
++            std::cout
++               << DSPLLIN "getMeta(" << item_name << ") "
++               << std::endl;
++#endif
++            bool changed_meta = false;
++            //
++            char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
++            if( new_xpl )
++            {
++               changed_meta = true;
++               md->Desc.Explanation = CORBA::string_dup( new_xpl );
++               std::cout << "\t-> changed explanation" << std::endl;
++            }
++            //
++            char const * new_rights = arg_scan.option( "SET-RIGHTS" );
++            if( new_rights )
++            {
++               changed_meta = true;
++               md->Desc.Rights = CORBA::string_dup( new_rights );
++               std::cout << "\t-> changed rights" << std::endl;
++            }
++            //
++            condChangeInt
++               (
++                  md->MaxLength, changed_meta,
++                  arg_scan, "SET-MAXLENGTH"
++               );
++            //
++            condChangeInt
++               (
++                  md->MinLength, changed_meta,
++                  arg_scan, "SET-MINLENGTH"
++               );
++            //
++            condChangeInt
++               (
++                  md->MaxNumber, changed_meta,
++                  arg_scan, "SET-MAXNUMBER"
++               );
++            //
++            condChangeInt
++               (
++                  md->MinNumber, changed_meta,
++                  arg_scan, "SET-MINNUMBER"
++               );
++            //
++            char const * new_regex = arg_scan.option( "SET-REGEX" );
++            if( new_regex )
++            {
++               changed_meta = true;
++               md->RegEx = CORBA::string_dup( new_regex );
++               std::cout << "\t-> changed RegEx" << std::endl;
++            }
++            //
++            char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
++            if( new_sem )
++            {
++               semanticDump const * ptr = l_semantic_dump;
++               bool found = false;
++               while( !found && ptr->stt )
+                {
+-                  semanticDump const * ptr = l_semantic_dump;
+-                  bool found = false;
+-                  while( !found && ptr->stt )
++                  if( !strcmp( ptr->stt, new_sem ) )
+                   {
+-                     if( !strcmp( ptr->stt, new_sem ) )
+-                     {
+-                        found = true;
+-                        changed_meta = true;
+-                        md->Semantic = ptr->stc;
+-                        std::cout << "\t-> changed Semantic" << std::endl;
+-                     }
+-                     ptr += 1;
+-                  }
+-                  if( !found )
+-                  {
+-                     std::cout
+-                        << "\t-> unknown semantic \""
+-                        << new_sem << "\""
+-                        << std::endl;
++                     found = true;
++                     changed_meta = true;
++                     md->Semantic = ptr->stc;
++                     std::cout << "\t-> changed Semantic" << std::endl;
+                   }
++                  ptr += 1;
+                }
+-               //
+-               if( changed_meta )
++               if( !found )
+                {
+-                  cfg_proxy->setMeta2( acc, md );
++                  std::cout
++                     << "\t-> unknown semantic \""
++                     << new_sem << "\""
++                     << std::endl;
+                }
+-               std::cout
+-                  << "\tExplanation = "
+-                     "\"" << plain( md->Desc.Explanation ) << "\""
+-                     "\n\tRights = \"" << md->Desc.Rights << "\""
+-                     "\n\tMaxLength = " << md->MaxLength
+-                  << "\n\tMinLength = " << md->MinLength
+-                  << "\n\tMaxNumber = " << md->MaxNumber
+-                  << "\n\tMinNumber = " << md->MinNumber
+-                  << "\n\tRegEx = \"" << md->RegEx << "\""
+-                     "\n\tSemantic = " << c_str( md->Semantic )
+-                  << std::endl;
+             }
++            //
++            if( changed_meta )
++            {
++               cfg_proxy->setMeta2( acc, md );
++            }
++            std::cout
++               << "\tExplanation = "
++                  "\"" << plain( md->Desc.Explanation ) << "\""
++                  "\n\tRights = \"" << md->Desc.Rights << "\""
++                  "\n\tMaxLength = " << md->MaxLength
++               << "\n\tMinLength = " << md->MinLength
++               << "\n\tMaxNumber = " << md->MaxNumber
++               << "\n\tMinNumber = " << md->MinNumber
++               << "\n\tRegEx = \"" << md->RegEx << "\""
++                  "\n\tSemantic = " << c_str( md->Semantic )
++               << std::endl;
+          }
+          catch( Config::Node::notFound & )
+          {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 7a5928b3..23e0ef10 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -541,8 +541,17 @@
+ //! @par     Change:
+ //! - MANTIS 49209: Extend Meta-Data for Text-Lists
+ //! - Apply to text lists, what has been done for texts before
+-#define FILE_VER_BIN 2,1,0,0
+-#define FILE_VER_DTS "2.1.0.0"
++// #define FILE_VER_BIN 2,1,0,0
++// #define FILE_VER_DTS "2.1.0.0"
++//
++//! @version 2.2.0
++//! @date    22.03.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 49760: MAC: new getMeta() method to get metadata from platform
++//! - Implement getMeta() methods
++#define FILE_VER_BIN 2,2,0,0
++#define FILE_VER_DTS "2.2.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index ffb63958..ef5ac343 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -535,8 +535,17 @@
+ //! @par     Change:
+ //! - MANTIS 49209: Extend Meta-Data for Text-Lists
+ //! - Apply to text lists, what has been done for texts before
+-#define FILE_VER_BIN 2,1,0,0
+-#define FILE_VER_DTS "2.1.0.0"
++// #define FILE_VER_BIN 2,1,0,0
++// #define FILE_VER_DTS "2.1.0.0"
++//
++//! @version 2.2.0
++//! @date    22.03.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 49760: MAC: new getMeta() method to get metadata from platform
++//! - Implement getMeta() methods
++#define FILE_VER_BIN 2,2,0,0
++#define FILE_VER_DTS "2.2.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number2.cpp
+index 06223413..8c4a09b1 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number2.cpp
+@@ -60,6 +60,68 @@ class cfgCorba_ServiceNumber2 :
+    cfgEntity * M_ConfigEntity;
+ 
+ 
++   Config::Number2::metaData * getMeta( Config::access const & acc )
++   {
++      Config::Number2::metaData * md = new Config::Number2::metaData;
++      cfgMeta const * const meta_data_cfg
++         = M_ConfigEntity->itemGetMeta
++            (
++               acc.Authorization,
++               cfgEntity::PURP_DIRGET, //TODO
++               acc.Item
++            );
++      if( meta_data_cfg )
++      {
++         md->Desc.Explanation
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getExplanation().c_str()
++               );
++         md->Desc.Rights
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getRights().c_str()
++               );
++         //
++         cfgMetaNumber const * const meta_number_cfg =
++            dynamic_cast<cfgMetaNumber const *>( meta_data_cfg );
++         if( meta_number_cfg )
++         {
++            md->MinValue = meta_number_cfg->getMinValue();
++            md->MaxValue = meta_number_cfg->getMaxValue();
++         }
++         else
++         {
++            writeTrace
++            (
++               SecondaryRuntime_HERE,
++               SCN2 "getMeta - notFound exception."
++            );
++            throw Config::Node::notFound();
++         }
++      }
++      else
++      {
++         // No meta data available, probably just initialized.
++         // Fake an explanation.
++         md->Desc.Explanation
++                  = CORBA::string_dup
++                     (
++                        "ENTRY NOT YET CREATED!"
++                     );
++         // Fake the access rights
++         md->Desc.Rights
++                  = CORBA::string_dup
++                    (
++                       "rl"
++                    );
++         md->MinValue = 0;
++         md->MaxValue = 0;
++      }
++      return md;
++   }
++
++
+    CORBA::Long getWithMeta
+       (
+          Config::access const &         acc,
+@@ -78,73 +140,7 @@ class cfgCorba_ServiceNumber2 :
+          //
+          // Metadata
+          //
+-         Config::Number2::metaData * md = new Config::Number2::metaData;
+-         cfgMeta const * const meta_data_cfg
+-            = M_ConfigEntity->itemGetMeta
+-               (
+-                  acc.Authorization,
+-                  cfgEntity::PURP_DIRGET, //TODO
+-                  acc.Item
+-               );
+-         if( meta_data_cfg )
+-         {
+-            md->Desc.Explanation
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getExplanation().c_str()
+-                  );
+-            md->Desc.Rights
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getRights().c_str()
+-                  );
+-            //
+-            try
+-            {
+-               cfgMetaNumber const * const meta_number_cfg =
+-                  dynamic_cast<cfgMetaNumber const *>( meta_data_cfg );
+-               if( meta_number_cfg )
+-               {
+-                  md->MinValue = meta_number_cfg->getMinValue();
+-                  md->MaxValue = meta_number_cfg->getMaxValue();
+-               }
+-               else
+-               {
+-                  writeTrace
+-                  (
+-                     SecondaryRuntime_HERE,
+-                     SCN2 "getWithMeta - NULL."
+-                  );
+-               }
+-            }
+-            catch( ... )
+-            {
+-               writeTrace
+-               (
+-                  SecondaryRuntime_HERE,
+-                  SCN2 "getWithMeta - exception."
+-               );
+-            }
+-         }
+-         else
+-         {
+-            // No meta data available, probably just initialized.
+-            // Fake an explanation.
+-            md->Desc.Explanation
+-                     = CORBA::string_dup
+-                        (
+-                           "ENTRY NOT YET CREATED!"
+-                        );
+-            // Fake the access rights
+-            md->Desc.Rights
+-                     = CORBA::string_dup
+-                       (
+-                          "rl"
+-                       );
+-            md->MinValue = 0;
+-            md->MaxValue = 0;
+-         }
+-         meta_data_out = md;
++         meta_data_out = getMeta( acc );
+          //
+          // Value
+          //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+index af8c858e..503e45a1 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -161,6 +161,79 @@ class cfgCorba_ServiceText2 :
+       );
+    }
+ 
++
++   Config::Text2::metaData * getMeta( Config::access const & acc )
++   {
++      Config::Text2::metaData * md = new Config::Text2::metaData;
++      cfgMeta const * const meta_data_cfg
++         = M_ConfigEntity->itemGetMeta
++            (
++               acc.Authorization,
++               cfgEntity::PURP_DIRGET, //TODO
++               acc.Item
++            );
++      if( meta_data_cfg )
++      {
++         md->Desc.Explanation
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getExplanation().c_str()
++               );
++         md->Desc.Rights
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getRights().c_str()
++               );
++         //
++         cfgMetaText const * const meta_text_cfg =
++            dynamic_cast<cfgMetaText const *>( meta_data_cfg );
++         if( meta_text_cfg )
++         {
++            md->MinLength = meta_text_cfg->getMinLength();
++            md->MaxLength = meta_text_cfg->getMaxLength();
++            md->RegEx = CORBA::string_dup
++                           (
++                              meta_text_cfg->getRegex()
++                           );
++            md->Semantic = static_cast<Config::semanticType>
++                           (
++                              meta_text_cfg->getSemantic()
++                           );
++         }
++         else
++         {
++            writeTrace
++            (
++               SecondaryRuntime_HERE,
++               SCT2 "getMeta - notFound exception."
++            );
++            throw Config::Node::notFound();
++         }
++      }
++      else
++      {
++         // No meta data available, probably just initialized.
++         // Fake an explanation.
++         md->Desc.Explanation
++                  = CORBA::string_dup
++                     (
++                        "ENTRY NOT YET CREATED!"
++                     );
++         // Fake the access rights
++         md->Desc.Rights
++                  = CORBA::string_dup
++                    (
++                       "rl"
++                    );
++         md->MinLength = 0;
++         md->MaxLength = 0;
++         md->RegEx = CORBA::string_dup( "" );
++         md->Semantic = Config::ST_NONE;
++      }
++      return md;
++   }
++
++
+    char * getWithMeta
+       (
+          Config::access const &         acc,
+@@ -179,83 +252,7 @@ class cfgCorba_ServiceText2 :
+          //
+          // Metadata
+          //
+-         Config::Text2::metaData * md = new Config::Text2::metaData;
+-         cfgMeta const * const meta_data_cfg
+-            = M_ConfigEntity->itemGetMeta
+-               (
+-                  acc.Authorization,
+-                  cfgEntity::PURP_DIRGET, //TODO
+-                  acc.Item
+-               );
+-         if( meta_data_cfg )
+-         {
+-            md->Desc.Explanation
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getExplanation().c_str()
+-                  );
+-            md->Desc.Rights
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getRights().c_str()
+-                  );
+-            //
+-            try
+-            {
+-               cfgMetaText const * const meta_text_cfg =
+-                  dynamic_cast<cfgMetaText const *>( meta_data_cfg );
+-               if( meta_text_cfg )
+-               {
+-                  md->MinLength = meta_text_cfg->getMinLength();
+-                  md->MaxLength = meta_text_cfg->getMaxLength();
+-                  md->RegEx = CORBA::string_dup
+-                                 (
+-                                    meta_text_cfg->getRegex()
+-                                 );
+-                  md->Semantic = static_cast<Config::semanticType>
+-                                 (
+-                                    meta_text_cfg->getSemantic()
+-                                 );
+-               }
+-               else
+-               {
+-                  writeTrace
+-                  (
+-                     SecondaryRuntime_HERE,
+-                     SCT2 "getWithMeta - NULL."
+-                  );
+-               }
+-            }
+-            catch( ... )
+-            {
+-               writeTrace
+-               (
+-                  SecondaryRuntime_HERE,
+-                  SCT2 "getWithMeta - exception."
+-               );
+-            }
+-         }
+-         else
+-         {
+-            // No meta data available, probably just initialized.
+-            // Fake an explanation.
+-            md->Desc.Explanation
+-                     = CORBA::string_dup
+-                        (
+-                           "ENTRY NOT YET CREATED!"
+-                        );
+-            // Fake the access rights
+-            md->Desc.Rights
+-                     = CORBA::string_dup
+-                       (
+-                          "rl"
+-                       );
+-            md->MinLength = 0;
+-            md->MaxLength = 0;
+-            md->RegEx = CORBA::string_dup( "" );
+-            md->Semantic = Config::ST_NONE;
+-         }
+-         meta_data_out = md;
++         meta_data_out = getMeta( acc );
+          //
+          // Value
+          //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+index 4408945b..6b8a1f98 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+@@ -167,6 +167,84 @@ class cfgCorba_ServiceTextlist2 :
+       );
+    }
+ 
++
++   Config::Textlist2::metaData * getMeta( Config::access const & acc )
++   {
++      Config::Textlist2::metaData * md =
++         new Config::Textlist2::metaData;
++      cfgMeta const * const meta_data_cfg
++         = M_ConfigEntity->itemGetMeta
++            (
++               acc.Authorization,
++               cfgEntity::PURP_DIRGET, //TODO
++               acc.Item
++            );
++      if( meta_data_cfg )
++      {
++         md->Desc.Explanation
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getExplanation().c_str()
++               );
++         md->Desc.Rights
++            = CORBA::string_dup
++               (
++                  meta_data_cfg->getRights().c_str()
++               );
++         //
++         cfgMetaTextlist const * const cfg_meta_textlist =
++            dynamic_cast<cfgMetaTextlist const *>( meta_data_cfg );
++         if( cfg_meta_textlist )
++         {
++            md->MaxLength = cfg_meta_textlist->getMaxLength();
++            md->MinLength = cfg_meta_textlist->getMinLength();
++            md->MaxNumber = cfg_meta_textlist->getMaxNumber();
++            md->MinNumber = cfg_meta_textlist->getMinNumber();
++            md->RegEx = CORBA::string_dup
++                           (
++                              cfg_meta_textlist->getRegex()
++                           );
++            md->Semantic = static_cast<Config::semanticType>
++                           (
++                              cfg_meta_textlist->getSemantic()
++                           );
++         }
++         else
++         {
++            writeTrace
++            (
++               SecondaryRuntime_HERE,
++               SCTL2 "getMeta - notFound exception."
++            );
++            throw Config::Node::notFound();
++         }
++      }
++      else
++      {
++         // No meta data available, probably just initialized.
++         // Fake an explanation.
++         md->Desc.Explanation
++                  = CORBA::string_dup
++                     (
++                        "ENTRY NOT YET CREATED!"
++                     );
++         // Fake the access rights
++         md->Desc.Rights
++                  = CORBA::string_dup
++                    (
++                       "rl"
++                    );
++         md->MaxLength = 0;
++         md->MinLength = 0;
++         md->MaxNumber = 0;
++         md->MinNumber = 0;
++         md->RegEx = CORBA::string_dup( "" );
++         md->Semantic = Config::ST_NONE;
++      }
++      return md;
++   }
++
++
+    Config::Textlist::strings * getWithMeta
+       (
+          Config::access const &                 acc,
+@@ -185,88 +263,7 @@ class cfgCorba_ServiceTextlist2 :
+          //
+          // Metadata
+          //
+-         Config::Textlist2::metaData * md =
+-            new Config::Textlist2::metaData;
+-         cfgMeta const * const meta_data_cfg
+-            = M_ConfigEntity->itemGetMeta
+-               (
+-                  acc.Authorization,
+-                  cfgEntity::PURP_DIRGET, //TODO
+-                  acc.Item
+-               );
+-         if( meta_data_cfg )
+-         {
+-            md->Desc.Explanation
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getExplanation().c_str()
+-                  );
+-            md->Desc.Rights
+-               = CORBA::string_dup
+-                  (
+-                     meta_data_cfg->getRights().c_str()
+-                  );
+-            //
+-            try
+-            {
+-               cfgMetaTextlist const * const cfg_meta_textlist =
+-                  dynamic_cast<cfgMetaTextlist const *>( meta_data_cfg );
+-               if( cfg_meta_textlist )
+-               {
+-                  md->MaxLength = cfg_meta_textlist->getMaxLength();
+-                  md->MinLength = cfg_meta_textlist->getMinLength();
+-                  md->MaxNumber = cfg_meta_textlist->getMaxNumber();
+-                  md->MinNumber = cfg_meta_textlist->getMinNumber();
+-                  md->RegEx = CORBA::string_dup
+-                                 (
+-                                    cfg_meta_textlist->getRegex()
+-                                 );
+-                  md->Semantic = static_cast<Config::semanticType>
+-                                 (
+-                                    cfg_meta_textlist->getSemantic()
+-                                 );
+-               }
+-               else
+-               {
+-                  writeTrace
+-                  (
+-                     SecondaryRuntime_HERE,
+-                     SCTL2 "getWithMeta - NULL."
+-                  );
+-               }
+-            }
+-            catch( ... )
+-            {
+-               writeTrace
+-               (
+-                  SecondaryRuntime_HERE,
+-                  SCTL2 "getWithMeta - exception."
+-               );
+-            }
+-         }
+-         else
+-         {
+-            // No meta data available, probably just initialized.
+-            // Fake an explanation.
+-            md->Desc.Explanation
+-                     = CORBA::string_dup
+-                        (
+-                           "ENTRY NOT YET CREATED!"
+-                        );
+-            // Fake the access rights
+-            md->Desc.Rights
+-                     = CORBA::string_dup
+-                       (
+-                          "rl"
+-                       );
+-            md->MaxLength = 0;
+-            md->MinLength = 0;
+-            md->MaxNumber = 0;
+-            md->MinNumber = 0;
+-            md->RegEx = CORBA::string_dup( "" );
+-            md->Semantic = Config::ST_NONE;
+-         }
+-         meta_data_out = md;
++         meta_data_out = getMeta( acc );
+          //
+          // Value
+          //
+diff --git a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+index a57a20de..f853a27c 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+@@ -30,9 +30,6 @@
+ module Config
+ {
+ 
+-    const string interface_version = "2.0";
+-
+-
+     /** This interface can be used by client applications to be informed
+      *  about change events.
+      */
+@@ -41,7 +38,7 @@ module Config
+ 
+         /** This method is called whenever the value of a configuration
+          *  item has changed.
+-         *  @param Item        - The name of the configuration item
++         *  @param Item:         The name of the configuration item
+          */
+         void valueChanged( in string Item );
+ 
+@@ -115,6 +112,9 @@ module Config
+     interface Node
+     {
+ 
++         const string interface_version = "2.0";
++
++
+         /** Is raised, when a configuration item requested has not been found. */
+         exception  notFound        {};
+ 
+@@ -156,39 +156,39 @@ module Config
+ 
+         /** Adds a change listener.
+          *
+-         *  @param Acc          - The item to be monitored.
+-         *  @param L            - The listener to be used upon change.
++         *  @param Acc:           The item to be monitored.
++         *  @param L:             The listener to be used upon change.
+          */
+         void addChangeListener( in access Acc, in changeListener L )
+             raises( notAuthorized );
+ 
+         /** Removes a change listener from all items.
+          *
+-         *  @param L            - The listener to be removed.
++         *  @param L:             The listener to be removed.
+          */
+         void removeChangeListener( in changeListener L )
+             raises( notAuthorized );
+ 
+         /** Removes a change listener from a specific item.
+          *
+-         *  @param L.           - The listener to be removed.
+-         *  @param Itm.         - The item.
++         *  @param L:             The listener to be removed.
++         *  @param Itm:           The item.
+          */
+         void removeChangeListenerItem( in changeListener L, in string Itm )
+             raises( notAuthorized );
+ 
+         /** Gets The type of the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The type of the item.
++         *  @return:              The type of the item.
+          */
+         itemType getItemType( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Get the access rights for an item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+          */
+         string getRights( in access Acc )
+@@ -196,10 +196,10 @@ module Config
+ 
+         /** Set the access rights for an item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+          *
+-         *  @param Rights       - The new rights string.
++         *  @param Rights:        The new rights string.
+          */
+         void setRights( in access Acc, in string Rights )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+@@ -213,11 +213,11 @@ module Config
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param DefaultValue - The default value.
+-         *  @param MaxLength    - The maximum string length.
++         *  @param Desc:          The description.
++         *  @param DefaultValue:  The default value.
++         *  @param MaxLength:     The maximum string length.
+          */
+         void create
+             (
+@@ -228,37 +228,37 @@ module Config
+ 
+         /** Gets the value of a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The current value.
++         *  @return:              The current value.
+          */
+         string get( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Sets a new value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The new value.
++         *  @param Value:         The new value.
+          */
+         void set( in access Acc, in string Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets an initial value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The initial value.
++         *  @param Value:         The initial value.
+          */
+         void setInitial( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param MaxLength    - The maximum string length.
++         *  @param Desc:          The description.
++         *  @param MaxLength:     The maximum string length.
+          */
+         void setMeta
+             (
+@@ -291,10 +291,10 @@ module Config
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param MetaData     - The meta-data.
+-         *  @param DefaultValue - The default value.
++         *  @param MetaData:      The meta-data.
++         *  @param DefaultValue:  The default value.
+          */
+         void create2
+             (
+@@ -303,21 +303,30 @@ module Config
+             )
+             raises( alreadyExists, noConfiguration, notCreated );
+ 
++        /** Gets the meta-data for a configuration item.
++         *
++         *  @param Acc:           The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @return:              The meta-data.
++         */
++         metaData getMeta( in access Acc )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+         /** Gets the value and meta-data a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param MetaData     - Returns the meta-data.
+-         *  @return             - The current value.
++         *  @param MetaData:      Returns the meta-data.
++         *  @return:              The current value.
+          */
+          string getWithMeta( in access Acc, out metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param MetaData     - The value and meta data.
++         *  @param MetaData:      The value and meta data.
+          */
+         void setMeta2( in access Acc, in metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+@@ -334,47 +343,47 @@ module Config
+ 
+         /** Adds a string to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The string to add.
++         *  @param Value:         The string to add.
+          */
+         void add( in access Acc, in string Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Adds a string (initially) to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The string to add.
++         *  @param Value:         The string to add.
+          */
+         void addInitial( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Adds a string unique to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The string to add.
++         *  @param Value:         The string to add.
+          */
+         void addU( in access Acc, in string Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Adds a string (initially) unique to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The string to add.
++         *  @param Value:         The string to add.
+          */
+         void addUInitial( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param DefaultValue - The default value.
+-         *  @param MaxLength    - The maximum string length.
++         *  @param Desc:          The description.
++         *  @param DefaultValue:  The default value.
++         *  @param MaxLength:     The maximum string length.
+          */
+         void create
+             (
+@@ -385,37 +394,37 @@ module Config
+ 
+         /** Gets the value of a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The current value.
++         *  @return:              The current value.
+          */
+         strings get( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Sets a new value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The new value.
++         *  @param Value:         The new value.
+          */
+         void set( in access Acc, in strings Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets an initial value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The initial value.
++         *  @param Value:         The initial value.
+          */
+         void setInitial( in access Acc, in strings Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param MaxLength    - The maximum string length.
++         *  @param Desc:          The description.
++         *  @param MaxLength:     The maximum string length.
+          */
+         void setMeta
+             (
+@@ -450,10 +459,10 @@ module Config
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param MetaData     - The meta-data.
+-         *  @param DefaultValue - The default value.
++         *  @param MetaData:      The meta-data.
++         *  @param DefaultValue:  The default value.
+          */
+         void create2
+             (
+@@ -462,21 +471,30 @@ module Config
+             )
+             raises( alreadyExists, noConfiguration, notCreated );
+ 
++        /** Gets the meta-data for a configuration item.
++         *
++         *  @param Acc:           The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @return:              The meta-data.
++         */
++         metaData getMeta( in access Acc )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+         /** Gets the value and meta-data a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param MetaData     - Returns the meta-data.
+-         *  @return             - The current value.
++         *  @param MetaData:      Returns the meta-data.
++         *  @return:              The current value.
+          */
+          strings getWithMeta( in access Acc, out metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param MetaData     - The value and meta data.
++         *  @param MetaData:      The value and meta data.
+          */
+         void setMeta2( in access Acc, in metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+@@ -500,12 +518,12 @@ module Config
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param DefaultValue - The default value.
+-         *  @param MinValue     - The minimum value.
+-         *  @param MaxValue     - The maximum value.
++         *  @param Desc:          The description.
++         *  @param DefaultValue:  The default value.
++         *  @param MinValue:      The minimum value.
++         *  @param MaxValue:      The maximum value.
+          */
+         void create
+             (
+@@ -516,47 +534,47 @@ module Config
+ 
+         /** Gets the value of a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The current value.
++         *  @return:              The current value.
+          */
+         long get( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Increment and return the new value.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Diff         - The increment to add (may be negative).
++         *  @param Diff:          The increment to add (may be negative).
+          */
+         long incrementGet( in access Acc, in long Diff )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets a new value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The new value.
++         *  @param Value:         The new value.
+          */
+         void set( in access Acc, in long Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets an initial value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The initial value.
++         *  @param Value:         The initial value.
+          */
+         void setInitial( in access Acc, in long Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param MinValue     - The minimum value.
+-         *  @param MaxValue     - The maximum value.
++         *  @param Desc:          The description.
++         *  @param MinValue:      The minimum value.
++         *  @param MaxValue:      The maximum value.
+          */
+         void setMeta
+             (
+@@ -584,21 +602,30 @@ module Config
+             long                MaxValue;       /**< max number in list */
+         };
+ 
++        /** Gets the meta-data for a configuration item.
++         *
++         *  @param Acc:           The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @return:              The meta-data.
++         */
++         metaData getMeta( in access Acc )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
+         /** Gets the value and meta-data a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param MetaData     - Returns the meta-data.
+-         *  @return             - The current value.
++         *  @param MetaData:      Returns the meta-data.
++         *  @return:              The current value.
+          */
+          long getWithMeta( in access Acc, out metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param MetaData     - The value and meta data.
++         *  @param MetaData:      The value and meta data.
+          */
+         void setMeta2( in access Acc, in metaData MetaData )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+@@ -630,11 +657,11 @@ module Config
+ 
+         /** Creates a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param DefaultIndex - The default value index.
+-         *  @param Values       - The list of possible values.
++         *  @param Desc:          The description.
++         *  @param DefaultIndex:  The default value index.
++         *  @param Values:        The list of possible values.
+          */
+         void create
+             (
+@@ -645,55 +672,55 @@ module Config
+ 
+         /** Gets the index value of a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The current value index.
++         *  @return:              The current value index.
+          */
+         long get( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Gets the string value of a configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The current value string.
++         *  @return:              The current value string.
+          */
+         string getString( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Ses a new index value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Index        - The new value index.
++         *  @param Index:         The new value index.
+          */
+         void set( in access Acc, in long Index )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets a new string value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The new value string.
++         *  @param Value:         The new value string.
+          */
+         void setString( in access Acc, in string Value )
+             raises( noConfiguration, notAuthorized, notFound, outOfRange, wrongParam );
+ 
+         /** Sets an initial value to the configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @param Value        - The initial value string.
++         *  @param Value:         The initial value string.
+          */
+         void setInitialString( in access Acc, in string Value )
+             raises( alreadyExists, noConfiguration, wrongParam );
+ 
+         /** Set new meta-data for an existing configuration item.
+          *
+-         *  @param Acc          - The configuration access, contains the item name and
++         *  @param Acc:           The configuration access, contains the item name and
+          *                        the creator authorization.
+-         *  @param Desc         - The description.
+-         *  @param Values       - The list of possible values.
++         *  @param Desc:          The description.
++         *  @param Values:        The list of possible values.
+          */
+         void setMeta
+             (
+@@ -743,16 +770,16 @@ module Config
+ 
+         /** Gets the content of a configuration directory.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+-         *  @return             - The configuration directory.
++         *  @return:              The configuration directory.
+          */
+         dir get( in access Acc )
+             raises( noConfiguration, notAuthorized, notFound, wrongParam );
+ 
+         /** Erase an entry from the configuration.
+          *
+-         *  @param Acc          - The configuration access, contains item name and the
++         *  @param Acc:           The configuration access, contains item name and the
+          *                        requester authorization.
+          */
+         void erase( in access Acc )
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,95 @@
+From 835cb9a71c2aec166e09d2333620d93e2345b0be Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 15 Feb 2022 11:25:53 +0000
+Subject: [PATCH 1056/1076] MANTIS 0062279 changed: DeskoPentaAssureId with
+ ChipData
+
+massai_systools.lib
+V1.0.0.43
+- mSysSmartCardReader check if SCardAccessStartedEvent is valid
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1700 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp           |  8 ++++++--
+ .../cpp/Systools/src/mSysSmartCardReaderW32.cpp     | 13 +++++++++++--
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index c74eb651..86c4a706 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 42);
++VERSION_ID_DT(systools, 1, 0, 0, 43);
+ 
+ /*!
+ \file
+@@ -8,12 +8,16 @@ VERSION_ID_DT(systools, 1, 0, 0, 42);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.42
++@version 1.0.0.43
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.43
++\li changed - SteT Mantis 0062279: DeskoPentaAssureId with ChipData
++- mSysSmartCardReader check if SCardAccessStartedEvent is valid
++
+ \version 1.0.0.42
+ \li 22.03.2021
+ \li changed - SteT Mantis 0060292: mstarter: shutdown plattform on kiosk shutdown
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+index 116ae2ef..c16b11e1 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+@@ -68,6 +68,7 @@ namespace
+       virtual ~CardServiceStart();
+ 
+       bool isStarted();
++      bool isValid();
+       virtual const Internal& getInternal() const;
+ 
+     private:
+@@ -214,7 +215,7 @@ namespace
+     if(handle.handle == 0)
+     {
+       mSysError::SystemErrorCode result = mSysError::getErrorCode();
+-      trc.writeTrace(MajorError_HERE, "SCardAccessStartedEvent(%d)(%s)",
++      trc.writeTrace(MajorError_HERE, "we must poll for start of smart card resource manager because; the SmartCardSCardAccessStartedEvent is not valid: (%d)(%s)",
+         result, mSysError::getErrorText(result).c_str());
+     }
+   }
+@@ -229,6 +230,11 @@ namespace
+     return WaitForSingleObject(handle.handle, 0) == WAIT_OBJECT_0;
+   }
+ 
++  bool CardServiceStart::isValid()
++  {
++    return handle.handle != 0;
++  }
++
+   const Internal& CardServiceStart::getInternal() const
+   {
+     return handle;
+@@ -820,7 +826,10 @@ namespace
+   {
+     SimpleSynchronize wait(trc);
+     wait.add(&notifyStop);
+-    wait.add(&serviceStart);
++    if(serviceStart.isValid())
++    {
++      wait.add(&serviceStart);
++    }
+     wait.wait(WAIT_TIMEOUT_MS);
+     if(serviceStart.isStarted())
+     {
+-- 
+2.41.0.windows.1
+

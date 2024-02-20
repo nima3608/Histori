@@ -1,0 +1,122 @@
+From 72fb7647df2e77152d34a95690dd1780930fb85a Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 15 Apr 2015 15:21:13 +0000
+Subject: [PATCH 0660/1076] MANTIS 36066 Mantis 36066: Bagtag device never
+ recovered after Comms or Power Error - extend registry lookup to find
+ USB-comports not only in "serenum", but also in "usbser" registry subsection.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@851 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/tRexLookupComport.cpp    | 44 ++++++++++---------
+ 1 file changed, 24 insertions(+), 20 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
+index 0c9177ea..dc45ed42 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/tRexLookupComport.cpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2008-2010 MATERNA Information & Communications
++ * Copyright (c) 2008-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -22,7 +22,6 @@ namespace
+ {
+ 
+ 
+-
+    /**
+     *
+     * Parameter class define comport-lookup parameters in the tRex user
+@@ -76,8 +75,7 @@ namespace
+       }
+    private:
+       comportParam();
+-   };
+-
++   }; // class comportParam
+ 
+ 
+    /**
+@@ -115,8 +113,7 @@ namespace
+             More = false;
+          }
+       }
+-   }
+-
++   } // query_serport()
+ 
+ 
+    /**
+@@ -160,8 +157,7 @@ namespace
+             More = false;
+          }
+       }
+-   }
+-
++   } // query_serdevice()
+ 
+ 
+    /**
+@@ -237,11 +233,18 @@ namespace
+             More = false;
+          }
+       }
+-   }
++   } // query_serenum()
+ 
+ 
++   char const reg_path_serenum[] =
++      "SYSTEM\\CurrentControlSet\\Services\\serenum\\Enum";
++
++
++   char const reg_path_usbser[] =
++      "SYSTEM\\CurrentControlSet\\Services\\usbser\\Enum";
+ 
+-}
++
++} // namespace
+ 
+ 
+ 
+@@ -254,11 +257,13 @@ void tRexLookupComport( comports & Dst, std::string const & DeviceKey )
+ {
+    std::string Comport;
+    comportParam Param( &Dst, &DeviceKey, 0, false );
+-   Param.access
+-      (
+-         "SYSTEM\\CurrentControlSet\\Services\\serenum\\Enum",
+-         query_serenum
+-      );
++   // Look in "serenum" subsection
++   Param.access( reg_path_serenum, query_serenum );
++   if( Comport.empty() )
++   {
++      // Look also in "usbser" subsection
++      Param.access( reg_path_usbser, query_serenum );
++   }
+ }
+ 
+ 
+@@ -271,11 +276,10 @@ void tRexLookupComport( comports & Dst, std::string const & DeviceKey )
+ void tRexLookupComport( std::ostream & Log )
+ {
+    comportParam Param( 0, 0, &Log, false );
+-   Param.access
+-      (
+-         "SYSTEM\\CurrentControlSet\\Services\\serenum\\Enum",
+-         query_serenum
+-      );
++   // Look in "serenum" subsection
++   Param.access( reg_path_serenum, query_serenum );
++   // Look also in "usbser" subsection
++   Param.access( reg_path_usbser, query_serenum );
+ }
+ 
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,269 @@
+From 9014d6bd6df9c38a1a551f6e0060c682beaba115 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 30 Oct 2018 09:51:39 +0000
+Subject: [PATCH 0929/1077] MANTIS 0052268 Installer_CustomAction: use new
+ CFGValues functionality removefromlist
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1390 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |   4 +-
+ .../src/MConfig_CustomAction.cpp              | 134 ++++++++----------
+ 2 files changed, 65 insertions(+), 73 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index b5c5cb88..9a0c2211 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,17
+-#define FILE_VER_STR     "FileVersion", "1.0.0.17\0"
++#define FILE_VER_BIN     1,0,0,18
++#define FILE_VER_STR     "FileVersion", "1.0.0.18\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 027877c6..1f622f82 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -40,11 +40,11 @@ typedef std::set<std::wstring> TUNIQUESET;
+ #define CFGVALUES_TIMEOUT_MS 10*1000
+ 
+ #define DEL_CFG_FILE_NAME "del_cfg.txt"
+-#define  SETINITIAL_FILE_NAME "setinitial_cfg.txt"
+-#define  AUTOINITIAL_FILE_NAME "autoinitial_cfg.txt"
+-#define  SET_ADDLIST_FILE_NAME "set_addlist_cfg.txt"
+-#define  SET_ADDLISTUNIQUE_FILE_NAME "set_addlistunique_cfg.txt"
+-#define  SET_FILE_NAME "set_cfg.txt"
++#define SETINITIAL_FILE_NAME "setinitial_cfg.txt"
++#define AUTOINITIAL_FILE_NAME "autoinitial_cfg.txt"
++#define SET_FILE_NAME "set_cfg.txt"
++
++#define CFGTEXTLISTTOKEN L"TEXTLIST"
+ 
+ class wstrBuff
+ {
+@@ -138,11 +138,7 @@ std::wstring getCADateTimeInfo(DATETIME_TYPE infoType)
+   time_t rawtime;
+   time (&rawtime);
+   struct tm saveTime;
+-  struct tm* pST= localtime(&rawtime);
+-  if(pST)
+-  {
+-    saveTime= *pST;
+-  }
++  errno_t err = localtime_s(&saveTime,&rawtime);
+ 
+   if(infoType == DTT_DATETIME || infoType == DTT_DATE)
+     mtstamp << std::setfill(L'0')<<std::setw(4)<<(saveTime.tm_year%5000)+1900 << std::setfill(L'0')<<std::setw(2)<< (saveTime.tm_mon%12)+1 << std::setfill(L'0')<<std::setw(2)<< (saveTime.tm_mday%32);
+@@ -1477,11 +1473,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ReplaceTextInFile(MSIHANDLE hI
+   time_t rawtime;
+   time (&rawtime);
+   struct tm saveTime;
+-  struct tm* pST= localtime(&rawtime);
+-  if(pST)
+-  {
+-    saveTime= *pST;
+-  }
++  errno_t err = localtime_s(&saveTime,&rawtime);
+ 
+   mtstamp << "." << std::setfill('0')<<std::setw(4)<<(saveTime.tm_year%5000)+1900 << std::setfill('0')<<std::setw(2)<< (saveTime.tm_mon%12)+1 << std::setfill('0')<<std::setw(2)<< (saveTime.tm_mday%32) << "_" <<
+              std::setfill('0')<<std::setw(2)<< saveTime.tm_hour << std::setfill('0')<<std::setw(2)<< saveTime.tm_min << std::setfill('0')<<std::setw(2)<< saveTime.tm_sec;
+@@ -1714,14 +1706,6 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+   cmdline.append(ToWiden(AUTOINITIAL_FILE_NAME "\" -autoinitial"));
+   exec_commandline(hInstall,cmdline);
+ 
+-  cmdline.assign(tmp_cmdline);
+-  cmdline.append(ToWiden(SET_ADDLIST_FILE_NAME "\" -autoinitial -addtolist"));
+-  exec_commandline(hInstall,cmdline);
+-
+-  cmdline.assign(tmp_cmdline);
+-  cmdline.append(ToWiden(SET_ADDLISTUNIQUE_FILE_NAME "\" -autoinitial -addtolistunique"));
+-  exec_commandline(hInstall,cmdline);
+-
+ LExit:
+   ReleaseStr(pwzCAData);
+ 
+@@ -1794,6 +1778,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+     cf_none,
+     cf_addtolist,
+     cf_addtolistunique,
++    cf_removefromlist
+   };
+ 
+   LPWSTR pwzPath = NULL, pwzType = NULL, pwzValue = NULL, pwzMeta = NULL, pwzFlags = NULL, pwzCondition = NULL;
+@@ -1889,22 +1874,26 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+       {
+         fDelete = true;
+       } else
+-      if(strFlags.compare(L"setinitial")!=std::wstring::npos)
++      if(strFlags.find(L"setinitial")!=std::wstring::npos)
+       {
+         fCfgSet = cf_setinitial;
+       } else
+-      if(strFlags.compare(L"autoinitial")!=std::wstring::npos)
++      if(strFlags.find(L"autoinitial")!=std::wstring::npos)
+       {
+         fCfgSet = cf_autoinitial;
+       };
+ 
+-      if(strFlags.compare(L"addtolistunique")!=std::wstring::npos)
++      if(strFlags.find(L"addtolistunique")!=std::wstring::npos)
+       {
+         fCfgSetList = cf_addtolistunique;
+       } else
+-      if(strFlags.compare(L"addtolist")!=std::wstring::npos)
++      if(strFlags.find(L"addtolist")!=std::wstring::npos)
+       {
+         fCfgSetList = cf_addtolist;
++      }else
++      if(strFlags.find(L"removefromlist")!=std::wstring::npos)
++      {
++        fCfgSetList = cf_removefromlist;
+       }
+       dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] : " << pwzFlags << std::endl;
+       Log_Str(dbstrs);
+@@ -1921,7 +1910,6 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+        strbuf << wstrPath.c_str();
+     } else
+     {
+-
+       strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
+ 
+       hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
+@@ -1940,6 +1928,23 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+         dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+         Log_Str(dbstrs);
+       }
++      std::wstring wstrType(pwzType);
++      size_t foundTextList = wstrType.find(CFGTEXTLISTTOKEN);
++      if(foundTextList!=std::wstring::npos)
++      {
++        if(fCfgSetList == cf_addtolistunique)
++        {
++          strbuf << "action=\"addtolistunique\" ";
++        } else
++        if(fCfgSetList == cf_addtolist)
++        {
++          strbuf << "action=\"addtolist\" ";
++        } else
++        if(fCfgSetList == cf_removefromlist)
++        {
++          strbuf << "action=\"removefromlist\" ";
++        }
++      }
+     }
+     
+     dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
+@@ -1964,16 +1969,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+       cfg_file_name=AUTOINITIAL_FILE_NAME;
+     } else
+     {
+-      if(fCfgSetList==cf_addtolist)
+-      {
+-        cfg_file_name=SET_ADDLIST_FILE_NAME;
+-      }
+-      else if(fCfgSetList==cf_addtolistunique)
+-      {
+-        cfg_file_name=SET_ADDLISTUNIQUE_FILE_NAME;
+-      }
+-      else 
+-        cfg_file_name=SET_FILE_NAME;
++      cfg_file_name=SET_FILE_NAME;
+     }
+     std::string buf_filename(strPath);
+     buf_filename.append("\\");
+@@ -2085,10 +2081,6 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ClearTmpCfgfiles(MSIHANDLE hIn
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+   hr = clearTmpCfgFile(hInstall,strPath,std::string(AUTOINITIAL_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-  hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLIST_FILE_NAME));
+-    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+-  hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLISTUNIQUE_FILE_NAME));
+-    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+   hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_FILE_NAME));
+     ExitOnFailure(hr, "Failure while clearing temporary cfg files");
+ 
+@@ -2174,28 +2166,28 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_Feature, &pwzFeature);
+     ExitOnFailure(hr, "failed to get Feature from [FEATURE_TABLE_PROP] table");
+-  std::wstring wstrFeature(pwzFeature);
+-  size_t cutPos = wstrFeature.rfind(CFGFEATSEPERATOR);
+-  if(cutPos!=std::wstring::npos) wstrFeature=wstrFeature.erase(cutPos);
+-  dbstrs << L"Feature from [FEATURE_TABLE_PROP] Feature=" << pwzFeature << std::endl;
+-  Log_Str(dbstrs);
++    std::wstring wstrFeature(pwzFeature);
++    size_t cutPos = wstrFeature.rfind(CFGFEATSEPERATOR);
++    if(cutPos!=std::wstring::npos) wstrFeature=wstrFeature.erase(cutPos);
++    dbstrs << L"Feature from [FEATURE_TABLE_PROP] Feature=" << pwzFeature << std::endl;
++    Log_Str(dbstrs);
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_State, &pwzState);
+     ExitOnFailure(hr, "failed to get State from [FEATURE_TABLE_PROP] table");
+-  dbstrs << L"State from [FEATURE_TABLE_PROP] State=" << pwzState << std::endl;
+-  Log_Str(dbstrs);
+-
+-  if (pwzFeature && *pwzFeature)
+-  {
+-    std::wstring strState(pwzState);
+-    if(!strState.compare(L"ABSENT"))
+-      iState = INSTALLSTATE_ABSENT;
+-    else
+-      iState = INSTALLSTATE_LOCAL;
+-    UINT er = ::MsiSetFeatureState(hInstall, pwzFeature, iState );
+-    dbstrs << L"MsiSetFeatureState (" << pwzFeature << L"," << iState << L") ret=" << er << std::endl;
++    dbstrs << L"State from [FEATURE_TABLE_PROP] State=" << pwzState << std::endl;
+     Log_Str(dbstrs);
+-  }    
++
++    if (pwzFeature && *pwzFeature)
++    {
++      std::wstring strState(pwzState);
++      if(!strState.compare(L"ABSENT"))
++        iState = INSTALLSTATE_ABSENT;
++      else
++        iState = INSTALLSTATE_LOCAL;
++      UINT er = ::MsiSetFeatureState(hInstall, pwzFeature, iState );
++      dbstrs << L"MsiSetFeatureState (" << pwzFeature << L"," << iState << L") ret=" << er << std::endl;
++      Log_Str(dbstrs);
++    }    
+ 
+   }
+   if (hr == E_NOMOREITEMS)
+@@ -2430,20 +2422,20 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessSetCfgTableTable(MSIHAN
+ 
+     hr = WcaGetRecordFormattedString(hRec, cn_TableName, &pwzTableName);
+     ExitOnFailure(hr, "failed to get Propertyname from [TABLE_TABLE_PROP] table");
+-  std::wstring wstrPropname(pwzTableName);
+-  dbstrs << L"Propertyname from [TABLE_TABLE_PROP] Feature=" << pwzTableName << std::endl;
+-  Log_Str(dbstrs);
+ 
+-  if (pwzTableName && *pwzTableName )
+-  {
+-    HRESULT er = WcaSetProperty(L"CFG_TABLE_PROP",pwzTableName);
+-    dbstrs << L"WcaSetProperty (" << L"CFG_TABLE_PROP" << L"," << pwzTableName << L") ret=" << er << std::endl;
++    std::wstring wstrPropname(pwzTableName);
++    dbstrs << L"Propertyname from [TABLE_TABLE_PROP] Feature=" << pwzTableName << std::endl;
+     Log_Str(dbstrs);
+-  }
+-  else
+-    continue;
+-  ::MsiDoAction(hInstall,CA_NAMESETCFGTAB);
+ 
++    if (pwzTableName && *pwzTableName )
++    {
++      HRESULT er = WcaSetProperty(L"CFG_TABLE_PROP",pwzTableName);
++      dbstrs << L"WcaSetProperty (" << L"CFG_TABLE_PROP" << L"," << pwzTableName << L") ret=" << er << std::endl;
++      Log_Str(dbstrs);
++    }
++    else
++      continue;
++    ::MsiDoAction(hInstall,CA_NAMESETCFGTAB);
+   }
+   if (hr == E_NOMOREITEMS)
+       hr = S_OK;
+-- 
+2.41.0.windows.1
+

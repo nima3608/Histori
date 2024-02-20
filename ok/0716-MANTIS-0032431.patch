@@ -1,0 +1,426 @@
+From f246c46ae727eba283fce02fe929456e5607a2b4 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 22 Jan 2016 15:32:58 +0000
+Subject: [PATCH 0716/1077] MANTIS 0032431 -Added class for manipulating date
+ and time objects from boost -Added Notification interface to create
+ Notifications for Poco::NotificationQueue -Added SchedulerInterface -Added
+ ScheduledTask interface to schedule tasks with the SchedulerInterface
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@957 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/Notification.h       |  70 +++++++++++
+ .../Interfaces/inc/Tools/ScheduledTask.h      | 118 ++++++++++++++++++
+ .../Interfaces/inc/Tools/SchedulerInterface.h | 111 ++++++++++++++++
+ .../Interfaces/inc/Tools/dateTimeTools.h      |  77 ++++++++++++
+ 4 files changed, 376 insertions(+)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/SchedulerInterface.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/Notification.h b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+new file mode 100644
+index 00000000..3cbf1264
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+@@ -0,0 +1,70 @@
++//---------------------------------------------------------------------------
++//
++//  file:       Notification.h
++//
++//  purpose:    class definition: Notification
++//
++//  date:       21.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef NOTIFICATION_H
++#define NOTIFICATION_H
++
++//Poco includes
++#include "Poco/Notification.h"
++
++//Compiler includes
++#include <string>
++
++
++namespace MASSAI
++{
++  namespace Notification
++  {
++    typedef enum 
++    {
++      //Terminate the thread TODO
++      CMD_THREAD_SHUTDOWN_NOW,
++      
++      //Terminate the associated module
++      CMD_MODULE_TERMINATE
++      
++    } THREAD_MSG;
++
++    template <typename tempMsg>
++    class ThreadNotification : public Poco::Notification 
++    {
++    public:
++        ThreadNotification<tempMsg>(std::string info, std::string pID, tempMsg msg) :
++          m_info(info),
++          m_parentID(pID),
++          m_msg(msg)
++        {
++          TRACE(HERE,"Create Notification: ParentID[%s], Msg[%d], MsgInfo[%s]", pID.c_str(), msg, info.c_str());
++        }
++        
++        /**
++        * getter Methods
++        */
++        std::string       getInfo(){ return m_info; }
++        std::string       getId()  { return m_parentID; }
++        typename tempMsg  getMsg(){ return m_msg; }
++        
++        
++    private: 
++        std::string       m_info;
++
++        std::string       m_parentID;
++        
++        typename tempMsg  m_msg;
++    };
++  }
++}
++
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h b/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
+new file mode 100644
+index 00000000..66d275aa
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
+@@ -0,0 +1,118 @@
++//---------------------------------------------------------------------------
++//
++//  file:       ScheduledTask.h
++//
++//  purpose:    class definition: ScheduledTask
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef SCHEDULED_TASK_H
++#define SCHEDULED_TASK_H
++
++//Compiler includes
++#include <string>
++#include <time.h>
++#include <stdio.h>
++
++//Boost includes
++#include "boost/date_time/posix_time/posix_time.hpp"
++
++
++namespace MASSAI
++{
++  namespace Scheduler
++  {
++    struct UserInfo
++    {
++      std::string account;
++      std::string password;
++
++      UserInfo(std::string acc, std::string pw);
++    };
++    
++    
++    class Task
++    {
++    public:
++      /**
++      * Constructor
++      */
++      Task(std::string cmd, UserInfo userInfo);
++      
++      
++      /**
++      *   Destructor
++      */
++      virtual ~Task();
++      
++      
++      /**
++      * getter
++      */
++      std::string getCmd(){ return m_cmd; }
++      std::string getUserAccount(){ return m_userInfo.account; }
++      std::string getUserPassword(){ return m_userInfo.password; }
++      
++    private:
++      std::string   m_cmd;
++      
++      UserInfo      m_userInfo;
++    };
++  
++    class ScheduledTask
++    {
++    public:
++        /**
++        *   Constructor, builds as ScheduledTask object out of the following format:
++        *
++        *   
++        *   
++        *   @param hour:                The Hour for scheduling the task
++        *   @param min:                 The Minute for scheduling the task
++        *   @param delayRange:          The Delay in minutes for the intervall to schedule the cmd
++        *   @param scheduleFrequency:   The frequency for scheduling the task given in the format: 
++        *                               [dd;] | [last;] | [mon;|tue;|wed;|thu;|fri;|sat;|sun;]
++        *                               dd: The day of the Month
++        *                               last: The last day of Month
++        *                               mon,...: The day of Week
++        *                               If it is empty, the task is scheduled dayliy
++        *   @param task:                The task to schedule
++        */
++        ScheduledTask(long hour, long min, long delayRange, std::string scheduleFrequency, Task* task);
++
++
++        /**
++        *   getter
++        **/
++        boost::posix_time::time_duration    getTime(){ return m_executionTime; }
++        long                                getDelayRange(){ return m_delayRange; }
++        long                                getScheduleMonthly(){ return m_scheduleMonthly; }
++        long                                getScheduleWeekly(){ return m_scheduleWeekly; }
++        bool                                getScheduleDaily(){ return m_scheduleDaily; }
++        std::string                         getScheduleInfo(){ return m_scheduleInfo; }
++        Task*                               getTask(){ return m_task; }
++
++
++    private:
++        boost::posix_time::time_duration    m_executionTime;
++        
++        long                                m_delayRange;
++        long                                m_scheduleMonthly;
++        long                                m_scheduleWeekly;
++
++        bool                                m_scheduleDaily;
++        
++        std::string                         m_scheduleInfo;
++        
++        Task*                               m_task;
++    };
++  }
++}
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/SchedulerInterface.h b/SelfServiceCommon/Interfaces/inc/Tools/SchedulerInterface.h
+new file mode 100644
+index 00000000..823992f3
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/SchedulerInterface.h
+@@ -0,0 +1,111 @@
++//---------------------------------------------------------------------------
++//
++//  file:       SchedulerInterface.h
++//
++//  purpose:    class definition: SchedulerInterface
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef SCHEDULER_INTERFACE_H
++#define SCHEDULER_INTERFACE_H
++
++
++//MATERNA
++#include "Tools/ScheduledTask.h"
++
++//Compiler includes
++#include <list>
++
++//Poco includes
++#include "Poco/Runnable.h"
++#include "Poco/NotificationQueue.h"
++#include "Poco/Notification.h"
++
++
++namespace MASSAI
++{
++  namespace Scheduler
++  { 
++    class SchedulerInterface : public Poco::Runnable
++    {
++    public:
++        /**
++        *   Constructor
++        *
++        *   @param wait: Seconds to wait for frequent execution of scheduleTasks()
++        *   @param localqueue: The reference to the NotificationQueue for terminating the Thread
++        */
++	      SchedulerInterface(long m_wait, Poco::NotificationQueue* m_localQueue);
++        
++        
++        /**
++        *   Destructor
++        */
++	      virtual ~SchedulerInterface();
++
++
++        /**
++        * getter
++        */
++        std::list<ScheduledTask* >* getTaskList(){ return &m_taskList; }
++        
++
++        /**
++        *   Needs to be implemented from the Runnable interface.
++        *   Calls the "scheduleTasks()" Method, handles incomming messages 
++        *   and ensures that the Thread will terminate safety 
++        */
++        void run(); 
++        
++        
++    private:
++        long                              m_wait;
++
++        Poco::NotificationQueue*          m_localQueue; 
++
++        std::list<ScheduledTask* >        m_taskList;
++        
++
++        /**
++        *   Schedule the configured tasks
++        */
++        void scheduleTasks();
++        
++
++        /**
++        *   Checks if m_taskList should be refreshed. Needs to be implemented by subclasses
++        *
++        *   @return: "ture" make refresh, otherwise "false"
++        */
++        virtual bool shouldRefresh();
++
++        
++        /**
++        * Handle the execution of a task. Needs to be implemented by subclasses
++        *
++        * @param task: the task to execute
++        */
++        virtual void executeTask(MASSAI::Scheduler::Task* task);
++
++
++        /**
++        *   Refreshes m_taskList. Needs to be implemented by subclasses.
++        */
++        virtual void refreshList(); 
++
++
++        /**
++        *   Resets the list of commands to get scheduled. Needs to be implemented by subclasses.
++        */
++        virtual void deleteList();
++    };
++  }
++}
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h b/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
+new file mode 100644
+index 00000000..9102b71b
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/dateTimeTools.h
+@@ -0,0 +1,77 @@
++//---------------------------------------------------------------------------
++//
++//  file:       dateTimeTools.h
++//
++//  purpose:    class definition: DateTimeTools
++//
++//  date:       20.01.2016
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#ifndef DATE_TIME_TOOLS_H
++#define DATE_TIME_TOOLS_H
++
++//Boost includes
++#include "boost/date_time/posix_time/posix_time.hpp"
++#include "boost/date_time/gregorian/gregorian.hpp"
++
++//Compiler includes
++#include <string>
++
++
++namespace MASSAI
++{
++  class DateTimeTools
++  {
++  public:
++    /**
++    *   creates a time stamp with the actual date and time of the OS
++    */
++    static std::string timeStamp();
++
++
++    /**
++    *   creates a time stamp from the given date and time
++    */
++    static std::string timeStamp(boost::posix_time::time_duration time, boost::gregorian::date date);
++
++
++    /**
++    *   Returns the actual System-Time.
++    */
++    static boost::posix_time::time_duration getActualSystemTime();
++
++
++    /**
++    *   Returns the actual System-Date.
++    */
++    static boost::gregorian::date getActualSystemDate(); 
++    
++    
++    /**
++    *   Converts a Day in string-format to a Day in long-format
++    *
++    *   @param sDay:    The Day to convert
++    *
++    *   @return:        The Day in long format
++    **/
++    static long getDayOfWeekAsNumber(std::string sDay);
++    
++
++    /**
++    *   Converts a Day in long-format to a Day in string-format
++    *
++    *   @param lDay:    The Day to convert
++    *
++    *   @return:        The Day in string-format
++    **/
++    static std::string getDayOfWeekAsString(long lDay);
++  };
++}
++
++#endif
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

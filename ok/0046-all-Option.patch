@@ -1,0 +1,92 @@
+From a0c5ec9b23ba3c9422780323da7d896b58149647 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 5 Oct 2010 11:58:48 +0000
+Subject: [PATCH 0046/1077] -all Option
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@50 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/src/CfgErase.cpp      | 45 ++++++++++++++-----
+ 1 file changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgErase.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgErase.cpp
+index bbc4e01b..fef374db 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgErase.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgErase.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2006 MATERNA Information & Communications
++ * Copyright (c) 2006-2010 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -64,7 +64,8 @@ int main( int argc, char ** argv )
+          Host = CFGMGR_HOST;
+       }
+       char const * const DstItem = Arg.argument( 1 );
+-      if( DstItem && DstItem[0] )
++      bool const OptionAll = Arg.option( "ALL" );
++      if( OptionAll || ( DstItem && DstItem[0] ) )
+       {
+          //
+          // Item is specified
+@@ -83,13 +84,34 @@ int main( int argc, char ** argv )
+                << std::endl;
+             return 1;
+          }
+-         Config::access      SAcc;
+-         SAcc.Authorization = CORBA::string_dup( argv[0] );
+-         SAcc.Item = CORBA::string_dup( DstItem );
+-         DirProxy->erase( SAcc );
+-         std::cout
+-            << DSPLLIN "Erased [" << DstItem << "]"
+-            << std::endl;
++         if( OptionAll )
++         {
++            Config::access Acc;
++            // Top level directory
++            Acc.Item = CORBA::string_dup( "" );
++            Acc.Authorization = CORBA::string_dup( argv[0] );
++            Config::Directory::dir * Dir = DirProxy->get( Acc );
++            unsigned const DirEntries = Dir->length();
++            for( unsigned DirNdx=0; DirNdx<DirEntries; ++DirNdx )
++            {
++               Config::Directory::item Item = (*Dir)[DirNdx];
++               Config::access      SAcc;
++               SAcc.Authorization = CORBA::string_dup( argv[0] );
++               SAcc.Item = CORBA::string_dup( Item.Name );
++               DirProxy->erase( SAcc );
++            }
++            std::cout << DSPLLIN "Erased all" << std::endl;
++         }
++         else
++         {
++            Config::access      SAcc;
++            SAcc.Authorization = CORBA::string_dup( argv[0] );
++            SAcc.Item = CORBA::string_dup( DstItem );
++            DirProxy->erase( SAcc );
++            std::cout
++               << DSPLLIN "Erased [" << DstItem << "]"
++               << std::endl;
++         }
+       }
+       else
+       {
+@@ -99,10 +121,11 @@ int main( int argc, char ** argv )
+          std::cout
+             << "CfgErase Vers." << _atsaver + 22 << "\n"
+             << HINDENT1
+-               "Copyright (c) 2006 MATERNA Information & Communications\n"
++               "Copyright (c) 2006-2010"
++               " MATERNA Information & Communications\n"
+             << HINDENT1 "usage:"
+                " CfgErase"
+-               " [-host:<Config-host>] <item>\n"
++               " [-host:<Config-host>] { <item> | -all }\n"
+             << std::endl;
+       }
+       return 0;
+-- 
+2.41.0.windows.1
+

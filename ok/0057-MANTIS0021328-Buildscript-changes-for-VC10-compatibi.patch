@@ -1,0 +1,128 @@
+From 801ab0fd2864c734da8c63f91ad959af2c9a14b6 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Thu, 20 Oct 2011 15:08:08 +0000
+Subject: [PATCH 057/462] MANTIS0021328: Buildscript changes for VC10
+ compatibility
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@81 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             | 57 +++++++++++++++++++
+ SelfServiceBuild/Build/scripts/setenv.bat     | 14 ++++-
+ 2 files changed, 69 insertions(+), 2 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index aacf4f7..fc7e410 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -98,6 +98,52 @@ IDLFLAGS     = $(COMMONIDLFLAGS) -t $(_GEN) -Cw
+ 
+ !endif
+ 
++!if "$(TAO_VERSION)" == "2.0.0"
++TAO_DEFINES      = -D_TAO_
++IDLC             = $(ACE_ROOT)\bin\tao_idl.exe
++INC_ACETAO       = -I$(TAO_ROOT) -I$(ACE_ROOT)
++SYS_ACETAO       = $(ACE_ROOT)\lib\ace.lib \
++                   $(ACE_ROOT)\lib\tao.lib \
++                   $(ACE_ROOT)\lib\TAO_PortableServer.lib \
++                   $(ACE_ROOT)\lib\TAO_IORTable.lib \
++               $(ACE_ROOT)\lib\TAO_Valuetype.lib \
++               $(ACE_ROOT)\lib\TAO_Messaging.lib \
++               $(ACE_ROOT)\lib\TAO_AnyTypeCode.lib \
++               $(ACE_ROOT)\lib\TAO_PI.lib \
++               $(ACE_ROOT)\lib\TAO_CodecFactory.lib
++SYS_ACETAO_S     = $(ACE_ROOT)\lib\aces.lib \
++                   $(ACE_ROOT)\lib\taos.lib \
++                   $(ACE_ROOT)\lib\TAO_PortableServers.lib \
++                   $(ACE_ROOT)\lib\TAO_IORTables.lib \
++               $(ACE_ROOT)\lib\TAO_Valuetypes.lib \
++               $(ACE_ROOT)\lib\TAO_IORInterceptors.lib \
++               $(ACE_ROOT)\lib\TAO_ObjRefTemplates.lib \
++               $(ACE_ROOT)\lib\TAO_Messagings.lib \
++               $(ACE_ROOT)\lib\TAO_AnyTypeCodes.lib \
++               $(ACE_ROOT)\lib\TAO_PIs.lib \
++               $(ACE_ROOT)\lib\TAO_CodecFactorys.lib
++COMMONIDLFLAGS   = $(INC_COMMON_MASSAI_IDL) \
++                   $(INC_CUSS_MASSAI_IDL) \
++                   $(INC_CUSS_CUSS_IDL) \
++                   $(INC_ABLS_MASSAI_IDL) \
++                   -o $(_GEN) \
++                   -aw \
++                   -ic \
++                   -ci "c.i" \
++                   -si "s.i" \
++                   -ss "_skel.cpp" \
++                   -hs "_skel.h" \
++                   -sT "_skel_t.cpp" \
++                   -hT "_skel_t.h" \
++                   -cs ".cpp" \
++                   -hc ".h"
++IDLFLAGS         = $(COMMONIDLFLAGS) -t $(_GEN) -Cw
++
++TAO_DEFINES  = $(TAO_DEFINES) -D_TAO_2_0_
++
++!endif
++
++
+ ######################################################################
+ # ANT
+ ######################################################################
+@@ -152,7 +198,18 @@ PP_SOAPGEN=..\..\$(_SOAPGEN)
+ 
+ GRACEFULLCRASH   = -INCLUDE:_gracefullycrash $(_LIB)\gracefullycrash.lib
+ STDDEFINES       = -DWIN32 -DWINNT $(TAO_DEFINES) -DMSYSTHREAD_USE_SEH
++
++!if "$(VC_COMPILER_VERSION)" == "VC10"
++STDCFLAGS        = -nologo -c -MD -W3 -GR -EHsc -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
++STDDEFINES       = $(STDDEFINES) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NON_CONFORMING_SWPRINTFS
++# to decide optimization level 
++MY_CFLAGS_1 	 = -GR -Gy 
++!endif
++!if "$(VC_COMPILER_VERSION)" == ""
+ STDCFLAGS        = -nologo -c -MD -W3 -GR -GX -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
++MY_CFLAGS_1 	 = -Gi -GR -G5 -Gy
++!endif
++
+ STDBINFLAGS      = -nologo -incremental:no -debug -map $(GRACEFULLCRASH) $(LIB_DBGHELP)
+ STDDLLFLAGS      = -nologo -incremental:no -debug -dll -map $(LIB_DBGHELP)
+ STDLIBFLAGS      = -nologo
+diff --git a/SelfServiceBuild/Build/scripts/setenv.bat b/SelfServiceBuild/Build/scripts/setenv.bat
+index 29b6448..ddf69aa 100644
+--- a/SelfServiceBuild/Build/scripts/setenv.bat
++++ b/SelfServiceBuild/Build/scripts/setenv.bat
+@@ -48,13 +48,20 @@ rem ######################################################################
+ rem # ACE/TAO
+ rem ######################################################################
+ 
++if "%VC_COMPILER_VERSION%"=="VC10" goto USE_ACE_TAO_2_0
+ set TAO_VERSION=1.4.0
+-
+ rem Sonderfall: ACE/TAO 1.2.0 kann per Parameter definiert werden.
+ if "%1" == "120" set TAO_VERSION=1.2.0
+-
+ set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%TAO_VERSION%\win32
+ set TAO_ROOT=%ACE_ROOT%
++goto END_USE_ACE_TAO_2_0
++:USE_ACE_TAO_2_0
++set TAO_VERSION=2.0.0
++set ACE_VERSION=6.0.4
++set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%ACE_VERSION%\ACE_wrappers
++set TAO_ROOT=%ACE_ROOT%\TAO
++:END_USE_ACE_TAO_2_0
++
+ 
+ rem ######################################################################
+ rem # ThirdParty-Software
+@@ -248,6 +255,9 @@ rem ######################################################################
+ 
+ set BUILDDIR=%BUILDROOT%\Build\scripts
+ set PATH=%TAO_ROOT%\bin;%DIR_XERCES%\bin;%PATH%
++if NOT "%TAO_VERSION%"=="2.0.0" goto END_ACE_TAO_2_0_MORE_PATHS
++set PATH=%ACE_ROOT%\bin;%ACE_ROOT%\lib;%PATH%
++:END_ACE_TAO_2_0_MORE_PATHS
+ set PATH=%_BIN%;%_DLL%;%BUILDDIR%;%PATH%
+ set PATH=%BUILDROOT%\Build\cygwin\bin;%PATH%
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,189 @@
+From 57b91faba4c4a0bd771bb5fa0e077e370da5196d Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 27 Aug 2012 10:54:26 +0000
+Subject: [PATCH 0333/1076] =?UTF-8?q?=20-=20BUGFIX:=20Die=20Konfiguration?=
+ =?UTF-8?q?=20f=C3=BCr=20den=20IPv4Interface=20Namen=20wurde=20nicht=20aus?=
+ =?UTF-8?q?=20der=20INI=20Datei=20genommen.=20=20-=20BUGFIX:=20Wenn=20ein?=
+ =?UTF-8?q?=20Wert=20nicht=20in=20der=20INI=20Datei=20stand,=20wurde=20er?=
+ =?UTF-8?q?=20angelegt.=20Dies=20f=C3=BChrte=20z.b.=20dazu,=20dass=20der?=
+ =?UTF-8?q?=20falsche=20Hostname=20genommen=20wurde.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@400 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.ini |  2 +-
+ .../Build/setup/SetKioskData/SetKioskData.iss | 78 ++++++++++---------
+ 2 files changed, 41 insertions(+), 39 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+index 9ac8ed04..6d5a4974 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+@@ -9,7 +9,7 @@ Airport: (3L Code)=DTM
+ Area: (Area in Terminal)=CheckIn
+ ; Kiosk environment TERMINAL Default
+ Terminal:=A
+-; The application to configure. NOTE: more then one applications are not supportet yet.
++; The application to configure. NOTE: This is a comma seperated list of application names, configured in plattform.
+ Applications=MAT_CKI
+ 
+ ; Host data configuration section.
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index dadf4e8f..d5f32b6c 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -1,6 +1,6 @@
+ [Setup]
+ AppName=Set Kiosk Data
+-AppVerName=Set Kiosk Data 1.1.0.2
++AppVerName=Set Kiosk Data 1.1.0.3
+ AppPublisher=MATERNA GmbH
+ AppPublisherURL=http://www.materna-ips.com
+ AppSupportURL=http://www.materna-ips.com
+@@ -14,7 +14,7 @@ EnableDirDoesntExistWarning=false
+ DisableStartupPrompt=true
+ AlwaysShowDirOnReadyPage=false
+ AlwaysShowGroupOnReadyPage=false
+-AppVersion=1.1.0.2
++AppVersion=1.1.0.3
+ 
+ BackColor=clBlue
+ BackColor2=clBlack
+@@ -42,10 +42,10 @@ DisableProgramGroupPage=true
+ 
+ LanguageDetectionMethod=locale
+ Compression=lzma/fast
+-VersionInfoVersion=1.1.0.2
++VersionInfoVersion=1.1.0.3
+ VersionInfoCompany=MATERNA GmbH Information & Communications
+ VersionInfoDescription=Set Kiosk Data
+-VersionInfoTextVersion=1.1.0.2
++VersionInfoTextVersion=1.1.0.3
+ SetupIconFile=.\massai30.ico
+ CreateAppDir=false
+ UsePreviousGroup=false
+@@ -102,6 +102,7 @@ var
+ 	LabelWidth           : Integer;
+ 	MassaiDir            : String;
+ 	ImageHostName        : String;
++	LANInterface         : String;
+ 
+ 
+ 
+@@ -111,21 +112,25 @@ var
+ function GetIPv4Address(Param:String) : String;
+ begin
+ 	Result := IPv4LevelData[0];
++	LOG('GetIPv4Address: ' + Result);
+ end;
+ 
+ function GetIPv4Subnet(Param:String) : String;
+ begin
+ 	Result := IPv4LevelData[1];
++	LOG('GetIPv4Subnet: ' + Result);
+ end;
+ 
+ function GetIPv4Gateway(Param:String) : String;
+ begin
+ 	Result := IPv4LevelData[2];
++	LOG('GetIPv4Gateway: ' + Result);
+ end;
+ 
+ function GetLANInterfaceName(Param:String) : String;
+ begin
+-    Result := ProcessIniString('HOSTDATA', 'IPv4Interface', 'Local Area Connection');
++    Result := LANInterface;
++    LOG('GetLANInterfaceName: ' + Result);
+ end;
+ 
+ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+@@ -367,31 +372,28 @@ begin
+ 			LevelDataPrompts[2] := 'Area: (Area in Terminal)';	{2}
+ 			LevelDataPrompts[3] := 'Terminal:';{3}
+ 			SetArrayLength(LevelData, 4);
+-
+-			LevelData[0] := ProcessIniString('KIOSKDATA', LevelDataPrompts[0], GetComputerNameString);
+-			LevelData[1] := ProcessIniString('KIOSKDATA', LevelDataPrompts[1], 'DTM');
+-			LevelData[2] := ProcessIniString('KIOSKDATA', LevelDataPrompts[2], 'Check-In');
+-			LevelData[3] := ProcessIniString('KIOSKDATA', LevelDataPrompts[3], 'A');
++            
++            LevelData[0] := GetIniString('KIOSKDATA', LevelDataPrompts[0], GetComputerNameString, IniFilename);
++			LevelData[1] := GetIniString('KIOSKDATA', LevelDataPrompts[1], 'DTM',                 IniFilename);
++			LevelData[2] := GetIniString('KIOSKDATA', LevelDataPrompts[2], 'Check-In',            IniFilename);
++			LevelData[3] := GetIniString('KIOSKDATA', LevelDataPrompts[3], 'A',                   IniFilename);
+ 			
+-
+ 			SetArrayLength(IPv4LevelDataPrompts, 3);
+ 			IPv4LevelDataPrompts[0] := 'IPv4 Address:';
+ 			IPv4LevelDataPrompts[1] := 'Subnet:';
+ 			IPv4LevelDataPrompts[2] := 'Gateway:';
+ 			SetArrayLength(IPv4LevelData, 3);
+             
+-            ImageHostName     := ProcessIniString('HOSTDATA', 'ImageHostName', GetComputerNameString);
+-			IPv4LevelData[0]  := ProcessIniString('HOSTDATA', 'IPv4Address', '139.2.249.21');
+-			IPv4LevelData[1]  := ProcessIniString('HOSTDATA', 'IPv4Subnet',  '255.255.240.0');
+-			IPv4LevelData[2]  := ProcessIniString('HOSTDATA', 'IPv4Gateway', '139.2.240.1');
+-
+-
+-
+-            { TODO: Mehrere Airlines unterstuezen. }
+-			DefaultID := 'MAT_CKI';
+-
+-			AppID := ProcessIniString('KIOSKDATA', 'Applications', DefaultID);
++            ImageHostName    := GetIniString('HOSTDATA', 'ImageHostName', GetComputerNameString,   IniFilename);
++			LANInterface     := GetIniString('HOSTDATA', 'IPv4Interface', 'Local Area Connection', IniFilename);
++	        IPv4LevelData[0] := GetIniString('HOSTDATA', 'IPv4Address',   '139.2.249.21',          IniFilename);
++			IPv4LevelData[1] := GetIniString('HOSTDATA', 'IPv4Subnet',    '255.255.240.0',         IniFilename);
++			IPv4LevelData[2] := GetIniString('HOSTDATA', 'IPv4Gateway',   '139.2.240.1',           IniFilename);
++			
++            DefaultID := 'MAT_CKI';
+ 
++			AppID := GetIniString('KIOSKDATA', 'Applications', DefaultID, IniFilename);
++			
+ 			LOG('Found Applications: ' + AppID);
+ 
+ 			{ Kopiere Komma seperierte Liste von Applikations ID's in ein Array. }
+@@ -404,22 +406,22 @@ begin
+ 			    i := i + 1;
+ 			end;
+ 
+-      { Falls nur eine Applikations ID vorhanden ist, verwende diese }
+-      if GetArrayLength(AppIDs)=0 then
+-      begin
+-			   SetArrayLength(AppIDs, 1);
+-			   AppIDs[0] := Trim(AppID);
+-			end;
+-
+-			for i := 0 to GetArrayLength(AppIDs)-1 do
+-      begin
+-			   AppCMD := '"C:\Programme\Internet Explorer\iexplore.exe" -K http://<server>/Applications/<applicationName>/<applicationName>_App.html$ wnd=<applicationName>_App';
+-			   SetArrayLength(AppLevelData, i + 1);
+-         AppLevelData[i]  := ProcessIniString('APPDATA_' + AppIDs[i], 'CMD', AppCMD);
+-         LOG('Get CommandLine of Application ' + AppIDs[i] + ': ' + AppCMD);
+-
+-			   SetArrayLength(AppLevelDataPrompts, i + 1);
+-			   AppLevelDataPrompts[i] := AppIDs[i] + ' application CMD:';
++            { Falls nur eine Applikations ID vorhanden ist, verwende diese }
++            if GetArrayLength(AppIDs)=0 then
++            begin
++      			   SetArrayLength(AppIDs, 1);
++      			   AppIDs[0] := Trim(AppID);
++      			end;
++      
++      			for i := 0 to GetArrayLength(AppIDs)-1 do
++            begin
++      		    AppCMD := '"C:\Programme\Internet Explorer\iexplore.exe" -K http://<server>/Applications/<applicationName>/<applicationName>_App.html$ wnd=<applicationName>_App';
++      		    SetArrayLength(AppLevelData, i + 1);
++      		    AppLevelData[i] := GetIniString('APPDATA_' + AppIDs[i], 'CMD', AppCMD, IniFilename);
++                LOG('Get CommandLine of Application ' + AppIDs[i] + ': ' + AppCMD);
++
++                SetArrayLength(AppLevelDataPrompts, i + 1);
++                AppLevelDataPrompts[i] := AppIDs[i] + ' application CMD:';
+ 			end;
+ 
+ 			Result:=true;
+-- 
+2.41.0.windows.1
+

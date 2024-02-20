@@ -1,0 +1,1344 @@
+From 274e9e7b84e48637688b06993eb07de0de840cf2 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 18 Sep 2017 16:19:00 +0000
+Subject: [PATCH 0880/1077] MANTIS 47240 Mantis 47240: Config service meta data
+ access - Implement Number servant extension
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1260 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp |  48 +-
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |   1 +
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      |   2 +
+ .../cpp/CfgXMgrB/src/cfgCorba_Number.cpp      | 687 +++++++++---------
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       |  11 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp   |  11 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp    |  10 +-
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   |   4 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp |  75 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |   4 +-
+ .../cpp/CfgXMgrB/src/cfgMetaTextlist.cpp      |   4 +-
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |   2 +
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |   1 +
+ 13 files changed, 429 insertions(+), 431 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
+index a19749a1..2724b7da 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaNumber.hpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,19 +29,19 @@ class cfgMetaNumber :
+ 
+    /**
+     *
+-    * Value range restriction. A configuration value my not be less than
++    * Value range restriction. A configuration value my not be greater than
+     * this.
+     *
+    **/
+-   cfgType_Number M_MinValue;
++   cfgType_Number m_max_value;
+ 
+    /**
+     *
+-    * Value range restriction. A configuration value my not be greater than
++    * Value range restriction. A configuration value my not be less than
+     * this.
+     *
+    **/
+-   cfgType_Number M_MaxValue;
++   cfgType_Number m_min_value;
+ 
+ public:
+ 
+@@ -50,7 +50,7 @@ public:
+     * Constructor.
+     *
+    **/
+-   cfgMetaNumber( char const * Auth );
++   cfgMetaNumber( char const * auth );
+ 
+    /**
+     *
+@@ -59,8 +59,8 @@ public:
+    **/
+    cfgMetaNumber
+    (
+-      std::string const & Rights, std::string const & Explanation,
+-      cfgType_Number MinValue, cfgType_Number MaxValue
++      std::string const & rights, std::string const & explanation,
++      cfgType_Number max_value, cfgType_Number min_value
+    );
+ 
+    /**
+@@ -96,22 +96,22 @@ public:
+ 
+    /**
+     *
+-    * Return minimum value.
++    * Return maximum value.
+     *
+    **/
+-   cfgType_Number getMinValue() const
++   cfgType_Number getMaxValue() const
+    {
+-      return M_MinValue;
++      return m_max_value;
+    }
+ 
+    /**
+     *
+-    * Return maximum value.
++    * Return minimum value.
+     *
+    **/
+-   cfgType_Number getMaxValue() const
++   cfgType_Number getMinValue() const
+    {
+-      return M_MaxValue;
++      return m_min_value;
+    }
+ 
+    /**
+@@ -127,39 +127,39 @@ public:
+     *
+     * Save the number value object to an ostream.
+     *
+-    * @param Dst:       Destination stream
++    * @param dst:       Destination stream
+     *
+-    * @param Ref:       Reference number
++    * @param ref:       Reference number
+     *
+-    * @param Indent:    Indentation string
++    * @param indent:    Indentation string
+     *
+    **/
+    virtual void save
+    (
+-      std::ostream &            Dst,
+-      cfgEntity::reference      Ref,
+-      std::string const &       Indent
++      std::ostream &            dst,
++      cfgEntity::reference      ref,
++      std::string const &       indent
+    ) const;
+ 
+    /**
+     *
+     * Adapt restrictions to allow the value.
+     *
+-    * @param Value:     The value to allow now.
++    * @param value:     The value to allow now.
+     *
+     * @return:          Success?
+     *
+    **/
+-   bool valueAllow( cfgValue const & Value );
++   bool valueAllow( cfgValue const & value );
+ 
+    /**
+     *
+     * Is the value a number between minvalue and maxvalue?
+     *
+-    * @param Value:     The value to allow now.
++    * @param value:     The value to allow now.
+     *
+    **/
+-   bool valueAllowed( cfgValue const & Value ) const;
++   bool valueAllowed( cfgValue const & value ) const;
+ 
+    /**
+     *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index ac34b8b7..d49a1a87 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -33,6 +33,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Directory.obj\
+     $(_OBJ)\cfgCorba_Node.obj \
+     $(_OBJ)\cfgCorba_Number.obj \
++    $(_OBJ)\cfgCorba_Number2.obj \
+     $(_OBJ)\cfgCorba_Selection.obj \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Text2.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index 1e48d9da..86e8c68e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -22,6 +22,7 @@
+ #include "cfgEntity.hpp"
+ #include "cfgCorba_Directory.hpp"
+ #include "cfgCorba_Number.hpp"
++#include "cfgCorba_Number2.hpp"
+ #include "cfgCorba_Selection.hpp"
+ #include "cfgCorba_Text.hpp"
+ #include "cfgCorba_Text2.hpp"
+@@ -164,6 +165,7 @@ int main( int argc, char ** argv )
+       //
+       cfgCorba_Directory  CorbaDirectory( Configuration );
+       cfgCorba_Number     CorbaNumber( Configuration );
++      cfgCorba_Number2    CorbaNumber2( Configuration );
+       cfgCorba_Selection  CorbaSelection( Configuration );
+       cfgCorba_Text       CorbaText( Configuration );
+       cfgCorba_Text2      CorbaText2( Configuration );
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+index 7e2c9d0f..3c481f79 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+@@ -7,13 +7,17 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
++// Exported
+ #include "cfgCorba_Number.hpp"
++
++// Local header
+ #include "cfgCorba_Node.hpp"
++#include "cfgCorba_ServiceNumber.hpp"
+ #include "cfgCorba_Template.hpp"
+ 
+ #include "cfgclnt/CfgMgrIPC.h"
+@@ -37,424 +41,395 @@
+ 
+ #include "trc/TraceClt.h"
+ 
+-#define SCN  "serviceCfgNumber::"
++#define SCN  "cfgCorba_ServiceNumber::"
+ 
+ 
+ 
+-/**
+- **************************************************************************
+- *
+- * Number configuration service implementation class.
+- *
+- **************************************************************************
+-**/
+-class serviceCfgNumber :
+-   public serviceCfg_Node,
+-   public POA_Config::Number
++void cfgCorba_ServiceNumber::create
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        CORBA::Long                       Def,
++        CORBA::Long                       Min,
++        CORBA::Long                       Max
++     )
+ {
+-
+-   cfgEntity * M_ConfigEntity;
+-
+-   /**
+-    *
+-    * Create a configuration item
+-    *
+-   **/
+-   void create
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           CORBA::Long                       Def,
+-           CORBA::Long                       Min,
+-           CORBA::Long                       Max
+-        )
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCN "create(%s) rights:%s ...",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
+    {
+-      writeTrace
++      cfgMetaNumber  Obj
++                     (
++                        std::string(Desc.Rights),
++                        std::string(Desc.Explanation),
++                        Max, Min
++                     );
++      M_ConfigEntity->itemCreate
+       (
+-         BasicRuntime_HERE,
+-         SCN "create(%s) rights:%s ...",
+-         access2Str(Acc).c_str(), Desc.Rights
++         Obj, Acc.Item,
++         new cfgValueNumber( Def )
+       );
+-      try
+-      {
+-         cfgMetaNumber  Obj
+-                        (
+-                           std::string(Desc.Rights),
+-                           std::string(Desc.Explanation),
+-                           Min, Max
+-                        );
+-         M_ConfigEntity->itemCreate
+-         (
+-            Obj, Acc.Item,
+-            new cfgValueNumber( Def )
+-         );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "create - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "create - notCreated (1) exception."
+-         );
+-         throw Config::Node::notCreated();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "create - notCreated (2) exception."
+-         );
+-         throw Config::Node::notCreated();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "create - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
++   }
++   catch( cfgEntity_AlreadyExists & )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCN "create(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCN "create - alreadyExists exception."
+       );
++      throw Config::Node::alreadyExists();
+    }
+-
+-   /**
+-    *
+-    * Get a configuration value
+-    *
+-   **/
+-   CORBA::Long get( Config::access const & Acc )
++   catch( cfgEntity_IllegalValue & )
+    {
+-      verifyAccess( SCN "get", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCN "get(%s) ...",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCN "create - notCreated (1) exception."
+       );
+-      try
+-      {
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueNumber const * const valref =
+-            dynamic_cast<cfgValueNumber const *>
+-            (
+-               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+-            );
+-         if( valref )
+-         {
+-            CORBA::Long const Val = valref->scalar();
+-            writeTrace
+-            (
+-               SecondaryRuntime_HERE, SCN "get = %d.",
+-               Val
+-            );
+-            return Val;
+-         }
+-         else
+-         {
+-            throw Config::Node::notFound();
+-         }
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "get - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "get - notFound exception."
+-         );
+-         throw Config::Node::notFound();
+-      }
+-      catch( Config::Node::notFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "get - notFound exception (root)."
+-         );
+-         throw;
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "get - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
++      throw Config::Node::notCreated();
+    }
+-
+-   /**
+-    *
+-    * Increment and get the incremented configuration value
+-    *
+-   **/
+-   CORBA::Long incrementGet( Config::access const & Acc, CORBA::Long Inc )
++   catch( cfgEntity_WrongParameter & )
+    {
+-      verifyAccess( SCN "get", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCN "incrementGet(%s,%d) ...",
+-         access2Str(Acc).c_str(),
+-         Inc
++         SecondaryRuntime_HERE,
++         SCN "create - notCreated (2) exception."
+       );
+-      CORBA::Long Val = get( Acc );
+-      Val += Inc;
+-      set( Acc, Val );
+-      return Val;
++      throw Config::Node::notCreated();
+    }
+-
+-   /**
+-    *
+-    * Set a configuration value
+-    *
+-   **/
+-   void set( Config::access const & Acc, CORBA::Long Val )
++   catch( ... )
+    {
+-      verifyAccess( SCN "set", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCN "set(%s) = %d ...",
+-         access2Str(Acc).c_str(), Val
++         SecondaryRuntime_HERE,
++         SCN "create - noConfiguration exception."
+       );
+-      try
+-      {
+-         M_ConfigEntity->itemSetValue
+-                        (
+-                           Acc.Authorization,
+-                           Acc.Item,
+-                           new cfgValueNumber( Val )
+-                        );
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCN "create(%s).",
++      access2Str(Acc).c_str()
++   );
++}
++
++
++
++CORBA::Long cfgCorba_ServiceNumber::get( Config::access const & Acc )
++{
++   verifyAccess( SCN "get", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCN "get(%s) ...",
++      access2Str(Acc).c_str()
++   );
++   try
++   {
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueNumber const * const valref =
++         dynamic_cast<cfgValueNumber const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCN "set - outOfRange exception."
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+          );
+-         throw Config::Node::outOfRange();
+-      }
+-      catch( cfgEntity_NotAuthorized & )
++      if( valref )
+       {
++         CORBA::Long const Val = valref->scalar();
+          writeTrace
+          (
+-            SecondaryRuntime_HERE,
+-            SCN "set - notAuthorized exception."
++            SecondaryRuntime_HERE, SCN "get = %d.",
++            Val
+          );
+-         throw Config::Node::notAuthorized();
++         return Val;
+       }
+-      catch( cfgEntity_NotFound & )
++      else
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "set - notFound exception."
+-         );
+          throw Config::Node::notFound();
+       }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "set - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCN "set." );
+    }
+-
+-   /**
+-    *
+-    * Set an initial configuration value
+-    *
+-   **/
+-   void setInitial( Config::access const & Acc, CORBA::Long Val )
++   catch( cfgEntity_NotAuthorized & )
+    {
+-      verifyAccess( SCN "setInitial", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCN "setInitial(%s) = %d ...",
+-         access2Str(Acc).c_str(), Val
++         SecondaryRuntime_HERE,
++         SCN "get - notAuthorized exception."
+       );
+-      try
+-      {
+-         cfgMetaNumber Obj( Acc.Authorization );
+-         M_ConfigEntity->itemCreate
+-                        (
+-                           Obj, Acc.Item,
+-                           new cfgValueNumber( Val )
+-                        );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setInitial - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setInitial - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setInitial - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCN "setInitial." );
++      throw Config::Node::notAuthorized();
+    }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "get - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( Config::Node::notFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "get - notFound exception (root)."
++      );
++      throw;
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "get - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++}
+ 
+-   /**
+-    *
+-    * Set new meta-data for an existing configuration item.
+-    *
+-   **/
+-   void setMeta
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           CORBA::Long                       Min,
+-           CORBA::Long                       Max
+-        )
++
++
++CORBA::Long cfgCorba_ServiceNumber::incrementGet
++   (
++      Config::access const & Acc,
++      CORBA::Long Inc
++   )
++{
++   verifyAccess( SCN "get", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCN "incrementGet(%s,%d) ...",
++      access2Str(Acc).c_str(),
++      Inc
++   );
++   CORBA::Long Val = get( Acc );
++   Val += Inc;
++   set( Acc, Val );
++   return Val;
++}
++
++
++
++void cfgCorba_ServiceNumber::set
++   (
++      Config::access const & Acc,
++      CORBA::Long Val
++   )
++{
++   verifyAccess( SCN "set", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCN "set(%s) = %d ...",
++      access2Str(Acc).c_str(), Val
++   );
++   try
++   {
++      M_ConfigEntity->itemSetValue
++                     (
++                        Acc.Authorization,
++                        Acc.Item,
++                        new cfgValueNumber( Val )
++                     );
++   }
++   catch( cfgEntity_IllegalValue & )
+    {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCN "setMeta(%s) rights:%s ...",
+-         access2Str(Acc).c_str(), Desc.Rights
++         SecondaryRuntime_HERE,
++         SCN "set - outOfRange exception."
+       );
+-      try
+-      {
+-         cfgMetaNumber  Obj
+-                        (
+-                           std::string(Desc.Rights),
+-                           std::string(Desc.Explanation),
+-                           Min, Max
+-                        );
+-         M_ConfigEntity->itemSetMeta
+-         (
+-            Obj, Acc.Item
+-         );
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setMeta - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setMeta - notFound exception."
+-         );
+-         throw Config::Node::notFound();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setMeta - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCN "setMeta - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
++      throw Config::Node::outOfRange();
++   }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "set - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "set - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( ... )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCN "setMeta(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCN "set - noConfiguration exception."
+       );
++      throw Config::Node::noConfiguration();
+    }
++   writeTrace( SecondaryRuntime_HERE, SCN "set." );
++}
+ 
+-public:
+ 
+-   /**
+-    *
+-    * Constructor.
+-    *
+-    * @param Configuration:             Refers the configuration back-end.
+-    *
+-   **/
+-   explicit serviceCfgNumber( cfgEntity & Configuration ) :
+-      serviceCfg_Node( Configuration ),
+-      POA_Config::Number(),
+-      M_ConfigEntity( &Configuration )
++
++void cfgCorba_ServiceNumber::setInitial
++   (
++      Config::access const & Acc,
++      CORBA::Long Val
++   )
++{
++   verifyAccess( SCN "setInitial", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCN "setInitial(%s) = %d ...",
++      access2Str(Acc).c_str(), Val
++   );
++   try
+    {
++      cfgMetaNumber Obj( Acc.Authorization );
++      M_ConfigEntity->itemCreate
++                     (
++                        Obj, Acc.Item,
++                        new cfgValueNumber( Val )
++                     );
+    }
++   catch( cfgEntity_AlreadyExists & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setInitial - alreadyExists exception."
++      );
++      throw Config::Node::alreadyExists();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setInitial - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setInitial - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCN "setInitial." );
++}
+ 
+-   /**
+-    *
+-    * Destructor.
+-    *
+-   **/
+-   ~serviceCfgNumber()
++
++
++void cfgCorba_ServiceNumber::setMeta
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        CORBA::Long                       Min,
++        CORBA::Long                       Max
++     )
++{
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCN "setMeta(%s) rights:%s ...",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
+    {
+-      M_ConfigEntity = 0;
++      cfgMetaNumber  Obj
++                     (
++                        std::string(Desc.Rights),
++                        std::string(Desc.Explanation),
++                        Max, Min
++                     );
++      M_ConfigEntity->itemSetMeta
++      (
++         Obj, Acc.Item
++      );
+    }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setMeta - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setMeta - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setMeta - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCN "setMeta - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCN "setMeta(%s).",
++      access2Str(Acc).c_str()
++   );
++}
+ 
+-private:
+ 
+-   //! Default constructor - intentionally not implemented.
+-   serviceCfgNumber();
+ 
+-};
++/**
++ *
++ * Constructor.
++ *
++ * @param Configuration:             Refers the configuration back-end.
++ *
++**/
++cfgCorba_ServiceNumber::cfgCorba_ServiceNumber
++   (
++      cfgEntity & Configuration
++   ) :
++   serviceCfg_Node( Configuration ),
++   POA_Config::Number(),
++   M_ConfigEntity( &Configuration )
++{
++}
++
++
++
++cfgCorba_ServiceNumber::~cfgCorba_ServiceNumber()
++{
++   M_ConfigEntity = 0;
++}
+ 
+ 
+ 
+ class cfgCorba_Number_Private
+ {
+-   serviceCfgNumber *                           pLC_Number;
+-   corbaServantEx<serviceCfgNumber> *           pLD_Number;
++   cfgCorba_ServiceNumber *                           pLC_Number;
++   corbaServantEx<cfgCorba_ServiceNumber> *           pLD_Number;
+ 
+ public:
+ 
+@@ -468,8 +443,8 @@ public:
+       pLD_Number( 0 )
+    {
+ 
+-      pLC_Number = new serviceCfgNumber( Configuration );
+-      pLD_Number = new_Servant<serviceCfgNumber>
++      pLC_Number = new cfgCorba_ServiceNumber( Configuration );
++      pLD_Number = new_Servant<cfgCorba_ServiceNumber>
+                         (
+                         *pLC_Number,
+                         CFGMGR_SRVNAME_NUMBER
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+index 691e81ab..3bd62676 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -74,8 +74,15 @@ class cfgCorba_ServiceText2 :
+       writeTrace
+       (
+          BasicRuntime_HERE,
+-         SCT2 "create2(%s) rights:%s",
+-         access2Str(acc).c_str(), meta_data.Desc.Rights
++         SCT2 "create2(%s) Rights:\"%s\" Expl:\"%s\""
++         " MaxLength:%d MinLength:%d RegEx:\"%s\" Semantic:%d",
++         access2Str(acc).c_str(),
++         meta_data.Desc.Rights,
++         meta_data.Desc.Explanation,
++         meta_data.MaxLength,
++         meta_data.MinLength,
++         meta_data.RegEx,
++         static_cast<unsigned>( meta_data.Semantic )
+       );
+       try
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+index ebca3e13..5cd7bcf9 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+@@ -74,8 +74,15 @@ class cfgCorba_ServiceTextlist2 :
+       writeTrace
+       (
+          BasicRuntime_HERE,
+-         SCTL2 "create2(%s) rights:%s",
+-         access2Str(acc).c_str(), meta_data.Desc.Rights
++         SCTL2 "create2(%s) Rights:\"%s\" Expl:\"%s\""
++         " MaxLength:%d MinLength:%d RegEx:\"%s\" Semantic:%d",
++         access2Str(acc).c_str(),
++         meta_data.Desc.Rights,
++         meta_data.Desc.Explanation,
++         meta_data.MaxLength,
++         meta_data.MinLength,
++         meta_data.RegEx,
++         static_cast<unsigned>( meta_data.Semantic )
+       );
+       try
+       {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
+index e6f87584..cc1c365c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -108,15 +108,15 @@ void document2Meta
+ 
+             if( !strcmp( NType.c_str(), CFGTOKEN_TYPE_NUMBER ) )
+             {
+-               std::string NMin;
+-               getAttribute( Attribs, CFGTOKEN_MINIMUM, NMin );
+                std::string NMax;
+                getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               std::string NMin;
++               getAttribute( Attribs, CFGTOKEN_MINIMUM, NMin );
+                cfgMetaNumber Meta
+                               (
+                                  NRights, NExpl,
+-                                 atoi(NMin.c_str()),
+-                                 atoi(NMax.c_str())
++                                 atoi( NMax.c_str() )
++                                 atoi( NMin.c_str() ),
+                               );
+                Dst.itemCreate( Meta, 0, 0, false );
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+index b7ef7458..c50e2c7c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -143,8 +143,8 @@ void document2Meta
+                cfgMetaNumber Meta
+                               (
+                                  NRights, NExpl,
+-                                 atoi(NMin.c_str()),
+-                                 atoi(NMax.c_str())
++                                 atoi( NMax.c_str() ),
++                                 atoi( NMin.c_str() )
+                               );
+                Dst.itemCreate( Meta, 0, 0, false );
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+index 47728fe7..12f85c0a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -26,9 +26,10 @@
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-cfgMetaNumber::cfgMetaNumber( char const * Auth ) :
+-   cfgMeta( Auth ),
+-   M_MinValue( 0 ), M_MaxValue( 0 )
++cfgMetaNumber::cfgMetaNumber( char const * auth ) :
++   cfgMeta( auth ),
++   m_max_value( 0 ),
++   m_min_value( 0 )
+ {
+ }
+ 
+@@ -39,9 +40,10 @@ cfgMetaNumber::cfgMetaNumber( char const * Auth ) :
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-cfgMetaNumber::cfgMetaNumber( cfgMetaNumber const & Src ) :
+-   cfgMeta( Src ),
+-   M_MinValue( Src.M_MinValue ), M_MaxValue( Src.M_MaxValue )
++cfgMetaNumber::cfgMetaNumber( cfgMetaNumber const & src ) :
++   cfgMeta( src ),
++   m_max_value( src.m_max_value ),
++   m_min_value( src.m_min_value )
+ {
+ }
+ 
+@@ -55,10 +57,11 @@ cfgMetaNumber::cfgMetaNumber( cfgMetaNumber const & Src ) :
+ cfgMetaNumber::cfgMetaNumber
+ (
+    std::string const & Rights, std::string const & Explanation,
+-   cfgType_Number MinValue, cfgType_Number MaxValue
++   cfgType_Number MaxValue, cfgType_Number MinValue
+ ) :
+    cfgMeta( Rights, Explanation ),
+-   M_MinValue( MinValue ), M_MaxValue( MaxValue )
++   m_max_value( MaxValue ),
++   m_min_value( MinValue )
+ {
+ }
+ 
+@@ -88,8 +91,8 @@ bool cfgMetaNumber::operator==( cfgMeta const & Other ) const
+    {
+       if
+       (
+-         ( M_MinValue == pOther->M_MinValue ) &&
+-         ( M_MaxValue == pOther->M_MaxValue )
++         ( m_min_value == pOther->m_min_value ) &&
++         ( m_max_value == pOther->m_max_value )
+       )
+       {
+          return cfgMeta::operator==( Other );
+@@ -119,16 +122,16 @@ char const * cfgMetaNumber::getTypeToken() const
+ **/
+ void cfgMetaNumber::save
+ (
+-   std::ostream &               Dst,
+-   cfgEntity::reference         Key,
+-   std::string const &          Indent
++   std::ostream &               dst,
++   cfgEntity::reference         key,
++   std::string const &          indent
+ ) const
+ {
+-   Dst << Indent << "<" CFGTOKEN_META;
+-   cfgMeta::saveCommon( Dst, Key );
+-   Dst << " " CFGTOKEN_MINIMUM "=\"" << M_MinValue;
+-   Dst << "\" " CFGTOKEN_MAXIMUM "=\"" << M_MaxValue;
+-   Dst << "\" />" << std::endl;
++   dst << indent << "<" CFGTOKEN_META;
++   cfgMeta::saveCommon( dst, key );
++   dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_value;
++   dst << "\" " CFGTOKEN_MINIMUM "=\"" << m_min_value;
++   dst << "\" />" << std::endl;
+ }
+ 
+ 
+@@ -138,10 +141,10 @@ void cfgMetaNumber::save
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-bool cfgMetaNumber::valueAllow( cfgValue const & Value )
++bool cfgMetaNumber::valueAllow( cfgValue const & value )
+ {
+    cfgValueNumber const * const Val =
+-      dynamic_cast<cfgValueNumber const *>( &Value );
++      dynamic_cast<cfgValueNumber const *>( &value );
+    if( !Val )
+    {
+       writeTrace
+@@ -152,25 +155,25 @@ bool cfgMetaNumber::valueAllow( cfgValue const & Value )
+       return false;
+    }
+    cfgType_Number const V = Val->scalar();
+-   if( V > M_MaxValue )
++   if( V > m_max_value )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaNumber::valueAllow - max: %d -> %d",
+-            M_MaxValue, V
++            m_max_value, V
+          );
+-      M_MaxValue = V;
++      m_max_value = V;
+    }
+-   if( V < M_MinValue )
++   if( V < m_min_value )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaNumber::valueAllow - min: %d -> %d",
+-            M_MinValue, V
++            m_min_value, V
+          );
+-      M_MinValue = V;
++      m_min_value = V;
+    }
+    writeTrace
+       (
+@@ -187,10 +190,10 @@ bool cfgMetaNumber::valueAllow( cfgValue const & Value )
+  * Method implementation - see cfgMetaNumber.hpp.
+  *
+ **/
+-bool cfgMetaNumber::valueAllowed( cfgValue const & Value ) const
++bool cfgMetaNumber::valueAllowed( cfgValue const & value ) const
+ {
+    cfgValueNumber const * const Val =
+-      dynamic_cast<cfgValueNumber const *>( &Value );
++      dynamic_cast<cfgValueNumber const *>( &value );
+    if( !Val )
+    {
+       writeTrace
+@@ -201,23 +204,23 @@ bool cfgMetaNumber::valueAllowed( cfgValue const & Value ) const
+       return false;
+    }
+    cfgType_Number const V = Val->scalar();
+-   if( V > M_MaxValue )
++   if( V > m_max_value )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaNumber::valueAllowed=false value:%d > max:%d",
+-            V, M_MaxValue
++            V, m_max_value
+          );
+       return false;
+    }
+-   if( V < M_MinValue )
++   if( V < m_min_value )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaNumber::valueAllowed=false value:%d < min:%d",
+-            V, M_MinValue
++            V, m_min_value
+          );
+       return false;
+    }
+@@ -225,7 +228,7 @@ bool cfgMetaNumber::valueAllowed( cfgValue const & Value ) const
+       (
+          SecondaryRuntime_HERE,
+          "cfgMetaNumber::valueAllowed=true min:%d < value:%d < max:%d",
+-         M_MinValue, V, M_MaxValue
++         m_min_value, V, m_max_value
+       );
+    return true;
+ }
+@@ -239,10 +242,10 @@ bool cfgMetaNumber::valueAllowed( cfgValue const & Value ) const
+ **/
+ cfgValue * cfgMetaNumber::valueFactory
+ (
+-   cfgFlatZ const & Src
++   cfgFlatZ const & src
+ ) const
+ {
+-   return new cfgValueNumber( Src );
++   return new cfgValueNumber( src );
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index 41cece99..aaed980b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -187,7 +187,7 @@ void cfgMetaText::save
+ 
+ /**
+  *
+- * Method implementation - see cfgMetaNumber.hpp.
++ * Method implementation - see cfgMetaText.hpp.
+  *
+ **/
+ bool cfgMetaText::valueAllow( cfgValue const & Value )
+@@ -226,7 +226,7 @@ bool cfgMetaText::valueAllow( cfgValue const & Value )
+ 
+ /**
+  *
+- * Method implementation - see cfgMetaNumber.hpp.
++ * Method implementation - see cfgMetaText.hpp.
+  *
+ **/
+ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index ed57ec0a..596d93fe 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -169,7 +169,7 @@ void cfgMetaTextlist::save
+ 
+ /**
+  *
+- * Method implementation - see cfgMetaNumber.hpp.
++ * Method implementation - see cfgMetaTextlist.hpp.
+  *
+ **/
+ bool cfgMetaTextlist::valueAllow( cfgValue const & value )
+@@ -217,7 +217,7 @@ bool cfgMetaTextlist::valueAllow( cfgValue const & value )
+ 
+ /**
+  *
+- * Method implementation - see cfgMetaNumber.hpp.
++ * Method implementation - see cfgMetaTextlist.hpp.
+  *
+ **/
+ bool cfgMetaTextlist::valueAllowed( cfgValue const & value ) const
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index 4c7c3973..3f86669c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -21,6 +21,7 @@
+ // Local header
+ #include "cfgCorba_Directory.hpp"
+ #include "cfgCorba_Number.hpp"
++#include "cfgCorba_Number2.hpp"
+ #include "cfgCorba_Selection.hpp"
+ #include "cfgCorba_Text.hpp"
+ #include "cfgCorba_Text2.hpp"
+@@ -214,6 +215,7 @@ int mDaemon_main( int argc, char const * const * argv )
+       );
+       cfgCorba_Directory  CorbaDirectory( Configuration );
+       cfgCorba_Number     CorbaNumber( Configuration );
++      cfgCorba_Number2    CorbaNumber2( Configuration );
+       cfgCorba_Selection  CorbaSelection( Configuration );
+       cfgCorba_Text       CorbaText( Configuration );
+       cfgCorba_Text2      CorbaText2( Configuration );
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index 57386912..5a40249b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -39,6 +39,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Directory.obj\
+     $(_OBJ)\cfgCorba_Node.obj \
+     $(_OBJ)\cfgCorba_Number.obj \
++    $(_OBJ)\cfgCorba_Number2.obj \
+     $(_OBJ)\cfgCorba_Selection.obj \
+     $(_OBJ)\cfgCorba_Text.obj \
+     $(_OBJ)\cfgCorba_Text2.obj \
+-- 
+2.41.0.windows.1
+

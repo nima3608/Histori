@@ -1,0 +1,2150 @@
+From a7420915802cfed04a47617037d9e76a66ea1e88 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 29 Aug 2017 14:25:28 +0000
+Subject: [PATCH 0870/1076] MANTIS 47240 Mantis 47240: Config service meta data
+ access - First steps to introduce more meta data
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1246 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/cfgclnt/CfgMgrIPC.h        |   9 +-
+ .../cpp/CfgXMgrB/inc/cfgCorba_ServiceText.hpp | 110 +++
+ .../Massai/cpp/CfgXMgrB/inc/cfgCorba_Text.hpp |   6 -
+ .../cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp       |  93 +++
+ .../cpp/CfgXMgrB/inc/serviceCfg_Text.hpp      | 109 +++
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |   1 +
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      |   2 +
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp | 685 +++++++++---------
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       | 511 +++++++++++++
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |   2 +
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |   1 +
+ .../Massai/idl/Massai/cfgmgr.idl              | 259 ++++++-
+ 12 files changed, 1404 insertions(+), 384 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceText.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/serviceCfg_Text.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/CfgMgrIPC.h b/SelfServiceCommon/Interfaces/inc/cfgclnt/CfgMgrIPC.h
+index 46516944..c635370c 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/CfgMgrIPC.h
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/CfgMgrIPC.h
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2008,  MATERNA Information & Communications
++ * Copyright (c) 2002-2017,  MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -45,6 +45,13 @@
+ **/
+ #define CFGMGR_SRVNAME_TEXT      (CFGMGR_SRVNAME_PREFIX "Text")
+ 
++/**
++ *
++ * The CORBA servant name for text-type configuration values (V2).
++ *
++**/
++#define CFGMGR_SRVNAME_TEXT2    (CFGMGR_SRVNAME_PREFIX "Text2")
++
+ /**
+  *
+  * The CORBA servant name for textlist-type configuration values.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceText.hpp
+new file mode 100644
+index 00000000..d1c75084
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_ServiceText.hpp
+@@ -0,0 +1,110 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_ServiceText.hpp
++ *
++ * Contains declaration of class cfgCorba_ServiceText.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGCORBA_SERVICETEXT
++#define CFGCORBA_SERVICETEXT
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++
++#include "cfgCorba_Node.hpp"
++
++
++class cfgCorba_ServiceText :
++   virtual public serviceCfg_Node,
++   virtual public POA_Config::Text
++{
++
++   cfgEntity * M_ConfigEntity;
++
++   /**
++    *
++    * Create a configuration item
++    *
++   **/
++   void create
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           char const *                      D,
++           CORBA::Long                       MaxLength
++        );
++
++   /**
++    *
++    * Get a configuration value
++    *
++   **/
++   char * get( Config::access const & Acc );
++
++   /**
++    *
++    * Set a configuration value
++    *
++   **/
++   void set( Config::access const & Acc, char const * Val );
++
++   /**
++    *
++    * Set an initial configuration value
++    *
++   **/
++   void setInitial( Config::access const & Acc, char const * Val );
++
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       MaxLength
++        );
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Configuration:             Refers the configuration back-end.
++    *
++   **/
++   explicit cfgCorba_ServiceText( cfgEntity & Configuration );
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~cfgCorba_ServiceText();
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   cfgCorba_ServiceText();
++
++};
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text.hpp
+index 77acc6e4..155e4ed1 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text.hpp
+@@ -14,16 +14,13 @@
+ #ifndef CFGCORBA_TEXT_HPP
+ #define CFGCORBA_TEXT_HPP
+ #ifdef SHOW_INCLUDE_FILES
+-
+ #pragma message("including: " __FILE__)
+-
+ #endif
+ 
+ 
+ #include "cfgEntity.hpp"
+ 
+ 
+-
+ /**
+  *
+  * Handle class.
+@@ -32,7 +29,6 @@
+ class cfgCorba_Text_Private;
+ 
+ 
+-
+ /**
+  *
+  * An object of this class provides a CORBA-based access to configuration
+@@ -78,11 +74,9 @@ private:
+    //! Assignment - Intentionally not implemented.
+    cfgCorba_Text & operator=( cfgCorba_Text const & );
+ 
+-
+ };
+ 
+ 
+-
+ #endif
+ /**
+  **************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
+new file mode 100644
+index 00000000..735715b8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Text2.hpp
+@@ -0,0 +1,93 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_Text2.hpp
++ *
++ * Contains declaration of class cfgCorba_Text2.
++ *
++ * @author JK
++ *
++ * Copyright (c) 2002 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGCORBA_TEXT2_HPP
++#define CFGCORBA_TEXT2_HPP
++#ifdef SHOW_INCLUDE_FILES
++
++#pragma message("including: " __FILE__)
++
++#endif
++
++
++#include "cfgEntity.hpp"
++
++
++
++/**
++ *
++ * Handle class.
++ *
++**/
++class cfgCorba_Text2_Private;
++
++
++
++/**
++ *
++ * An object of this class provides a CORBA-based access to configuration
++ * items of "text" type.
++ *
++**/
++class cfgCorba_Text2
++{
++
++   /**
++    *
++    * Implementation handle.
++    *
++   **/
++   cfgCorba_Text2_Private * Handle;
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Entity:    Configuration data reference.
++    *
++   **/
++   explicit cfgCorba_Text2( cfgEntity & Entity );
++
++   /**
++    *
++    * Destructor
++    *
++   **/
++   ~cfgCorba_Text2();
++
++private:
++
++   //! Default constructor - Intentionally not implemented.
++   cfgCorba_Text2();
++
++   //! Copy constructor - Intentionally not implemented.
++   cfgCorba_Text2( cfgCorba_Text2 const & );
++
++   //! Assignment - Intentionally not implemented.
++   cfgCorba_Text2 & operator=( cfgCorba_Text2 const & );
++
++
++};
++
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/serviceCfg_Text.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/serviceCfg_Text.hpp
+new file mode 100644
+index 00000000..425bb375
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/serviceCfg_Text.hpp
+@@ -0,0 +1,109 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_ServiceText.hpp
++ *
++ * Contains declaration of class cfgCorba_ServiceText.
++ *
++ * @author JK
++ *
++ * Copyright (c) 2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef CFGCORBA_SERVICETEXT
++#define CFGCORBA_SERVICETEXT
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "xcfgCorba_Node.hpp"
++
++
++class cfgCorba_ServiceText :
++   public serviceCfg_Node,
++   public POA_Config::Text
++{
++
++   cfgEntity * M_ConfigEntity;
++
++   /**
++    *
++    * Create a configuration item
++    *
++   **/
++   void create
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           char const *                      D,
++           CORBA::Long                       MaxLength
++        );
++
++   /**
++    *
++    * Get a configuration value
++    *
++   **/
++   char * get( Config::access const & Acc );
++
++   /**
++    *
++    * Set a configuration value
++    *
++   **/
++   void set( Config::access const & Acc, char const * Val );
++
++   /**
++    *
++    * Set an initial configuration value
++    *
++   **/
++   void setInitial( Config::access const & Acc, char const * Val );
++
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta
++        (
++           Config::access const &            Acc,
++           Config::description const &       Desc,
++           CORBA::Long                       MaxLength
++        );
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Configuration:             Refers the configuration back-end.
++    *
++   **/
++   explicit cfgCorba_ServiceText( cfgEntity & Configuration );
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~cfgCorba_ServiceText();
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   cfgCorba_ServiceText();
++
++};
++
++
++#endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 5e988711..6115990a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -35,6 +35,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Number.obj \
+     $(_OBJ)\cfgCorba_Selection.obj \
+     $(_OBJ)\cfgCorba_Text.obj \
++    $(_OBJ)\cfgCorba_Text2.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
+     $(_OBJ)\cfgEntity.obj \
+     $(XERCES_IFOBJ) \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index ddecf88c..0ed856e2 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -24,6 +24,7 @@
+ #include "cfgCorba_Number.hpp"
+ #include "cfgCorba_Selection.hpp"
+ #include "cfgCorba_Text.hpp"
++#include "cfgCorba_Text2.hpp"
+ #include "cfgCorba_Textlist.hpp"
+ #include "CfgXMgrB_def.h"
+ #include "traceLocal.hpp"
+@@ -164,6 +165,7 @@ int main( int argc, char ** argv )
+       cfgCorba_Number     CorbaNumber( Configuration );
+       cfgCorba_Selection  CorbaSelection( Configuration );
+       cfgCorba_Text       CorbaText( Configuration );
++      cfgCorba_Text2      CorbaText2( Configuration );
+       cfgCorba_Textlist   CorbaTextlist( Configuration );
+       //
+       // Wait ...
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index 43e82559..5ee1f276 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -12,7 +12,11 @@
+  **************************************************************************
+ **/
+ 
++// Exported
+ #include "cfgCorba_Text.hpp"
++
++// Local header
++#include "cfgCorba_ServiceText.hpp"
+ #include "cfgCorba_Node.hpp"
+ #include "cfgCorba_Template.hpp"
+ #include "cfgRightsMan.hpp"
+@@ -38,419 +42,406 @@
+ 
+ #include "trc/TraceClt.h"
+ 
+-#define SCT  "serviceCfgText::"
++#define SCT  "cfgCorba_ServiceText::"
+ 
+ 
+ 
+-/**
+- **************************************************************************
++/*
+  *
+- * Text configuration service implementation class
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
+  *
+- **************************************************************************
+-**/
+-class serviceCfgText :
+-   public serviceCfg_Node,
+-   public POA_Config::Text
++ */
++void cfgCorba_ServiceText::create
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        char const *                      D,
++        CORBA::Long                       MaxLength
++     )
+ {
+-
+-   cfgEntity * M_ConfigEntity;
+-
+-   /**
+-    *
+-    * Create a configuration item
+-    *
+-   **/
+-   void create
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           char const *                      D,
+-           CORBA::Long                       MaxLength
+-        )
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCT "create(%s) rights:%s",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
+    {
+-      writeTrace
+-      (
+-         BasicRuntime_HERE,
+-         SCT "create(%s) rights:%s",
+-         access2Str(Acc).c_str(), Desc.Rights
+-      );
+-      try
+-      {
+-         std::string const rights( Desc.Rights );
+-         std::string const explanation( Desc.Explanation );
+-         cfgMetaText Obj
+-                     (
+-                        rights,
+-                        explanation,
+-                        static_cast<unsigned>( MaxLength )
+-                     );
+-         if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+-         {
+-            // Read access -> plain text in file.
+-            M_ConfigEntity->itemCreate
+-            (
+-               Obj, Acc.Item,
+-               new cfgValueText( false, explanation, D )
+-            );
+-         }
+-         else
+-         {
+-            //No read access -> encrypt in file.
+-            M_ConfigEntity->itemCreate
+-            (
+-               Obj, Acc.Item,
+-               new cfgValueText( true, explanation, D )
+-            );
+-         }
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "create - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "create - notCreated (1) exception."
+-         );
+-         throw Config::Node::notCreated();
+-      }
+-      catch( cfgEntity_WrongParameter & )
++      std::string const rights( Desc.Rights );
++      std::string const explanation( Desc.Explanation );
++      cfgMetaText Obj
++                  (
++                     rights,
++                     explanation,
++                     static_cast<unsigned>( MaxLength )
++                  );
++      if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+       {
+-         writeTrace
++         // Read access -> plain text in file.
++         M_ConfigEntity->itemCreate
+          (
+-            SecondaryRuntime_HERE,
+-            SCT "create - notCreated (2) exception."
++            Obj, Acc.Item,
++            new cfgValueText( false, explanation, D )
+          );
+-         throw Config::Node::notCreated();
+       }
+-      catch( ... )
++      else
+       {
+-         writeTrace
++         //No read access -> encrypt in file.
++         M_ConfigEntity->itemCreate
+          (
+-            SecondaryRuntime_HERE,
+-            SCT "create - noConfiguration exception."
++            Obj, Acc.Item,
++            new cfgValueText( true, explanation, D )
+          );
+-         throw Config::Node::noConfiguration();
+       }
++   }
++   catch( cfgEntity_AlreadyExists & )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCT "create(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCT "create - alreadyExists exception."
+       );
++      throw Config::Node::alreadyExists();
+    }
+-
+-   /**
+-    *
+-    * Get a configuration value
+-    *
+-   **/
+-   char * get( Config::access const & Acc )
++   catch( cfgEntity_IllegalValue & )
+    {
+-      verifyAccess( SCT "get", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCT "get(%s) ...",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCT "create - notCreated (1) exception."
+       );
+-      try
+-      {
+-         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+-         cfgValueText const * const valref =
+-            dynamic_cast<cfgValueText const *>
+-            (
+-               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+-            );
+-         if( valref )
+-         {
+-            char const * const Val = valref->c_str();
+-            writeTrace
+-            (
+-               SecondaryRuntime_HERE, SCT "get = [%s].",
+-               Val
+-            );
+-            return CORBA::string_dup( Val );
+-         }
+-         else
+-         {
+-            throw Config::Node::notFound();
+-         }
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "get - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "get - notFound exception."
+-         );
+-         throw Config::Node::notFound();
+-      }
+-      catch( Config::Node::notFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "get - notFound exception (root)."
+-         );
+-         throw;
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "get - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
++      throw Config::Node::notCreated();
+    }
+-
+-   /**
+-    *
+-    * Set a configuration value
+-    *
+-   **/
+-   void set( Config::access const & Acc, char const * Val )
++   catch( cfgEntity_WrongParameter & )
+    {
+-      verifyAccess( SCT "set", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCT "set(%s) = [%s] ...",
+-         access2Str(Acc).c_str(), Val
++         SecondaryRuntime_HERE,
++         SCT "create - notCreated (2) exception."
+       );
+-      try
+-      {
+-         M_ConfigEntity->itemSetValue
+-                        (
+-                           Acc.Authorization,
+-                           Acc.Item,
+-                           new cfgValueText( Val )
+-                        );
+-      }
+-      catch( cfgEntity_IllegalValue & )
+-      {
+-         writeTrace
++      throw Config::Node::notCreated();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "create - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCT "create(%s).",
++      access2Str(Acc).c_str()
++   );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++char * cfgCorba_ServiceText::get( Config::access const & Acc )
++{
++   verifyAccess( SCT "get", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCT "get(%s) ...",
++      access2Str(Acc).c_str()
++   );
++   try
++   {
++      Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++      cfgValueText const * const valref =
++         dynamic_cast<cfgValueText const *>
+          (
+-            SecondaryRuntime_HERE,
+-            SCT "set - outOfRange exception."
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+          );
+-         throw Config::Node::outOfRange();
+-      }
+-      catch( cfgEntity_NotAuthorized & )
++      if( valref )
+       {
++         char const * const Val = valref->c_str();
+          writeTrace
+          (
+-            SecondaryRuntime_HERE,
+-            SCT "set - notAuthorized exception."
++            SecondaryRuntime_HERE, SCT "get = [%s].",
++            Val
+          );
+-         throw Config::Node::notAuthorized();
++         return CORBA::string_dup( Val );
+       }
+-      catch( cfgEntity_NotFound & )
++      else
+       {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "set - notFound exception."
+-         );
+          throw Config::Node::notFound();
+       }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "set - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCT "set." );
+    }
+-
+-   /**
+-    *
+-    * Set an initial configuration value
+-    *
+-   **/
+-   void setInitial( Config::access const & Acc, char const * Val )
++   catch( cfgEntity_NotAuthorized & )
+    {
+-      verifyAccess( SCT "setInitial", Acc );
+       writeTrace
+       (
+-         SecondaryRuntime_HERE, SCT "setInitial(%s) = [%s] ...",
+-         access2Str(Acc).c_str(), Val
++         SecondaryRuntime_HERE,
++         SCT "get - notAuthorized exception."
+       );
+-      try
+-      {
+-         cfgMetaText Obj( Acc.Authorization );
+-         M_ConfigEntity->itemCreate
+-                        (
+-                           Obj, Acc.Item,
+-                           new cfgValueText( Val )
+-                        );
+-      }
+-      catch( cfgEntity_AlreadyExists & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setInitial - alreadyExists exception."
+-         );
+-         throw Config::Node::alreadyExists();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setInitial - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setInitial - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
+-      writeTrace( SecondaryRuntime_HERE, SCT "setInitial." );
++      throw Config::Node::notAuthorized();
+    }
+-
+-   /**
+-    *
+-    * Set new meta-data for an existing configuration item.
+-    *
+-   **/
+-   void setMeta
+-        (
+-           Config::access const &            Acc,
+-           Config::description const &       Desc,
+-           CORBA::Long                       MaxLength
+-        )
++   catch( cfgEntity_NotFound & )
+    {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCT "setMeta(%s) rights:%s",
+-         access2Str(Acc).c_str(), Desc.Rights
++         SecondaryRuntime_HERE,
++         SCT "get - notFound exception."
+       );
+-      try
+-      {
+-         std::string const rights( Desc.Rights );
+-         std::string const explanation( Desc.Explanation );
+-         cfgMetaText Obj
++      throw Config::Node::notFound();
++   }
++   catch( Config::Node::notFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "get - notFound exception (root)."
++      );
++      throw;
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "get - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++void cfgCorba_ServiceText::set( Config::access const & Acc, char const * Val )
++{
++   verifyAccess( SCT "set", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCT "set(%s) = [%s] ...",
++      access2Str(Acc).c_str(), Val
++   );
++   try
++   {
++      M_ConfigEntity->itemSetValue
+                      (
+-                        rights,
+-                        explanation,
+-                        static_cast<unsigned>( MaxLength )
++                        Acc.Authorization,
++                        Acc.Item,
++                        new cfgValueText( Val )
+                      );
+-         M_ConfigEntity->itemSetMeta
+-         (
+-            Obj, Acc.Item
+-         );
+-      }
+-      catch( cfgEntity_NotAuthorized & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setMeta - notAuthorized exception."
+-         );
+-         throw Config::Node::notAuthorized();
+-      }
+-      catch( cfgEntity_NotFound & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setMeta - notFound exception."
+-         );
+-         throw Config::Node::notFound();
+-      }
+-      catch( cfgEntity_WrongParameter & )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setMeta - wrongParam exception."
+-         );
+-         throw Config::Node::wrongParam();
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            SCT "setMeta - noConfiguration exception."
+-         );
+-         throw Config::Node::noConfiguration();
+-      }
++   }
++   catch( cfgEntity_IllegalValue & )
++   {
+       writeTrace
+       (
+-         BasicRuntime_HERE,
+-         SCT "setMeta(%s).",
+-         access2Str(Acc).c_str()
++         SecondaryRuntime_HERE,
++         SCT "set - outOfRange exception."
+       );
+-   } // void setMeta()
++      throw Config::Node::outOfRange();
++   }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "set - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "set - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "set - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace( SecondaryRuntime_HERE, SCT "set." );
++}
+ 
+-public:
+ 
+-   /**
+-    *
+-    * Constructor.
+-    *
+-    * @param Configuration:             Refers the configuration back-end.
+-    *
+-   **/
+-   explicit serviceCfgText( cfgEntity & Configuration ) :
+-      serviceCfg_Node( Configuration ),
+-      POA_Config::Text(),
+-      M_ConfigEntity( &Configuration )
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++void cfgCorba_ServiceText::setInitial( Config::access const & Acc, char const * Val )
++{
++   verifyAccess( SCT "setInitial", Acc );
++   writeTrace
++   (
++      SecondaryRuntime_HERE, SCT "setInitial(%s) = [%s] ...",
++      access2Str(Acc).c_str(), Val
++   );
++   try
++   {
++      cfgMetaText Obj( Acc.Authorization );
++      M_ConfigEntity->itemCreate
++                     (
++                        Obj, Acc.Item,
++                        new cfgValueText( Val )
++                     );
++   }
++   catch( cfgEntity_AlreadyExists & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setInitial - alreadyExists exception."
++      );
++      throw Config::Node::alreadyExists();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setInitial - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
+    {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setInitial - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
+    }
++   writeTrace( SecondaryRuntime_HERE, SCT "setInitial." );
++}
+ 
+-   /**
+-    *
+-    * Destructor.
+-    *
+-   **/
+-   ~serviceCfgText()
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++void cfgCorba_ServiceText::setMeta
++     (
++        Config::access const &            Acc,
++        Config::description const &       Desc,
++        CORBA::Long                       MaxLength
++     )
++{
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCT "setMeta(%s) rights:%s",
++      access2Str(Acc).c_str(), Desc.Rights
++   );
++   try
+    {
+-      M_ConfigEntity = 0;
++      std::string const rights( Desc.Rights );
++      std::string const explanation( Desc.Explanation );
++      cfgMetaText Obj
++                  (
++                     rights,
++                     explanation,
++                     static_cast<unsigned>( MaxLength )
++                  );
++      M_ConfigEntity->itemSetMeta
++      (
++         Obj, Acc.Item
++      );
+    }
++   catch( cfgEntity_NotAuthorized & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setMeta - notAuthorized exception."
++      );
++      throw Config::Node::notAuthorized();
++   }
++   catch( cfgEntity_NotFound & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setMeta - notFound exception."
++      );
++      throw Config::Node::notFound();
++   }
++   catch( cfgEntity_WrongParameter & )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setMeta - wrongParam exception."
++      );
++      throw Config::Node::wrongParam();
++   }
++   catch( ... )
++   {
++      writeTrace
++      (
++         SecondaryRuntime_HERE,
++         SCT "setMeta - noConfiguration exception."
++      );
++      throw Config::Node::noConfiguration();
++   }
++   writeTrace
++   (
++      BasicRuntime_HERE,
++      SCT "setMeta(%s).",
++      access2Str(Acc).c_str()
++   );
++} // void setMeta()
+ 
+-private:
+ 
+-   //! Default constructor - intentionally not implemented.
+-   serviceCfgText();
+ 
+-};
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++cfgCorba_ServiceText::cfgCorba_ServiceText( cfgEntity & Configuration ) :
++   serviceCfg_Node( Configuration ),
++   POA_Config::Text(),
++   M_ConfigEntity( &Configuration )
++{
++}
++
++
++
++/*
++ *
++ * Method implementation, see "cfgCorba_ServiceText.hpp".
++ *
++ */
++cfgCorba_ServiceText::~cfgCorba_ServiceText()
++{
++   M_ConfigEntity = 0;
++}
+ 
+ 
+ 
+ class cfgCorba_Text_Private
+ {
+-   serviceCfgText *                             pLC_Text;
+-   corbaServantEx<serviceCfgText> *             pLD_Text;
++   cfgCorba_ServiceText *                             pLC_Text;
++   corbaServantEx<cfgCorba_ServiceText> *             pLD_Text;
+ 
+ public:
+ 
+@@ -471,8 +462,8 @@ public:
+       pLD_Text( 0 )
+    {
+ 
+-      pLC_Text = new serviceCfgText( Configuration );
+-      pLD_Text = new_Servant<serviceCfgText>
++      pLC_Text = new cfgCorba_ServiceText( Configuration );
++      pLD_Text = new_Servant<cfgCorba_ServiceText>
+                      (
+                         *pLC_Text,
+                         CFGMGR_SRVNAME_TEXT
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+new file mode 100644
+index 00000000..bf83171b
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -0,0 +1,511 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgCorba_Text2.cpp
++ *
++ * Contains method implementation of class cfgCorba_Text2.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
++#include "cfgCorba_Text2.hpp"
++
++// Loacal header
++#include "cfgCorba_ServiceText.hpp"
++#include "cfgCorba_Template.hpp"
++#include "cfgRightsMan.hpp"
++
++#include "cfgclnt/CfgMgrIPC.h"
++
++#include "massaiCorba/orbIncDefs.h"
++#include "massaiCorba/corbasrvr.h"
++
++#ifdef _TAO_
++#include "Tao/CORBA.h"
++#include "massaiCorba/orbIncDefs.h"
++#include "CfgMgr.h"
++#include "CfgMgr_skel.h"
++#endif
++
++#ifdef _ORBACUS_
++#include <CfgMgr_skel.h>
++#endif
++
++#include "cfgMetaText.hpp"
++#include "cfgValueText.hpp"
++
++#include "trc/TraceClt.h"
++
++#define SCT2  "cfgCorba_ServiceText2::"
++
++
++
++/**
++ **************************************************************************
++ *
++ * Text2 configuration service implementation class
++ *
++ **************************************************************************
++**/
++class cfgCorba_ServiceText2 :
++   virtual public cfgCorba_ServiceText,
++   virtual public POA_Config::Text2
++{
++
++   cfgEntity * M_ConfigEntity;
++
++   /**
++    *
++    * Create a configuration item
++    *
++   **/
++   void create2
++         (
++            Config::access const &              acc,
++            Config::Text2::metaData const &     meta_data,
++            char const *                        default_value
++         )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT2 "create2(%s) rights:%s",
++         access2Str(acc).c_str(), meta_data.Desc.Rights
++      );
++      try
++      {
++         std::string const rights( meta_data.Desc.Rights );
++         std::string const explanation( meta_data.Desc.Explanation );
++         cfgMetaText Obj
++                     (
++                        rights,
++                        explanation,
++                        static_cast<unsigned>( meta_data.MaxLength )
++                     );
++         if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
++         {
++            // Read access -> plain text in file.
++            M_ConfigEntity->itemCreate
++            (
++               Obj, acc.Item,
++               new cfgValueText( false, explanation, default_value )
++            );
++         }
++         else
++         {
++            //No read access -> encrypt in file.
++            M_ConfigEntity->itemCreate
++            (
++               Obj, acc.Item,
++               new cfgValueText( true, explanation, default_value )
++            );
++         }
++      }
++      catch( cfgEntity_AlreadyExists & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "create2 - alreadyExists exception."
++         );
++         throw Config::Node::alreadyExists();
++      }
++      catch( cfgEntity_IllegalValue & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "create2 - notCreated (1) exception."
++         );
++         throw Config::Node::notCreated();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "create2 - notCreated (2) exception."
++         );
++         throw Config::Node::notCreated();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "create2 - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT2 "create2(%s).",
++         access2Str(acc).c_str()
++      );
++   }
++
++   char * getWithMeta
++      (
++         Config::access const &         acc,
++         Config::Text2::metaData_out    meta_data_out
++      )
++   {
++      //TODO
++      verifyAccess( SCT2 "getWithMeta", acc );
++      writeTrace
++      (
++         SecondaryRuntime_HERE, SCT2 "getWithMeta(%s) ...",
++         access2Str(acc).c_str()
++      );
++      try
++      {
++         //
++         // Metadata
++         //
++         Config::Text2::metaData * md = new Config::Text2::metaData;
++         cfgMeta const * const meta_data_cfg
++            = M_ConfigEntity->itemGetMeta
++               (
++                  acc.Authorization,
++                  cfgEntity::PURP_DIRGET, //TODO
++                  acc.Item
++               );
++         if( meta_data_cfg )
++         {
++            md->Desc.Explanation
++                        = CORBA::string_dup
++                           (
++                              meta_data_cfg->getExplanation().c_str()
++                           );
++            std::string rights_cfg;
++            meta_data_cfg->getRights( acc.Authorization, rights_cfg );
++            md->Desc.Rights
++               = CORBA::string_dup( rights_cfg.c_str() );
++            //
++            try
++            {
++               cfgMetaText const * const meta_text_cfg =
++                  dynamic_cast<cfgMetaText const *>( meta_data_cfg );
++               if( meta_text_cfg )
++               {
++                  md->MinLength = 0;
++                  md->MaxLength = meta_text_cfg->getMaxLength();
++                  md->RegEx = CORBA::string_dup( "" );
++                  md->Semantic = Config::ST_NONE;
++               }
++               else
++               {
++                  writeTrace
++                  (
++                     SecondaryRuntime_HERE,
++                     SCT2 "getWithMeta - NULL."
++                  );
++               }
++            }
++            catch( ... )
++            {
++               writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  SCT2 "getWithMeta - exception."
++               );
++            }
++         }
++         else
++         {
++            // No meta data available, probably just initialized.
++            // Fake an explanation.
++            md->Desc.Explanation
++                     = CORBA::string_dup
++                        (
++                           "ENTRY NOT YET CREATED!"
++                        );
++            // Fake the access rights
++            md->Desc.Rights
++                     = CORBA::string_dup
++                       (
++                          "rl"
++                       );
++            md->MinLength = 0;
++            md->MaxLength = 0;
++            md->RegEx = CORBA::string_dup( "" );
++            md->Semantic = Config::ST_NONE;
++         }
++         meta_data_out = md;
++         //
++         // Value
++         //
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueText const * const valref =
++            dynamic_cast<cfgValueText const *>
++            (
++               M_ConfigEntity->itemGetValue( acc.Authorization, acc.Item )
++            );
++         if( valref )
++         {
++            char const * const Val = valref->c_str();
++            writeTrace
++            (
++               SecondaryRuntime_HERE, SCT2 "getWithMeta = [%s].",
++               Val
++            );
++            return CORBA::string_dup( Val );
++         }
++         else
++         {
++            throw Config::Node::notFound();
++         }
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "getWithMeta - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "getWithMeta - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( Config::Node::notFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "getWithMeta - notFound exception (root)."
++         );
++         throw;
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "getWithMeta - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++   }
++
++
++   /**
++    *
++    * Set new meta-data for an existing configuration item.
++    *
++   **/
++   void setMeta2
++         (
++            Config::access const &              acc,
++            Config::Text2::metaData const &     meta_data
++        )
++   {
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT2 "setMeta2(%s) rights:%s",
++         access2Str(acc).c_str(), meta_data.Desc.Rights
++      );
++      try
++      {
++         std::string const rights( meta_data.Desc.Rights );
++         std::string const explanation( meta_data.Desc.Explanation );
++         cfgMetaText Obj
++                     (
++                        rights,
++                        explanation,
++                        static_cast<unsigned>( meta_data.MaxLength )
++                     );
++         M_ConfigEntity->itemSetMeta
++         (
++            Obj, acc.Item
++         );
++      }
++      catch( cfgEntity_NotAuthorized & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "setMeta2 - notAuthorized exception."
++         );
++         throw Config::Node::notAuthorized();
++      }
++      catch( cfgEntity_NotFound & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "setMeta2 - notFound exception."
++         );
++         throw Config::Node::notFound();
++      }
++      catch( cfgEntity_WrongParameter & )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "setMeta2 - wrongParam exception."
++         );
++         throw Config::Node::wrongParam();
++      }
++      catch( ... )
++      {
++         writeTrace
++         (
++            SecondaryRuntime_HERE,
++            SCT2 "setMeta2 - noConfiguration exception."
++         );
++         throw Config::Node::noConfiguration();
++      }
++      writeTrace
++      (
++         BasicRuntime_HERE,
++         SCT2 "setMeta2(%s).",
++         access2Str(acc).c_str()
++      );
++   } // void setMeta2()
++
++public:
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param Configuration:             Refers the configuration back-end.
++    *
++   **/
++   explicit cfgCorba_ServiceText2( cfgEntity & Configuration ) :
++      serviceCfg_Node( Configuration ),
++      cfgCorba_ServiceText( Configuration ),
++      POA_Config::Text2(),
++      M_ConfigEntity( &Configuration )
++   {
++   }
++
++   /**
++    *
++    * Destructor.
++    *
++   **/
++   ~cfgCorba_ServiceText2()
++   {
++      M_ConfigEntity = 0;
++   }
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   cfgCorba_ServiceText2();
++
++};
++
++
++
++class cfgCorba_Text2_Private
++{
++   cfgCorba_ServiceText2 *                             pLC_Text;
++   corbaServantEx<cfgCorba_ServiceText2> *             pLD_Text;
++
++public:
++
++   /**
++    *
++    * Constructor
++    *
++   **/
++   cfgCorba_Text2_Private();
++
++   /**
++    *
++    * Constructor
++    *
++   **/
++   explicit cfgCorba_Text2_Private( cfgEntity & Configuration ) :
++      pLC_Text( 0 ),
++      pLD_Text( 0 )
++   {
++
++      pLC_Text = new cfgCorba_ServiceText2( Configuration );
++      pLD_Text = new_Servant<cfgCorba_ServiceText2>
++                     (
++                        *pLC_Text,
++                        CFGMGR_SRVNAME_TEXT2
++                     );
++   }
++
++   /**
++    *
++    * Destructor
++    *
++   **/
++   ~cfgCorba_Text2_Private()
++   {
++      try
++      {
++         delete pLD_Text;
++         delete pLC_Text;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++private:
++
++   //! Copy constructor - Intentionally not implemented.
++   cfgCorba_Text2_Private( cfgCorba_Text2_Private const & );
++
++   //! Assignment - Intentionally not implemented.
++   cfgCorba_Text2_Private & operator=( cfgCorba_Text2_Private const & );
++
++};
++
++
++
++cfgCorba_Text2::cfgCorba_Text2( cfgEntity & Configuration ) :
++   Handle( new cfgCorba_Text2_Private( Configuration ) )
++{
++   writeTrace
++      (
++         SecondaryRuntime_HERE, "cfgCorba_Text2::cfgCorba_Text2"
++      );
++}
++
++
++
++cfgCorba_Text2::~cfgCorba_Text2()
++{
++   try
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE, "cfgCorba_Text2::~cfgCorba_Text2"
++         );
++      delete Handle;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index 652bd1f3..bd0b2f18 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -23,6 +23,7 @@
+ #include "cfgCorba_Number.hpp"
+ #include "cfgCorba_Selection.hpp"
+ #include "cfgCorba_Text.hpp"
++#include "cfgCorba_Text2.hpp"
+ #include "cfgCorba_Textlist.hpp"
+ #include "cfgEntity.hpp"
+ #include "massaiCfgXB_def.h"
+@@ -214,6 +215,7 @@ int mDaemon_main( int argc, char const * const * argv )
+       cfgCorba_Number     CorbaNumber( Configuration );
+       cfgCorba_Selection  CorbaSelection( Configuration );
+       cfgCorba_Text       CorbaText( Configuration );
++      cfgCorba_Text2      CorbaText2( Configuration );
+       cfgCorba_Textlist   CorbaTextlist( Configuration );
+ 
+       //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index ad249002..e8a836f0 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -41,6 +41,7 @@ CORE_OBJS = \
+     $(_OBJ)\cfgCorba_Number.obj \
+     $(_OBJ)\cfgCorba_Selection.obj \
+     $(_OBJ)\cfgCorba_Text.obj \
++    $(_OBJ)\cfgCorba_Text2.obj \
+     $(_OBJ)\cfgCorba_Textlist.obj \
+     $(_OBJ)\cfgEntity.obj \
+     $(XERCES_IFOBJ) \
+diff --git a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+index 1ba1d8fb..95d98f8c 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/cfgmgr.idl
+@@ -22,30 +22,52 @@
+ 
+ 
+ 
+-/** This module provides interfaces for client-application acces to the
++/**
++ *
++ *  This module provides interfaces for client-application acces to the
+  *  configuration servant.
+  *  @version 2.0
+  *  @author Carsten Metzler - Materna Information & Communications
+- */
++ *
++**/
+ module Config
+ {
+ 
++    const string interface_version = "2.0";
+ 
+-    /** This interface can be used by client applications to be informed
+-     *  about change events.
+-     */
++
++    /**
++     *
++     * This interface can be used by client applications
++     * to be informed about configuration changes.
++     *
++    **/
+     interface changeListener
+     {
+ 
+-        /** This method is called whenever the value of a configuration
++        /**
++         *
++         *  This method is called whenever the value of a configuration
+          *  item has changed.
+          *  @param Item        - The name of the configuration item
+-         */
++         *
++        **/
+         void valueChanged( in string Item );
+ 
+     };
+ 
+ 
++    /** The type codes here might help to validate an input */
++    enum semanticType
++    {
++        ST_NONE,                        /**< No special type */
++        ST_PASSWORD,                    /**< Password */
++        ST_URL,                         /**< Generic URL */
++        ST_HOSTNAME,                    /**< Hostname or IP Address*/
++        ST_IP_ADDRESS                   /**< IP Address */
++    };
++
++
+     /** Meta-Information about a configuration item. */
+     struct description
+     {
+@@ -95,9 +117,12 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides basic operations for all types of
+-     *  configuration values.
+-     */
++    /**
++     *
++     * This interface provides basic operations
++     * for all types of configuration values.
++     *
++    **/
+     interface Node
+     {
+ 
+@@ -133,11 +158,11 @@ module Config
+         /** The type of the configuration item. */
+         enum itemType
+         {
+-            CFG_DIR,            /** subdirectory */
+-            CFG_TEXT,           /** string item */
+-            CFG_TEXTLIST,       /** string list */
+-            CFG_NUMBER,         /** numeric item */
+-            CFG_SELECTION       /** selection list */
++            CFG_DIR,            /**< subdirectory */
++            CFG_TEXT,           /**< string item */
++            CFG_TEXTLIST,       /**< string list */
++            CFG_NUMBER,         /**< numeric item */
++            CFG_SELECTION       /**< selection list */
+         };
+ 
+         /** Adds a change listener.
+@@ -193,7 +218,12 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides operations for string configuration values. */
++    /**
++     *
++     * This interface provides operations
++     * for text configuration values.
++     *
++    **/
+     interface Text : Node
+     {
+ 
+@@ -256,7 +286,67 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides operations for textlist configuration values. */
++    /**
++     *
++     * This interface provides metadata-enhanced operations
++     * for text configuration values.
++     *
++    **/
++    interface Text2 : Text
++    {
++
++        /** Contains the value and meta-data of a configuration item */
++        struct metaData
++        {
++            description         Desc;           /**< the description */
++            long                MinLength;      /**< min length */
++            long                MaxLength;      /**< max length */
++            string              RegEx;          /**< regular expression */
++            semanticType        Semantic;       /**< semantic type */
++        };
++
++        /** Creates a configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param MetaData     - The meta-data.
++         *  @param DefaultValue - The default value.
++         */
++        void create2
++            (
++               in access Acc, in metaData MetaData,
++               in string DefaultValue
++            )
++            raises( alreadyExists, noConfiguration, notCreated );
++
++        /** Gets the value and meta-data a configuration item.
++         *
++         *  @param Acc          - The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @param MetaData     - Returns the meta-data.
++         *  @return             - The current value.
++         */
++         string getWithMeta( in access Acc, out metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param MetaData     - The value and meta data.
++         */
++        void setMeta2( in access Acc, in metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++    };
++
++
++    /**
++     *
++     * This interface provides operations
++     * for textlist configuration values.
++     *
++    **/
+     interface Textlist : Node
+     {
+ 
+@@ -358,7 +448,69 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides operations for numeric configuration values. */
++    /**
++     *
++     * This interface provides metadata-enhanced operations
++     * for textlist configuration values.
++     *
++    **/
++    interface Textlist2 : Textlist
++    {
++
++        /** Contains the value and meta-data of a configuration item */
++        struct metaData
++        {
++            description         Desc;           /**< the description */
++            long                MinLength;      /**< min length */
++            long                MaxLength;      /**< max length */
++            long                MinNumber;      /**< min number in list */
++            long                MaxNumber;      /**< max number in list */
++            string              RegEx;          /**< regular expression */
++            semanticType        Semantic;       /**< semantic type */
++        };
++
++        /** Creates a configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param MetaData     - The meta-data.
++         *  @param DefaultValue - The default value.
++         */
++        void create2
++            (
++               in access Acc, in metaData MetaData,
++               in strings DefaultValue
++            )
++            raises( alreadyExists, noConfiguration, notCreated );
++
++        /** Gets the value and meta-data a configuration item.
++         *
++         *  @param Acc          - The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @param MetaData     - Returns the meta-data.
++         *  @return             - The current value.
++         */
++         strings getWithMeta( in access Acc, out metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param MetaData     - The value and meta data.
++         */
++        void setMeta2( in access Acc, in metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++    };
++
++
++    /**
++     *
++     * This interface provides operations
++     * for numeric configuration values.
++     *
++    **/
+     interface Number : Node
+     {
+ 
+@@ -441,24 +593,67 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides operations for selection configuration values. */
++    /**
++     *
++     * This interface provides metadata-enhanced operations
++     * for numeric configuration values.
++     *
++    **/
++    interface Number2 : Number
++    {
++
++        /** Contains the value and meta-data of a configuration item */
++        struct metaData
++        {
++            description         Desc;           /**< the description */
++            long                MinValue;       /**< min number in list */
++            long                MaxValue;       /**< max number in list */
++        };
++
++        /** Gets the value and meta-data a configuration item.
++         *
++         *  @param Acc          - The configuration access, contains item name and the
++         *                        requester authorization.
++         *  @param MetaData     - Returns the meta-data.
++         *  @return             - The current value.
++         */
++         long getWithMeta( in access Acc, out metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++        /** Set new meta-data for an existing configuration item.
++         *
++         *  @param Acc          - The configuration access, contains the item name and
++         *                        the creator authorization.
++         *  @param MetaData     - The value and meta data.
++         */
++        void setMeta2( in access Acc, in metaData MetaData )
++            raises( noConfiguration, notAuthorized, notFound, wrongParam );
++
++    };
++
++
++    /**
++     *
++     * This interface provides operations
++     * for selection configuration values.
++     *
++    **/
+     interface Selection : Node
+     {
+ 
+         /** The type of the configuration values. */
+         struct select
+         {
+-            /** An index associated with the value. */
+ 
++            /** An index associated with the value. */
+             long   selLong;
+ 
+             /** A string associated with the value. */
+-
+             string selString;
+ 
+             /** A verbose explanation for the value. */
+-
+             string selExplanation;
++
+         };
+ 
+         /** The list of possible values. */
+@@ -541,16 +736,20 @@ module Config
+     };
+ 
+ 
+-    /** This interface provides operations for the configuration editor to display the
+-     *  configuration tree */
++    /**
++     *
++     * This interface provides operations
++     * for the configuration tree
++     *
++    **/
+     interface Directory : Node
+     {
+ 
+         /** Contains a selection list and the currently selected index */
+         struct selectionData
+         {
+-            Selection::selectList  List;          /** the selection list */
+-            long                   CurrentIndex;  /** the currently selected index */
++            Selection::selectList  List;          /**< the selection list */
++            long                   CurrentIndex;  /**< the currently selected index */
+         };
+ 
+         /** Contains the current value of a configuration item dependant on its type */
+@@ -566,10 +765,10 @@ module Config
+         /** Contains the value and meta-data of a configuration item */
+         struct item
+         {
+-            itemType            Type;               /** the type */
+-            string              Name;               /** the name */
+-            description         Desc;               /** the description */
+-            itemValue           Value;              /** the value */
++            itemType            Type;               /**< the type */
++            string              Name;               /**< the name */
++            description         Desc;               /**< the description */
++            itemValue           Value;              /**< the value */
+         };
+ 
+         /** The content of a configuration directory
+-- 
+2.41.0.windows.1
+

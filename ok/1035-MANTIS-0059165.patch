@@ -1,0 +1,87 @@
+From a801d8dc2b0f421567478026439e26fdeec52ea5 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 24 Nov 2020 20:39:26 +0000
+Subject: [PATCH 1035/1076] MANTIS 0059165 bugfix: Call CUSS 1.5 Shortcuts
+ without extension from Platform config
+
+massai_systools.lib
+V1.0.0.41
+- convert start/stop time of process from UTC to local time
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1610 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp           |  9 +++++++--
+ .../Massai/cpp/Systools/src/mSysTimeW32.cpp         | 13 +++++++++++--
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 55f432ff..1acfca27 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 40);
++VERSION_ID_DT(systools, 1, 0, 0, 41);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 40);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.40
++@version 1.0.0.41
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.41
++\li 24.11.2020
++\li bugfix - SteT Mantis 0059165: Call CUSS 1.5 Shortcuts without extension from Platform config
++- convert start/stop time of process from UTC to local time
++
+ \version 1.0.0.40
+ \li 04.03.2020
+ \li extension - SteT Mantis 0056107: PLF MouseHook for entering service mode won't work on Windows 10
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+index b6bd7441..a5421f36 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysTimeW32.cpp
+@@ -71,12 +71,21 @@ namespace mSysTime
+     return getDuration(time);
+   }
+ 
++  SYSTEMTIME getLocalTimeFromUTC(const SYSTEMTIME& timestamp)
++  {
++    TIME_ZONE_INFORMATION timeZone;
++    GetTimeZoneInformation(&timeZone);
++    SYSTEMTIME result;
++    SystemTimeToTzSpecificLocalTime(&timeZone, &timestamp, &result);
++    return result;
++  }
++
+   Timestamp getTimestamp(const FILETIME& filetime)
+   {
+     // 100 nano seconds since 1.Janur 1601
+     SYSTEMTIME systemtime;
+     FileTimeToSystemTime(&filetime, &systemtime);
+-    return getTimestamp(systemtime);
++    return getTimestamp(getLocalTimeFromUTC(systemtime));
+   }
+ 
+   Timestamp getTimestamp(const SYSTEMTIME& systemtime)
+@@ -289,7 +298,7 @@ namespace mSysTime
+   {
+     return getTimestamp(getFileTime(left) + getFileTime(right));
+   }
+-  
++
+   unsigned long getDurationInMs(Duration d)
+   {
+     const unsigned long millisecsPerSecond = 1000;
+-- 
+2.41.0.windows.1
+

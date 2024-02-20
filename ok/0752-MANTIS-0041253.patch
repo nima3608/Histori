@@ -1,0 +1,253 @@
+From e9749544c6f62c5dd4f31fb81c661bccf6096310 Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 25 May 2016 17:32:30 +0000
+Subject: [PATCH 0752/1076] MANTIS 0041253 [SetKioskData]:  - Add Autologon
+ functionality.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1022 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.iss | 53 +++++++++++++--
+ .../setup/SetKioskData/configConveyor.cmd     | 64 ++++++++++++++-----
+ .../Build/setup/SetKioskData/joinDom.cmd      | 29 ++++++++-
+ 3 files changed, 123 insertions(+), 23 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 39b5a174..b6a2a089 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -59,9 +59,9 @@ Name: {userstartup}\SetKioskData.lnk; Type: files
+ 
+ [Run]
+ Filename: "{tmp}\configEnvironment.cmd"; Parameters: """{code:GetAirport}"" ""{code:GetArea}"" ""{code:GetTerminal}"" ""{code:GetKioskName}"""; WorkingDir: "{tmp}"
+-Filename: "{tmp}\configHostname.cmd";    Parameters: """{code:GetKioskName}"""; WorkingDir: "{tmp}"; Check: RunSetHostname
+-Filename: "{tmp}\configConveyor.cmd";    Parameters: """{code:GetConvName}"" ""{code:GetBHSHost}"" ""{code:GetBHSPort}"" ""{code:GetSICKHost}"" ""{code:GetSICKPort}"""; WorkingDir: "{tmp}"; Check: RunConveyor
+-Filename: "{tmp}\joinDom.cmd";           Parameters: """{code:GetDomainName}"" ""{code:GetKioskName}"" ""{code:GetDomainUser}"" ""{code:GetOperationUnit}"""; WorkingDir: "{tmp}"; Check: RunAddDomain
++Filename: "{tmp}\configHostname.cmd"; Parameters: """{code:GetKioskName}"""; WorkingDir: "{tmp}"; Check: RunSetHostname
++Filename: "{tmp}\configConveyor.cmd"; Parameters: """{code:GetConvName}"" ""{code:GetBHSHost}"" ""{code:GetBHSPort}"" ""{code:GetSICKHost}"" ""{code:GetSICKPort}"""; WorkingDir: "{tmp}"; Check: RunConveyor
++Filename: "{tmp}\joinDom.cmd"; Parameters: """{code:GetDomainName}"" ""{code:GetKioskName}"" ""{code:GetDomainUser}"" ""{code:GetOperationUnit}"" ""{code:GetLogonDomain}"" ""{code:GetLogonUser}"" ""{code:GetLogonPassword}"""; WorkingDir: "{tmp}"; Flags: waituntilterminated; Check: RunAddDomain
+ 
+ [Code]
+ var
+@@ -284,6 +284,24 @@ begin
+     end;
+ end;
+ 
++function GetLogonDomain(Param:String): String;
++begin
++    Result := GetPageData('DOMAIN', 'Domain (NETBIOS) Name (if any):');
++    LOG('Domain (NETBIOS) Name: ' + Result);
++end;
++
++function GetLogonUser(Param:String): String;
++begin
++    Result := GetPageData('DOMAIN', 'Windows logon User:');
++    LOG('Windows logon User: ' + Result);
++end;
++
++function GetLogonPassword(Param:String): String;
++begin
++    Result := GetPageData('DOMAIN', 'Logon Password:');
++    LOG('Logon Password: xxx');
++end;
++
+ function RunAddDomain(): Boolean;
+ begin
+     Result := False;
+@@ -625,9 +643,9 @@ begin
+         Page.Name := 'DOMAIN';
+         LOG('[InitializeWizard]: Add page ' + Page.Name);
+ 
+-        Index := Page.Add('Domain Name:',    False);
+-        Index := Page.Add('Domain Administrator Account:',    False);
+-        Index := Page.Add('Operation Unit:', False);
++        Index := Page.Add('Domain Name:',                  False);
++        Index := Page.Add('Domain Administrator Account:', False);
++        Index := Page.Add('Operation Unit:',               False);
+         
+         Page.Values[0] := GetIniString('HOSTDATA', 'DomainName', '', IniFilename);
+         Page.Values[1] := GetIniString('HOSTDATA', 'DomainUser', '', IniFilename);
+@@ -637,6 +655,29 @@ begin
+         SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+         MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+         MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
++        
++        { ------------------------------------------------------ }
++        { Init autologon config page }
++        Page := CreateInputQueryPage(
++            MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
++            'Autologon configuration',
++            'Edit Autologon configuration.',
++            'Please insert your autologon configuration.'
++        );
++        Page.Name := 'AUTOLOGON';
++        LOG('[InitializeWizard]: Add page ' + Page.Name);
++
++        Index := Page.Add('Domain (NETBIOS) Name (if any):', False);
++        Index := Page.Add('Windows logon User:',   False);
++        Index := Page.Add('Logon Password:',       False);
++        
++        Page.Values[0] := GetIniString('HOSTDATA', 'LogonDomain', '', IniFilename);
++        Page.Values[1] := GetIniString('HOSTDATA', 'LogonUser',   '', IniFilename);
++        
++        SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
++        SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
++        MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
++        MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+     end;
+     
+ end;
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+index b0f79dab..1a69f992 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+@@ -2,12 +2,15 @@
+ 
+ setlocal ENABLEDELAYEDEXPANSION
+ 
+-set BHSHost=%~1
+-set BHSPort=%~2
+-set SICKHost=%~3
+-set SICKPort=%~4
++set NAME=%~1
++set BHSHost=%~2
++set BHSPort=%~3
++set SICKHost=%~4
++set SICKPort=%~5
+ 
+-echo Configure Kiosk Conveyor:
++if "%NAME%" == "" set NAME=ConveyorDev
++
++echo Configure Kiosk Conveyor %NAME%:
+ echo BHSHost: %BHSHost%
+ echo BHSPort: %BHSPort%
+ echo SICKHost: %SICKHost%
+@@ -32,32 +35,42 @@ if not exist "%mips_path%\bin\cfgvalues.exe" (
+     echo Fail to find CfgValues application in %mips_path%! Abort.
+     exit /b 1
+ )
++
++call :setsetupentries "%NAME%"
+  
+ set tmpfile=%TEMP%\conv_tmp.cfg
+ 
+ if "%BHSHost%" == "" goto :no_bhs
+ 
+-echo itm="DEVICES.ConveyorDev.BHS host" typ="TEXT" val="%BHSHost%" > %tmpfile%
+-echo itm="DEVICES.ConveyorDev.BHS port" typ="NUMBER" val="%BHSPort%" >> %tmpfile%
++echo itm="DEVICES.%NAME%.BHS host" typ="TEXT" val="%BHSHost%" > %tmpfile%
++echo itm="DEVICES.%NAME%.BHS port" typ="NUMBER" val="%BHSPort%" >> %tmpfile%
+ 
+ "%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+ 
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v BHS_CONVLGW_HOST /t REG_SZ /d "%AIRPORT%"
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v BHS_CONVLGW_PORT /t REG_SZ /d "%AREA%"
++if not "%REG_BHS_HOST%" == "" (
++    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_BHS_HOST% /t REG_SZ /d "%BHSHost%"
++)
++if not "%REG_BHS_PORT%" == "" (
++    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_BHS_PORT% /t REG_SZ /d "%BHSPort%"
++)
+ 
+ del /F /Q %tmpfile% > nul 2>&1
+ :no_bhs
+ 
+ if "%SICKHost%" == "" goto :no_sick
+ 
+-echo itm="DEVICES.ConveyorDev.Sick host" typ="TEXT" val="%BHSHost%" > %tmpfile%
+-echo itm="DEVICES.ConveyorDev.Sick port" typ="NUMBER" val="%SICKPort%" >> %tmpfile%
++echo itm="DEVICES.%NAME%.Sick host" typ="TEXT" val="%SICKHost%" > %tmpfile%
++echo itm="DEVICES.%NAME%.Sick port" typ="NUMBER" val="%SICKPort%" >> %tmpfile%
+ 
+ "%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+ 
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v SI_CONVLGW_HOST /t REG_SZ /d "%AIRPORT%"
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v SI_CONVLGW_PORT /t REG_SZ /d "%AREA%"
+-
++if not "%REG_SICK_HOST%" == "" (
++    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_SICK_HOST% /t REG_SZ /d "%SICKHost%"
++)
++if not "%REG_SICK_PORT%" == "" (
++    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_SICK_PORT% /t REG_SZ /d "%SICKPort%"
++)
++    
+ del /F /Q %tmpfile% > nul 2>&1
+ :no_sick
+ 
+@@ -73,4 +86,25 @@ rem query given reg_path from registry and set it to given variable
+ 		for /f "tokens=1 delims=?" %%a in ('echo !_regquery!') do set %1=%%a
+ 	)
+ goto :eof
+-rem regquery END
+\ No newline at end of file
++rem regquery END
++
++rem setsetupentries
++rem set setup entries
++:setsetupentries
++    set _name=%~1
++    
++    if "%_name%" == "CONVSBDLGW" (
++        set REG_BHS_HOST=BHS_CONVLGW_HOST
++        set REG_BHS_PORT=BHS_CONVLGW_PORT
++        set REG_SICK_HOST=SI_CONVLGW_HOST
++        set REG_SICK_PORT=SI_CONVLGW_PORT
++        goto :eof
++    )
++    if "%_name%" == "ConveyorDev" (
++        set REG_BHS_HOST=BHS_CONVLGW_HOST
++        set REG_BHS_PORT=BHS_CONVLGW_PORT
++        set REG_SICK_HOST=SI_CONVLGW_HOST
++        set REG_SICK_PORT=SI_CONVLGW_PORT
++        goto :eof
++    )
++goto :eof
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+index a7e62de1..d2a03597 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+@@ -5,7 +5,10 @@ setlocal
+ set DOMAIN=%~1
+ set NAME=%~2
+ set USER=%~3
+-set OU=%~5
++set OU=%~4
++set LOGONDOMAIN=%~5
++set LOGONUSER=%~6
++set LOGONPASS=%~7
+ set PS=%SystemRoot%\system32\WINDOWSPOWERSHELL\V1.0\powershell.exe
+ 
+ if "%OU%" == "" (
+@@ -21,4 +24,26 @@ if /I "%NAME%" == "%COMPUTERNAME%" (
+ )
+ 
+ rem "%PS%" "Add-Computer -DomainName %DOMAIN% -ComputerName %COMPUTERNAME% -NewName %NAME% -Credential %USER% %OU_PATH%"
+-"%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Credential %USER% %OU_PATH%"
+\ No newline at end of file
++"%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Credential %USER% %OU_PATH%"
++
++if not "%errorlevel%" == "0" (
++    exit /b 1
++)
++
++rem set admin account credentials
++if not "%LOGONDOMAIN%" == "" (
++    set ADMINUSER=%LOGONDOMAIN%\%LOGONUSER%
++) else (
++    set ADMINUSER=%LOGONUSER%
++)
++
++if not "%LOGONUSER%" == "" (
++    net localgroup Administrators "%ADMINUSER%" /add
++    
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v AutoAdminLogon /t REG_SZ /d 1
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultUserName /t REG_SZ /d "%LOGONUSER%"
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultPassword /t REG_SZ /d "%LOGONPASS%"
++    if not "%LOGONDOMAIN%" == "" (
++        reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultDomainName /t REG_SZ /d "%LOGONDOMAIN%"
++    )
++)
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,340 @@
+From 725e2d8e043268541e82e8adfd6402c1e9722c20 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 6 Dec 2010 10:27:34 +0000
+Subject: [PATCH 0065/1076] Move "DevicesCommon.cpp" from SelfServiceCommon to
+ SelfServicePlatform.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@81 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/SerialCon/makefile.mak         |   1 -
+ .../Massai/cpp/SerialCon/src/MassaiDevice.cpp | 306 ------------------
+ 2 files changed, 307 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/cpp/SerialCon/src/MassaiDevice.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+index b639a9ae..e8f18850 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/makefile.mak
+@@ -17,7 +17,6 @@ MY_LIB1 = \
+     $(LIB_SERIALCON)
+ 
+ MY_LIB1_OBJS = \
+-    $(_OBJ)\MassaiDevice.obj \
+     $(_OBJ)\matAsyncW32.obj \
+     $(_OBJ)\mIEtxAckAsy.obj \
+     $(_OBJ)\cfgUART.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/MassaiDevice.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/MassaiDevice.cpp
+deleted file mode 100644
+index 519062cb..00000000
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/MassaiDevice.cpp
++++ /dev/null
+@@ -1,306 +0,0 @@
+-/**
+- **************************************************************************
+- *
+- * @file MassaiDevice.cpp
+- *
+- * Massai device tools.
+- *
+- * @author Juergen Kreierhoff
+- *
+- * Copyright (c) 2002-2005 MATERNA Information & Communications
+- *
+- **************************************************************************
+-**/
+-
+-#if defined(_MSC_VER)
+-// Exception specification ignored
+-#pragma warning (disable : 4290)
+-#endif /* _MSC_VER */
+-
+-
+-
+-#include "MassaiDevice.hpp"
+-
+-#include "traceClt.h"
+-
+-#ifdef USE_MASSAICFG
+-#include "massai.hpp"
+-#else
+-#include "nConfigText.hpp"
+-#endif
+-
+-#include "devicesDotStrDotStr.hpp"
+-
+-
+-
+-namespace
+-{
+-
+-
+-
+-   class portConfigExplanation
+-   {
+-      std::string M_Str;
+-
+-   public:
+-
+-      explicit portConfigExplanation( char const * Configurable ) :
+-         M_Str()
+-      {
+-         M_Str =
+-            "Asynchroneous serial port for device communication."
+-            " SYNTAX: port";
+-         std::string XEnd = "";
+-         std::string XX = ". EXAMPLE: com1";
+-         if( Configurable )
+-         {
+-            unsigned Off = 0;
+-            while( Configurable[Off] )
+-            {
+-               switch( Configurable[Off] )
+-               {
+-               case 'B':
+-                  M_Str += "[:speed";
+-                  XX += ":9600";
+-                  break;
+-               case 'P':
+-                  M_Str += "[parity";
+-                  XX += "n";
+-                  break;
+-               case 'D':
+-                  M_Str += "[databits";
+-                  XX += "8";
+-                  break;
+-               case 'S':
+-                  M_Str += "[stopbits";
+-                  XX += "1";
+-                  break;
+-               default:
+-                  M_Str += "[?";
+-                  XX += "?";
+-               }
+-               ++Off;
+-               XEnd += "]";
+-            }
+-         }
+-         M_Str += XEnd;
+-         M_Str += XX;
+-      }
+-
+-      portConfigExplanation();
+-
+-      virtual ~portConfigExplanation()
+-      {
+-      }
+-
+-      char const * c_str() const
+-      {
+-         return M_Str.c_str();
+-      }
+-   };
+-
+-
+-
+-#ifndef USE_MASSAICFG
+-
+-   class textItem :
+-      public portConfigExplanation,
+-      public devicesDotStrDotStr,
+-      public nConfig::gcText
+-   {
+-
+-      void create( char const * & R, char const * & X, char const * & D )
+-      {
+-         R = "rwl";
+-         X = portConfigExplanation::c_str();
+-         D = "COM1";
+-      }
+-
+-   public:
+-
+-      textItem
+-      (
+-         char const * DevName,
+-         char const * ItmName,
+-         char const * Configurable
+-      ) :
+-         portConfigExplanation( Configurable ),
+-         devicesDotStrDotStr( DevName, ItmName ),
+-         nConfig::gcText( devicesDotStrDotStr::c_str(), DevName )
+-      {
+-      }
+-
+-      textItem();
+-
+-   };
+-
+-#endif
+-
+-
+-}
+-
+-
+-
+-/**
+- *
+- * (see MassaiDevice.hpp)
+- *
+- */
+-void Materna::MassaiDevice::warning
+-(
+-   char const * Msg,
+-   char const * Detail
+-)
+-{
+-   std::string Str( Msg );
+-   if( Detail )
+-   {
+-      Str += " (";
+-      Str += Detail;
+-      Str += ")";
+-   }
+-   writeTraceText( MajorWarning_HERE, Str.c_str() );
+-   std::cerr << Str.c_str() << std::endl;
+-}
+-
+-
+-
+-/**
+- *
+- * (see MassaiDevice.hpp)
+- *
+- */
+-Materna::MassaiDevice::params::params
+-(
+-   int argc, char ** argv,
+-   char const * DefName
+-) :
+-   argScan( argc, argv ),
+-   M_Sub( DefName )
+-{
+-   char const * Sub = argument( 1 );
+-   if( Sub )
+-   {
+-      M_Sub = Sub;
+-   }
+-}
+-
+-
+-
+-/**
+- *
+- * (see MassaiDevice.hpp)
+- *
+- */
+-char const * Materna::MassaiDevice::params::comport
+-(
+-   char const * Item,
+-   char const * Configurable
+-)
+-{
+-   if( !M_Sub.c_str() )
+-      return 0;
+-   char const * Val = option( Item );
+-   if( Val )
+-      return Val;
+-   else
+-#ifdef USE_MASSAICFG
+-   {
+-      static char Buffer[128];
+-      mConfig Cfg
+-      (
+-         "DEVICES",
+-         const_cast<char *>( M_Sub.c_str() ),
+-         const_cast<char *>( Item )
+-      );
+-      Buffer[0] = 0;
+-      Cfg.asString( Buffer, sizeof(Buffer) );
+-      if( Buffer[0] )
+-         return Buffer;
+-      else
+-         return 0;
+-   }
+-#else
+-   {
+-      static std::string S_String;
+-      textItem Text( M_Sub.c_str(), Item, Configurable );
+-      S_String = Text.get();
+-      return S_String.c_str();
+-   }
+-#endif
+-}
+-
+-
+-
+-/**
+- *
+- * (see MassaiDevice.hpp)
+- *
+- */
+-Materna::MassaiDevice::parseAsyncConfig::parseAsyncConfig
+-(
+-   char const * Src
+-)
+-{
+-   strcpy( M_Port, "\\\\.\\COM1" );
+-   strcpy( M_Speed, "9600" );
+-   M_Parity[0] = 'N';
+-   M_Parity[1] = 0;
+-   M_Databits[0] = '8';
+-   M_Databits[1] = 0;
+-   M_Stopbits[0] = '1';
+-   M_Stopbits[1] = 0;
+-   if( Src )
+-   {
+-      char * DstPtr;
+-      int    DstLen;
+-      //
+-      // Get port name (e.g. "\\.\COM1")
+-      //
+-      DstPtr = M_Port + 4;
+-      DstLen = sizeof(M_Port) - 4 - 1;
+-      while( *Src && ( *Src != ':') && DstLen-- )
+-         *DstPtr++ = *Src++;
+-      *DstPtr = 0;
+-      if( *Src == ':' )
+-         ++Src;
+-      //
+-      // Get speed
+-      //
+-      if( *Src )
+-      {
+-         DstPtr = M_Speed;
+-         DstLen = sizeof(M_Speed) -1;
+-         while( ( *Src >= '0' ) && ( *Src <= '9' ) && DstLen-- )
+-            *DstPtr++ = *Src++;
+-         *DstPtr = 0;
+-      }
+-      //
+-      // Get parity
+-      //
+-      if( *Src )
+-         M_Parity[0] = static_cast<char>(*Src++ & 0x5F);
+-      //
+-      // Get databits
+-      //
+-      if( *Src )
+-         M_Databits[0] = *Src++;
+-      //
+-      // Get stopbits
+-      //
+-      if( *Src )
+-         M_Stopbits[0] = *Src;
+-   }
+-}
+-
+-
+-
+-
+-/**
+- **************************************************************************
+- *
+- * End of file
+- *
+- **************************************************************************
+-**/
+-
+-- 
+2.41.0.windows.1
+

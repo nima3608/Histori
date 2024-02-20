@@ -1,0 +1,246 @@
+From 038a0103519c30a737a85ea15933c99c06842f07 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 14 Nov 2014 09:59:06 +0000
+Subject: [PATCH 0614/1076] MANTIS 34590 massaiCfgXB.exe 1.3.0 MANTIS 34590:
+ mcontrol - Crash - Set local environment variable CORBA_USE_NESTED_CALLS.
+ This will allow CORBA to re-use a servant thread for change indications.
+ Otherwise a change-indication would be sent only when some client calls. - In
+ traces show detailed listener exceptions
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@771 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 17 +++++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgCorba_Base.hpp | 12 +---
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 17 +++++-
+ .../Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp      | 12 +++-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp | 60 ++++++++++++-------
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |  5 +-
+ 6 files changed, 84 insertions(+), 39 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 68154c27..2eb40b1d 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -362,8 +362,21 @@
+ //! @par     Change:
+ //! - MANTIS 24145: Remove CORBA.SERVANTS configuration
+ //!   MStarter must be able to read just-initialized values
+-#define FILE_VER_BIN 1,2,8,0
+-#define FILE_VER_DTS "1.2.8.0"
++// #define FILE_VER_BIN 1,2,8,0
++// #define FILE_VER_DTS "1.2.8.0"
++//
++//! @version 1.3.0
++//! @date    14.Nov.2014
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34590: mcontrol - Crash
++//!   - Set local environment variable CORBA_USE_NESTED_CALLS
++//!     This will allow CORBA to re-use a servant thread for change
++//!     indications. Otherwise a change-indication would be sent only
++//!     when some client calls.
++//!   - In traces show detailed listener exceptions
++#define FILE_VER_BIN 1,3,0,0
++#define FILE_VER_DTS "1.3.0.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Base.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Base.hpp
+index d3e5eab4..d37ddbf4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Base.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgCorba_Base.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2009 MATERNA Information & Communications
++ * Copyright (c) 2002-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -97,16 +97,6 @@ class cfgCorba_Base :
+             char const * const & Event
+          );
+ 
+-      //! Listener trace callback.
+-      void trace
+-         (
+-            long           TraceLevel,
+-            char const *   File,
+-            short          Line,
+-            char const *   Function,
+-            char const *   Text
+-         );
+-
+    };
+ 
+    /**
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index c3cd8251..12dd0c90 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -353,8 +353,21 @@
+ //! @par     Change:
+ //! - MANTIS 24145: Remove CORBA.SERVANTS configuration
+ //!   MStarter must be able to read just-initialized values
+-#define FILE_VER_BIN 1,2,8,0
+-#define FILE_VER_DTS "1.2.8.0"
++// #define FILE_VER_BIN 1,2,8,0
++// #define FILE_VER_DTS "1.2.8.0"
++//
++//! @version 1.3.0
++//! @date    14.Nov.2014
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34590: mcontrol - Crash
++//!   - Set local environment variable CORBA_USE_NESTED_CALLS
++//!     This will allow CORBA to re-use a servant thread for change
++//!     indications. Otherwise a change-indication would be sent only
++//!     when some client calls.
++//!   - In traces show detailed listener exceptions
++#define FILE_VER_BIN 1,3,0,0
++#define FILE_VER_DTS "1.3.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+index e563285a..98ebf24c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/CfgXMgrB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2010 MATERNA Information & Communications
++ * Copyright (c) 2003-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -77,8 +77,10 @@ int main( int argc, char ** argv )
+    argScan Arg( argc, argv );
+    if( Arg.help() )
+    {
+-      std::cout << "Usage: CfgXMgrB [ -xmldb:<file> ] [-ipinterface:<interface>]"
+-                                  " [-tracefile:<file>]" << std::endl;
++      std::cout << "Usage: CfgXMgrB [ -xmldb:<file> ]"
++                                  " [-ipinterface:<interface>]"
++                                  " [-tracefile:<file>]"
++                << std::endl;
+       return 0;
+    }
+    //
+@@ -147,6 +149,10 @@ int main( int argc, char ** argv )
+       //
+       cfgEntity Configuration( ConfigFile.c_str() );
+       Configuration.cfgFileRead();
++
++      // Due to a change in massaiCorba ...
++      _putenv( "CORBA_USE_NESTED_CALLS=yes please!" );
++
+       //
+       // CORBA servants
+       //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index cd8bd836..148c8961 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -65,25 +65,45 @@ void cfgCorba_Base::valChgListener::mSendIndication
+       char const * const & Event
+    )
+ {
+-   Listener->valueChanged( Event );
+-}
+-
+-
+-
+-void cfgCorba_Base::valChgListener::trace
+-   (
+-      long           /* TraceLevel */,
+-      char const *   /* File */,
+-      short          /* Line */,
+-      char const *   /* Function */,
+-      char const *   Text
+-   )
+-{
+-   writeTrace
+-   (
+-      SecondaryRuntime_HERE, "valChgListener %s",
+-      Text
+-   );
++   try
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "valChgListener:mSendIndication( %s ) ...",
++            Event ? Event : "<null>"
++         );
++      Listener->valueChanged( Event );
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "valChgListener:mSendIndication."
++         );
++   }
++   catch( CORBA::SystemException & e )
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "valChgListener:mSendIndication"
++            " CORBA::SystemException( %s )",
++            e._info().c_str()
++         );
++      // Re-throw to remove listener
++      throw;
++   }
++   catch( CORBA::UserException & e )
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "valChgListener:mSendIndication"
++            " CORBA::UserException( %s )",
++            e._info().c_str()
++         );
++      // Re-throw to remove listener
++      throw;
++   }
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index d204c149..93b700f0 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2010 MATERNA Information & Communications
++ * Copyright (c) 2003-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -231,6 +231,9 @@ int mDaemon_main( int argc, char const * const * argv )
+       );
+       Configuration.cfgFileRead();
+ 
++      // Due to a change in massaiCorba ...
++      _putenv( "CORBA_USE_NESTED_CALLS=yes please!" );
++
+       //
+       // CORBA servants
+       //
+-- 
+2.41.0.windows.1
+

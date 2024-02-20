@@ -1,0 +1,212 @@
+From 7f3d0cb819c1d015bac4881a47f8d4ce664d4357 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 22 Jan 2015 13:00:54 +0000
+Subject: [PATCH 0564/1000] MANTIS 0034880 Plattform Devicehandler Lamp:
+ Lightcontrol by RGB Values
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@814 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/illudev.idl             | 176 ++++++++++++++++++
+ .../Massai/idl/Massai/makefile.mak            |   3 +-
+ 2 files changed, 178 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Massai/idl/Massai/illudev.idl
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/illudev.idl b/SelfServiceCommon/Massai/idl/Massai/illudev.idl
+new file mode 100644
+index 00000000..c7858648
+--- /dev/null
++++ b/SelfServiceCommon/Massai/idl/Massai/illudev.idl
+@@ -0,0 +1,176 @@
++//---------------------------------------------------------------------------
++//
++//  file:     illudev.idl
++//
++//  purpose:  interface to illumination devices
++//
++//  date:     05.01.2015
++//
++//---------------------------------------------------------------------------
++
++#ifndef ILLUDEV_IDL
++#define ILLUDEV_IDL
++
++#pragma prefix "materna.com"
++
++module IlluDev
++{
++  const string interface_version = "1.0";
++
++  typedef sequence<octet> SetupData;
++
++  /** Function return codes */
++  enum RC
++  {
++    RC_OK,         	                    /**<  Function was successful executed*/
++    RC_ERROR,        	                  /**<  Function failed*/
++    RC_NOT_SUPPORTED,                   /**<  Function is not supported*/
++    RC_NOT_PRESENT,                     /**<  Function was not executed because the addressed lamp/led is not available*/
++    RC_WRONG_STATE                      /**<  The device is unable to execute the function*/
++  };
++
++  /** Color scheme of the hardware lamps/leds */
++  enum IlluColorScheme
++  {
++    ICS_RGB,                            /**<  Multicolor LED, Color is set with a RGB tuple of unsigned bytes (0 - 255)*/
++    ICS_MONOCHROME,                     /**<  Monochrome LED, can be set to ON(with blinking on/off) or OFF*/
++    ICS_BI_COLOR,                       /**<  Bi Color LED, can be set to Red or Green (with blinking on/off)*/
++    ICS_TRI_COLOR,                      /**<  Tri Color LED, can be set to Red or Green or Amber (with blinking on/off)*/
++    ICS_QUAD_COLOR                      /**<  Quad Color LED, can be set to Red,Green,Blue or Amber (with blinking on/off)*/
++  };
++  
++  /** Predefined colors
++  *   All default color definitions may be overwritten by the define_named_color command
++  */
++  enum NamedColorType
++  {
++    NC_NONE,                            /**<  no color (used in set commands if the actual color should not be changed)*/
++    NC_OFF,                             /**<  Lamp/LED off. Default: (0,0,0)*/
++    NC_ON,                              /**<  Lamp/LED on.  Default: (255,255,255)*/
++    NC_BLINKING_OFF,                    /**<  Lamp/LED off color when blinking state is active. Default: (0,0,0)*/
++    NC_BLINKING_ON,                     /**<  Lamp/LED on color when blinking state is active.  Default: (255,255,255)*/
++    NC_RED,                             /**<  Lamp/LED shows red.  Default: (255,0,0)*/
++    NC_GREEN,                           /**<  Lamp/LED shows green.  Default: (0,255,0)*/
++    NC_BLUE,                            /**<  Lamp/LED shows blue.  Default: (0,0,255)*/
++    NC_AMBER,                           /**<  Lamp/LED shows amber.  Default: (255,191,0)*/
++    NC_USER_DEFINED_1,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_2,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_3,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_4,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_5,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_6,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_7,                  /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++    NC_USER_DEFINED_8                   /**<  User defined color. Default: (0,0,0). May be set by the define_named_color command*/
++  };
++
++  /** RGB, Intensity color definition
++  */
++  struct RGBColor
++  {
++    short             r;                /**< Red fraction (0-255). Negative values are ignored and do not change the previous value.*/
++    short             g;                /**< Green fraction (0-255). Negative values are ignored and do not change the previous value.*/
++    short             b;                /**< Blue fraction (0-255). Negative values are ignored and do not change the previous value.*/
++    short             intensity;        /**< Intensity (0-255). Negative values are ignored and do not change the previous value.*/
++  };
++  
++  /** color definition
++  * based on the given ICS color scheme either the RGB tuple or a named color value is used
++  */
++  struct ColorValue
++  {
++    IlluColorScheme   ics;              /**< Select the color scheme - If ICS_RGB is selected nc will be ignored, for all other ICS schemes rgbc is ignored.*/
++    NamedColorType    nc;               /**< Predefined named color.*/
++    RGBColor          rgbc;             /**< RGB color values.*/
++  };
++
++  /** Blinking rate definition
++  */
++  struct BlinkingValues
++  {
++    long duration_on;                   /**< Time in milliseconds the light is switched on while blinking.*/
++    long duration_off;                  /**< Time in milliseconds the light is switched off while blinking.*/
++  };
++
++  /** Hardware status of the illumination device
++  */
++  struct DevState
++  {
++    boolean         is_connected;       /**< Signs if the device is connected*/
++    boolean         is_ok;              /**< Signs if the device is working and accepts commands*/
++  };
++
++  /** Action to carry out when the lamp state is set
++  */
++  enum ActionType
++  {
++    AT_SET_COLOR,                       /**< Sets only the color*/
++    AT_SET_BLINK,                       /**< Sets only the blinking state*/
++    AT_SET_BOTH                         /**< Sets both*/
++  };
++  
++  /** Lamp/LED state color and blinking state definition
++  */
++  struct LampState
++  {
++    ColorValue      color;              /**< Color definition. This might be either a RGB tuple or a named color depending on the color scheme.*/
++    BlinkingValues  blinking_values;    /**< Blinking values definition.*/
++    boolean         blinking_on;        /**< Signs or set the blinking state of the lamp*/
++  };
++
++  /** Color and/or blinking parameter to set a lamp/LED
++  */
++  struct LampAction
++  {
++    long            lamp_id;            /**< Lamp/Led id*/
++    ActionType      at;                 /**< Action: set color or blink state or both*/  
++    LampState       ls;                 /**< Color and/or blinking values*/
++  };
++
++  /** Multiple color and/or blinking parameters for batch setting of lamps/LEDs
++  */
++  typedef sequence<LampAction> LampActions;
++  
++  interface illuControl
++  {
++    /** The color scheme that is supported by the hardware
++    */
++    readonly attribute IlluColorScheme    hw_ics;
++    
++    /** The name of the hardware device
++    */
++    readonly attribute string             device_name;
++
++    /** The highest ID of available lamps/LED handled by the hardware (normally one LED is available)
++    */
++    readonly attribute unsigned long      hw_max_lamp_id;
++
++    /** The actual hardware state of the device
++    */
++    readonly attribute DevState           device_state;
++
++    /** Execute a hardware reset of the device
++    *   this might include an implicit reconnect
++    */
++    RC reset();
++
++    /** Send hardware specific data to the device
++    */
++    RC setup( in SetupData data );
++    
++    RC define_named_color( in NamedColorType nc, in RGBColor rgbclr );
++    RC get_named_color( in NamedColorType nc, out RGBColor rgbclr );
++
++    RC get_lamp_color_for_scheme( in unsigned long lamp_id, in IlluColorScheme ics, out ColorValue clr );
++
++    RC set_lamp( in LampAction lamp_action );
++    RC switch_lamp( in LampAction lamp_action, in unsigned long duration );
++    
++    RC set_lamps( in LampActions lamp_actions );
++    RC switch_lamps( in LampActions lamp_actions, in unsigned long duration );
++
++    RC get_lamp_state( in unsigned long lamp_id, out LampState ls );
++  };
++
++};
++
++#endif // LEDDEV_IDL
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/idl/Massai/makefile.mak b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+index ac0f0fd3..195c1ece 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/makefile.mak
++++ b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+@@ -37,6 +37,7 @@ MY_GEN_CPPS = \
+     $(_GEN)\screendev.cpp \
+     $(_GEN)\seldev.cpp \
+     $(_GEN)\doordev.cpp \
+-    $(_GEN)\second_screen.cpp
++    $(_GEN)\second_screen.cpp \
++    $(_GEN)\illudev.cpp
+ 
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+-- 
+2.41.0.windows.1
+

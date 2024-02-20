@@ -1,0 +1,536 @@
+From 3818ba2501412049df6ace2761e4e1b2da31cf70 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 24 Mar 2017 14:39:18 +0000
+Subject: [PATCH 0836/1077] MANTIS 0044645 change: PLATFORM.REBOOT.DelayRange
+ generates a new random value every minute mControl.exe V1.0.2.20
+
+- create random value for delay range at start
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1185 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |  11 +-
+ .../Massai/cpp/Controller/inc/reboot.h        |  27 +-
+ .../Massai/cpp/Controller/src/reboot.cpp      | 372 +++++++++---------
+ 3 files changed, 215 insertions(+), 195 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index cdf721c1..7d255aae 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,8 +9,8 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,19
+-#define FILE_VER_STR     "FileVersion", "1.0.2.19"
++#define FILE_VER_BIN     1,0,2,20
++#define FILE_VER_STR     "FileVersion", "1.0.2.20"
+ 
+ /*!
+ \file
+@@ -18,12 +18,17 @@
+ 
+ \page mControl.exe Release Notes - mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+ 
+-@version 1.0.2.19
++@version 1.0.2.20
+ 
+ \section change1 Change history
+ 
+ mControl.exe
+ 
++\date 22.03.2017
++\li V1.0.2.20
++\li change - SteT Mantis 0044645: PLATFORM.REBOOT.DelayRange generates a new random value every minute
++- create random value for delay range at start
++
+ \date 22.03.2017 \li V1.0.2.19
+                  \li change - SchyJ Mantis 0045254: Add file name support to HostsFileServer config
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/reboot.h b/SelfServiceCommon/Massai/cpp/Controller/inc/reboot.h
+index ffc70e28..fff5b94e 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/reboot.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/reboot.h
+@@ -25,18 +25,24 @@
+ 
+ class controllerServant;
+ 
+-class checkReboot : public mThreadEx
++class checkReboot: public mThreadEx
+ {
+-private:
++  public:
++    long saveRebootDate();
++    long getRebootDate(mDate *pDate);
+ 
++    checkReboot(controllerServant *p);
++
++  private:
+     char  szRebootTime[256];
+-    char *pStr;
++    char* pStr;
+ 
+     unsigned long lHourReset;
+     unsigned long lMinuteReset;
+     unsigned long lDelay;
+ 
+     long lStartDelay;
++    int delayRandom;
+ 
+     controllerServant *pServant;
+     cfgNum *pDelayRange;
+@@ -45,13 +51,14 @@ private:
+ 
+     long function();
+     void init();
+-
+-public:
+-
+-    long saveRebootDate();
+-    long getRebootDate(mDate *pDate);
+-
+-    checkReboot(controllerServant *p);
++    void reinit();
++    void createCfgRebootTime();
++    void createCfgDelayRange();
++    void createCfgStartDelay();
++    void readRebootTime();
++    void readDelayRange();
++    void randomizeDelay();
++    FILE* openRebootFile(const char* mode);
+ };
+ 
+ #endif // REBOOT_H
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+index 832ce7f0..6646508e 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/reboot.cpp
+@@ -35,26 +35,18 @@ extern bool serverMode();
+ 
+ long checkReboot::saveRebootDate()
+ {
+-    FILE *fp;
+-    mDate date = mDate::today();
+-    mTime time = mTime();
+-
+-    if(pServant)
+-      fp = fopen(pServant->getRebootFileName().c_str(),"wb");
+-    else
+-      fp = fopen(REBOOT_FILE_NAME,"rb");
+-
+-    if(fp)
+-    {
+-      fwrite(&date,sizeof(mDate),1,fp);
+-      fwrite(&time,sizeof(mTime),1,fp);
+-
+-      fclose(fp);
+-
+-      return(0);
+-    }
+-    else
+-      return(-1);
++  long result = -1;
++  mDate date = mDate::today();
++  mTime time = mTime();
++  FILE *fp = openRebootFile("wb");
++  if(fp)
++  {
++    fwrite(&date, sizeof(mDate), 1, fp);
++    fwrite(&time, sizeof(mTime), 1, fp);
++    fclose(fp);
++    result = 0;
++  }
++  return result;
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -71,23 +63,15 @@ long checkReboot::saveRebootDate()
+ 
+ long checkReboot::getRebootDate(mDate *pDate)
+ {
+-    FILE *fp;
+-    mDate date;
+-
+-    if(pServant)
+-      fp = fopen(pServant->getRebootFileName().c_str(),"rb");
+-    else
+-      fp = fopen(REBOOT_FILE_NAME,"rb");
+-
+-    if(fp && pDate)
+-    {
+-      fread(pDate,sizeof(mDate),1,fp);
+-      fclose(fp);
+-
+-      return(0);
+-    }
+-    else
+-      return(-1);
++  long result = -1;
++  FILE *fp = openRebootFile("rb");
++  if(fp && pDate)
++  {
++    fread(pDate, sizeof(mDate), 1, fp);
++    fclose(fp);
++    result = 0;
++  }
++  return result;
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -104,97 +88,74 @@ long checkReboot::getRebootDate(mDate *pDate)
+ 
+ long checkReboot::function()
+ {
+-    long  rc;
+-    bool  fRebootedToday;
+-
+-    // let platform come up first !!
+-
+-    TRACE(HERE,"reboot checker waiting for %d min.",lStartDelay);
+-
+-    OS_Sleep(lStartDelay * 60000);
+-
+-    TRACE(HERE,"reboot checker started...");
+-
+-    while(*szRebootTime && pServant)
++  bool fRebootedToday = false;
++  // let platform come up first !!
++  TRACE(TRC_BASICRUNTIME, "reboot checker waiting for %d min.", lStartDelay);
++  OS_Sleep(lStartDelay * 60000);
++  TRACE(TRC_BASICRUNTIME, "reboot checker started...");
++  while(*szRebootTime && pServant)
++  {
++    mTime time  = mTime();
++    mDate today = mDate::today();
++    mDate lastReboot = today;
++    lastReboot += 1;
++    long rc = getRebootDate(&lastReboot);
++    TRACE(TRC_BASICRUNTIME, "trying to get last reboot time, rc = %d", rc);
++    if(!rc)
+     {
+-      mTime time  = mTime();
+-      mDate today = mDate::today();
+-
+-      mDate lastReboot = today;
+-
+-      lastReboot += 1;
+-
+-      rc = getRebootDate(&lastReboot);
+-
+-      TRACE(HERE,"trying to get last reboot time, rc = %d",rc);
+-
+-      if(!rc)
++      fRebootedToday = today.dayOfMonth()  == lastReboot.dayOfMonth() &&
++                       today.monthOfYear() == lastReboot.monthOfYear() &&
++                       today.year()        == lastReboot.year();
++      if(fRebootedToday)
+       {
+-        fRebootedToday = today.dayOfMonth()  == lastReboot.dayOfMonth() &&
+-                         today.monthOfYear() == lastReboot.monthOfYear() &&
+-                         today.year()        == lastReboot.year();
+-
+-        if(fRebootedToday)
+-          TRACE(HERE,"Reboot skipped, already done today!");
+-
+-        unsigned const minutes_of_reset = ( lHourReset * 60 ) + lMinuteReset + lDelay;
+-        unsigned const minutes_of_now = ( time.hours() * 60 ) + time.minutes();
+-        if(!fRebootedToday
+-          && !pServant->isKioskBusy()
+-          && (minutes_of_now >= minutes_of_reset))
++        TRACE(TRC_BASICRUNTIME, "Reboot skipped, already done today!");
++      }
++      unsigned const minutes_of_reset = (lHourReset * 60) + lMinuteReset + lDelay;
++      unsigned const minutes_of_now = (time.hours() * 60) + time.minutes();
++      if(!fRebootedToday
++        && !pServant->isKioskBusy()
++        && (minutes_of_now >= minutes_of_reset))
++      {
++        rc = pServant->rebootKiosk();
++        if(!rc)
+         {
+-          rc = pServant->rebootKiosk();
+-
+-          if(!rc)
+-          {
+-            TRACE(HERE,"REBOOTING KIOSK NOW...");
+-
+-            saveRebootDate();
+-
+-            // we can terminate this thread now !!
+-
+-            return(-1);
+-          }
+-          else
+-          {
+-            TRACE(HERE,"FAILED to reboot kiosk, rc = %d",rc);
+-
+-            // sleep a minute
+-
+-            OS_Sleep(50000);
+-          }
++          TRACE(TRC_MAJORWARNING, "REBOOTING KIOSK NOW...");
++          saveRebootDate();
++          // we can terminate this thread now !!
++          return -1;
+         }
+         else
+         {
+-          if(fRebootedToday)
+-          {
+-            // sleep a hour
+-
+-            OS_Sleep(60000 * 60);
+-          }
+-          else
+-            OS_Sleep(50000);
+-
+-          // re-initialize
+-
+-          init();
++          TRACE(TRC_MAJORERROR, "FAILED to reboot kiosk, rc = %d", rc);
++          // sleep a minute
++          OS_Sleep(50000);
+         }
+       }
+       else
+       {
+-        // no mControl.reboot file found -> create one!!
+-
+-        TRACE(HERE,"no reboot file found -> creating new one.");
+-
+-        saveRebootDate();
+-
++        if(fRebootedToday)
++        {
++          // sleep a hour
++          OS_Sleep(60000 * 60);
++        }
++        else
++        {
++          OS_Sleep(50000);
++        }
+         // re-initialize
+-
+-        init();
++        reinit();
+       }
+     }
+-
+-    return(-1);
++    else
++    {
++      // no mControl.reboot file found -> create one!!
++      TRACE(TRC_MINORWARNING, "no reboot file found -> creating new one.");
++      saveRebootDate();
++      // re-initialize
++      reinit();
++    }
++  }
++  return -1;
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -211,65 +172,22 @@ long checkReboot::function()
+ 
+ void checkReboot::init()
+ {
+-  if (pRebootTime==NULL)
+-    pRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
+-
+-    // wait for config service to be ready !!
+-
+-    while(pRebootTime && !pRebootTime->get())
+-    {
+-      TRACE(HERE,"config service not yet ready, started ??");
+-
+-      delete(pRebootTime);
+-
+-      pRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
+-
+-      OS_Sleep(1000);
+-    }
+-
+-    if (pDelayRange==NULL)
+-      pDelayRange = new cfgNum("PLATFORM.REBOOT.DelayRange",
+-                      "Specifies reboot the delay range in minutes for the kiosk. This protects servers from overloading. The value is computed randomly within the given range.");
+-
+-    if (pStartDelay==NULL)
+-      pStartDelay = new cfgNum ("PLATFORM.REBOOT.StartCheckingAfter",
+-                      "Specifies the delay time in minutes before reboot-checks are started, to let the platform come up completely.",
+-                      15,0,60);
+-
+-    lStartDelay = pStartDelay->get();
+-
+-    if(pDelayRange->get() > 0)
+-    {
+-      srand(static_cast<unsigned int>(time(NULL)));
+-
+-      lDelay = rand() % pDelayRange->get();
+-    }
+-    else
+-      lDelay = 0;
+-
+-    if(*pRebootTime->get())
+-    {
+-      strcpy(szRebootTime,pRebootTime->get());
+-
+-      if((pStr = strchr(szRebootTime,':')) != NULL)
+-      {
+-        lMinuteReset = atoi(pStr +1);
+-        *pStr = '\0';
+-      }
+-      else
+-        lMinuteReset = 0;
+-
+-      lHourReset = atoi(szRebootTime);
+-
+-      if(!serverMode())
+-        TRACE(HERE,"Kiosk Reboot Time = %02d:%02d(%02d)",lHourReset,lMinuteReset,lDelay);
+-    }
+-    else
+-    {
+-      TRACE(HERE,"Reboot Time has been deleted from configuration.");
+-
+-      *szRebootTime = '\0';
+-    }
++  randomizeDelay();
++  createCfgRebootTime();
++  // wait for config service to be ready !!
++  while(pRebootTime && !pRebootTime->get())
++  {
++    TRACE(TRC_MAJORWARNING, "config service not yet ready, started ??");
++    delete pRebootTime;
++    pRebootTime = 0;
++    createCfgRebootTime();
++    OS_Sleep(1000);
++  }
++  createCfgDelayRange();
++  createCfgStartDelay();
++  lStartDelay = pStartDelay->get();
++  readDelayRange();
++  readRebootTime();
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -286,18 +204,108 @@ void checkReboot::init()
+ 
+ checkReboot::checkReboot(controllerServant *p)
+ {
+-    pServant = p;
++  pServant = p;
++  pDelayRange = 0;
++  pStartDelay = 0;
++  pRebootTime = 0;
++  try
++  {
++    init();
++  }
++  catch(nConfig::exception ce)
++  {
++    TRACE(TRC_MAJORERROR, "Config Exception: config service not yet ready, started ??");
++  }
++}
+ 
+-    pDelayRange = NULL;
+-    pStartDelay = NULL;
+-    pRebootTime = NULL;
++void checkReboot::reinit()
++{
++  readDelayRange();
++  readRebootTime();
++}
++
++void checkReboot::createCfgRebootTime()
++{
++  if(!pRebootTime)
++  {
++    pRebootTime = new cfgStr(RTIME_ITEM, RTIME_EXPL, RTIME_DEF);
++  }
++}
++
++void checkReboot::createCfgDelayRange()
++{
++  if(!pDelayRange)
++  {
++    pDelayRange = new cfgNum("PLATFORM.REBOOT.DelayRange",
++                    "Specifies reboot the delay range in minutes for the kiosk. This protects servers from overloading. The value is computed randomly within the given range.");
++  }
++}
++
++void checkReboot::createCfgStartDelay()
++{
++  if(!pStartDelay)
++  {
++    pStartDelay = new cfgNum("PLATFORM.REBOOT.StartCheckingAfter",
++                    "Specifies the delay time in minutes before reboot-checks are started, to let the platform come up completely.",
++                    15, 0, 60);
++  }
++}
+ 
+-    try
++void checkReboot::readRebootTime()
++{
++  if(*pRebootTime->get())
++  {
++    strcpy(szRebootTime, pRebootTime->get());
++    if((pStr = strchr(szRebootTime, ':')) != 0)
++    {
++      lMinuteReset = atoi(pStr + 1);
++      *pStr = '\0';
++    }
++    else
+     {
+-        init();
++      lMinuteReset = 0;
+     }
+-    catch (nConfig::exception ce)
++    lHourReset = atoi(szRebootTime);
++    if(!serverMode())
+     {
+-       TRACE(HERE,"Config Exception: config service not yet ready, started ??");
++      TRACE(TRC_BASICRUNTIME, "Kiosk Reboot Time = %02d:%02d(%02d)", lHourReset, lMinuteReset, lDelay);
+     }
++  }
++  else
++  {
++    TRACE(TRC_BASICRUNTIME, "Reboot Time has been deleted from configuration.");
++    *szRebootTime = '\0';
++  }
++}
++
++void checkReboot::readDelayRange()
++{
++  if(pDelayRange->get() > 0)
++  {
++    lDelay = delayRandom % pDelayRange->get();
++  }
++  else
++  {
++    lDelay = 0;
++  }
++}
++
++FILE* checkReboot::openRebootFile(const char* mode)
++{
++  FILE *fp;
++  if(pServant)
++  {
++    fp = fopen(pServant->getRebootFileName().c_str(), mode);
++  }
++  else
++  {
++    fp = fopen(REBOOT_FILE_NAME, mode);
++  }
++  return fp;
++}
++
++void checkReboot::randomizeDelay()
++{
++  srand(static_cast<unsigned int>(time(0)));
++  delayRandom = rand();
+ }
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1054 @@
+From ae7ab3411da35ca3aad1b8ac64a26afb6787297c Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 20 Jul 2012 11:12:25 +0000
+Subject: [PATCH 0297/1077] MConfig_CustomAction WIX helper DLL more CFG
+ functions
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@362 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |   4 +-
+ .../Installer_CustomAction/inc/targetver.h    |   8 +
+ .../src/MConfig_CustomAction.cpp              | 728 ++++++++++++++++--
+ .../src/MConfig_CustomAction.def              |   6 +-
+ .../src/MConfig_CustomAction_cfg.cpp          |  64 --
+ 5 files changed, 671 insertions(+), 139 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/targetver.h
+ delete mode 100644 SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction_cfg.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index ecdca015..9eb797a5 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,1
+-#define FILE_VER_STR     "FileVersion", "1.0.0.1\0"
++#define FILE_VER_BIN     1,0,0,2
++#define FILE_VER_STR     "FileVersion", "1.0.0.2\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/targetver.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/targetver.h
+new file mode 100644
+index 00000000..497706ee
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/targetver.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++// Durch Einbeziehen von"SDKDDKVer.h" wird die höchste verfügbare Windows-Plattform definiert.
++
++// Wenn Sie die Anwendung für eine frühere Windows-Plattform erstellen möchten, schließen Sie "WinSDKVer.h" ein, und
++// legen Sie das _WIN32_WINNT-Makro auf die zu unterstützende Plattform fest, bevor Sie "SDKDDKVer.h" einschließen.
++
++#include <SDKDDKVer.h>
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index f927f347..5d182bfc 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -2,7 +2,7 @@
+ //
+ 
+ #pragma warning(disable : 4995)
+-
++#define _CRT_SECURE_NO_WARNINGS
+ 
+ #include "targetver.h"
+ 
+@@ -25,12 +25,24 @@
+ #include <sstream>
+ #include <string>
+ #include <set>
++#include <vector>
+ #include "strutil.h"
+ 
+ #include "MConfig_CA_Log.h"
+ 
+ typedef std::set<std::wstring> TUNIQUESET;
+ 
++#define MAX_NUM_DIALOGS 100
++#define CFGVALUES_TIMEOUT_MS 10*1000
++
++
++#define DEL_CFG_FILE_NAME "del_cfg.txt"
++#define	SETINITIAL_FILE_NAME "setinitial_cfg.txt"
++#define	AUTOINITIAL_FILE_NAME "autoinitial_cfg.txt"
++#define	SET_ADDLIST_FILE_NAME "set_addlist_cfg.txt"
++#define	SET_ADDLISTUNIQUE_FILE_NAME "set_addlistunique_cfg.txt"
++#define	SET_FILE_NAME "set_cfg.txt"
++
+ BOOL __stdcall WcaIsPropertySetW(__in LPCWSTR szProperty)
+ {
+     DWORD cchProperty = 0;
+@@ -60,34 +72,134 @@ std::wstring ToWiden( const char *s, const std::locale& loc = std::locale() )
+   return stm.str();
+ }
+ 
++int checkInstalled(MSIHANDLE hInstall, std::wstring& wstrFeature)
++{
++	int ret = 0;
++
++	INSTALLSTATE installed;
++    INSTALLSTATE action;
++
++	::MsiGetFeatureState( hInstall, wstrFeature.c_str() ,  &installed, &action );
++	if(action==INSTALLSTATE_LOCAL)
++		ret = 1;
++	else
++		ret = 0;
++
++	return ret;
++}
+ 
+-extern "C" _declspec(dllexport) UINT __stdcall CA_Install(MSIHANDLE hInstall)
++extern "C" _declspec(dllexport) UINT __stdcall CA_MutuallyExclusive(MSIHANDLE hInstall)
+ {
+-	std::wstringstream dbstrs;
++	std::wstring wstrPropertyValue;
+ 
+-	dbstrs << L"MSI SETUP: Initialized" << std::endl;
++	std::wstring wstrFeatureList;
++	std::wstring resBuf;
+ 
+-	OutputDebugString(dbstrs.str().c_str());
++	std::wstringstream dbstrs;
++	std::wstringstream strbuf;
++
++	dbstrs << L"MSI SETUP: CA_MutuallyExclusive" << std::endl;
+ 
+ 	HRESULT hr = S_OK;
+-    UINT er = ERROR_SUCCESS;
++	UINT er = ERROR_SUCCESS;
++	hr = WcaInitialize(hInstall, "CA_MutuallyExclusive");
++	dbstrs << L"MSI SETUP CA_MutuallyExclusive: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
+ 
+-    hr = WcaInitialize(hInstall, "CA_Install");
+-	dbstrs.str(std::wstring());
+-	dbstrs << L"MSI SETUP: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	OutputDebugString(dbstrs.str().c_str());
+-    ExitOnFailure(hr, "Failed to initialize");
++	LPWSTR pwzPropertyValue = NULL;
++	hr = WcaGetProperty(L"ME_FEATURE_LIST_PROP", &pwzPropertyValue);
++	ExitOnFailure(hr, "Failed to get ME_FEATURE_LIST_PROP property value");
++	dbstrs << "MSI SETUP CA_MutuallyExclusive: Read ME_FEATURE_LIST_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
++	Log_Str(dbstrs);
++
++	size_t  start = 0, end = 0;
++	int iInstalledC = 0;
++
++	wstrFeatureList.assign(pwzPropertyValue);
++    while ( end != std::wstring::npos)
++    {
++        end = wstrFeatureList.find( ';', start);
++
++        iInstalledC += checkInstalled( hInstall, 
++			wstrFeatureList.substr( start, (end == std::wstring::npos) ? std::wstring::npos : end - start)
++			);
++
++        start = (( end > (std::wstring::npos - 1) ) ? std::wstring::npos  :  end + 1);
++    }
++
++	if(iInstalledC>1)
++		resBuf = L"0";
++	else 
++		resBuf = L"1";
++
++	hr = WcaSetProperty(L"MUTUALLYEXCLUSIVE", resBuf.c_str());
++	dbstrs << "MSI SETUP CA_MutuallyExclusive: SetProperty MUTUALLYEXCLUSIVE [" << resBuf.c_str() << "] Result:" << hr;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
+ 
+-    WcaLog(LOGMSG_STANDARD, "Initialized.");
+-	
+ LExit:
+     er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+ 
++bool Check_Dialog_Cond(MSIHANDLE hInstall, std::wstring& prop_name, HRESULT& hr )
++{
++	bool ret = false;
++	std::wstringstream dbstrs;
++	LPWSTR pwzPropertyValue = NULL;
++
++	if(!WcaIsPropertySetW(prop_name.c_str()))
++	{
++		hr = S_OK;
++		ret = true;
++		return ret;
++	}
++
++	hr = WcaGetProperty(prop_name.c_str(), &pwzPropertyValue);
++	if(hr != S_OK)
++	{
++		dbstrs << "MSI SETUP CA_NextDialog: failed to read [" << prop_name.c_str() << "]";
++		Log_Str(dbstrs);
++		return ret;
++	}
++	//dbstrs << "MSI SETUP CA_NextDialog: Check Dialog " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "]";
++	//Log_Str(dbstrs);
++	if (pwzPropertyValue && *pwzPropertyValue)
++	{
++		MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzPropertyValue);
++		if (condition == MSICONDITION_ERROR)
++		{
++			hr = E_INVALIDARG;
++			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] Error:Invalid Argument";
++			Log_Str(dbstrs);
++			ret = false;
++		}
++		else if (condition == MSICONDITION_TRUE)
++		{
++			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = True";
++			Log_Str(dbstrs);
++			ret = true;
++
++		}
++		else 
++		{
++			dbstrs << "MSI SETUP CA_NextDialog: " << prop_name.c_str() <<" Condition [" << std::wstring(pwzPropertyValue).c_str() << "] = False";
++			Log_Str(dbstrs);
++			ret = false;
++
++		}
++	}
++	return ret;
++}
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_NextDialog(MSIHANDLE hInstall)
+ {
+ #define DIALOG_NAME L"DIALOG"
++#define START_DIALOG_NAME L"DIALOG_START"
++
++#define DIALOG_CONDITION_PREFIX L"COND_"
++
+ 	std::wstringstream dbstrs;
+ 	std::wstringstream strbuf;
+ 	dbstrs << L"MSI SETUP: CA_NextDialog" << std::endl;
+@@ -117,24 +229,42 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_NextDialog(MSIHANDLE hInstall)
+ 		if(!init_prop)
+ 		{
+ 			init_prop = true;
+-			for(int i = 0; i < 50; i++)
++
++			int iDialogNum=-1;
++			if(wcscmp(pwzPropertyValue,START_DIALOG_NAME))
+ 			{
+-				strbuf.str(std::wstring());
+-				strbuf << DIALOG_NAME << (int)i;
+-				if(!strbuf.str().compare(std::wstring(pwzPropertyValue)))
++				std::wstring wzDialogNum(pwzPropertyValue);
++				size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
++
++				if(not_num != std::wstring::npos)
+ 				{
+-					strbuf.str(std::wstring());
+-					strbuf << DIALOG_NAME << (int)(i + 1);
+-					dbstrs << "MSI SETUP CA_NextDialog: NEXT_DIALOG found Dialog " << std::wstring(pwzPropertyValue).c_str();
+-					Log_Str(dbstrs);
+-					init_prop = false;
+-					hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
+-					dbstrs << "MSI SETUP CA_NextDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
+-					Log_Str(dbstrs);
+-					ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+-					break;
++					wzDialogNum.erase(0,not_num+1);
++					std::wstringstream ss(wzDialogNum);
++					ss >> iDialogNum;
+ 				}
+ 			}
++
++			for(int i = iDialogNum; i < MAX_NUM_DIALOGS; i++)
++			{
++
++				strbuf.str(std::wstring());
++				strbuf << DIALOG_NAME << (int)(i + 1);
++				std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
++
++				wstrDialogCondProp.append(strbuf.str());
++				bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
++				ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
++				if(!bCond) continue;
++
++				dbstrs << "MSI SETUP CA_NextDialog: NEXT_DIALOG found Dialog " << std::wstring(pwzPropertyValue).c_str();
++				Log_Str(dbstrs);
++				init_prop = false;
++				hr = WcaSetProperty(L"NEXT_DIALOG", strbuf.str().c_str());
++				dbstrs << "MSI SETUP CA_NextDialog: SetProperty NEXT_DIALOG [" << strbuf.str().c_str() << "] Result:" << hr;
++				Log_Str(dbstrs);
++				ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
++				break;
++			}
+ 			if(!init_prop)
+ 			{
+ 				if(!WcaIsPropertySetW(strbuf.str().c_str()))
+@@ -193,14 +323,33 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_PrevDialog(MSIHANDLE hInstall)
+ 		if(!init_prop)
+ 		{
+ 			init_prop = true;
+-			for(int i = 1; i < 50; i++)
++
++			int iDialogNum=-1;
++
++			if(wcscmp(pwzPropertyValue,START_DIALOG_NAME))
+ 			{
+-				strbuf.str(std::wstring());
+-				strbuf << DIALOG_NAME << (int)i;
+-				if(!strbuf.str().compare(std::wstring(pwzPropertyValue)))
++				std::wstring wzDialogNum(pwzPropertyValue);
++				size_t not_num=wzDialogNum.find_last_not_of(L"0123456789");
++
++				if(not_num != std::wstring::npos)
+ 				{
++					wzDialogNum.erase(0,not_num+1);
++					std::wstringstream ss(wzDialogNum);
++					ss >> iDialogNum;
++				}
++			}
++
++			for(int i = iDialogNum; i < MAX_NUM_DIALOGS && i>=0 ; i--)
++			{
+ 					strbuf.str(std::wstring());
+ 					strbuf << DIALOG_NAME << (int)(i - 1);
++					std::wstring wstrDialogCondProp(DIALOG_CONDITION_PREFIX);
++
++					wstrDialogCondProp.append(strbuf.str());
++					bool bCond = Check_Dialog_Cond(hInstall, wstrDialogCondProp, hr);
++					ExitOnFailure(hr, "MSI SETUP CA_NextDialog condition error");
++					if(!bCond) continue;
++
+ 					dbstrs << "MSI SETUP CA_PrevDialog: NEXT_DIALOG found Dialog " << std::wstring(pwzPropertyValue).c_str();
+ 					Log_Str(dbstrs);
+ 					init_prop = false;
+@@ -209,7 +358,6 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_PrevDialog(MSIHANDLE hInstall)
+ 					Log_Str(dbstrs);
+ 					ExitOnFailure(hr, "Failed to set NEXT_DIALOG property value");
+ 					break;
+-				}
+ 			}
+ 			if(!init_prop)
+ 			{
+@@ -246,6 +394,8 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_FillPrinterListbox(MSIHANDLE h
+ 	MSIHANDLE hTable = NULL;
+ 	MSIHANDLE hColumns = NULL;
+ 
++	std::wstring wstrPropertyValue;
++
+ 	std::wstringstream dbstrs;
+ 	std::wstringstream strbuf;
+ 	dbstrs << L"MSI SETUP: CA_FillPrinterListbox" << std::endl;
+@@ -281,10 +431,28 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_FillPrinterListbox(MSIHANDLE h
+ 		Log_Str(dbstrs);
+ 		hr = WcaAddTempRecord(&hTable, &hColumns, L"ComboBox", NULL, 0, 3, std::wstring(pwzPropertyValue).c_str(), i+1, std::wstring(list[i].pPrinterName).c_str());
+ 	}
++
++	LPWSTR pwzPropertyValue1 = NULL;
++	hr = WcaGetProperty(std::wstring(pwzPropertyValue).c_str(), &pwzPropertyValue1);
++	if(SUCCEEDED(hr) && wcslen(pwzPropertyValue1))
++		wstrPropertyValue.assign(pwzPropertyValue1);
++	else
++		wstrPropertyValue.assign(L"T500");
++
++	for(i = 0; i < cnt; i++)
++	{
++		if(std::wstring(list[i].pPrinterName).find(wstrPropertyValue) != std::wstring::npos)
++		{
++			break;
++		}
++	}
++	if(i == cnt && cnt > 0)
++		hr = WcaSetProperty(std::wstring(pwzPropertyValue).c_str(), std::wstring(list[0].pPrinterName).c_str());
+ LExit:
+ 	if (hTable)	MsiCloseHandle(hTable);
+ 	if (hColumns) MsiCloseHandle(hColumns);
+ 	ReleaseStr(pwzPropertyValue);
++	ReleaseStr(pwzPropertyValue1);
+ 
+ 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+@@ -325,7 +493,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_DirBrowser(MSIHANDLE hInstall)
+ 	ofn.lpstrInitialDir = NULL;
+ 	ofn.Flags = OFN_PATHMUSTEXIST;
+ 
+-	if (GetOpenFileName(&ofn))
++	if(GetOpenFileName(&ofn))
+ 	{
+ 		dbstrs << "MSI SETUP CA_DirBrowser: Set (" << std::wstring(pwzPropertyValue).c_str() << ") to [" << szEditPath << "]";
+ 		WcaSetProperty( std::wstring(pwzPropertyValue).c_str(), szEditPath);
+@@ -339,29 +507,156 @@ LExit:
+     return WcaFinalize(er);
+ }
+ 
+-void JEscape( std::wstring& res, wchar_t ch )
++bool exec_commandline(MSIHANDLE hInstall, std::wstring& cmdLine)
++{
++	std::wstringstream dbstrs;
++
++	std::vector<wchar_t> buffer(cmdLine.begin(),cmdLine.end());
++	buffer.push_back(0);
++	HRESULT exec_hr=S_FALSE;
++	try
++	{
++			exec_hr = QuietExec(buffer.data(),CFGVALUES_TIMEOUT_MS);
++	}
++	catch(...)
++	{
++		dbstrs << L"Exception in QuietExec" << std::wstring(buffer.data()).c_str() << std::endl;
++		Log_Str(dbstrs);
++	}
++	dbstrs << L"QuietExec (" << std::wstring(buffer.data()).c_str() << L") result=" << exec_hr << std::endl;
++	Log_Str(dbstrs);
++
++	return exec_hr==S_OK;
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
++{
++	std::wstringstream dbstrs;
++	std::wstringstream strbuf;
++
++	std::wstring cmdline;
++	std::string strItem;
++	std::string del_file_name;
++	std::ifstream del_file;
++	std::wstring tmp_cmdline;
++
++	dbstrs << L"MSI SETUP: CA_WriteCfg" << std::endl;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++	hr = WcaInitialize(hInstall, "CA_WriteCfg");
++	dbstrs << L"MSI SETUP CA_WriteCfg: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	LPWSTR pwzCfgValues = NULL;
++	hr = WcaGetProperty(L"[#CfgValuesS]", &pwzCfgValues);
++	ExitOnFailure(hr, "Failed to get pwzCfgValues property value");
++	dbstrs << "MSI SETUP CA_WriteCfg: Read CfgValuesS [" << pwzCfgValues << "]";
++	Log_Str(dbstrs);
++
++	LPWSTR pwzCfgEraseS = NULL;
++	hr = WcaGetProperty(L"[#CfgEraseS]", &pwzCfgEraseS);
++	ExitOnFailure(hr, "Failed to get pwzCfgEraseS property value");
++	dbstrs << "MSI SETUP CA_WriteCfg: Read CfgEraseS [" << std::wstring(pwzCfgEraseS).c_str() << "]";
++	Log_Str(dbstrs);
++
++	char * pPath;
++	pPath = getenv ("TEMP");
++	if (pPath==NULL) pPath="";
++
++	tmp_cmdline.assign(L"\"");
++	tmp_cmdline.append(pwzCfgEraseS);
++	tmp_cmdline.append(L"\"");
++
++	del_file_name.assign("\"");
++	del_file_name.append(pPath);
++	del_file_name.append("\\" DEL_CFG_FILE_NAME "\"");
++
++	del_file.open(del_file_name);
++	if (del_file.is_open())
++	{
++		while(!del_file.eof())
++		{
++			del_file >> strItem;
++			cmdline.assign( tmp_cmdline+L" "+ToWiden(strItem.c_str()) );
++			exec_commandline(hInstall,cmdline);
++			dbstrs << "MSI SETUP CA_WriteCfg: " << cmdline.c_str() << std::endl;
++			Log_Str(dbstrs);
++		}
++		del_file.close();
++	} else
++	{
++			dbstrs << "MSI SETUP CA_WriteCfg failed to open " << del_file_name.c_str() << std::endl;
++			Log_Str(dbstrs);
++	}
++	tmp_cmdline.assign(L"\"");
++	tmp_cmdline.append(pwzCfgValues);
++	tmp_cmdline.append(L"\" -write:\"");
++	tmp_cmdline.append(ToWiden(pPath));
++	tmp_cmdline.append(L"\"");
++
++	cmdline.assign(tmp_cmdline);
++	cmdline.append(ToWiden(SET_FILE_NAME "\""));
++	exec_commandline(hInstall,cmdline);
++
++	cmdline.assign(tmp_cmdline);
++	cmdline.append(ToWiden(SETINITIAL_FILE_NAME "\" -setinitial"));
++	exec_commandline(hInstall,cmdline);
++
++	cmdline.assign(tmp_cmdline);
++	cmdline.append(ToWiden(AUTOINITIAL_FILE_NAME "\" -autoinitial"));
++	exec_commandline(hInstall,cmdline);
++
++	cmdline.assign(tmp_cmdline);
++	cmdline.append(ToWiden(SET_ADDLIST_FILE_NAME "\" -addtolist"));
++	exec_commandline(hInstall,cmdline);
++
++	cmdline.assign(tmp_cmdline);
++	cmdline.append(ToWiden(SET_ADDLISTUNIQUE_FILE_NAME "\" -addtolistunique"));
++	exec_commandline(hInstall,cmdline);
++
++LExit:
++	ReleaseStr(pwzCfgValues);
++	ReleaseStr(pwzCfgEraseS);
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
++
++
++bool JEscape( std::wstring& res, wchar_t ch, wchar_t ch1 )
+ {
+-	  switch( ch )
+-	  {
+-	  case L'/':
+-        res.append(L"//");
++	bool ret = false;
++	switch(ch)
++	{
++		case L'/':
++			if(ch1==';')
++			{
++				ret = true;
++				break;
++			}
++		res.append(L"//");
+ 		break;
+-	  case L'"':
+-        res.append(L"/\"");
++		case L'"':
++		res.append(L"/\"");
+ 		break;
+-	  case L';':
+-        res.append(L"/;");
++		case L';':
++		res.append(L"/;");
+ 		break;
+-	  default:
++		default:
+ 		res.push_back( ch );
+-	  }
++	}
++	return ret;
+   }
+ 
+ std::wstring escape_str(const std::wstring& strpar)
+ {
+ 	std::wstring buf;
+ 	for(std::wstring::const_iterator it=strpar.begin(); it!=strpar.end();++it)
+-		JEscape(buf,*it);
++		if(JEscape(buf,*it, *(it+1)))
++			if((it+1)!=strpar.end())
++				++it;
+ 	return buf;
+ }
+ 
+@@ -369,7 +664,8 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ {
+ 	const LPCWSTR vcsCfgTableQuery = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags` FROM `";
+ 	const LPCWSTR vcsCfgTableQueryC = L"SELECT `Cfg_Path`, `Cfg_Entry_Type`, `Cfg_Entry_Value`, `Cfg_Entry_Meta`, `Cfg_Entry_Flags`, `Entry_Condition` FROM `";
+-
++	
++	#define CFGPATHSEPERATOR ';'
+ 
+ 	enum eCfgQuery
+ 	{
+@@ -450,80 +746,130 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 		fDelete = false;
+ 		fCfgSet = cf_set;
+ 		strbuf.str(std::wstring());
++
++		if(cfg_table_condition_present)
++		{
++			hr = WcaGetRecordFormattedString(hRec, cn_Entry_Condition, &pwzCondition);
++			ExitOnFailure(hr, "failed to get Entry_Condition from [CFG_TABLE_PROP] table");
++			if (pwzCondition && *pwzCondition)
++			{
++				MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzCondition);
++				if (MSICONDITION_ERROR == condition)
++				{
++					hr = E_INVALIDARG;
++					ExitOnFailure(hr, "failed to process condition from [CFG_TABLE_PROP] table");
++				}
++				else if (MSICONDITION_FALSE == condition)
++				{
++					dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = FALSE" << std::endl;
++					Log_Str(dbstrs);
++					continue; // skip processing this entry
++				}
++				dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << " = TRUE" << std::endl;
++				Log_Str(dbstrs);
++			}
++		}
++
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Path, &pwzPath);
+         ExitOnFailure(hr, "failed to get Cfg_Path from [CFG_TABLE_PROP] table");
++		std::wstring wstrPath(pwzPath);
++		size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
++		if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
+ 		strbuf << "itm=\"" << pwzPath << "\" ";
+-		dbstrs << L"Cfg_Path from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+-		Log_Str(dbstrs);
+ 
+ 
+-        hr = WcaGetRecordString(hRec, cn_Cfg_Entry_Type, &pwzType);
++        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Type from [CFG_TABLE_PROP] table");
+ 		strbuf << "typ=\"" << pwzType << "\" ";
+-		dbstrs << L"Cfg_Entry_Type from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+-		Log_Str(dbstrs);
+ 
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Value, &pwzValue);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Value from [CFG_TABLE_PROP] table");
+ 		strbuf << "val=\"" << escape_str(std::wstring(pwzValue)).c_str() << "\" ";
+-		dbstrs << L"Cfg_Entry_Value from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+-		Log_Str(dbstrs);
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Meta, &pwzMeta);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Meta from [CFG_TABLE_PROP] table");
+ 		if(pwzMeta && wcslen(pwzMeta))
+ 		{
+-			strbuf << pwzValue << " ";
+-			strbuf << "val=\"" << escape_str(pwzValue) << "\" ";
++			strbuf << pwzMeta << " ";
+ 			dbstrs << L"Cfg_Entry_Meta from [CFG_TABLE_PROP] " << strbuf.str().c_str() << std::endl;
+ 			Log_Str(dbstrs);
+ 		}
+ 
+-        hr = WcaGetRecordString(hRec, cn_Cfg_Entry_Flags, &pwzFlags);
++		dbstrs << L"Cfg_Entry read from [CFG_TABLE_PROP]: " << strbuf.str().c_str() << std::endl;
++		Log_Str(dbstrs);
++
++        hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Flags, &pwzFlags);
+         ExitOnFailure(hr, "failed to get Cfg_Entry_Flags from [CFG_TABLE_PROP] table");
+ 		if(pwzFlags && wcslen(pwzFlags))
+ 		{
+ 			std::wstring strFlags(pwzFlags);
+ 
+-			if(!strFlags.compare(L"delete"))
++			if(strFlags.find(L"delete")!=std::wstring::npos)
+ 			{
+ 				fDelete = true;
+ 			} else
+-			if(!strFlags.compare(L"setinitial"))
++			if(strFlags.compare(L"setinitial")!=std::wstring::npos)
+ 			{
+ 				fCfgSet = cf_setinitial;
+ 			} else
+-			if(!strFlags.compare(L"autoinitial"))
++			if(strFlags.compare(L"autoinitial")!=std::wstring::npos)
+ 			{
+ 				fCfgSet = cf_autoinitial;
+ 			};
+ 
+-			if(!strFlags.compare(L"addtolist"))
++			if(strFlags.compare(L"addtolist")!=std::wstring::npos)
+ 			{
+ 				fCfgSetList = cf_addtolist;
+ 			}
+-			if(!strFlags.compare(L"addtolistunique"))
++			if(strFlags.compare(L"addtolistunique")!=std::wstring::npos)
+ 			{
+ 				fCfgSetList = cf_addtolistunique;
+ 			}
++			dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] : " << pwzFlags << std::endl;
++			Log_Str(dbstrs);
+ 		}
+-		dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] " << pwzFlags << std::endl;
+-		Log_Str(dbstrs);
+ 
+-		if(cfg_table_condition_present)
++		std::string cfg_file_name;
++
++		char * pPath;
++		pPath = getenv ("TEMP");
++		if (pPath==NULL) pPath="";
++		std::string strPath(pPath);
++
++		if(fDelete)
+ 		{
+-			hr = WcaGetRecordString(hRec, cn_Entry_Condition, &pwzCondition);
+-			ExitOnFailure(hr, "failed to get Entry_Condition from [CFG_TABLE_PROP] table");
+-			dbstrs << L"Entry_Condition from [CFG_TABLE_PROP] " << pwzCondition << std::endl;
+-			Log_Str(dbstrs);
++			cfg_file_name=DEL_CFG_FILE_NAME;
+ 		}
+-
+-		test_file.open("c:\\test_cfg.txt", std::ios::out | std::ios::app);
++		else if(fCfgSet==cf_setinitial)
++		{
++			cfg_file_name=SETINITIAL_FILE_NAME;
++		} else if(fCfgSet==cf_autoinitial)
++		{
++			cfg_file_name=AUTOINITIAL_FILE_NAME;
++		} else
++		{
++			if(fCfgSetList==cf_addtolist)
++			{
++				cfg_file_name=SET_ADDLIST_FILE_NAME;
++			}
++			else if(fCfgSetList==cf_addtolistunique)
++			{
++				cfg_file_name=SET_ADDLISTUNIQUE_FILE_NAME;
++			}
++			else 
++				cfg_file_name=SET_FILE_NAME;
++		}
++		std::string buf_filename("\""+strPath);
++		buf_filename.append("\\");
++		buf_filename.append(cfg_file_name);
++		buf_filename.append("\"");
++		dbstrs << L"CA_ProcessCFGTable write Entry to " << ToWiden(buf_filename.c_str()).c_str() << std::endl;
++		Log_Str(dbstrs);
++		test_file.open(buf_filename.c_str(), std::ios::out | std::ios::app);
+ 		test_file << ToNarrow(strbuf.str().c_str()) << std::endl;
+ 		test_file.flush();
+ 		test_file.close();
+-
+ 	}
+     if (hr == E_NOMOREITEMS)
+         hr = S_OK;
+@@ -541,6 +887,246 @@ LExit:
+     return WcaFinalize(er);
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE hInstall)
++{
++	const LPCWSTR vcsCfgTableQuery = L"SELECT `Feature`, `State`, `Feature_Condition` FROM `";
++	
++	#define CFGFEATSEPERATOR ';'
++
++	enum eCfgQuery
++	{
++		cn_Feature = 1,
++		cn_State,
++		cn_Feature_Condition,
++	};
++
++	LPWSTR pwzFeature = NULL, pwzState = NULL, pwzCondition = NULL;
++
++	PMSIHANDLE hView, hRec;
++
++	std::wstringstream dbstrs;
++
++	std::wstring sql_gen_select;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++	INSTALLSTATE iState = INSTALLSTATE_ABSENT;
++
++
++	hr = WcaInitialize(hInstall, "CA_ProcessFeatureTable");
++	dbstrs << L"MSI SETUP CA_ProcessFeatureTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	LPWSTR pwzTablePropertyValue = NULL;
++
++	hr = WcaGetProperty(L"FEATURE_TABLE_PROP", &pwzTablePropertyValue);
++	ExitOnFailure(hr, "Failed to get FEATURE_TABLE_PROP property value");
++	dbstrs << "MSI SETUP CA_ProcessFeatureTable: Read FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++	Log_Str(dbstrs);
++
++	if (S_OK != WcaTableExists(pwzTablePropertyValue))
++	{
++		dbstrs << "MSI SETUP CA_ProcessFeatureTable: Skipping CA_ProcessFeatureTable() because FEATURE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++		Log_Str(dbstrs);
++
++		hr = S_FALSE;
++		ExitOnFailure(hr, "Skipping CA_ProcessFeatureTable()");
++	}
++
++	sql_gen_select.assign(vcsCfgTableQuery);
++	sql_gen_select.append(pwzTablePropertyValue);
++	sql_gen_select.append(L"`");
++	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++	ExitOnFailure(hr, "Failed to open view on [FEATURE_TABLE_PROP] table");
++
++	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  {
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Feature_Condition, &pwzCondition);
++    ExitOnFailure(hr, "failed to get Feature_Condition from [FEATURE_TABLE_PROP] table");
++    dbstrs << L"Feature_Condition from [FEATURE_TABLE_PROP] ConditionStatement=" << pwzCondition << std::endl;
++    Log_Str(dbstrs);
++    if (pwzCondition && *pwzCondition)
++    {
++      MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzCondition);
++      if (MSICONDITION_ERROR == condition)
++      {
++        hr = E_INVALIDARG;
++        ExitOnFailure(hr, "failed to process condition from [FEATURE_TABLE_PROP] table");
++      }
++      else if (MSICONDITION_FALSE == condition)
++      {
++        continue; // skip processing this entry
++      }
++    }
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Feature, &pwzFeature);
++    ExitOnFailure(hr, "failed to get Feature from [FEATURE_TABLE_PROP] table");
++	std::wstring wstrFeature(pwzFeature);
++	size_t cutPos = wstrFeature.rfind(CFGFEATSEPERATOR);
++	if(cutPos!=std::wstring::npos) wstrFeature=wstrFeature.erase(cutPos);
++	dbstrs << L"Feature from [FEATURE_TABLE_PROP] Feature=" << pwzFeature << std::endl;
++	Log_Str(dbstrs);
++
++    hr = WcaGetRecordFormattedString(hRec, cn_State, &pwzState);
++    ExitOnFailure(hr, "failed to get State from [FEATURE_TABLE_PROP] table");
++	dbstrs << L"State from [FEATURE_TABLE_PROP] State=" << pwzState << std::endl;
++	Log_Str(dbstrs);
++
++	if (pwzFeature && *pwzFeature)
++	{
++		std::wstring strState(pwzState);
++		if(!strState.compare(L"ABSENT"))
++			iState = INSTALLSTATE_ABSENT;
++		else
++			iState = INSTALLSTATE_LOCAL;
++		UINT er = ::MsiSetFeatureState(hInstall, pwzFeature, iState );
++		dbstrs << L"MsiSetFeatureState (" << pwzFeature << "," << iState << ") ret=" << er << std::endl;
++		Log_Str(dbstrs);
++	}    
++
++  }
++  if (hr == E_NOMOREITEMS)
++      hr = S_OK;
++      
++  ExitOnFailure(hr, "Failure while processing [FEATURE_TABLE_PROP]");
++  hr = S_OK;
++
++LExit:
++	ReleaseStr(pwzTablePropertyValue);
++	ReleaseStr(pwzFeature);
++	ReleaseStr(pwzState);
++	ReleaseStr(pwzCondition);
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessPropTable(MSIHANDLE hInstall)
++{
++	const LPCWSTR vcsCfgTableQuery = L"SELECT `Property`, `Value`, `Prop_Entry_Flags`, `Prop_Condition` FROM `";
++	
++	#define PROPNAMESEPERATOR ';'
++
++	enum eCfgQuery
++	{
++		cn_Property = 1,
++		cn_Value,
++		cn_Prop_Entry_Flags,
++		cn_Prop_Condition,
++	};
++
++	bool fl_ifempty = false;
++
++	LPWSTR pwzProperty = NULL, pwzValue = NULL, pwzProp_Entry_Flags = NULL, pwzCondition = NULL;
++
++	PMSIHANDLE hView, hRec;
++
++	std::wstringstream dbstrs;
++
++	std::wstring sql_gen_select;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++
++	hr = WcaInitialize(hInstall, "CA_ProcessPropTable");
++	dbstrs << L"MSI SETUP CA_ProcessPropTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	LPWSTR pwzTablePropertyValue = NULL;
++
++	hr = WcaGetProperty(L"PROP_TABLE_PROP", &pwzTablePropertyValue);
++	ExitOnFailure(hr, "Failed to get PROP_TABLE_PROP property value");
++	dbstrs << "MSI SETUP CA_ProcessPropTable: Read PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++	Log_Str(dbstrs);
++
++	if (S_OK != WcaTableExists(pwzTablePropertyValue))
++	{
++		dbstrs << "MSI SETUP CA_ProcessPropTable: Skipping CA_ProcessPropTable() because PROP_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++		Log_Str(dbstrs);
++
++		hr = S_FALSE;
++		ExitOnFailure(hr, "Skipping CA_ProcessPropTable()");
++	}
++
++	sql_gen_select.assign(vcsCfgTableQuery);
++	sql_gen_select.append(pwzTablePropertyValue);
++	sql_gen_select.append(L"`");
++	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++	ExitOnFailure(hr, "Failed to open view on [PROP_TABLE_PROP] table");
++
++	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  {
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Prop_Condition, &pwzCondition);
++    ExitOnFailure(hr, "failed to get Prop_Condition from [PROP_TABLE_PROP] table");
++    dbstrs << L"Prop_Condition from [PROP_TABLE_PROP] Condition=" << pwzCondition << std::endl;
++    Log_Str(dbstrs);
++    if (pwzCondition && *pwzCondition)
++    {
++      MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzCondition);
++      if (MSICONDITION_ERROR == condition)
++      {
++        hr = E_INVALIDARG;
++        ExitOnFailure(hr, "failed to process condition from [PROP_TABLE_PROP] table");
++      }
++      else if (MSICONDITION_FALSE == condition)
++      {
++        continue; // skip processing this entry
++      }
++    }
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Property, &pwzProperty);
++    ExitOnFailure(hr, "failed to get Propertyname from [PROP_TABLE_PROP] table");
++	std::wstring wstrPropname(pwzProperty);
++	size_t cutPos = wstrPropname.rfind(PROPNAMESEPERATOR);
++	if(cutPos!=std::wstring::npos) wstrPropname=wstrPropname.erase(cutPos);
++	dbstrs << L"Propertyname from [PROP_TABLE_PROP] Feature=" << pwzProperty << std::endl;
++	Log_Str(dbstrs);
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Value, &pwzValue);
++    ExitOnFailure(hr, "failed to get Value from [PROP_TABLE_PROP] table");
++	std::wstring wstrValue(pwzValue);
++	dbstrs << L"Value from [PROP_TABLE_PROP] Feature=" << pwzValue << std::endl;
++	Log_Str(dbstrs);
++
++    hr = WcaGetRecordFormattedString(hRec, cn_Prop_Entry_Flags, &pwzProp_Entry_Flags);
++	if(pwzProp_Entry_Flags)
++	{
++		dbstrs << L"Prop_Entry_Flags from [FEATURE_TABLE_PROP] Flags=" << pwzProp_Entry_Flags << std::endl;
++		Log_Str(dbstrs);
++	}
++	if (pwzProperty && *pwzProperty && pwzValue)
++	{
++		std::wstring strFlags(pwzProp_Entry_Flags);
++		if(strFlags.find(L"escapeforcfgvalues")!=std::wstring::npos)
++			wstrValue=escape_str(wstrValue);
++		if(strFlags.find(L"ifempty")!=std::wstring::npos)
++			fl_ifempty=true;
++
++		HRESULT er = WcaSetProperty(pwzProperty,pwzValue);
++		dbstrs << L"WcaSetProperty (" << pwzProperty << "," << pwzValue << ") ret=" << er << std::endl;
++		Log_Str(dbstrs);
++	}    
++
++  }
++  if (hr == E_NOMOREITEMS)
++      hr = S_OK;
++      
++  ExitOnFailure(hr, "Failure while processing [FEATURE_TABLE_PROP]");
++  hr = S_OK;
++
++LExit:
++	ReleaseStr(pwzTablePropertyValue);
++	ReleaseStr(pwzProperty);
++	ReleaseStr(pwzValue);
++	ReleaseStr(pwzProp_Entry_Flags);
++	ReleaseStr(pwzCondition);
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
+ void fetchJavaVersions(TUNIQUESET& RegJavaVersionList)
+ {
+ 	const TCHAR* java_Registry_Path = L"Software\\JavaSoft\\java Runtime Environment";
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index f3b422fd..245b3a71 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -1,10 +1,12 @@
+ ï»¿LIBRARY MConfig_CustomAction
+ EXPORTS
+-	CA_Install
+     CA_NextDialog
+     CA_PrevDialog
+     CA_FillPrinterListbox
+     CA_DirBrowser
+ 	CA_ProcessCFGTable
+ 	CA_ModifyJavaPolicy
+-
++	CA_MutuallyExclusive
++	CA_ProcessFeatureTable
++	CA_ProcessPropTable
++	CA_WriteCfg
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction_cfg.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction_cfg.cpp
+deleted file mode 100644
+index 5d8d43f2..00000000
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction_cfg.cpp
++++ /dev/null
+@@ -1,64 +0,0 @@
+-#include "stdafx.h"
+-#include "windows.h"
+-
+-#include <Commdlg.h>
+-
+-#include <iostream>
+-#include <sstream>
+-#include <string>
+-#include <vector>
+-#include "strutil.h"
+-
+-#include "MConfig_CA_Log.h"
+-
+-extern "C" _declspec(dllexport) UINT __stdcall CA_SetCfgInitial(MSIHANDLE hInstall)
+-{
+-	const std::wstring& delimiters = L"|";
+-
+-	std::wstringstream dbstrs;
+-	std::wstringstream strbuf;
+-	dbstrs << L"MSI SETUP: CA_SetCfgInitial" << std::endl;
+-
+-	HRESULT hr = S_OK;
+-    UINT er = ERROR_SUCCESS;
+-    hr = WcaInitialize(hInstall, "CA_SetCfgInitial");
+-	dbstrs << L"MSI SETUP CA_SetCfgInitial: WcaInitialize " << std::hex << (int)hr << std::endl;
+-	Log_Str(dbstrs);
+-	ExitOnFailure(hr, "Failed to initialize");
+-
+-	LPWSTR pwzPropertyValue = NULL;
+-
+-	LPWSTR pwzPropertyValue_ConfigFile = NULL;
+-	hr = WcaGetProperty(L"SET_INITIAL_CONFIG_FILE", &pwzPropertyValue);
+-	ExitOnFailure(hr, "Failed to get SET_INITIAL_CONFIG_FILE property value");
+-	dbstrs << "MSI SETUP CA_SetCfgInitial: Read SET_INITIAL_CONFIG_FILE [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
+-
+-	LPWSTR pwzPropertyValue = NULL;
+-	hr = WcaGetProperty(L"CustomActionData", &pwzPropertyValue);
+-	ExitOnFailure(hr, "Failed to get CustomActionData property value");
+-	dbstrs << "MSI SETUP CA_SetCfgInitial: Read CustomActionData [" << std::wstring(pwzPropertyValue).c_str() << "]";
+-	Log_Str(dbstrs);
+-
+-	std::vector<std::wstring> tokens;
+-
+-	std::wstring szParam(pwzPropertyValue);
+-	std::wstring::size_type lastPos = szParam.find_first_not_of(delimiters, 0);
+-	std::wstring::size_type pos     = szParam.find_first_of(delimiters, lastPos);
+-
+-    while (std::wstring::npos != pos || std::wstring::npos != lastPos)
+-    {
+-        tokens.push_back(szParam.substr(lastPos, pos - lastPos));
+-        lastPos = szParam.find_first_not_of(delimiters, pos);
+-        pos = szParam.find_first_of(delimiters, lastPos);
+-    }
+-
+-
+-
+-
+-LExit:
+-	ReleaseStr(pwzPropertyValue_ConfigFile);
+-	ReleaseStr(pwzPropertyValue);
+-    er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+-    return WcaFinalize(er);
+-}
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

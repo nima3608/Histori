@@ -1,0 +1,148 @@
+From 90f80fbf7e9b687318366913a0c2a8a085d432bf Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 12 Nov 2014 15:58:36 +0000
+Subject: [PATCH 0530/1000] MANTIS 0032431 -added correct process
+ implementation
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@762 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  9 +-------
+ .../Massai/cpp/mControl/inc/mControl_worker.h | 11 +++++++++-
+ .../cpp/mControl/src/mControl_tools.cpp       | 20 -----------------
+ .../cpp/mControl/src/mControl_worker.cpp      | 22 +++++++++++++++++--
+ 4 files changed, 31 insertions(+), 31 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 1cc4ba69..30157b77 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -135,14 +135,7 @@ namespace mControl
+                                    char *pszWorkingDir);
+ 
+ 
+-        //TODO: implement with new process configuration
+-        /**
+-        *   replacement for the standard system() command,
+-        *   this one doesn't pop up any windows
+-        */
+-        static long mSystem( char const * cmd, char const * purpose );
+-
+-
++        
+         //TODO: new implementation with Boost or Poco
+         /**
+         *   load a hosts file from HTTP server (if configured)
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 26c54ffb..f2c11820 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -17,6 +17,7 @@
+ #include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_tools.h"
+ #include "..\inc\mControl_dialog.h"
++#include "..\inc\mControl_process.h"
+ 
+ //Poco includes
+ #include "Poco/NotificationQueue.h"
+@@ -36,7 +37,7 @@ namespace mControl
+         Dialog&                     m_dialog;
+         cfgListSysCommands*         m_shutDownCommands;
+         cfgListSysCommands*         m_startUpCommands;
+-
++        mcProcessListMonitor        m_processListMonitor;
+ 
+     public:
+         Worker(NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+@@ -60,6 +61,14 @@ namespace mControl
+         *   execute configured commands on platform startup
+         */
+         void execSysCmdsStartup();
++
++
++        //TODO: implement with new process configuration
++        /**
++        *   replacement for the standard system() command,
++        *   this one doesn't pop up any windows
++        */
++        long mSystem( char const * cmd, char const * purpose );
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index fa3d6ef9..7157c5d1 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -548,26 +548,6 @@ namespace mControl
+     }
+ 
+ 
+-    long Tools::mSystem( char const * cmd, char const * purpose )
+-    {
+-        /*
+-       std::string task( "cmd.exe /X /C \"" );
+-       task += cmd;
+-       task += "\"";
+-       TRACE( HERE, "mSystem(%s)", task.c_str() );
+-       mSysProcess::parent par;
+-       par.setCommandline( task.c_str() );
+-       mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
+-       mcData * mcdata = getMcData();
+-       if( mcdata )
+-       {
+-          mcdata->m_processlistmonitor.add( ctrl );
+-       }
+-       */
+-       return 0;
+-    }
+-
+-
+     long Tools::loadHostsFile()
+     {
+         /*
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index fa593afa..515e00fb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -112,7 +112,7 @@ namespace mControl
+             oss << "execSysCmdsShutdown#" << index++;
+             
+             //TODO: process implemnentation
+-            long const rc = 0;//newProcess( (*i).c_str(), oss.str().c_str() );
++            long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
+ 
+             TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+         }
+@@ -134,10 +134,28 @@ namespace mControl
+             oss << "execSysCmdsStartup#" << index++;
+ 
+             //TODO: process implemnentation
+-            long const rc = 0;//newProcess( (*i).c_str(), oss.str().c_str() );
++            long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
+ 
+             TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+         }
+         TRACE( HERE, "execSysCmdsStartup." );
+     }
++
++
++    
++
++    long Worker::mSystem( char const * cmd, char const * purpose )
++    {
++       std::string task( "cmd.exe /X /C \"" );
++       task += cmd;
++       task += "\"";
++       TRACE( HERE, "mSystem(%s)", task.c_str() );
++       mSysProcess::parent par;
++       par.setCommandline( task.c_str() );
++       mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
++
++       m_processListMonitor.add( ctrl );
++
++       return 0;
++    }
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

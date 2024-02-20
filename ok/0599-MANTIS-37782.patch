@@ -1,0 +1,426 @@
+From 75f8222f7d036bab541aca25f92018c02691f3d4 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 14 Aug 2015 08:12:25 +0000
+Subject: [PATCH 0599/1000] MANTIS 37782 Mantis 37782: Bagtag Printer
+ devAEA_FDGeminiBT: Devicehandler can not talk with printer RC-3.0.4815 -
+ Introduce a new option setEscapeMinControl(), which restricts the characters
+ sent with DLE-escape to the protocol-relevant ones. These are STX, ETX, ACK,
+ DLE, NAK, ETB. This option not set would escape all characters below SPACE. -
+ With LH-protocol active use this option.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@881 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/serialCon/mPEtxAck.hpp     | 206 ++++++++++--------
+ .../Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp  |   5 +-
+ 2 files changed, 118 insertions(+), 93 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+index acac6537..1227b038 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2011 MATERNA Information & Communications
++ * Copyright (c) 2001-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,7 +15,7 @@
+ #define METXACK_HPP
+ 
+ #include "fsm/mfMTQueue.hpp"
+-#include "device/aSCII.h"
++#include "device/ASCII.h"
+ 
+ 
+ 
+@@ -68,20 +68,28 @@ public:
+    {
+    };
+ 
+-
+ private:
+ 
+-   //! Refers the low-level character interface to use.
+-   CIO &                            M_CharInOut;
++   //! Which bytes to DLE-escape?
++   bool                                 m_cfg_escape_all_control;
+ 
+    //! The maximum number of data bytes in a segment.
+-   unsigned const                   M_MaxBlock;
++   unsigned const                       m_cfg_max_segment;
++
++   //! Is the protocol configured to wait for an ACK?
++   bool                                 m_cfg_rx_ack;
++
++   //! Is the protocol configured to wait for an LRC?
++   bool                                 m_cfg_rx_lrc;
++
++   //! Refers the low-level character interface to use.
++   CIO &                                m_char_in_out;
+ 
+    //! Queues the ACKs received.
+-   Materna::MSSD::fmtQueue<char>    M_RxAckQ;
++   Materna::MSSD::fmtQueue<char>        m_rx_ack_queue;
+ 
+    //! Queues the messages received.
+-   Materna::MSSD::fmtQueue<xData>   M_RxMessageQ;
++   Materna::MSSD::fmtQueue<xData>       m_rx_msg_queue;
+ 
+    /**
+     *
+@@ -101,19 +109,13 @@ private:
+ 
+       //! Receiving the checksum.
+       STA_CHK
+-   }                 M_RxState;
++   }                                    m_rx_state;
+ 
+    //! The currently received segment.
+-   xData             M_RxSegment;
++   xData                                m_rx_segment;
+ 
+    //! The currently received LRC.
+-   char              M_RxLRC;
+-
+-   //! Is the protocol configured to wait for an ACK?
+-   bool              M_CfgRxAck;
+-
+-   //! Is the protocol configured to wait for an LRC?
+-   bool              M_CfgXxLRC;
++   char                                 m_rx_lrc;
+ 
+    /**
+     *
+@@ -128,10 +130,10 @@ private:
+    )
+       throw()
+    {
+-      int Tries = 3;
+-      while( Tries-- )
++      int tries_left = 3;
++      while( tries_left-- )
+       {
+-         M_CharInOut.write( ASCII_STX );
++         m_char_in_out.write( ASCII_STX );
+          char TxLRC = 0;
+          char RxAck = 0;
+          xData::const_iterator Iter( SrcFrom );
+@@ -139,39 +141,44 @@ private:
+          {
+             char C = *Iter;
+             TxLRC ^= C;
+-#if 0
+-            switch( C )
++            if( m_cfg_escape_all_control )
+             {
+-            case ASCII_STX:
+-            case ASCII_ETX:
+-            case ASCII_ACK:
+-            case ASCII_DLE:
+-            case ASCII_NAK:
+-            case ASCII_ETB:
+-               M_CharInOut.write( ASCII_DLE );
+-               break;
+-            default:
+-               break;
++               // DLE-Escape all characters below space
++               if( ( C >= 0 ) && ( C < ' ' ) )
++               {
++                  m_char_in_out.write( ASCII_DLE );
++               }
+             }
+-#else
+-            if( ( C >= 0 ) && ( C < ' ' ) )
++            else
+             {
+-               M_CharInOut.write( ASCII_DLE );
++               // DLE-Escape just the protocol-relevant control chars
++               switch( C )
++               {
++               case ASCII_STX:
++               case ASCII_ETX:
++               case ASCII_ACK:
++               case ASCII_DLE:
++               case ASCII_NAK:
++               case ASCII_ETB:
++                  m_char_in_out.write( ASCII_DLE );
++                  break;
++               default:
++                  break;
++               }
+             }
+-#endif
+-            M_CharInOut.write( static_cast<unsigned char>( C ) );
++            m_char_in_out.write( static_cast<unsigned char>( C ) );
+             ++Iter;
+          }
+          TxLRC ^= SrcETX;
+-         M_CharInOut.write( static_cast<unsigned char>( SrcETX ) );
+-         M_RxAckQ.clear();
+-         if( M_CfgXxLRC )
++         m_char_in_out.write( static_cast<unsigned char>( SrcETX ) );
++         m_rx_ack_queue.clear();
++         if( m_cfg_rx_lrc )
+          {
+-            M_CharInOut.write( static_cast<unsigned char>( TxLRC ) );
++            m_char_in_out.write( static_cast<unsigned char>( TxLRC ) );
+          }
+-         if( M_CfgRxAck )
++         if( m_cfg_rx_ack )
+          {
+-            M_RxAckQ.read( RxAck, 500 );
++            m_rx_ack_queue.read( RxAck, 500 );
+             if( RxAck == ASCII_ACK )
+                return RC_OK;
+          }
+@@ -187,22 +194,23 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param CharInOut: The character interface to use.
++    * @param char_in_out:       The character interface to use.
+     *
+-    * @param MaxBlock:  The maximum size allowed for a single segment.
++    * @param max_segment_size:  The maximum size allowed for a segment.
+     *
+    **/
+-   explicit mPEtxAck( CIO & CharInOut, unsigned MaxBlock = 2000 )
++   explicit mPEtxAck( CIO & char_in_out, unsigned max_segment_size = 2000 )
+       throw():
+-      M_CharInOut( CharInOut ),
+-      M_MaxBlock( MaxBlock ),
+-      M_RxAckQ( 1 ),
+-      M_RxMessageQ( 10 ),
+-      M_RxState( STA_INI ),
+-      M_RxSegment(),
+-      M_RxLRC( 0 ),
+-      M_CfgRxAck( true ),
+-      M_CfgXxLRC( true )
++      m_cfg_escape_all_control( true ),
++      m_cfg_max_segment( max_segment_size ),
++      m_cfg_rx_ack( true ),
++      m_cfg_rx_lrc( true ),
++      m_char_in_out( char_in_out ),
++      m_rx_ack_queue( 1 ),
++      m_rx_msg_queue( 10 ),
++      m_rx_state( STA_INI ),
++      m_rx_segment(),
++      m_rx_lrc( 0 )
+    {
+    }
+ 
+@@ -215,8 +223,20 @@ public:
+    void setChkNone()
+       throw()
+    {
+-      M_CfgXxLRC = false;
+-      M_CfgRxAck = false;
++      m_cfg_rx_lrc = false;
++      m_cfg_rx_ack = false;
++   }
++
++   /**
++    *
++    * Calling this method will set the protocol handler to DLE-Escape
++    * all characters below 0x20. This is necessary for IER.
++    *
++    */
++   void setEscapeMinControl()
++      throw()
++   {
++      m_cfg_escape_all_control = false;
+    }
+ 
+    /**
+@@ -228,7 +248,7 @@ public:
+    void setNoRxAck()
+       throw()
+    {
+-      M_CfgRxAck = false;
++      m_cfg_rx_ack = false;
+    }
+ 
+    /**
+@@ -243,19 +263,19 @@ public:
+    void event( char RxC )
+       throw( mPEtxAck_Fatal )
+    {
+-      switch( M_RxState )
++      switch( m_rx_state )
+       {
+ 
+       case STA_INI:
+          if( RxC == ASCII_STX )
+          {
+-            M_RxSegment.clear();
+-            M_RxState = STA_DATA;
+-            M_RxLRC = 0;
++            m_rx_segment.clear();
++            m_rx_state = STA_DATA;
++            m_rx_lrc = 0;
+          }
+          else
+          {
+-            M_RxAckQ.write( RxC );
++            m_rx_ack_queue.write( RxC );
+          }
+          break;
+ 
+@@ -263,54 +283,56 @@ public:
+          switch( RxC )
+          {
+          case ASCII_STX:
+-            M_RxSegment.clear();
+-            M_RxLRC = 0;
++            m_rx_segment.clear();
++            m_rx_lrc = 0;
+             break;
+          case ASCII_ETB:
+          case ASCII_ETX:
+-            if( M_CfgXxLRC )
++            if( m_cfg_rx_lrc )
+             {
+                // Next byte received should be LRC
+-               M_RxState = STA_CHK;
+-               M_RxLRC ^= RxC;
++               m_rx_state = STA_CHK;
++               m_rx_lrc ^= RxC;
+             }
+             else
+             {
+                // End of frame received
+-               M_RxState = STA_INI;
++               m_rx_state = STA_INI;
+                // Do not send an ACK
+-               // M_CharInOut.write( ASCII_ACK );
+-               M_RxMessageQ.write( M_RxSegment );
++               // m_char_in_out.write( ASCII_ACK );
++               m_rx_msg_queue.write( m_rx_segment );
+             }
+             break;
+          case ASCII_DLE:
+-            M_RxState = STA_DATA_DLE;
++            m_rx_state = STA_DATA_DLE;
+             break;
+          default:
+-            M_RxSegment.push_back( RxC );
+-            M_RxLRC ^= RxC;
++            m_rx_segment.push_back( RxC );
++            m_rx_lrc ^= RxC;
+          }
+          break;
+ 
+       case STA_DATA_DLE:
+-         M_RxSegment.push_back( RxC );
+-         M_RxLRC ^= RxC;
+-         M_RxState = STA_DATA;
++         m_rx_segment.push_back( RxC );
++         m_rx_lrc ^= RxC;
++         m_rx_state = STA_DATA;
+          break;
+       case STA_CHK:
+          // End of frame received
+ #if CHK_RX_CHK
+-         if( RxC == M_RxLRC  )
++         if( RxC == m_rx_lrc  )
+          {
+ #endif
+-            M_CharInOut.write( ASCII_ACK );
+-            M_RxMessageQ.write( M_RxSegment );
++            m_char_in_out.write( ASCII_ACK );
++            m_rx_msg_queue.write( m_rx_segment );
+ #if CHK_RX_CHK
+          }
+          else
+-            M_CharInOut.write( ASCII_NAK );
++         {
++            m_char_in_out.write( ASCII_NAK );
++         }
+ #endif
+-         M_RxState = STA_INI;
++         m_rx_state = STA_INI;
+          break;
+ 
+       default:
+@@ -330,7 +352,7 @@ public:
+    RC read( xData & Dst )
+       throw()
+    {
+-      if( M_RxMessageQ.read( Dst ) == Materna::MSSD::FMTQ_OK )
++      if( m_rx_msg_queue.read( Dst ) == Materna::MSSD::FMTQ_OK )
+          return RC_OK;
+       else
+          return RC_ERROR;
+@@ -340,22 +362,22 @@ public:
+     *
+     * Write a message to the interface.
+     *
+-    * @param Src:       The segment to write.
++    * @param src:       The segment to write.
+     *
+    **/
+-   RC write( xData const & Src )
++   RC write( xData const & src )
+       throw()
+    {
+-      unsigned Remaining = Src.size();
+-      xData::const_iterator From( Src.begin() );
+-      while( Remaining > M_MaxBlock )
++      unsigned Remaining = src.size();
++      xData::const_iterator From( src.begin() );
++      while( Remaining > m_cfg_max_segment )
+       {
+-         xData::const_iterator To( From + M_MaxBlock );
++         xData::const_iterator To( From + m_cfg_max_segment );
+          RC PartRC = write( From, To, ASCII_ETB );
+          if( PartRC != RC_OK )
+             return PartRC;
+          From = To;
+-         Remaining -= M_MaxBlock;
++         Remaining -= m_cfg_max_segment;
+       }
+       return write( From, From + Remaining, ASCII_ETX );
+    }
+@@ -365,10 +387,10 @@ public:
+     * Write a forced nonfinal segment to the interface.
+     *
+    **/
+-   RC writeNonfinal( xData const & Src )
++   RC writeNonfinal( xData const & src )
+       throw()
+    {
+-      return write( Src.begin(), Src.end(), ASCII_ETB );
++      return write( src.begin(), src.end(), ASCII_ETB );
+    }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+index de61bc01..3d281d00 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+@@ -165,7 +165,7 @@ public:
+ 
+    /**
+     *
+-    * Set LH protocol status.
++    * Set "no checksum" protocol status.
+     *
+    **/
+    void setChkNone()
+@@ -183,7 +183,10 @@ public:
+       throw()
+    {
+       M_LH = true;
++      // Do not send ACK
+       M_Proto.setNoRxAck();
++      // DLE-Escape only the protocol-relevant bytes
++      M_Proto.setEscapeMinControl();
+    }
+ 
+    /**
+-- 
+2.41.0.windows.1
+

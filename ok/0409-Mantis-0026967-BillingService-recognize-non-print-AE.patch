@@ -1,0 +1,700 @@
+From 23425b33601c811f70643f8930cb27dc21cb7176 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 25 Apr 2013 10:41:03 +0000
+Subject: [PATCH 0409/1077] Mantis 0026967: BillingService: recognize non print
+ AEA messages Billing.exe V1.0.0.7
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@500 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/BillingService/inc/BillingS_def.h     |   7 +-
+ .../Massai/cpp/BillingService/makefile.mak    |  25 +-
+ .../cpp/BillingService/src/PrinterRsp.cpp     | 452 +++---------------
+ .../cpp/BillingService/src/TestBilling.cpp    | 130 +++++
+ 4 files changed, 236 insertions(+), 378 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/BillingService/src/TestBilling.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+index 87f07a7b..ddc20dfa 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
++++ b/SelfServiceCommon/Massai/cpp/BillingService/inc/BillingS_def.h
+@@ -1,9 +1,12 @@
+-#define FILE_VER_BIN     1,0,0,6
+-#define FILE_VER_STR     "FileVersion", "1.0.0.6\0"
++#define FILE_VER_BIN     1,0,0,7
++#define FILE_VER_STR     "FileVersion", "1.0.0.7\0"
+ 
+ /*!
+ \page Billing.exe Billing Service - Release Notes
+ 
++\date 25.14.2013 \li V1.0.0.7
++                 \li Mantis 0026967: BillingService: recognize non print AEA messages
++
+ \date 07.11.2012 \li V1.0.0.6
+                  \li SteT Mantis 0024999: service creates very large files (VC10)
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak b/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
+index a1786e2e..e082cfb7 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
+@@ -10,7 +10,8 @@ MY_CFLAGS = \
+     $(MY_CFLAGS_3) \
+     -I$(_GEN) \
+     $(INC_INTERFACES) \
+-    $(INC_ACETAO)
++    $(INC_ACETAO) \
++    $(INC_REGEX)
+ 
+ ######################################################################
+ 
+@@ -82,4 +83,26 @@ MY_BIN2_GEN_DIRS = \
+ 
+ ######################################################################
+ 
++MY_BIN3 = \
++    $(_BIN)\TestBilling.exe
++
++MY_BIN3_OBJS = \
++    $(_OBJ)\TestBilling.obj \
++    $(_OBJ)\PrinterRsp.obj
++
++MY_BIN3_RES = \
++    $(_OBJ)\BillingS.res
++
++MY_BIN3_USER_LIBS = \
++    $(LIB_TRACE) \
++    $(LIB_REGEX)
++
++MY_BIN3_LINKLIBS = \
++    $(SYS_ACETAO)
++
++MY_BIN3_GEN_DIRS = \
++    $(GEN_MASSAI_COMMON)
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
+index 2f5a43db..55827084 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
+@@ -16,6 +16,24 @@
+ #include <stdlib.h>
+ #include "trc/trace.h"
+ #include "PrinterRsp.h"
++#include "boost/regex.hpp"
++
++using boost::cmatch;
++using boost::regex_match;
++using boost::regex;
++
++namespace
++{
++  regex btp_print_done      ("^.{0,5}(?:PROK|ERR[13456789EL])[1IODL]([0-9]{2})(?:[^0-9A-Z]V([0-9]{3}))?(?:[^0-9A-Z].*)?$");
++  regex btp_command_failed  ("^.{0,5}ERR[1-9EL].*$");
++  regex btp_command_done    ("^.{0,5}(CT|PT|PC|PS|LT|LC|LS|AV|PV|RI|RC|ES|EP|BT|ZS)OK.*$");
++
++  regex gpp_print_done      ("^.{0,5}(?:PROK|ERR[13456789EFLOST])[^0-9A-Z][1LOJD]([0-9]{2})[^0-9A-Z][2LOJD]([0-9]{2})[^0-9A-Z][3LOJD]([0-9]{2})(?:[^0-9A-Z]([V1-9])[SO][ROLJD])?(?:[^0-9A-Z].*)?$");
++  regex gpp_command_failed  ("^.{0,5}ERR[1-9EFLNOST].*$");
++  regex gpp_command_done    ("^.{0,5}(CT|PT|PC|PS|LT|LC|LS|AV|PV|RI|RC|ES|EP|BT|FT|FC|FS|FA|FR|TT|TC|TA|CS|TS)OK.*$");
++  regex gpp_coupon_inserted ("^.{0,5}(CPNI|BRPI|ATBI|NMCI|TKTI).*$");
++}
++
+ 
+ /*---------------------------------------------------------------------------
+ 
+@@ -34,79 +52,34 @@
+ 
+ int parseBTP(int& iUsed, const char* pResponse)
+ {
+-const char* pStr;
+-const char  *pEnd;
+-char   c;
+-int  n;
+-
+-    if(!pResponse)
+-      return(-1);
+-
+-    if((pStr = strstr(pResponse,"PROK")) != NULL)
+-    {
+-      pEnd= pStr+strlen(pStr);
+-      pStr += 4;
+-      if( pEnd <= pStr ) return -1;
+-		c = *pStr;
+-
+-      // check for paper out flag !!
+-
+-      /*
+-      if(*pStr == 'O')
+-      {
+-        TRACE(HERE,"BTP out of paper stock !!!");
+-
+-        logEvent("btpPaperEmpty","BTP out of paper stock !!!");
+-
+-        setSendTelex(TLXID_BTP_STOCK_EMPTY);
+-      }
+-      */
+-
+-      pStr += 1; // number of tags printed
+-
+-      n = atoi(pStr);
+-
+-      iUsed+= n;
+-      /*
+-      if(n > getNoOfBags())
+-        n = getNoOfBags();
+-
+-      setBagTagsPrinted(n);
+-      cntBagTag(n);
+-      */
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"ERR")) != NULL)
++  int result = 0;
++  cmatch match;
++  if(pResponse[0] == 0)
++  {
++    TRACE(HERE_7, "empty message");
++  }
++  else if(regex_match(pResponse, match, btp_print_done))
++  {
++    TRACE(HERE_7, "print done");
++    iUsed+= atoi(match[1].first);
++    if(match[2].matched)
+     {
+-      /*
+-      pStr += 4;
+-
+-      c = *pStr;
+-
+-      // check for paper out flag !!
+-
+-      if(*pStr == 'O')
+-      {
+-        TRACE(HERE,"BTP out of paper stock !!!");
+-
+-        logEvent("btpPaperEmpty","BTP out of paper stock !!!");
+-
+-        setSendTelex(TLXID_BTP_STOCK_EMPTY);
+-      }
+-      else
+-      {
+-        TRACE(HERE,"BTP error !!!");
+-
+-        logEvent("btpError","Error detected in: %s",pResponse);
+-
+-        setSendTelex(TLXID_BTP_HWERROR);
+-      }
+-      */
+-      return 0;
++      iUsed+= atoi(match[2].first);
+     }
+-
+-    return -1;
+-
++  }
++  else if(regex_match(pResponse, match, btp_command_failed))
++  {
++    TRACE(HERE_7, "command error");
++  }
++  else if(regex_match(pResponse, match, btp_command_done))
++  {
++    TRACE(HERE_7, "command success");
++  }
++  else
++  {
++    result = -1;
++  }
++  return result;
+ }
+ 
+ 
+@@ -128,217 +101,7 @@ int  n;
+ 
+ int parseATB(int& iUsed, const char* pResponse)
+ {
+-const char      *pStr;
+-const char      *pEnd;
+-char       c;
+-/*
+-char       szCheck[256];
+-ssdConfig  check("SERVICES","StockControl","CheckStocks");
+-*/
+-
+-    if(!pResponse)
+-      return -1;
+-/*
+-    if(!check.error())
+-      check.asString(szCheck,sizeof(szCheck));
+-    else
+-      memset(szCheck,0,sizeof(szCheck));
+-*/
+-
+-    // @$/PROK!VSR!4C085!4D0103339955
+-
+-    if((pStr = strstr(pResponse,"@@@HWE")) != NULL)
+-    {
+-      // printer HW error (Swissair only ??)
+-      /*
+-
+-      TRACE(HERE,"Hardware error (@@@HWE)");
+-
+-      logEvent("atbError", "Hardware error: %s", pResponse);
+-
+-      setSendTelex(TLXID_HWERROR);
+-      */
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"ERR45")) != NULL)
+-    {
+-      // ribbon end !!
+-
+-      /*
+-      TRACE(HERE,"RIBBON end (ERR45)");
+-
+-      logEvent("atbRibbonEnd", "RIBBON end at %s (ERR45)", pResponse );
+-
+-      setSendTelex(TLXID_RIBBON_END);
+-      */
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"ERR7")) != NULL)
+-    {
+-      TRACE(HERE_5,"CKI revalidation in progress -> switch on/off printer");
+-
+-      // switch printer on/off in CONTOLLER !!
+-      /*
+-      setATBError(TRUE);
+-      */
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"PROK")) ||  // printing OK
+-            (pStr = strstr(pResponse,"ERR2")) ||  // illogical command
+-            (pStr = strstr(pResponse,"ERR3")) ||  // incorrect field
+-            (pStr = strstr(pResponse,"ERR5")) ||  // unsuccessful print/encode
+-            (pStr = strstr(pResponse,"ERRS"))     // document unknown
+-           )
+-    {
+-      pEnd= pStr+strlen(pStr);
+-      // all these indicators may have stock information appended !!!
+-
+-      // printer response can be PROK / ERRx
+-
+-      pStr += 4;
+-      if (pEnd <= pStr) return -1;
+-
+-      // get delimiter character (PECTAB depending)
+-
+-      c = *pStr;
+-
+-      pStr++;
+-      if (pEnd <= pStr) return -1;
+-
+-      if(isdigit(*(pStr +1)))
+-      {
+-        // must be a response like: @$/PROK!101!200!O00!VSR (ET-CKI)
+-
+-        // check configured bins for paper low/empty
+-
+-        /*
+-        TRACE(HERE,"checking ET-CKI printer response [%s], stocks = %s",pStr,szCheck);
+-
+-        if(strchr(szCheck,'1') != NULL)
+-        {
+-          // check BIN 1
+-
+-          switch(*pStr)
+-          {
+-          case 'O': TRACE(HERE,"paper empty BIN 1");
+-                    logEvent("atbStock1Empty", "BIN 1");
+-                    setSendTelex(TLXID_STOCK_EMPTY);
+-                    break;
+-
+-          case 'L': TRACE(HERE,"paper low BIN 1");
+-                    logEvent("atbStock1Low", "BIN 1");
+-                    break;
+-          }
+-        }
+-        */
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return -1;
+-
+-        /*
+-        if(strchr(szCheck,'2') != NULL)
+-        {
+-          // check BIN 2
+-
+-          switch(*pStr)
+-          {
+-          case 'O': TRACE(HERE,"paper empty BIN 2");
+-                    logEvent("atbStock2Empty", "BIN 2");
+-                    setSendTelex(TLXID_STOCK_EMPTY);
+-                    break;
+-
+-          case 'L': TRACE(HERE,"paper low BIN 2");
+-                    logEvent("atbStock2Low", "BIN 2");
+-                    break;
+-          }
+-        }
+-        */
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return -1;
+-
+-
+-        /*
+-        if(strchr(szCheck,'3') != NULL)
+-        {
+-          // check BIN 3
+-
+-          switch(*pStr)
+-          {
+-          case 'O': TRACE(HERE,"paper empty BIN 3");
+-                    logEvent("atbStock3Empty", "BIN 3");
+-                    setSendTelex(TLXID_STOCK_EMPTY);
+-                    break;
+-
+-          case 'L': TRACE(HERE,"paper low BIN 3");
+-                    logEvent("atbStock3Low", "BIN 3");
+-                    break;
+-          }
+-        }
+-        */
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return 0;
+-
+-      }
+-      else
+-      {
+-        // must be a response like: @$/PROK!VSR!4C085!4D0103340890 (ATB-CKI)
+-        /*
+-        TRACE(HERE,"checking ATB-CKI printer response [%s], stocks = %s",pStr,szCheck);
+-        */
+-      }
+-
+-      if(pStr && *pStr)
+-      {
+-        // check for voided coupons
+-        /*
+-        if(*pStr != 'V')
+-        {
+-          TRACE(HERE,"VOIDED %d",c - '0');
+-          logEvent("atbError", "VOIDED %d",c - '0');
+-        }
+-        */
+-
+-        pStr++;
+-        if (pEnd <= pStr) return 0;
+-
+-        // check stacker
+-
+-        /*
+-        if(*pStr != 'S')
+-        {
+-          TRACE(HERE,"STACKER FULL");
+-          logEvent("atbStackerFull", "STACKER FULL");
+-        }
+-        */
+-
+-        pStr++;
+-        if (pEnd <= pStr) return 0;
+-
+-        // check ribbon (send telex if at end)
+-
+-        /*
+-        if(*pStr != 'R')
+-        {
+-          TRACE(HERE,"RIBBON end");
+-          logEvent("atbRibbonEnd", "RIBBON end");
+-
+-          setSendTelex(TLXID_RIBBON_END);
+-        }
+-        */
+-      }
+-      return 0;
+-    }
+-
+-    return -1;
++  return parseGPP(iUsed, pResponse);
+ }
+ 
+ 
+@@ -357,99 +120,38 @@ ssdConfig  check("SERVICES","StockControl","CheckStocks");
+ 
+ int parseGPP(int& iUsed, const char* pResponse)
+ {
+-const char* pStr;
+-const char* pEnd;
+-char       c;
+-
+-    if(!pResponse)
+-      return -1;
+-    // @$/PROK!VSR!4C085!4D0103339955
+-    if((pStr = strstr(pResponse,"@@@HWE")) != NULL)
+-    {
+-      // printer HW error (Swissair only ??)
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"ERR45")) != NULL)
+-    {
+-      // ribbon end !!
+-      return 0;
+-    }
+-    else if((pStr = strstr(pResponse,"ERR7")) != NULL)
++  int result = 0;
++  cmatch match;
++  if(pResponse[0] == 0)
++  {
++    TRACE(HERE_7, "empty message");
++  }
++  else if(regex_match(pResponse, match, gpp_print_done))
++  {
++    TRACE(HERE_7, "print done");
++    iUsed+= atoi(match[1].first);
++    iUsed+= atoi(match[2].first);
++    iUsed+= atoi(match[3].first);
++    if(match[4].matched)
+     {
+-      // switch printer on/off in CONTOLLER !!
+-      return 0;
++      iUsed+= atoi(match[4].first);
+     }
+-    else if((pStr = strstr(pResponse,"PROK")) ||  // printing OK
+-            (pStr = strstr(pResponse,"ERR2")) ||  // illogical command
+-            (pStr = strstr(pResponse,"ERR3")) ||  // incorrect field
+-            (pStr = strstr(pResponse,"ERR5")) ||  // unsuccessful print/encode
+-            (pStr = strstr(pResponse,"ERRS"))     // document unknown
+-           )
+-    {
+-      pEnd= pStr+strlen(pStr);
+-      // all these indicators may have stock information appended !!!
+-
+-      // printer response can be PROK / ERRx
+-
+-      pStr += 4;
+-      if (pEnd <= pStr) return -1;
+-
+-      // get delimiter character (PECTAB depending)
+-
+-      c = *pStr;
+-
+-      pStr++;
+-      if (pEnd <= pStr) return -1;
+-
+-      if(isdigit(*(pStr +1)))
+-      {
+-        // must be a response like: @$/PROK!101!200!O00!VSR (ET-CKI)
+-
+-        // check configured bins for paper low/empty
+-
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return -1;
+-
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return -1;
+-
+-
+-        if (isdigit(*(pStr+1)) && isdigit(*(pStr+2)))
+-          iUsed+= ((*(pStr+1))-'0')*10 + ((*(pStr+2))-'0');
+-
+-        pStr += 4;
+-        if (pEnd <= pStr) return 0;
+-
+-      }
+-      else
+-      {
+-        // must be a response like: @$/PROK!VSR!4C085!4D0103340890 (ATB-CKI)
+-      }
+-
+-      if(pStr && *pStr)
+-      {
+-        // check for voided coupons
+-
+-        pStr++;
+-        if (pEnd <= pStr) return 0;
+-
+-        // check stacker
+-
+-        pStr++;
+-        if (pEnd <= pStr) return 0;
+-
+-        // check ribbon (send telex if at end)
+-
+-      }
+-      return 0;
+-    }
+-
+-    return -1;
++  }
++  else if(regex_match(pResponse, match, gpp_command_failed))
++  {
++    TRACE(HERE_7, "command error");
++  }
++  else if(regex_match(pResponse, match, gpp_command_done))
++  {
++    TRACE(HERE_7, "command success");
++  }
++  else if(regex_match(pResponse, match, gpp_coupon_inserted))
++  {
++    TRACE(HERE_7, "document inserted");
++  }
++  else
++  {
++    result = -1;
++  }
++  return result;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/TestBilling.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/TestBilling.cpp
+new file mode 100644
+index 00000000..12b6c385
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/TestBilling.cpp
+@@ -0,0 +1,130 @@
++#include <stdio.h>
++#include <assert.h>
++#include "PrinterRsp.h"
++
++void checkBTP(int returnCode, int used, const char* message)
++{
++  int iUsed = 0;
++  printf("test: (%d) (%d) (%s)\n", returnCode, used, message);
++  int result = parseBTP(iUsed, message);
++  printf("done: (%d) (%d) (%s)\n", result, iUsed, message);
++  assert(iUsed == used);
++  assert(returnCode == result);
++}
++
++void checkGPP(int returnCode, int used, const char* message)
++{
++  int iUsed = 0;
++  printf("test: (%d) (%d) (%s)\n", returnCode, used, message);
++  int result = parseGPP(iUsed, message);
++  printf("done: (%d) (%d) (%s)\n", result, iUsed, message);
++  assert(iUsed == used);
++  assert(returnCode == result);
++}
++
++int main(int argc, char** argv)
++{
++  checkBTP(0, 0, "BTP CTOKCHECK");
++  checkBTP(0, 0, "CHECKPTOK02030301");
++  checkBTP(0, 0, "$$ PCOK0203");
++  checkBTP(0, 0, "_$XPSOK0203");
++  checkBTP(0, 0, "LTOK0M0Y");
++  checkBTP(0, 0, "LCOK0M");
++  checkBTP(0, 0, "%%#$LSOK0M");
++  checkBTP(0, 0, "LSAVOK99#BTP");
++  checkBTP(0, 0, "BTP PVOK1015");
++  checkBTP(0, 0, "BTP RIOK");
++  checkBTP(0, 0, "BTP RCOK");
++  checkBTP(0, 0, "BTP ESOK");
++  checkBTP(0, 0, "BTP EPOK");
++  checkBTP(0, 0, "BTP BTOK");
++  checkBTP(0, 0, "BTP ZSOK");
++  checkBTP(0, 0, "BTP ERR1");
++  checkBTP(0, 0, "BTP ERR2105");
++  checkBTP(0, 0, "CHECKERR3");
++  checkBTP(0, 0, "$$ERR4");
++  checkBTP(0, 0, "ERR5");
++  checkBTP(0, 0, "###ERR6");
++  checkBTP(0, 0, "...ERR7");
++  checkBTP(0, 0, ".ERR8");
++  checkBTP(0, 0, "..ERR9");
++  checkBTP(0, 0, "....ERRE");
++  checkBTP(0, 0, ".....ERRL");
++  checkBTP(0, 5, "PROK105");
++  checkBTP(0, 4, "XXPROKI01#V003");
++  checkBTP(0, 4, "XXXPROK101#V003#J01");
++  checkBTP(0, 1, "XXXXPROK101#J01");
++  checkBTP(0, 5, "XXXXXERR5105");
++  checkBTP(0, 4, "XXXXERR3O01#V003");
++  checkBTP(0, 4, "XERRED01#V003#J01");
++  checkBTP(0, 1, "ERRLL01#J01");
++  checkBTP(0, 0, "");
++  checkGPP(0, 0, "CTOK");
++  checkGPP(0, 0, " PTOK");
++  checkGPP(0, 0, "  PCOK");
++  checkGPP(0, 0, "---PSOK");
++  checkGPP(0, 0, "$%&LTOK");
++  checkGPP(0, 0, "$LCOK");
++  checkGPP(0, 0, "GPP LSOK");
++  checkGPP(0, 0, "GPP AVOK");
++  checkGPP(0, 0, "GPP PVOK");
++  checkGPP(0, 0, "GPP RIOK");
++  checkGPP(0, 0, "GPP RCOK");
++  checkGPP(0, 0, "GPP ESOK");
++  checkGPP(0, 0, "GPP EPOK");
++  checkGPP(0, 0, "GPP BTOK");
++  checkGPP(0, 0, "GPP FTOK");
++  checkGPP(0, 0, "GPP FCOK");
++  checkGPP(0, 0, "GPP FSOK");
++  checkGPP(0, 0, "GPP FAOK");
++  checkGPP(0, 0, "GPP FROK");
++  checkGPP(0, 0, "GPP TTOK");
++  checkGPP(0, 0, "GPP TCOK");
++  checkGPP(0, 0, "GPP TAOK");
++  checkGPP(0, 0, "GPP CSOK");
++  checkGPP(0, 0, "GPP TSOK");
++  checkGPP(0, 0, "GPP ERR1");
++  checkGPP(0, 0, "GPP ERR2");
++  checkGPP(0, 0, "GPP ERR3");
++  checkGPP(0, 0, "GPP ERR4");
++  checkGPP(0, 0, "GPP ERR5");
++  checkGPP(0, 0, "GPP ERR6");
++  checkGPP(0, 0, "GPP ERR7");
++  checkGPP(0, 0, "GPP ERR8");
++  checkGPP(0, 0, "GPP ERR9");
++  checkGPP(0, 0, "GPP ERRE");
++  checkGPP(0, 0, "GPP ERRF");
++  checkGPP(0, 0, "GPP ERRL");
++  checkGPP(0, 0, "GPP ERRN");
++  checkGPP(0, 0, "GPP ERRO");
++  checkGPP(0, 0, "GPP ERRS");
++  checkGPP(0, 0, "GPP ERRT");
++  checkGPP(0, 8, "PROK#105#202#301");
++  checkGPP(0, 8, " PROK#105#L02#301#123");
++  checkGPP(0, 8, ". PROK#105#O02#301#VSR");
++  checkGPP(0, 8, "%$%$PROK#L05#202#J01#VSR#123");
++  checkGPP(0, 8, "ERRL#O00#202#D01#5SR");
++  checkGPP(0, 8, "ERRT#J00#202#301#5SR#123");
++  checkGPP(0, 8, "ERR5#D00#202#301#5SR");
++  checkGPP(0, 8, "ERRS#100#202#301#5SR#123");
++  checkGPP(0, 0, "CPNI");
++  checkGPP(0, 0, "BRPI#01W#005#");
++  checkGPP(0, 0, "ATBI#01W#005#");
++  checkGPP(0, 0, "NMCI#01W#005#");
++  checkGPP(0, 0, "TKTI#01W#005#");
++  checkGPP(0, 0, "");
++
++  checkBTP(-1, 0, "BTP   CTOKCHECK");
++  checkGPP(-1, 0, "GPP   ERRF");
++
++  return 0;
++}
++
++
++
++
++
++
++
++
++
+-- 
+2.41.0.windows.1
+

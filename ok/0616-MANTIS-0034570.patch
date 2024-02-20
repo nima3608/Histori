@@ -1,0 +1,245 @@
+From f087b9343524402a78705e2dcda4770be70e0818 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 18 Nov 2014 13:37:33 +0000
+Subject: [PATCH 0616/1077] MANTIS 0034570 extension GPPDev: FD Phoenix
+ Protocol
+
+massai_systools.lib
+V1.0.0.24
+
+- added close for mSysIO::Reader, mSysIO::Writer
+- added mSysUSBPrinter::getUSBPrinterDeviceById
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@773 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysIO.h          |  2 +
+ .../Interfaces/inc/systools/mSysUSBPrinter.h  |  2 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 10 ++-
+ .../Massai/cpp/Systools/src/mSysIOW32.cpp     | 25 +++++++-
+ .../cpp/Systools/src/mSysUSBPrinterW32.cpp    | 64 +++++++++++++++++++
+ 5 files changed, 100 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h b/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
+index 1d7e160c..f3417d8c 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysIO.h
+@@ -28,6 +28,7 @@ namespace mSysIO
+       virtual bool read(std::string& data, Time_ms timeout) = 0;
+       virtual bool read(std::string& data, size_t size) = 0;
+       virtual bool read(std::string& data) = 0;
++      virtual void close() = 0;
+   };
+ 
+   class Writer
+@@ -36,6 +37,7 @@ namespace mSysIO
+       virtual ~Writer();
+       virtual size_t write(const std::string& data, Time_ms timeout) = 0;
+       virtual size_t write(const std::string& data) = 0;
++      virtual void close() = 0;
+   };
+ 
+   class ReadOptions
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+index 3e2247fb..7d9212f8 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysUSBPrinter.h
+@@ -15,6 +15,8 @@ namespace mSysUSBPrinter
+   // returns filename of first matching device
+   // returns empty string if not matching device found
+   std::string getUSBPrinterDevice(const std::string& printerPort, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++
++  std::string getUSBPrinterDeviceById(const std::string& hardwareId, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 12a41264..864c5f30 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 23);
++VERSION_ID_DT(systools, 1, 0, 0, 24);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 23);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.23
++@version 1.0.0.24
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.24
++\li 18.11.20014
++\li extension SteT Mantis 0034570 GPPDev: FD Phoenix Protocol
++- added close for mSysIO::Reader, mSysIO::Writer
++- added mSysUSBPrinter::getUSBPrinterDeviceById
++
+ \version 1.0.0.23
+ \li 28.10.20014
+ \li Mantis 0034299: switch resolution; start application with default resolution
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
+index 79d1fa63..36b5bcd8 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysIOW32.cpp
+@@ -37,6 +37,7 @@ namespace
+       virtual bool read(std::string& data, Time_ms timeout);
+       virtual bool read(std::string& data, size_t size);
+       virtual bool read(std::string& data);
++      virtual void close();
+ 
+     private:
+       bool read(std::string& data, Time_ms timeout, size_t size, bool useTime, bool useSize);
+@@ -57,6 +58,7 @@ namespace
+       virtual ~WriterImpl();
+       virtual size_t write(const std::string& data, Time_ms timeout);
+       virtual size_t write(const std::string& data);
++      virtual void close();
+ 
+     private:
+       TraceInterface& m_trc;
+@@ -127,10 +129,17 @@ namespace
+   }
+ 
+   ReaderImpl::~ReaderImpl()
++  {
++    close();
++  }
++
++  void ReaderImpl::close()
+   {
+     if(m_handle != INVALID_HANDLE_VALUE)
+     {
+-      if(!CloseHandle(m_handle))
++      HANDLE handle = m_handle;
++      m_handle = INVALID_HANDLE_VALUE;
++      if(!CloseHandle(handle))
+       {
+         traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, GetLastError());
+       }
+@@ -296,6 +305,20 @@ namespace
+ 
+   WriterImpl::~WriterImpl()
+   {
++    close();
++  }
++
++  void WriterImpl::close()
++  {
++    if(m_handle != INVALID_HANDLE_VALUE)
++    {
++      HANDLE handle = m_handle;
++      m_handle = INVALID_HANDLE_VALUE;
++      if(!CloseHandle(handle))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, GetLastError());
++      }
++    }
+   }
+ 
+   size_t WriterImpl::write(const std::string& data, Time_ms timeout)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+index fc3fff5e..ed81e059 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBPrinterW32.cpp
+@@ -9,6 +9,7 @@
+ using MASSAI::trace::TraceInterface;
+ using mSysUSBDeviceW32::Devices;
+ using mSysUSBDeviceW32::DeviceData;
++using mSysUSBDeviceW32::DeviceInfo;
+ using mSysUSBDeviceW32::DeviceRegistry;
+ using mSysUSBDevice::Search;
+ 
+@@ -33,6 +34,22 @@ namespace
+       Search m_search;
+       TraceInterface& m_trc;
+   };
++
++  class FindPrinterDeviceById
++  {
++    public:
++      FindPrinterDeviceById(const std::string& hardwareId, Search search, TraceInterface& trc);
++      ~FindPrinterDeviceById();
++
++      std::string getDevice();
++
++    private:
++      bool match(const std::string& deviceInstanceId);
++
++      const std::string& m_hardwareId;
++      Search m_search;
++      TraceInterface& m_trc;
++  };
+ }
+ 
+ namespace
+@@ -92,6 +109,47 @@ namespace
+     }
+     return result;
+   }
++
++
++  FindPrinterDeviceById::FindPrinterDeviceById(const std::string& hardwareId, Search search, TraceInterface& trc):
++    m_hardwareId(hardwareId),
++    m_search(search),
++    m_trc(trc)
++  {}
++
++  FindPrinterDeviceById::~FindPrinterDeviceById()
++  {}
++
++  std::string FindPrinterDeviceById::getDevice()
++  {
++    std::string result;
++    try
++    {
++      Devices devices(PRINTER_GUID, m_search, m_trc);
++      for(DWORD i = 0;; i++)
++      {
++        DeviceInfo deviceInfo(devices, i, m_trc);
++        if(match(deviceInfo.getDeviceId()))
++        {
++          DeviceData deviceData(devices, i, PRINTER_GUID, m_trc);
++          result = deviceData.getDeviceName();
++          m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
++          break;
++        }
++      }
++    }
++    catch(const mSysError::SystemError& e)
++    {
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
++    }
++    return result;
++  }
++
++  bool FindPrinterDeviceById::match(const std::string& deviceInstanceId)
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "check: (%s)", deviceInstanceId.c_str());
++    return deviceInstanceId.find(m_hardwareId) != std::string::npos;
++  }
+ }
+ 
+ namespace mSysUSBPrinter
+@@ -101,4 +159,10 @@ namespace mSysUSBPrinter
+     FindPrinterDevice find(printerPort, search, trc);
+     return find.getDevice();
+   }
++
++  std::string getUSBPrinterDeviceById(const std::string& hardwareId, mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindPrinterDeviceById find(hardwareId, search, trc);
++    return find.getDevice();
++  }
+ }
+-- 
+2.41.0.windows.1
+

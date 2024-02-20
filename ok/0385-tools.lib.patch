@@ -1,0 +1,150 @@
+From ea7ef7caeb294eae6553ffb594c139fde9142457 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 8 Aug 2013 18:17:49 +0000
+Subject: [PATCH 0385/1000] tools.lib V1.0.1.13 Mantis 0028323: GPPDev: Custom
+ VKP-80II extension: added Interval.h
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@559 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/Interval.h           | 10 +++-
+ .../Massai/cpp/Tools/src/Interval.cpp         | 48 +++++++++++++++++--
+ 2 files changed, 51 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/Interval.h b/SelfServiceCommon/Interfaces/inc/Tools/Interval.h
+index a3e98855..4cc79925 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/Interval.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/Interval.h
+@@ -20,6 +20,8 @@ namespace mInterval
+       void start();
+       void stop();
+       void wait();
++      bool isActive();
++      void wait(const std::string& id);
+     private:
+       std::string m_name;
+       Time m_duration;
+@@ -33,10 +35,12 @@ namespace mInterval
+   class Slot
+   {
+     public:
+-      Slot(Interval& m_interval);
++      Slot(Interval& interval);
++      Slot(Interval& interval, const std::string& id);
+       ~Slot();
+     private:
+       Interval& m_interval;
++      std::string m_id;
+   };
+ 
+   // gap between two intervals
+@@ -45,10 +49,12 @@ namespace mInterval
+   class Gap
+   {
+     public:
+-      Gap(Interval& m_interval);
++      Gap(Interval& interval);
++      Gap(Interval& interval, const std::string& id);
+       ~Gap();
+     private:
+       Interval& m_interval;
++      std::string m_id;
+   };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
+index ab38d604..f0d1b882 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
+@@ -27,6 +27,8 @@ namespace
+       t.milliseconds
+     );
+   }
++
++  const std::string defaultId = "wait";
+ }
+ 
+ namespace mInterval
+@@ -53,7 +55,27 @@ namespace mInterval
+     m_isActive = false;
+   }
+ 
++  bool Interval::isActive()
++  {
++    bool result = false;
++    if(m_isActive)
++    {
++      Time now = currentTime();
++      Time delay = now - m_intervalStart;
++      if(delay < m_duration)
++      {
++        result = true;
++      }
++    }
++    return result;
++  }
++
+   void Interval::wait()
++  {
++    wait(defaultId);
++  }
++
++  void Interval::wait(const std::string& id)
+   {
+     if(m_isActive)
+     {
+@@ -62,7 +84,7 @@ namespace mInterval
+       if(delay < m_duration)
+       {
+         Time wait = m_duration - delay;
+-        traceDuration(m_trc, BasicRuntime_HERE, m_name, "wait ", wait);
++        traceDuration(m_trc, BasicRuntime_HERE, m_name, id.c_str(), wait);
+         mSysTime::sleep(wait);
+       }
+       stop();
+@@ -70,9 +92,17 @@ namespace mInterval
+   }
+ 
+   Gap::Gap(Interval& interval):
+-    m_interval(interval)
++    m_interval(interval),
++    m_id(defaultId)
+   {
+-    m_interval.wait();
++    m_interval.wait(m_id);
++  }
++
++  Gap::Gap(Interval& interval, const std::string& id):
++    m_interval(interval),
++    m_id(id)
++  {
++    m_interval.wait(m_id);
+   }
+ 
+   Gap::~Gap()
+@@ -81,13 +111,21 @@ namespace mInterval
+   }
+ 
+   Slot::Slot(Interval& interval):
+-    m_interval(interval)
++    m_interval(interval),
++    m_id(defaultId)
++  {
++    m_interval.start();
++  }
++
++  Slot::Slot(Interval& interval, const std::string& id):
++    m_interval(interval),
++    m_id(id)
+   {
+     m_interval.start();
+   }
+ 
+   Slot::~Slot()
+   {
+-    m_interval.wait();
++    m_interval.wait(m_id);
+   }
+ }
+-- 
+2.41.0.windows.1
+

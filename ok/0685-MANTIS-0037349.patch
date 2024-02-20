@@ -1,0 +1,188 @@
+From 79e7ff8261041637ad30904d947d639c9540f196 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 2 Oct 2015 16:31:11 +0000
+Subject: [PATCH 0685/1077] MANTIS 0037349 integration of ingenico payment
+ device for KIS kiosk
+
+tools for device handler
+enumeration.hpp convert enum to/from string
+configItem.h access configuration item
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@905 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/tools/Enumeration.h    |  6 ++++
+ .../Interfaces/generic/tools/Enumeration.hpp  | 29 +++++++++++++++++++
+ .../Interfaces/inc/Tools/configItem.h         |  1 +
+ .../Massai/cpp/Tools/src/configItem.cpp       | 22 ++++++++++++++
+ 4 files changed, 58 insertions(+)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+index f35f2ef5..f65f10b9 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+@@ -4,6 +4,7 @@
+ #include <map>
+ #include <set>
+ #include <string>
++#include <iostream>
+ 
+ namespace mipsTools
+ {
+@@ -44,12 +45,14 @@ namespace mipsTools
+       E getCode() const;
+       std::string getValue() const;
+       std::string getDescription() const;
++      std::string getText() const;
+ 
+       bool operator<(const enumerationEntry<E>& cmp) const;
+       bool operator>(const enumerationEntry<E>& cmp) const;
+       bool operator<=(const enumerationEntry<E>& cmp) const;
+       bool operator>=(const enumerationEntry<E>& cmp) const;
+       bool operator==(const enumerationEntry<E>& cmp) const;
++
+     private:
+       E code;
+       std::string value;
+@@ -66,4 +69,7 @@ namespace mipsTools
+ 
+       std::string getDescription(E code) const;
+   };
++
++  template<class E>
++  std::ostream& operator<<(std::ostream& out, const enumerationEntry<E>& data);
+ }
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+index 8e690913..eccb21c9 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+@@ -2,6 +2,7 @@
+ #pragma once
+ 
+ #include "enumeration.h"
++#include <sstream>
+ 
+ namespace mipsTools
+ {
+@@ -44,6 +45,14 @@ namespace mipsTools
+     return description;
+   }
+ 
++  template<class E>
++  std::string enumerationEntry<E>::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
+   template<class E>
+   bool enumerationEntry<E>::operator<(const enumerationEntry<E>& cmp) const
+   {
+@@ -101,6 +110,18 @@ namespace mipsTools
+     m_entrySet.insert(entry);
+   }
+ 
++  template<class E, class Value, class Entry>
++  Entry enumerationBase<E, Value, Entry>::getEntry(E code) const
++  {
++    Entry result = m_defaultEntry;
++    entryMap::const_iterator it = m_entryMap.find(code);
++    if(it != m_entryMap.end())
++    {
++      result = it->second;
++    }
++    return result;
++  }
++
+   template<class E, class Value, class Entry>
+   std::set<Entry> enumerationBase<E, Value, Entry>::getEntries() const
+   {
+@@ -153,4 +174,12 @@ namespace mipsTools
+   {
+     return getEntry(code).getDescription();
+   }
++
++
++  template<class E>
++  std::ostream& operator<<(std::ostream& out, const enumerationEntry<E>& data)
++  {
++    out << data.getCode() << "/" << data.getValue() << "/" << data.getDescription();
++    return out;
++  }
+ }
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+index 7b1b0ba2..949a22bc 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -12,6 +12,7 @@ namespace config
+   {
+     public:
+       cfgRoot(const std::string& section, const std::string& client, MASSAI::trace::TraceInterface& trc);
++      ~cfgRoot();
+ 
+       std::string section;
+       std::string client;
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+index d13b4024..ce3982c7 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -2,6 +2,16 @@
+ 
+ namespace config
+ {
++  cfgRoot::cfgRoot(const std::string& section, const std::string& client, MASSAI::trace::TraceInterface& trc):
++    section(section),
++    client(client),
++    trc(trc)
++  {}
++
++  cfgRoot::~cfgRoot()
++  {}
++
++
+   cfgCachedText::cfgCachedText
+   (
+     const cfgRoot& root,
+@@ -53,6 +63,9 @@ namespace config
+     maxLength = this->maxLength;
+   }
+ 
++  cfgCachedText::~cfgCachedText()
++  {}
++
+   std::string cfgCachedText::getValue()
+   {
+     return cached();
+@@ -130,6 +143,9 @@ namespace config
+     maxLength = this->maxLength;
+   }
+ 
++  cfgText::~cfgText()
++  {}
++
+   std::string cfgText::getValue() const throw(nConfig::exception)
+   {
+     const char* result = get();
+@@ -208,6 +224,9 @@ namespace config
+     max = this->max;
+   }
+ 
++  cfgCachedNumber::~cfgCachedNumber()
++  {}
++
+   long cfgCachedNumber::getValue()
+   {
+     return cached();
+@@ -267,6 +286,9 @@ namespace config
+     trc(trc)
+   {}
+ 
++  cfgNumber::~cfgNumber()
++  {}
++
+   void cfgNumber::create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max)
+   {
+     trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s)",
+-- 
+2.41.0.windows.1
+

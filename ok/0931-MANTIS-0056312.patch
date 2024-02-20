@@ -1,0 +1,621 @@
+From ae3467a2c0191b57a16eefba44df6b97c9a76269 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 4 Mar 2020 20:22:21 +0000
+Subject: [PATCH 0931/1000] MANTIS 0056312 extension: Extend Desko-Penta
+ Device-Handler by Accufill-SDK for reading US driving-licenses
+
+massai_text.lib
+V1.0.0.11
+- add interfaces TextMask/WTextMask for masking log entries
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1559 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/TextMask.h            | 190 +++++++++++
+ .../Massai/cpp/Text/makefile.mak              |   9 +
+ .../Massai/cpp/Text/src/TestTextMask.cpp      |  29 ++
+ .../Massai/cpp/Text/src/TextMask.cpp          | 303 ++++++++++++++++++
+ .../Massai/cpp/Text/src/local_def.cpp         |   9 +-
+ 5 files changed, 538 insertions(+), 2 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/text/TextMask.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/TestTextMask.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/TextMask.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/TextMask.h b/SelfServiceCommon/Interfaces/inc/text/TextMask.h
+new file mode 100644
+index 00000000..c7dbd311
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/text/TextMask.h
+@@ -0,0 +1,190 @@
++// text masking
++#ifndef INCLUDE_TEXTMASK_H
++#define INCLUDE_TEXTMASK_H
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include <set>
++#include <regex>
++
++namespace textmask
++{
++  class TextMask
++  {
++    public:
++      TextMask();
++      virtual ~TextMask();
++      virtual std::string mask(const std::string& in) = 0;
++  };
++
++  // replace complete input by mask string
++  // size of output = size of mask
++  class FullMask: public TextMask
++  {
++    public:
++      FullMask(const std::string& replacement);
++      virtual ~FullMask();
++      virtual std::string mask(const std::string& in);
++
++    private:
++      std::string replacement;
++  };
++
++  // do not mask
++  // output = input
++  class NoMask: public TextMask
++  {
++    public:
++      NoMask();
++      virtual ~NoMask();
++      virtual std::string mask(const std::string& in);
++  };
++
++  // replace all matching parts with the given replacement
++  class PatternMask: public TextMask
++  {
++    public:
++      PatternMask(const std::string& regEx, const std::string& replacement);
++      virtual ~PatternMask();
++      virtual std::string mask(const std::string& in);
++
++    private:
++      std::tr1::regex regEx;
++      std::string replacement;
++  };
++
++  // replace any not allowed character by the mask character
++  // size of input = size of output
++  class CharacterMask: public TextMask
++  {
++    public:
++      CharacterMask(const std::string& allowed, char replacement);
++      virtual ~CharacterMask();
++      virtual std::string mask(const std::string& in);
++
++    private:
++      bool isAllowed(char in);
++
++      std::set<char> allowed;
++      char replacement;
++  };
++
++  // replace input by length of input
++  // the start and the end of the input is not masked
++  class SizeMask: public TextMask
++  {
++    public:
++      SizeMask(unsigned int prefix, unsigned int postfix);
++      virtual ~SizeMask();
++      virtual std::string mask(const std::string& in);
++
++    private:
++      unsigned int prefix;
++      unsigned int postfix;
++  };
++
++  // Mask all alpha-num characters of given string, except first and last
++  // character E.g. make "B*******N" from "BORNEMANN" and "S**N B*******N" from "SVEN BORNEMANN"
++  class WordMask: public TextMask
++  {
++    public:
++      WordMask(char replacement);
++      virtual ~WordMask();
++      virtual std::string mask(const std::string& in);
++
++    private:
++      char replacement;
++  };
++
++
++  class WTextMask
++  {
++    public:
++      WTextMask();
++      virtual ~WTextMask();
++      virtual std::wstring mask(const std::wstring& in) = 0;
++  };
++
++  // replace complete input by mask string
++  // size of output = size of mask
++  class WFullMask: public WTextMask
++  {
++    public:
++      WFullMask(const std::wstring& replacement);
++      virtual ~WFullMask();
++      virtual std::wstring mask(const std::wstring& in);
++
++    private:
++      std::wstring replacement;
++  };
++
++  // do not mask
++  // output = input
++  class WNoMask: public WTextMask
++  {
++    public:
++      WNoMask();
++      virtual ~WNoMask();
++      virtual std::wstring mask(const std::wstring& in);
++  };
++
++  // replace all matching parts with the given replacement
++  class WPatternMask: public WTextMask
++  {
++    public:
++      WPatternMask(const std::wstring& regEx, const std::wstring& replacement);
++      virtual ~WPatternMask();
++      virtual std::wstring mask(const std::wstring& in);
++
++    private:
++      std::tr1::wregex regEx;
++      std::wstring replacement;
++  };
++
++  // replace any not allowed character by the mask character
++  // size of input = size of output
++  class WCharacterMask: public WTextMask
++  {
++    public:
++      WCharacterMask(const std::wstring& allowed, wchar_t replacement);
++      virtual ~WCharacterMask();
++      virtual std::wstring mask(const std::wstring& in);
++
++    private:
++      bool isAllowed(wchar_t in);
++
++      std::set<wchar_t> allowed;
++      wchar_t replacement;
++  };
++
++  // replace input by length of input
++  // the start and the end of the input is not masked
++  class WSizeMask: public WTextMask
++  {
++    public:
++      WSizeMask(unsigned int prefix, unsigned int postfix);
++      virtual ~WSizeMask();
++      virtual std::wstring mask(const std::wstring& in);
++
++    private:
++      unsigned int prefix;
++      unsigned int postfix;
++  };
++
++  // Mask all alpha-num characters of given string, except first and last
++  // character E.g. make "B*******N" from "BORNEMANN" and "S**N B*******N" from "SVEN BORNEMANN"
++  class WWordMask: public WTextMask
++  {
++    public:
++      WWordMask(wchar_t replacement);
++      virtual ~WWordMask();
++      virtual std::wstring mask(const std::wstring& in);
++
++    private:
++      wchar_t replacement;
++  };
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 8f1bc82f..e3f38dfd 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -25,6 +25,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\stoupper.obj \
+                         $(_OBJ)\readEnv.obj \
+                         $(_OBJ)\parseServant.obj \
++                        $(_OBJ)\TextMask.obj \
+ 
+ 
+ ######################################################################
+@@ -85,4 +86,12 @@ MY_BIN7_OBJS =          $(_OBJ)\TestParseServant.obj
+ 
+ ######################################################################
+ 
++MY_BIN8 =               $(_BIN)\TestTextMask.exe
++
++MY_BIN8_USER_LIBS =     $(LIB_TEXT) $(LIB_TOOLS)
++
++MY_BIN8_OBJS =          $(_OBJ)\TestTextMask.obj
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/TestTextMask.cpp b/SelfServiceCommon/Massai/cpp/Text/src/TestTextMask.cpp
+new file mode 100644
+index 00000000..62e40297
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/TestTextMask.cpp
+@@ -0,0 +1,29 @@
++// test TextMask.cpp implementation
++#include "text/TextMask.h"
++#include <iostream>
++
++int main(int argc, char** argv)
++{
++  textmask::FullMask fullMask("***");
++  textmask::NoMask noMask;
++  textmask::PatternMask patternMask("a(b)", "$1c");
++  textmask::CharacterMask characterMask("ABCDEFGHIJKLMNOPQRSTUVWXYZ", '*');
++  textmask::SizeMask sizeMask(4, 6);
++  textmask::WordMask wordMask('*');
++
++  std::cout << "FullMask: " << fullMask.mask("FullMask") << std::endl;
++  std::cout << "NoMask: " << noMask.mask("NoMask") << std::endl;
++  std::cout << "PatternMask: " << patternMask.mask("ababac") << std::endl;
++  std::cout << "CharacterMask: " << characterMask.mask("CharacterMask") << std::endl;
++  std::cout << "SizeMask: " << sizeMask.mask("12341234567890123456") << std::endl;
++  std::cout << "WordMask: " << wordMask.mask("  Word Mask 12345-1263-100(100)") << std::endl;
++
++
++  textmask::WFullMask wfullMask(L"***");
++  textmask::WNoMask wnoMask;
++
++  std::wcout << L"FullMask: " << wfullMask.mask(L"FullMask") << std::endl;
++  std::wcout << L"NoMask: " << wnoMask.mask(L"NoMask") << std::endl;
++
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/TextMask.cpp b/SelfServiceCommon/Massai/cpp/Text/src/TextMask.cpp
+new file mode 100644
+index 00000000..e7a424e3
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/TextMask.cpp
+@@ -0,0 +1,303 @@
++// text masking
++#include "text/TextMask.h"
++#include <sstream>
++
++namespace
++{
++  const std::string NOT_WORD_CHARS = " &-<";
++  const std::wstring W_NOT_WORD_CHARS = L" &-<";
++  const std::set<char> NOT_WORD_CHAR_SET(NOT_WORD_CHARS.begin(), NOT_WORD_CHARS.end());
++  const std::set<wchar_t> W_NOT_WORD_CHAR_SET(W_NOT_WORD_CHARS.begin(), W_NOT_WORD_CHARS.end());
++
++  bool isWord(char in)
++  {
++     return NOT_WORD_CHAR_SET.find(in) == NOT_WORD_CHAR_SET.end();
++  }
++
++  bool isWord(wchar_t in)
++  {
++     return W_NOT_WORD_CHAR_SET.find(in) == W_NOT_WORD_CHAR_SET.end();
++  }
++
++  bool isInWord(const std::string& text, unsigned int position)
++  {
++    return position != 0
++      && position != text.size() - 1
++      && isWord(text[position - 1])
++      && isWord(text[position])
++      && isWord(text[position + 1]);
++  }
++
++  bool isInWord(const std::wstring& text, unsigned int position)
++  {
++    return position != 0
++      && position != text.size() - 1
++      && isWord(text[position - 1])
++      && isWord(text[position])
++      && isWord(text[position + 1]);
++  }
++}
++
++namespace textmask
++{
++  TextMask::TextMask()
++  {}
++
++  TextMask::~TextMask()
++  {}
++
++
++  FullMask::FullMask(const std::string& replacement):
++    replacement(replacement)
++  {}
++
++  FullMask::~FullMask()
++  {}
++
++  std::string FullMask::mask(const std::string& in)
++  {
++    return replacement;
++  }
++
++
++  NoMask::NoMask()
++  {}
++
++  NoMask::~NoMask()
++  {}
++
++  std::string NoMask::mask(const std::string& in)
++  {
++    return in;
++  }
++
++
++  PatternMask::PatternMask(const std::string& regEx, const std::string& replacement):
++    regEx(regEx, std::regex::optimize | std::regex::extended),
++    replacement(replacement)
++  {}
++
++  PatternMask::~PatternMask()
++  {}
++
++  std::string PatternMask::mask(const std::string& in)
++  {
++    return std::regex_replace(in, regEx, replacement, std::regex_constants::match_any);
++  }
++
++
++  CharacterMask::CharacterMask(const std::string& allowed, char replacement):
++    allowed(allowed.begin(), allowed.end()),
++    replacement(replacement)
++  {}
++
++  CharacterMask::~CharacterMask()
++  {}
++
++  std::string CharacterMask::mask(const std::string& in)
++  {
++    std::string result;
++    result.reserve(in.size());
++    for(unsigned int i = 0; i < in.size(); i++)
++    {
++      if(isAllowed(in[i]))
++      {
++        result.append(1, in[i]);
++      }
++      else
++      {
++        result.append(1, replacement);
++      }
++    }
++    return result;
++  }
++
++  bool CharacterMask::isAllowed(char in)
++  {
++    return allowed.find(in) != allowed.end();
++  }
++
++
++  SizeMask::SizeMask(unsigned int prefix, unsigned int postfix):
++    prefix(prefix),
++    postfix(postfix)
++  {}
++
++  SizeMask::~SizeMask()
++  {
++  }
++
++  std::string SizeMask::mask(const std::string& in)
++  {
++    if (in.size() <= prefix + postfix)
++    {
++      return in;
++    }
++    else
++    {
++      std::ostringstream out;
++      out << in.substr(0, prefix);
++      out << "..(";
++      out << in.size() - prefix - postfix;
++      out <<  ")..";
++      out << in.substr(in.size() - postfix);
++      return out.str();
++    }
++  }
++
++
++  WordMask::WordMask(char replacement):
++    replacement(replacement)
++  {}
++
++  WordMask::~WordMask()
++  {}
++
++  std::string WordMask::mask(const std::string& in)
++  {
++    std::string result;
++    for (unsigned int i = 0; i < in.size(); i++)
++    {
++      if(isInWord(in, i))
++      {
++        result.append(1, replacement);
++      }
++      else
++      {
++        result.append(1, in[i]);
++      }
++    }
++    return result;
++  }
++
++
++  WTextMask::WTextMask()
++  {}
++
++  WTextMask::~WTextMask()
++  {}
++
++
++  WFullMask::WFullMask(const std::wstring& replacement):
++    replacement(replacement)
++  {}
++
++  WFullMask::~WFullMask()
++  {}
++
++  std::wstring WFullMask::mask(const std::wstring& in)
++  {
++    return replacement;
++  }
++
++
++  WNoMask::WNoMask()
++  {}
++
++  WNoMask::~WNoMask()
++  {}
++
++  std::wstring WNoMask::mask(const std::wstring& in)
++  {
++    return in;
++  }
++
++
++  WPatternMask::WPatternMask(const std::wstring& regEx, const std::wstring& replacement):
++    regEx(regEx, std::regex::optimize | std::regex::extended),
++    replacement(replacement)
++  {}
++
++  WPatternMask::~WPatternMask()
++  {}
++
++  std::wstring WPatternMask::mask(const std::wstring& in)
++  {
++    return std::regex_replace(in, regEx, replacement, std::regex_constants::match_any);
++  }
++
++
++  WCharacterMask::WCharacterMask(const std::wstring& allowed, wchar_t replacement):
++    allowed(allowed.begin(), allowed.end()),
++    replacement(replacement)
++  {}
++
++  WCharacterMask::~WCharacterMask()
++  {}
++
++  std::wstring WCharacterMask::mask(const std::wstring& in)
++  {
++    std::wstring result;
++    result.reserve(in.size());
++    for(unsigned int i = 0; i < in.size(); i++)
++    {
++      if(isAllowed(in[i]))
++      {
++        result.append(1, in[i]);
++      }
++      else
++      {
++        result.append(1, replacement);
++      }
++    }
++    return result;
++  }
++
++  bool WCharacterMask::isAllowed(wchar_t in)
++  {
++    return allowed.find(in) != allowed.end();
++  }
++
++
++  WSizeMask::WSizeMask(unsigned int prefix, unsigned int postfix):
++    prefix(prefix),
++    postfix(postfix)
++  {}
++
++  WSizeMask::~WSizeMask()
++  {
++  }
++
++  std::wstring WSizeMask::mask(const std::wstring& in)
++  {
++    if (in.size() <= prefix + postfix)
++    {
++      return in;
++    }
++    else
++    {
++      std::wostringstream out;
++      out << in.substr(0, prefix);
++      out << "..(";
++      out << in.size() - prefix - postfix;
++      out <<  ")..";
++      out << in.substr(in.size() - postfix);
++      return out.str();
++    }
++  }
++
++
++  WWordMask::WWordMask(wchar_t replacement):
++    replacement(replacement)
++  {}
++
++  WWordMask::~WWordMask()
++  {}
++
++  std::wstring WWordMask::mask(const std::wstring& in)
++  {
++    std::wstring result;
++    for (unsigned int i = 0; i < in.size(); i++)
++    {
++      if(isInWord(in, i))
++      {
++        result.append(1, replacement);
++      }
++      else
++      {
++        result.append(1, in[i]);
++      }
++    }
++    return result;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 8e3bcc5f..96597c14 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,23 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 10);
++VERSION_ID_DT(text, 1, 0, 0, 11);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.10
++\version 1.0.0.11
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.11
++\li 04.03.2020
++\li extension - SteT Mantis 0056312: Extend Desko-Penta Device-Handler by Accufill-SDK for reading US driving-licenses
++- add interfaces TextMask/WTextMask for masking log entries
++
+ \version 1.0.0.10
+ \li 14.11.2018
+ \li extension - SteT Mantis 0052433: appcontrol: add current AppId and PLATFORM.ENVIRONMENT.Variables to application start environment
+-- 
+2.41.0.windows.1
+

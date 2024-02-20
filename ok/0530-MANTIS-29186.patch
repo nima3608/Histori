@@ -1,0 +1,745 @@
+From 4a82918b04718647f418a5f0e9ef7e74bf3b1bb3 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Mar 2014 11:19:30 +0000
+Subject: [PATCH 0530/1077] MANTIS 29186 Mantis 29186: GPPDev legt
+ pectabConversion Verzeichnis nicht an mSysProcess::setWorkDirectory() will
+ now create a directory, if the directory specified does not exist and the
+ parent directory does and the optional second argument "try_create" is set to
+ true.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@660 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |  69 +++++----
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 142 ++++++++++++++----
+ .../Massai/cpp/Systools/src/mSysThreadW32.cpp |   2 +-
+ 3 files changed, 152 insertions(+), 61 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index 8429848d..eca53d24 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009-2011 MATERNA Information & Communications
++ * Copyright (c) 2009-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,11 +29,13 @@
+ 
+ namespace mSysProcess
+ {
++
++
+    /**
++    *
+     *  System environment variables
+     *
+    **/
+-
+    typedef std::map<std::string, std::string> Environment;
+ 
+ 
+@@ -62,12 +64,12 @@ namespace mSysProcess
+        * This method is called for every line out output. An application
+        * is supposed to overload this and handle the call as desired.
+        *
+-       * @param Line:           The line data.
++       * @param line:           The line data.
+        *
+       **/
+-      virtual void lineOut( char const * Line ) const = 0;
++      virtual void lineOut( char const * line ) const = 0;
+ 
+-   };
++   }; // class callBack
+ 
+ 
+    /**
+@@ -84,7 +86,6 @@ namespace mSysProcess
+    };
+ 
+ 
+-
+    /**
+     *
+     * Control a child process.
+@@ -126,12 +127,12 @@ namespace mSysProcess
+        * it the childs's console has been redirected by a call
+        * to setStdIn().
+        *
+-       * @param Input:          The console input.
++       * @param input:          The console input.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      virtual child & stdIn( char const * Input ) = 0;
++      virtual child & stdIn( char const * input ) = 0;
+ 
+       /**
+        *
+@@ -146,13 +147,13 @@ namespace mSysProcess
+        *
+        * Wait (limited) for the process to terminate.
+        *
+-       * @param Seconds:        The number of seconds to wait,
++       * @param seconds:        The number of seconds to wait,
+        *                        wait forever if 0.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      virtual child & waitForTermination( unsigned Seconds ) = 0;
++      virtual child & waitForTermination( unsigned seconds ) = 0;
+ 
+       /**
+        *
+@@ -226,7 +227,8 @@ namespace mSysProcess
+ 
+       // get parent process id
+       virtual std::string getParentProcessId() const = 0;
+-   };
++
++   }; // class child
+ 
+ 
+    /**
+@@ -256,10 +258,10 @@ namespace mSysProcess
+        *
+        * Constructor.
+        *
+-       * @param ThreadExeption: A exception handler to use.
++       * @param thread_exeption: A exception handler to use.
+        *
+       **/
+-      explicit parent( threadException const * ThreadExeption );
++      explicit parent( threadException const * thread_exeption );
+ 
+       /**
+        *
+@@ -282,12 +284,12 @@ namespace mSysProcess
+        * Set the client processe's commandline. Please note, this
+        * call is mandatory before creating a new child.
+        *
+-       * @param Commandline:    The commandline.
++       * @param command_line:   The commandline.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      parent & setCommandline( char const * Commandline );
++      parent & setCommandline( char const * command_line );
+ 
+       /**
+        *
+@@ -302,12 +304,12 @@ namespace mSysProcess
+        *
+        * Setup a destination for logging data.
+        *
+-       * @param CallBack:       The data callback.
++       * @param call_back:      The data callback.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      parent & setLogging( callBack const & CallBack );
++      parent & setLogging( callBack const & call_back );
+ 
+       /**
+        *
+@@ -322,12 +324,12 @@ namespace mSysProcess
+        *
+        * Setup a destination for the stderr output of the child.
+        *
+-       * @param CallBack:       The data callback.
++       * @param call_back:      The data callback.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      parent & setStdErr( callBack const & CallBack );
++      parent & setStdErr( callBack const & call_back );
+ 
+       /**
+        *
+@@ -342,23 +344,32 @@ namespace mSysProcess
+        *
+        * Setup a destination for the stdout output of the child.
+        *
+-       * @param CallBack:       The data callback.
++       * @param call_back:      The data callback.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      parent & setStdOut( callBack const & CallBack );
++      parent & setStdOut( callBack const & call_back );
+ 
+       /**
+        *
+        * Set the optional working directory parameter.
+        *
+-       * @param Directory:      The directory path.
++       * @param directory_path: The directory path.
++       *
++       * @param try_create:     If true and the path does not exist,
++       *                        make a try to create that directory.
++       *                        This will succeed only with existing
++       *                        parent directory.
+        *
+        * @return                A reference to this object.
+        *
+       **/
+-      parent & setWorkDirectory( char const * Directory );
++      parent & setWorkDirectory
++               (
++                  char const *  directory_path,
++                  bool          try_create = false
++               );
+ 
+       /**
+        *
+@@ -369,7 +380,7 @@ namespace mSysProcess
+        * @return                A reference to this object.
+        *
+       **/
+-      parent& setEnvironment(const Environment& environment);
++      parent & setEnvironment( Environment const & environment );
+ 
+       /**
+        *
+@@ -380,7 +391,7 @@ namespace mSysProcess
+        * @return                A reference to this object.
+        *
+       **/
+-      parent& setWindowTitle(const char* title);
++      parent & setWindowTitle( char const * title );
+ 
+       /**
+        *
+@@ -391,7 +402,7 @@ namespace mSysProcess
+        * @return                A reference to this object.
+        *
+       **/
+-      parent& setDesktop(const char* desktop);
++      parent & setDesktop( char const * desktop );
+ 
+       /**
+        *
+@@ -400,7 +411,7 @@ namespace mSysProcess
+        * @return                A reference to this object.
+        *
+       **/
+-      parent& setReuseConsole();
++      parent & setReuseConsole();
+ 
+       /**
+        *
+@@ -409,7 +420,7 @@ namespace mSysProcess
+        * @return                A reference to this object.
+        *
+       **/
+-      parent& setNewProcessGroup();
++      parent & setNewProcessGroup();
+ 
+ 
+    private:
+@@ -420,7 +431,7 @@ namespace mSysProcess
+       //! Assignment - intentionally not implemented.
+       parent & operator=( parent const & );
+ 
+-   };
++   }; // class parent
+ 
+ 
+ } // namespace mSysProcess
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index fcd769f0..207d77bb 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -7,35 +7,45 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009-2011 MATERNA Information & Communications
++ * Copyright (c) 2009-2014 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
+-#pragma warning (disable: 4786)
+-
++// Exported
+ #include "systools/mSysProcess.hpp"
+ 
++// Local header
+ #include "mSysErrorW32.h"
++#include "mSysProcessIOCountersW32.h"
+ #include "mSysProcessW32.h"
+ #include "mSysSynchronizeW32.h"
+ #include "mSysTimeW32.h"
+-#include "psapi.h"
++
++// From SelfServiceCommon
+ #include "systools/mSysThread.hpp"
+ #include "systools/software_error.h"
+ #include "tools/StringBuffer.h"
+ 
++// Windows
++#include "psapi.h"
++#include "windows.h"
++
++// Compiler lib
+ #include <string>
+ #include <sstream>
+ #include <iomanip>
+-#include <windows.h>
+ 
+-#include "mSysProcessIOCountersW32.h"
++
+ 
+ #pragma comment(lib, "User32.lib")
+ 
++
++
+ namespace
+ {
++
++
+    /**
+     *
+     * Called upon windows function failure this will trace the last
+@@ -70,6 +80,7 @@ namespace
+       }
+    }
+ 
++
+    std::string getStatusText(mSysProcess::status status)
+    {
+      switch(status)
+@@ -80,6 +91,8 @@ namespace
+        default:                              return "unknown";
+      }
+    }
++
++
+    std::ostream& operator<<(std::ostream& out, const mSysTime::Duration& duration)
+    {
+      out << std::dec;
+@@ -90,6 +103,8 @@ namespace
+      out << std::setw(3) << duration.milliseconds;
+      return out;
+    }
++
++
+    std::ostream& operator<<(std::ostream& out, const mSysTime::Timestamp& timestamp)
+    {
+      out << std::dec;
+@@ -103,6 +118,8 @@ namespace
+      out << std::setw(3) << timestamp.milliseconds;
+      return out;
+    }
++
++
+ #ifdef _MSC_VER
+ #if _MSC_VER <= 1200 // 1200 == VC6
+    std::ostream& operator<<(std::ostream& out, unsigned __int64 number)
+@@ -115,6 +132,7 @@ namespace
+ #endif
+ #endif
+ 
++
+    std::string getEnvironmentBlock(const mSysProcess::Environment& environment)
+    {
+      std::string result;
+@@ -166,7 +184,6 @@ namespace
+   };
+ 
+ 
+-
+   /**
+    *
+    * class fromChild
+@@ -211,6 +228,8 @@ namespace
+         }
+      }
+   }
++
++
+   fromChild::fromChild( threadException const * ThreadExeption ) :
+      mSysThread::thread( ThreadExeption ),
+      M_Active( false ),
+@@ -220,6 +239,8 @@ namespace
+      M_LineOut( 0 ),
+      M_Logging( 0 )
+   {}
++
++
+   fromChild::~fromChild()
+   {
+      try
+@@ -293,7 +314,6 @@ namespace
+   }
+ 
+ 
+-
+   /**
+    *
+    * Control a child process.
+@@ -408,6 +428,7 @@ namespace
+     openProcess();
+   }
+ 
++
+   void myChild::openProcess()
+   {
+     M_HandleProcess = OpenProcess(PROCESS_TERMINATE|PROCESS_QUERY_INFORMATION|SYNCHRONIZE, false, M_ProcessId);
+@@ -726,6 +747,7 @@ namespace
+      return *this;
+   }
+ 
++
+   /**
+    *
+    * Implementation method.
+@@ -740,6 +762,7 @@ namespace
+     return *this;
+   }
+ 
++
+   /**
+    *
+    * Implementation method.
+@@ -751,6 +774,7 @@ namespace
+     return sendEvent(CTRL_BREAK_EVENT);
+   }
+ 
++
+   /**
+    *
+    * Implementation method.
+@@ -762,6 +786,7 @@ namespace
+     return sendEvent(CTRL_C_EVENT);
+   }
+ 
++
+   /**
+    *
+    * send BREAK/CTRL-C to the process
+@@ -778,6 +803,7 @@ namespace
+     return result;
+   }
+ 
++
+   /**
+    *
+    * Implementation method.
+@@ -786,13 +812,20 @@ namespace
+   **/
+   mSysProcess::child& myChild::kill()
+   {
+-    if(!TerminateProcess(M_HandleProcess, -1))
++    if (
++         !TerminateProcess
++            (
++               M_HandleProcess,
++               static_cast<unsigned int>( -1 )
++            )
++       )
+     {
+       logLastError( M_Logging, "TerminateProcess" );
+     }
+     return *this;
+   }
+ 
++
+   /**
+    *
+    * write the process state to ostream
+@@ -814,6 +847,7 @@ namespace
+     }
+   }
+ 
++
+   /**
+    *
+    * write the process used time to ostream
+@@ -843,6 +877,7 @@ namespace
+     }
+   }
+ 
++
+   /**
+    *
+    * write the process resource counters to ostream
+@@ -890,6 +925,7 @@ namespace
+     }
+   }
+ 
++
+   /**
+    *
+    * get the process information
+@@ -911,6 +947,7 @@ namespace
+     return out.str();
+   }
+ 
++
+   /**
+    *
+    * get the process id to ostream
+@@ -923,6 +960,7 @@ namespace
+     return out.str();
+   }
+ 
++
+   /**
+    *
+    * get the process id to ostream
+@@ -942,23 +980,29 @@ namespace
+     return std::string(M_Commandline.data(), M_Commandline.size());
+   }
+ 
++
+   // get creation time of process
+   mSysTime::Timestamp myChild::getCreationTime() const
+   {
+-    mSysTime::Timestamp result;
+-    FILETIME creation;
+-    FILETIME exit;
+-    FILETIME kernel;
+-    FILETIME user;
+-    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
+-    {
+-      result = mSysTime::getTimestamp(creation);
+-    }
+-    else
+-    {
+-      logLastError(M_Logging, "GetProcessTimes");
+-    }
+-    return result;
++      mSysTime::Timestamp result;
++      FILETIME creation, exit, kernel, user;
++      if (
++            GetProcessTimes
++               (
++                  M_HandleProcess,
++                  &creation, &exit, &kernel, &user
++               )
++         )
++      {
++         result = mSysTime::getTimestamp( creation );
++      }
++      else
++      {
++         // Could not get process times, use this!
++         result = mSysTime::getTimestamp();
++         logLastError(M_Logging, "GetProcessTimes");
++      }
++      return result;
+   }
+ 
+ 
+@@ -973,6 +1017,7 @@ namespace
+     return M_Internal;
+   }
+ 
++
+   /**
+    *
+    * Implementation method.
+@@ -983,7 +1028,10 @@ namespace
+   {
+     return M_Internal;
+   }
+-}
++
++
++} // namespace
++
+ 
+ 
+ /**
+@@ -997,6 +1045,7 @@ mSysProcess::child::~child() throw()
+ }
+ 
+ 
++
+ /**
+  *
+  * Implementation class.
+@@ -1228,9 +1277,22 @@ public:
+     * See the comment in mSysProcess.hpp" to the interface method.
+     *
+    **/
+-   void setWorkDirectory( char const * Directory )
++   void setWorkDirectory
++      (
++         char const *      directory_path,
++         bool              try_create
++      )
+    {
+-      M_Directory = Directory;
++      if( try_create )
++      {
++         CreateDirectory( directory_path, 0 );
++         // Do not check the result!
++         // Either the directory already exists, which is fine
++         // or it is created successfully, which is also fine
++         // or creation faild, which will lead to a process creation
++         // problem later-on.
++      }
++      M_Directory = directory_path;
+       if( M_Logging )
+       {
+          std::string Str;
+@@ -1240,6 +1302,8 @@ public:
+          M_Logging->lineOut( Str.c_str() );
+       }
+    }
++
++
+    /**
+     *
+     * Implementation method.
+@@ -1267,6 +1331,7 @@ public:
+       }
+    }
+ 
++
+    /**
+     *
+     * Implementation method.
+@@ -1286,6 +1351,7 @@ public:
+      }
+    }
+ 
++
+    /**
+     *
+     * Implementation method.
+@@ -1305,6 +1371,7 @@ public:
+      }
+    }
+ 
++
+    /**
+     *
+     * Implementation method.
+@@ -1321,6 +1388,8 @@ public:
+         M_Logging->lineOut( Str.c_str() );
+      }
+    }
++
++
+    /**
+     *
+     * Implementation method.
+@@ -1339,8 +1408,6 @@ public:
+    }
+ 
+ 
+-
+-
+ private:
+ 
+ 
+@@ -1348,7 +1415,7 @@ private:
+    impl();
+ 
+ 
+-};
++}; // class mSysProcess::parent::impl
+ 
+ 
+ 
+@@ -1521,10 +1588,11 @@ mSysProcess::parent & mSysProcess::parent::setStdOut
+ **/
+ mSysProcess::parent & mSysProcess::parent::setWorkDirectory
+    (
+-      char const * Directory
++      char const *      directory_path,
++      bool              try_create
+    )
+ {
+-   M_Impl->setWorkDirectory( Directory );
++   M_Impl->setWorkDirectory( directory_path, try_create );
+    return *this;
+ }
+ 
+@@ -1541,6 +1609,8 @@ mSysProcess::parent& mSysProcess::parent::setEnvironment(const Environment& envi
+   return *this;
+ }
+ 
++
++
+ /**
+  *
+  * Class mSysProcess::parent method implementation
+@@ -1553,6 +1623,8 @@ mSysProcess::parent& mSysProcess::parent::setWindowTitle(const char* title)
+   return *this;
+ }
+ 
++
++
+ /**
+  *
+  * Class mSysProcess::parent method implementation
+@@ -1565,6 +1637,8 @@ mSysProcess::parent& mSysProcess::parent::setDesktop(const char* desktop)
+   return *this;
+ }
+ 
++
++
+ /**
+  *
+  * Class mSysProcess::parent method implementation
+@@ -1577,6 +1651,8 @@ mSysProcess::parent& mSysProcess::parent::setReuseConsole()
+   return *this;
+ }
+ 
++
++
+ /**
+  *
+  * Class mSysProcess::parent method implementation
+@@ -1590,16 +1666,20 @@ mSysProcess::parent& mSysProcess::parent::setNewProcessGroup()
+ }
+ 
+ 
++
+ mSysProcess::child::Internal::Internal():
+   id(0)
+ {}
+ 
++
++
+ mSysProcess::child* mSysProcess::createProcess(DWORD pid, DWORD ppid, const std::string& module, const callBack* logging)
+ {
+   return new myChild(pid, ppid, module, logging);
+ }
+ 
+ 
++
+ /**
+  **************************************************************************
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+index 3d426456..6d892663 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+@@ -18,7 +18,7 @@
+ 
+ // Common header
+ #include "mSysDebug.hpp"
+-#include "mSysException.hpp"
++#include "sysTools/mSysException.hpp"
+ 
+ // Compiler lib
+ #include <exception>
+-- 
+2.41.0.windows.1
+

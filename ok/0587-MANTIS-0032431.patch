@@ -1,0 +1,77 @@
+From f831bcc983bac68f2c644a7fee41d2d6f1a0f712 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 14 Oct 2014 15:03:04 +0000
+Subject: [PATCH 0587/1077] MANTIS 0032431 basic calls in mDaemon_main are
+ correct now
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@737 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 37 ++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 151d6266..cd574ad3 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -141,7 +141,7 @@ int mDaemon_main( int argc, char const * const * argv )
+     std::string userDir;
+ 
+     DWORD myStyle = WS_POPUP;
+-
++    
+     
+     
+     //******************************************************************************************
+@@ -293,6 +293,7 @@ int mDaemon_main( int argc, char const * const * argv )
+     //******************************************************************************************
+     try
+     {
++        
+         TRACE(HERE,"handle the args parameter...");
+ 
+         if( args.option( "SERVER" ) || mDaemon_isService() )
+@@ -359,8 +360,40 @@ int mDaemon_main( int argc, char const * const * argv )
+     
+         impl.getDialog().getMControlWindowConfig().registerWindow();
+         impl.getDialog().getMControlWindowConfig().createWindow();
++        impl.getDialog().getMControlWindowConfig().showWindow(SW_SHOW);
++
++        if( mDaemon_isService() )
++        {
++            //PostMessage(hwnd,WM_PAINT,0,0);
++            RedrawWindow(impl.getDialog().getMControlWindowConfig().getHwnd(),NULL,NULL,RDW_INTERNALPAINT);
++        }
++
++        mDaemon_indReady(0);
++
++        //TODO: delay the start of the platform
++        //PostMessage(hwnd,WM_START_DELAY_TIMER, lDelay, 0);
++
++        MSG msg;
++
++        // process all remaining window messages
++        // kind of a filter, before starting to work with the Window
++        while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
++            DispatchMessage(&msg);
+ 
+-        impl.getDialog().startShowWindow(SW_SHOW);
++        //******************************************************************************************
++        //  initialize and starting servatn, scheduler and rebooter 
++        //******************************************************************************************
++        
++
++
++
++
++        //handle all incomming Messages in the Windows-Queue
++        while (GetMessage(&msg, NULL, 0, 0))
++        {
++            TranslateMessage(&msg);
++            DispatchMessage(&msg);
++        }
+ 
+         OS_Sleep(500);
+     }
+-- 
+2.41.0.windows.1
+

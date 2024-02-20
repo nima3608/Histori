@@ -1,0 +1,555 @@
+From 5a85f0913a34f21364a35b567c0ccd41f40faf1b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 2 Jul 2015 10:24:23 +0000
+Subject: [PATCH 0671/1076] MANTIS 37129 Mantis 37129: Improve serial comms
+ debugging options - show low-level trace data now not only in HEX, but ASCII
+ too. - indent received data, thus receive- and transmit blocks are easier to
+ see - ETX-ACK handler now with optional exception handler
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@874 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/serialCon/mIEtxAck.hpp     | 51 +++++++------
+ .../Interfaces/inc/serialCon/mPTrace.hpp      | 29 ++++----
+ .../Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp  | 72 +++++++++++--------
+ .../Massai/cpp/SerialCon/src/matAsyncW32.c    | 39 +++++++---
+ 4 files changed, 113 insertions(+), 78 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+index 9282bd5b..94c70f71 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2010 MATERNA Information & Communications
++ * Copyright (c) 2001-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,14 +15,18 @@
+ #define MIETXACK_HPP
+ 
+ 
+-
+ #include "atbMessage.hpp"
+-
++#include "systools/threadException.hpp"
+ 
+ 
+ //! Handle class
+ class mIEtxAck_Handle;
+ 
++/**
++ *
++ * ETX-ACK protocol handler implementation.
++ *
++**/
+ class mIEtxAck
+ {
+ 
+@@ -53,10 +57,16 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param MaxSegment:        Maximum size of transmit blocks
++    * @param segment_size:      Maximum size of transmit blocks
++    *
++    * @param exception_handler: Optional thread exception handler
+     *
+    **/
+-   mIEtxAck( unsigned MaxSegment );
++   mIEtxAck
++      (
++         unsigned                       segment_size,
++         threadException const *        exception_handler = 0
++      );
+ 
+    /**
+     *
+@@ -76,52 +86,52 @@ public:
+     *
+     * Write data.
+     *
+-    * @param Src:       The message to write.
++    * @param src:       The message to write.
+     *
+    **/
+-   RC write( atbMessage const & Src ) throw();
++   RC write( atbMessage const & src ) throw();
+ 
+    /**
+     *
+     * Write data as nonfinal segment.
+     *
+-    * @param Src:       The message to write.
++    * @param src:       The message to write.
+     *
+    **/
+-   RC writeNonfinal( atbMessage const & Src ) throw();
++   RC writeNonfinal( atbMessage const & src ) throw();
+ 
+    /**
+     *
+     * Read data.
+     *
+-    * @param Dst:       Upon return the message received.
++    * @param dst:       Upon return the message received.
+     *
+    **/
+-   RC read( atbMessage & Dst ) throw();
++   RC read( atbMessage & dst ) throw();
+ 
+    /**
+     *
+     * Retrieve an attribute.
+     *
+-    * @param Key:       The attribute name.
++    * @param key:       The attribute name.
+     *
+-    * @param Buf:       There to write the attribute.
++    * @param buf:       There to write the attribute.
+     *
+-    * @param Len:       The aize of Buf.
++    * @param len:       The aize of Buf.
+     *
+    **/
+-   void get( char const * Key, char * Buf, long Len ) throw();
++   void get( char const * key, char * buf, long len ) throw();
+ 
+    /**
+     *
+     * Set an attribute.
+     *
+-    * @param Key:       The attribute name.
++    * @param key:       The attribute name.
+     *
+-    * @param Value:     A zero terminated string with the new value.
++    * @param value:     A zero terminated string with the new value.
+     *
+    **/
+-   void set( char const * Key, char const * Value ) throw();
++   void set( char const * key, char const * value ) throw();
+ 
+ private:
+ 
+@@ -139,9 +149,10 @@ private:
+    **/
+    mIEtxAck & operator=( mIEtxAck const & );
+ 
+-};
++}; // class mIEtxAck
++
+ 
+-#endif
++#endif // #ifndef MIETXACK_HPP
+ /**
+  **************************************************************************
+  *
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
+index dc38bd21..4c0f8f92 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPTrace.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2011 MATERNA Information & Communications
++ * Copyright (c) 2001-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,14 +29,14 @@ template <class PImpl, class PRet, class PData>
+ class mPTrace
+ {
+ 
+-   //! Module name used in trace entries.
+-   std::string const  M_Module;
++   //! Module name used in "read" trace entries.
++   std::string const  m_module_read;
+ 
+-   //! Read method name.
+-   char const * const M_Read;
++   //! Module name used in "write-final" trace entries.
++   std::string const  m_module_write_f;
+ 
+-   //! Write method name.
+-   char const * const M_Write;
++   //! Module name used in "write-non-final" trace entries.
++   std::string const  m_module_write_nf;
+ 
+    //! Refers the protocol implementation.
+    PImpl &            M_P;
+@@ -49,9 +49,9 @@ public:
+     *
+    **/
+    mPTrace( char const * Module, PImpl & Protocol ) :
+-      M_Module( Module ),
+-      M_Read( "read" ),
+-      M_Write( "write" ),
++      m_module_read( (std::string)Module + " read" ),
++      m_module_write_f( (std::string)Module + " write" ),
++      m_module_write_nf( (std::string)Module + " write (non-final)" ),
+       M_P( Protocol )
+    {
+    }
+@@ -66,10 +66,9 @@ public:
+       throw()
+    {
+       PRet R = M_P.read( Dst );
+-      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Read, "read:" );
+       dumpTrace
+       (
+-         BasicProcess, M_Module.c_str(), 0, M_Read, Dst.size(),
++         BasicRuntime, m_module_read.c_str(), 0, "", Dst.size(),
+          &(*Dst.begin())
+       );
+       return R;
+@@ -84,10 +83,9 @@ public:
+    PRet write( PData const & Src )
+       throw()
+    {
+-      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Write, "write:" );
+       dumpTrace
+       (
+-         BasicProcess, M_Module.c_str(), 0, M_Write, Src.size(),
++         BasicRuntime, m_module_write_f.c_str(), 0, "", Src.size(),
+          &(*Src.begin())
+       );
+       return M_P.write( Src );
+@@ -102,10 +100,9 @@ public:
+    PRet writeNonfinal( PData const & Src )
+       throw()
+    {
+-      writeTraceText( BasicProcess, M_Module.c_str(), 0, M_Write, "write (nonfinal):" );
+       dumpTrace
+       (
+-         BasicProcess, M_Module.c_str(), 0, M_Write, Src.size(),
++         BasicRuntime, m_module_write_nf.c_str(), 0, "", Src.size(),
+          &(*Src.begin())
+       );
+       return M_P.writeNonfinal( Src );
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+index c210251e..de61bc01 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2010 MATERNA Information & Communications
++ * Copyright (c) 2001-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -28,7 +28,7 @@
+ #endif
+ 
+ #include "serialCon/matAsync.h"
+-#include "systools/matThread.hpp"
++#include "systools/mSysThread.hpp"
+ 
+ 
+ 
+@@ -42,13 +42,12 @@ typedef mPEtxAck<matAsync,atbMessage>::RC  xRC;
+ 
+ 
+ 
+-
+ /**
+  *
+- * Handle class.
++ * Implementation class.
+  *
+ **/
+-class mIEtxAck_Handle : public matThread
++class mIEtxAck_Handle : public mSysThread::thread
+ {
+ 
+    //! The COM-port handler.
+@@ -93,7 +92,7 @@ class mIEtxAck_Handle : public matThread
+             // Try again later (probably useless as well ).
+             // Sleep a while, because the read() could have returned
+             // really fast and we do not want to hog the CPU.
+-            matThreadSleep( 1000 );
++            mSysThread::sleep( 1000 );
+          }
+          // Read the next byte from the COM-port
+          RR = M_Asy.read( RxB );
+@@ -108,10 +107,14 @@ public:
+     * Constructor.
+     *
+    **/
+-   explicit mIEtxAck_Handle( unsigned Blocksize ) :
+-      matThread(),
++   mIEtxAck_Handle
++      (
++         unsigned                       segment_size,
++         threadException const *        exception_handler
++      ) :
++      thread( exception_handler ),
+       M_Asy(),
+-      M_Proto( M_Asy, Blocksize ),
++      M_Proto( M_Asy, segment_size ),
+ #ifdef USE_TRACE_CLIENT
+       M_Trace( "mIEtxAckAsy", M_Proto ),
+ #endif
+@@ -221,35 +224,39 @@ private:
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::mIEtxAck() :
+-   Handle( new mIEtxAck_Handle( 2048 ) )
++   Handle( new mIEtxAck_Handle( 2048, 0 ) )
+ {
+ }
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
+-mIEtxAck::mIEtxAck( unsigned Blocksize ) :
+-   Handle( new mIEtxAck_Handle( Blocksize ) )
++ */
++mIEtxAck::mIEtxAck
++   (
++      unsigned                  segment_size,
++      threadException const *   exception_handler
++   ) :
++   Handle( new mIEtxAck_Handle( segment_size, exception_handler ) )
+ {
+ }
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::~mIEtxAck()
+ {
+    delete Handle;
+@@ -257,11 +264,11 @@ mIEtxAck::~mIEtxAck()
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::RC mIEtxAck::write( atbMessage const & Src )
+    throw()
+ {
+@@ -292,11 +299,12 @@ mIEtxAck::RC mIEtxAck::write( atbMessage const & Src )
+ }
+ 
+ 
+-/**
++
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::RC mIEtxAck::writeNonfinal( atbMessage const & Src )
+    throw()
+ {
+@@ -309,11 +317,12 @@ mIEtxAck::RC mIEtxAck::writeNonfinal( atbMessage const & Src )
+ }
+ 
+ 
+-/**
++
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::RC mIEtxAck::read( atbMessage & Dst )
+    throw()
+ {
+@@ -347,11 +356,11 @@ mIEtxAck::RC mIEtxAck::read( atbMessage & Dst )
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ mIEtxAck::RC mIEtxAck::open()
+    throw()
+ {
+@@ -359,7 +368,7 @@ mIEtxAck::RC mIEtxAck::open()
+    {
+       if( Handle->asy().open() == MATRC_OK )
+       {
+-         Handle->start( THREADPRTY_HIGH );
++         Handle->start( mSysThread::PRIORITY_HIGH );
+          return RC_OK;
+       }
+    }
+@@ -368,11 +377,11 @@ mIEtxAck::RC mIEtxAck::open()
+ 
+ 
+ 
+-/**
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ void mIEtxAck::get( char const * Key, char * Buf, long Len )
+    throw()
+ {
+@@ -383,11 +392,12 @@ void mIEtxAck::get( char const * Key, char * Buf, long Len )
+ }
+ 
+ 
+-/**
++
++/*
+  *
+  * (see mIEtxAck.hpp)
+  *
+-**/
++ */
+ void mIEtxAck::set( char const * Key, char const * Value )
+    throw()
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+index 01d4fc18..80c391ad 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/matAsyncW32.c
+@@ -27,6 +27,8 @@
+ 
+ 
+ 
++#define PREFIX_RX       "        RX:"
++#define PREFIX_TX       "TX:"
+ #define TRACE1(X)        if( H->FTrace )\
+                          {\
+                             ts( H );\
+@@ -64,7 +66,22 @@ static void traceDump
+    unsigned long i;
+    fprintf( F, " | %s", szDir );
+    for( i=0; i < nD; i++ )
+-      fprintf( F, " %02X", *pD++ );
++   {
++      fprintf( F, " %02X", pD[i] );
++   }
++   fprintf( F, " = " );
++   for( i=0; i < nD; i++ )
++   {
++      char const chr = pD[i];
++      if( ( chr >= ' ' ) && ( chr <= 'z' ) )
++      {
++         fprintf( F, "%c", chr );
++      }
++      else
++      {
++         fprintf( F, "." );
++      }
++   }
+    fprintf( F, "\n" );
+ }
+ 
+@@ -110,15 +127,15 @@ struct matAsyncPrivate
+     * other functions are still running.
+     */
+    HANDLE            ReadMutex;           /* Protects matAsyncRead() */
+-   HANDLE            ReadStateMutex;      /* Protects matAsyncReadStatus() */
+-   HANDLE            WriteMutex;          /* Protcts matAsyncWrite() */
++   HANDLE            ReadStateMutex;      /* Protects ~ReadStatus() */
++   HANDLE            WriteMutex;          /* Protcts ~Write() */
+    /*
+     * OVERLAP structures, allows simultaneous call of blocking functions
+     * from different threads of execution.
+     */
+    OVERLAPPED        OverlapRx;           /* ... for matAsyncRead() */
+-   OVERLAPPED        OverlapSt;           /* ... for matAsyncReadStatus() */
+-   OVERLAPPED        OverlapTx;           /* ... for matAsyncWrite() */
++   OVERLAPPED        OverlapSt;           /* ... for ~ReadStatus() */
++   OVERLAPPED        OverlapTx;           /* ... for ~Write() */
+    /*
+     * Counts number of matAsyncRead() with NO_DATA returned
+     */
+@@ -913,7 +930,7 @@ MATRC matAsyncRead( mtHdl H, mtDta * pDst, mtLen * pMaxNumberRead )
+          /* No data received */
+          if( !H->RxNodataCount++ )
+          {
+-            TRACE1( "RX:" )
++            TRACE1( PREFIX_RX )
+          }
+          /* Return is already MATRC_NO_DATA; */
+       }
+@@ -928,7 +945,7 @@ MATRC matAsyncRead( mtHdl H, mtDta * pDst, mtLen * pMaxNumberRead )
+             }
+             H->RxNodataCount = 0;
+          }
+-         TRACEDUMP( "RX:", pDst, NumberRead )
++         TRACEDUMP( PREFIX_RX, pDst, NumberRead )
+          *pMaxNumberRead = (mtLen)NumberRead;
+          Return = MATRC_OK;
+       }
+@@ -966,7 +983,7 @@ MATRC matAsyncRead( mtHdl H, mtDta * pDst, mtLen * pMaxNumberRead )
+                   /* No data received */
+                   if( !H->RxNodataCount++ )
+                   {
+-                     TRACE1( "RX:" )
++                     TRACE1( PREFIX_RX )
+                   }
+                   Return = MATRC_NO_DATA;
+                }
+@@ -981,7 +998,7 @@ MATRC matAsyncRead( mtHdl H, mtDta * pDst, mtLen * pMaxNumberRead )
+                      }
+                      H->RxNodataCount = 0;
+                   }
+-                  TRACEDUMP( "RX:", pDst, OvNumberRead )
++                  TRACEDUMP( PREFIX_RX, pDst, OvNumberRead )
+                   *pMaxNumberRead = (mtLen)OvNumberRead;
+                   Return = MATRC_OK;
+                }
+@@ -1133,7 +1150,7 @@ MATRC matAsyncWrite( mtHdl H, MTCONST mtDta * pSrc, mtLen *pnSrc )
+       )
+    )
+    {
+-      TRACEDUMP( "TX:", pSrc, NumberWritten )
++      TRACEDUMP( PREFIX_TX, pSrc, NumberWritten )
+       if( NumberWritten == NumberToWrite )
+       {
+          Return = MATRC_OK;
+@@ -1168,7 +1185,7 @@ MATRC matAsyncWrite( mtHdl H, MTCONST mtDta * pSrc, mtLen *pnSrc )
+             }
+             else
+             {
+-               TRACEDUMP( "TX:", pSrc, nSrc )
++               TRACEDUMP( PREFIX_TX, pSrc, nSrc )
+                if( nSrc == NumberToWrite )
+                {
+                   Return = MATRC_OK;
+-- 
+2.41.0.windows.1
+

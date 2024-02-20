@@ -1,0 +1,572 @@
+From 420aef675666a2f430213a9fb7a19d34c7b856ac Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 15 Dec 2010 17:25:22 +0000
+Subject: [PATCH 0073/1077] AEAParser: use TraceInterface
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@90 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/TraceClient.h        | 31 ---------
+ .../Interfaces/inc/Tools/TraceDelegate.h      | 37 +----------
+ .../Interfaces/inc/Tools/TraceHandle.h        | 32 ---------
+ .../cpp/AEAParser/src/AEASimulatorTest.cpp    |  2 +-
+ .../Massai/cpp/Tools/src/TraceClient.cpp      | 59 -----------------
+ .../Massai/cpp/Tools/src/TraceDelegate.cpp    | 65 -------------------
+ .../Massai/cpp/Tools/src/TraceHandle.cpp      | 59 -----------------
+ .../Massai/cpp/Tools/src/TraceInterface.cpp   | 30 ++++++++-
+ .../Services/cpp/TrcServ/makefile.mak         | 11 ++--
+ .../Services/cpp/TrcServ/src/tracetest.cpp    |  3 +
+ 10 files changed, 40 insertions(+), 289 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceClient.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceClient.h
+index e982ae88..ce4596e3 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceClient.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceClient.h
+@@ -46,21 +46,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        virtual void writeTrace
+-        (
+-          long lTraceLevel,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+         /*
+         ---------------------------------------------------------------------------
+            Trace Dump
+@@ -101,22 +86,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        virtual void writeTraceForTopic
+-        (
+-          const char* pszTopic,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+-
+ 
+         /*
+         ---------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegate.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegate.h
+index 62c56f58..6734f34a 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegate.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegate.h
+@@ -18,14 +18,13 @@
+ #ifndef TRACEDELEGATE_H_INCLUDED
+ #define TRACEDELEGATE_H_INCLUDED
+ 
+-#include "trc/tracedef.h"
++#include "Tools/TraceInterface.h"
+ 
+ namespace MASSAI
+ {
+   namespace trace
+   {
+-    class TraceInterface;
+-    class TraceDelegate
++    class TraceDelegate: public TraceInterface
+     {
+       public:
+         TraceDelegate(TraceInterface* pDelegate);
+@@ -46,21 +45,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        void writeTrace
+-        (
+-          long lTraceLevel,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+         /*
+         ---------------------------------------------------------------------------
+            Trace Dump
+@@ -82,7 +66,7 @@ namespace MASSAI
+ 
+         ---------------------------------------------------------------------------
+         */
+-        void _stdcall startNewTraceFile(long lTraceLevel);
++        void startNewTraceFile(long lTraceLevel);
+ 
+ 
+         /*
+@@ -101,21 +85,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        void writeTraceForTopic
+-        (
+-          const char* pszTopic,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+ 
+ 
+         /*
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceHandle.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceHandle.h
+index f34ba01b..b7b1d045 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceHandle.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceHandle.h
+@@ -46,21 +46,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        virtual void writeTrace
+-        (
+-          long lTraceLevel,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+         /*
+         ---------------------------------------------------------------------------
+            Trace Dump
+@@ -101,23 +86,6 @@ namespace MASSAI
+         );
+ 
+ 
+-        /*
+-        ---------------------------------------------------------------------------
+-           Trace Text
+-           resulting string must be smaller than 4096 byte
+-        ---------------------------------------------------------------------------
+-        */
+-        virtual void writeTraceForTopic
+-        (
+-          const char* pszTopic,
+-          const char* pszFile,
+-          short  sLine,
+-          const char* pszFunction,
+-          const char* pszFormat,
+-          ...
+-        );
+-
+-
+         /*
+         ---------------------------------------------------------------------------
+            Trace Dump
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/AEASimulatorTest.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/AEASimulatorTest.cpp
+index 617f7336..a14491ad 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/AEASimulatorTest.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/AEASimulatorTest.cpp
+@@ -61,7 +61,7 @@ namespace
+ 
+ int main(int argc, char** argv)
+ {
+-  MASSAI::trace::TraceClient trace("TestAEASimulator");
++  MASSAI::trace::TraceClient trace("AEASimulatorTest");
+   aeaPrinter.setTrace(&trace);
+   sendCommand("CTHX");
+   return 0;
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceClient.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceClient.cpp
+index dae8c313..de2ecc17 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceClient.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceClient.cpp
+@@ -15,16 +15,6 @@
+ #include "Tools/TraceClient.h"
+ #include "Tools/TraceInterface.h"
+ #include "TraceClt.h"
+-#include <stdarg.h>
+-#include <stdio.h>
+-
+-namespace
+-{
+-  enum CONSTS
+-  {
+-    BUFFERSIZE= 4096
+-  };
+-}
+ 
+ namespace MASSAI
+ {
+@@ -65,30 +55,6 @@ namespace MASSAI
+     }
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceClient::writeTrace
+-    (
+-      long lTraceLevel,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      char buffer[BUFFERSIZE];
+-      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-      buffer[sizeof(buffer)-1]= 0;
+-      ::writeTraceText(lTraceLevel, pszFile, sLine, pszFunction, buffer);
+-      va_end( arg_ptr);
+-    }
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -141,31 +107,6 @@ namespace MASSAI
+ 
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceClient::writeTraceForTopic
+-    (
+-      const char* pszTopic,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      char buffer[BUFFERSIZE];
+-      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-      buffer[sizeof(buffer)-1]= 0;
+-      ::writeTraceTextForTopic(pszTopic, pszFile, sLine, pszFunction, buffer);
+-      va_end( arg_ptr);
+-    }
+-
+ 
+ 
+     /*
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegate.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegate.cpp
+index f5aedf34..fc618a7e 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegate.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceDelegate.cpp
+@@ -14,16 +14,6 @@
+ 
+ #include "Tools/TraceDelegate.h"
+ #include "Tools/TraceInterface.h"
+-#include <stdarg.h>
+-#include <stdio.h>
+-
+-namespace
+-{
+-  enum CONSTS
+-  {
+-    BUFFERSIZE= 4096
+-  };
+-}
+ 
+ namespace MASSAI
+ {
+@@ -56,33 +46,6 @@ namespace MASSAI
+     }
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceDelegate::writeTrace
+-    (
+-      long lTraceLevel,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      if(m_pDelegate)
+-      {
+-        char buffer[BUFFERSIZE];
+-        _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-        buffer[sizeof(buffer)-1]= 0;
+-        m_pDelegate->writeTraceText(lTraceLevel, pszFile, sLine, pszFunction, buffer);
+-      }
+-      va_end( arg_ptr);
+-    }
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -144,34 +107,6 @@ namespace MASSAI
+ 
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceDelegate::writeTraceForTopic
+-    (
+-      const char* pszTopic,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      if(m_pDelegate)
+-      {
+-        char buffer[BUFFERSIZE];
+-        _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-        buffer[sizeof(buffer)-1]= 0;
+-        m_pDelegate->writeTraceTextForTopic(pszTopic, pszFile, sLine, pszFunction, buffer);
+-      }
+-      va_end( arg_ptr);
+-    }
+-
+ 
+ 
+     /*
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
+index 8493c460..46360ca6 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceHandle.cpp
+@@ -15,16 +15,6 @@
+ #include "Tools/TraceHandle.h"
+ #include "Tools/TraceInterface.h"
+ #include "TrcHdlClt.h"
+-#include <stdarg.h>
+-#include <stdio.h>
+-
+-namespace
+-{
+-  enum CONSTS
+-  {
+-    BUFFERSIZE= 4096
+-  };
+-}
+ 
+ namespace MASSAI
+ {
+@@ -66,30 +56,6 @@ namespace MASSAI
+     }
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceHandle::writeTrace
+-    (
+-      long lTraceLevel,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      char buffer[BUFFERSIZE];
+-      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-      buffer[sizeof(buffer)-1]= 0;
+-      ::writeTraceText(m_handle, lTraceLevel, pszFile, sLine, pszFunction, buffer);
+-      va_end( arg_ptr);
+-    }
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -142,31 +108,6 @@ namespace MASSAI
+ 
+ 
+ 
+-    /*
+-    ---------------------------------------------------------------------------
+-       Trace Text
+-       resulting string must be smaller than 4096 byte
+-    ---------------------------------------------------------------------------
+-    */
+-    void TraceHandle::writeTraceForTopic
+-    (
+-      const char* pszTopic,
+-      const char* pszFile,
+-      short  sLine,
+-      const char* pszFunction,
+-      const char* pszFormat,
+-      ...
+-    )
+-    {
+-      va_list arg_ptr;
+-      va_start(arg_ptr, pszFormat);
+-      char buffer[BUFFERSIZE];
+-      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
+-      buffer[sizeof(buffer)-1]= 0;
+-      ::writeTraceTextForTopic(m_handle, pszTopic, pszFile, sLine, pszFunction, buffer);
+-      va_end( arg_ptr);
+-    }
+-
+ 
+ 
+     /*
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceInterface.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceInterface.cpp
+index fd454f86..9db5c509 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceInterface.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceInterface.cpp
+@@ -13,6 +13,16 @@
+ 
+ 
+ #include "Tools/TraceInterface.h"
++#include <stdarg.h>
++#include <stdio.h>
++
++namespace
++{
++  enum CONSTS
++  {
++    BUFFERSIZE= 4096
++  };
++}
+ 
+ 
+ namespace MASSAI
+@@ -55,7 +65,15 @@ namespace MASSAI
+       const char* pszFormat,
+       ...
+     )
+-    {}
++    {
++      va_list arg_ptr;
++      va_start(arg_ptr, pszFormat);
++      char buffer[BUFFERSIZE];
++      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
++      buffer[sizeof(buffer)-1]= 0;
++      writeTraceText(lTraceLevel, pszFile, sLine, pszFunction, buffer);
++      va_end( arg_ptr);
++    }
+     /*
+     ---------------------------------------------------------------------------
+        Trace Dump
+@@ -114,7 +132,15 @@ namespace MASSAI
+       const char* pszFormat,
+       ...
+     )
+-    {}
++    {
++      va_list arg_ptr;
++      va_start(arg_ptr, pszFormat);
++      char buffer[BUFFERSIZE];
++      _vsnprintf(buffer, sizeof(buffer), pszFormat, arg_ptr);
++      buffer[sizeof(buffer)-1]= 0;
++      writeTraceTextForTopic(pszTopic, pszFile, sLine, pszFunction, buffer);
++      va_end( arg_ptr);
++    }
+ 
+ 
+     /*
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+index 8f529aac..45b04ffe 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
++++ b/SelfServiceCommon/Services/cpp/TrcServ/makefile.mak
+@@ -133,15 +133,14 @@ MY_BIN3_RES = \
+     $(_OBJ)\tracetestdll.res
+ 
+ MY_BIN3_OBJS = \
+-    $(TOOL_OBJS) \
+-    $(_OBJ)\TrcClt.obj \
+-    $(_OBJ)\TrcPrtcl.obj \
+-    $(_OBJ)\Tracedll.obj \
+-    $(_OBJ)\TraceTest.obj
++    $(_OBJ)\TraceTest.obj \
++    $(_OBJ)\TraceTestHdl.obj
+ 
+ MY_BIN3_USER_LIBS = \
+     $(LIB_CXAPI) \
+-    $(LIB_MSYSTOOLS)
++    $(LIB_MSYSTOOLS) \
++    $(_LIB)\tracehdl.lib \
++    $(_LIB)\trace.lib
+ 
+ MY_BIN3_LINKLIBS = \
+     $(SYS_ACETAO)
+diff --git a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+index 19f3f19b..08b1e947 100644
+--- a/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
++++ b/SelfServiceCommon/Services/cpp/TrcServ/src/tracetest.cpp
+@@ -1,5 +1,6 @@
+ #include "TraceClt.h"
+ #include "string.h"
++#include "TraceTestHdl.h"
+ 
+ #ifndef __IBMCPP__
+ #include <iostream>
+@@ -17,12 +18,14 @@ void main(int argc, char** argv)
+     openTrace(argv[1]);
+   else if (argc > 2)
+     return;
++  TraceTest hdl("xxx");
+   char szBuffer[256];
+   do
+   {
+     std::cout << "Type Tracetext: ";
+     std::cin >> szBuffer;
+     int length= strlen(szBuffer);
++    hdl.trace(szBuffer);
+     for(int i= 0; i < 100; i++)
+     {
+       wrtTraceForTopic("Console", __FILE__, __LINE__, __FUNCTION__, szBuffer);
+-- 
+2.41.0.windows.1
+

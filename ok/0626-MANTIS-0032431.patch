@@ -1,0 +1,1611 @@
+From e2a212eac70fa074314dfcc7b9543a81917b71e1 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 4 Dec 2014 14:13:40 +0000
+Subject: [PATCH 0626/1077] MANTIS 0032431 -switch some methods from the
+ WindowConfig class to the Dialog class -some formatting
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@790 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |  39 +-
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  30 +-
+ .../cpp/mControl/inc/mControl_logging.h       |   1 +
+ .../cpp/mControl/inc/mControl_notification.h  |  26 +-
+ .../Massai/cpp/mControl/inc/mControl_reboot.h |  15 +-
+ .../cpp/mControl/inc/mControl_scheduler.h     |  28 +-
+ .../cpp/mControl/inc/mControl_servant.h       |  39 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |   9 +-
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  12 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 388 ++++++------------
+ .../cpp/mControl/src/mControl_dialog.cpp      | 169 +++++++-
+ .../Massai/cpp/mControl/src/mControl_main.cpp |   9 +-
+ .../mControl/src/mControl_notification.cpp    |  21 +-
+ .../cpp/mControl/src/mControl_reboot.cpp      |   3 +-
+ .../cpp/mControl/src/mControl_scheduler.cpp   |   6 +-
+ .../cpp/mControl/src/mControl_servant.cpp     |  18 +-
+ .../cpp/mControl/src/mControl_tools.cpp       |  84 ++--
+ .../cpp/mControl/src/mControl_worker.cpp      |  67 ++-
+ 18 files changed, 508 insertions(+), 456 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index ad69cba1..71014095 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -70,9 +70,16 @@ namespace mControl
+         std::list<long>         m_prList;
+ 
+     public:
++        /**
++        *   Constructor
++        */
+         GlobalConfig();
+-        ~GlobalConfig();
++        
+ 
++        /**
++        *   Destructor
++        */
++        ~GlobalConfig();
+ 
+ 
+         /**
+@@ -151,16 +158,9 @@ namespace mControl
+ 
+     public:
+         /**
+-        *   this Method is the main WindowProc-Method, which is called from windows.
+-        *   It passes all the incomming Messages to the wndProc
+-        */
+-        static LRESULT CALLBACK startUPWndProc(HWND hWnd, UINT msg, WPARAM w, LPARAM l); 
+-
+-
+-        /**
+-        *   Basic WindowProc-Method. It handles the Messages to build and edit the Window.
++        *   Constructor
+         */
+-        LRESULT CALLBACK wndProc(HWND, UINT, WPARAM, LPARAM);
++        WindowConfig(HINSTANCE hInst, GlobalConfig& config);
+ 
+ 
+         /**
+@@ -179,29 +179,20 @@ namespace mControl
+         * Calls the ShowWindow() Method of the Window API, with the correct Parameters.
+         */
+         void showWindow(int cmd);
+-        
+-
+-        /**
+-        *   initialize SNMP traps
+-        */
+-        void createAlert();
+ 
+ 
+         /**
+-        *   Sends SNMP traps
++        *   this Method is the main WindowProc-Method, which is called from windows.
++        *   It passes all the incomming Messages to the wndProc
+         */
+-        void sendAlert(char *s);
++        static LRESULT CALLBACK startUPWndProc(HWND hWnd, UINT msg, WPARAM w, LPARAM l); 
+ 
+ 
+         /**
+-        *   at the first call watch for loggingservice semaphore
++        *   Basic WindowProc-Method. It handles the Messages to build and edit the Window.
+         */
+-        void waitInitialForLoggingService();
+-
++        LRESULT CALLBACK wndProc(HWND, UINT, WPARAM, LPARAM);
+ 
+-        //Constructor
+-        WindowConfig(HINSTANCE hInst, GlobalConfig& config);
+-        
+ 
+         /**
+         * Attribut getter Methods
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index b942ef93..2b032ef6 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -53,18 +53,6 @@ namespace mControl
+         static HBITMAP CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName);
+ 
+ 
+-        /** TODO: is this method used?
+-        *   Finds the first valid drive letter from a mask of drive letters.
+-        *   The mask must be in the format bit 0 = A, bit 1 = B, bit 3 = C,
+-        *   etc. A valid drive letter is defined when the corresponding bit
+-        *   is set to 1.
+-        *
+-        *   @param unitmask: 
+-        *
+-        *   @return: -first drive letter that was found.
+-        */
+-        char FirstDriveFromMask (ULONG unitmask);
+-
+ 
+         /**
+         *   get description of SystemErrorCodes
+@@ -72,6 +60,24 @@ namespace mControl
+         static void syserror(const std::string &msg);
+ 
+ 
++        /**
++        *   initialize SNMP traps
++        */
++        void createAlert();
++
++
++        /**
++        *   Sends SNMP traps
++        */
++        void sendAlert(char *s);
++
++
++        /**
++        *   at the first call watch for loggingservice semaphore
++        */
++        void waitInitialForLoggingService();
++
++
+         /**
+         * getter Methods
+         */
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+index 6a9d13d4..5c1ae571 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+@@ -17,6 +17,7 @@
+ #include "massaiCorba/orbIncDefs.h"
+ #include "systools\mSysProcessTree.h"
+ 
++
+ class Logging : public mSysProcess::callBack
+ {
+ private:
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+index 7500da6e..a113b5b2 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+@@ -28,25 +28,33 @@ namespace mControl
+ {
+     class MControlNotification : public Poco::Notification 
+     {
+-      private: 
++    private: 
+         std::string m_info;
++
+         int         m_parentID;
++        
+         int         m_cmd;
+ 
+-      public:
++    public:
++        /**
++        *   Constructor
++	    */
++        MControlNotification (std::string data, int id, int cmd);
++        
++        
++        /**
++        *   Destructor
++        */
++        ~MControlNotification ();
++        
++        
+         /**
+         * getter Methods
+         */
+         std::string     data() const;
+         int             getId() const;
+         int             getCmd() const;
+-        void            printString(); //TODO: erase after completion
+-
+-
+-        //Constructor
+-	    MControlNotification (std::string data, int id, int cmd);
+-        //Destructor
+-        ~MControlNotification ();
++        void            printString(); 
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+index 24838acb..7f9e8e5d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_reboot.h
+@@ -75,13 +75,19 @@ namespace mControl
+ 	    ~KioskReboot();
+ 
+ 
++        /**
++        * getter Methods
++        */
++        Poco::NotificationQueue&    getNotificationQueue(){ return m_notificationQueue; }
++        long                        getDelay(){ return m_startDelay; } 
++
++
+         /**
+         *   Configures all Attributes with the from MCC given Values. 
+         */
+         void init();
+ 
+ 
+-        //TODO: implement correct functionality
+         /**
+         * Needs to be implemented from the Runnable interface.
+         * Here the kiosk is rebooted once per day
+@@ -101,13 +107,6 @@ namespace mControl
+         *   RebootDate in MCC and saves it in m_lastRebootDate
+         */
+         void setRebootDateFromMCC();
+-
+-        
+-        /**
+-        * getter Methods
+-        */
+-        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-        long getDelay(){ return m_startDelay; } 
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+index 6388ee77..d103cd92 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+@@ -101,21 +101,6 @@ namespace mControl
+ 
+ 
+     public:
+-        /**
+-        *   Needs to be implemented from the Runnable interface.
+-        *   Here the MCC processes are scheduled.
+-        */
+-        void run();
+-
+-
+-
+-        /**
+-        * Getter-Methods
+-        */
+-        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-
+-
+-
+         /**
+         *   Constructor
+         *
+@@ -129,6 +114,19 @@ namespace mControl
+         *   Destructor
+         */
+ 	    ~Scheduler();
++        
++
++        /**
++        * Getter-Methods
++        */
++        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++
++
++        /**
++        *   Needs to be implemented from the Runnable interface.
++        *   Here the MCC processes are scheduled.
++        */
++        void run();   
+     };
+ }
+ #endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+index 18c84167..89faadc4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+@@ -41,17 +41,32 @@ namespace mControl
+         long shutdownOS(bool fReboot = true, bool fForced = false);      
+ 
+ 
+-    public:  
++    public:
++        /**
++        *   Constructor
++        *
++        *   @param queue: -reference to the NotificationQueue, where to put msg's
++        */
++	    MControlServant(Poco::NotificationQueue& queue);    
++
++
++        /**
++        * Attribut getter Methods
++        */
++        bool                        isKioskBusy() { return m_kioskBusy; }
++        Poco::NotificationQueue&    getQueue(){ return m_notificationQueue; }
++
++
+         /**
+         * get the Name from the reboot file as string
+         */
+         std::string getRebootFileName();
+ 
++
+         //---------------------------------------------------------------------------
+-        //   controller::kioskControl interface Methods
++        //  controller::kioskControl interface Methods
+         //
+         //  definded in controller.idl
+-        
+ 
+         /**
+         *   Get a list of all current existings processes.
+@@ -186,25 +201,9 @@ namespace mControl
+         *   @return: successfull
+         */
+         CORBA::Long setSystemTime(const char *dateTime);
+-    
+-        
++         
+         // END interface Methods
+         //----------------------------------------------------------------------------
+-    
+-
+-        /**
+-        * Attribut getter Methods
+-        */
+-        bool                        isKioskBusy() { return m_kioskBusy; }
+-        Poco::NotificationQueue&    getQueue(){ return m_notificationQueue; }
+-
+-
+-        /**
+-        *   Constructor
+-        *
+-        *   @param queue: -reference to the NotificationQueue, where to put msg's
+-        */
+-	    MControlServant(Poco::NotificationQueue& queue);
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 1025c1dd..a2a0c399 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -47,17 +47,12 @@
+ #include <vector>
+ #include <sstream> 
+ 
++
+ namespace mControl
+ {
+     class Tools
+     {
+-    private:
+-        GlobalConfig&           m_globalConfig;
+-
+-    public:
+-        Tools(GlobalConfig& config);
+-            
+-                    
++    public:                  
+         /**
+         *   check if file exists
+         */
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 9a5fbc1e..5a5a598c 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -45,10 +45,18 @@ namespace mControl
+ 
+ 
+     public:
++        /**
++        *   Constructor
++        */
+         Worker(Poco::NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+ 
+-        Poco::NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-        Dialog& getDialog(){ return m_dialog; }
++
++        /**
++        *   Getter Methods
++        */
++        Poco::NotificationQueue&    getNotificationQueue(){ return m_notificationQueue; }
++        Dialog&                     getDialog(){ return m_dialog; }
++
+ 
+         /**
+         * Needs to be implemented from the Runnable interface.
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 31e23184..b729c32b 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -35,7 +35,6 @@ namespace mControl
+ /*******************************************************************************************************
+ * GlobalConfig implementation
+ */
+-
+     GlobalConfig::GlobalConfig() : 
+         m_serverMode(false),
+         m_noLog(false),
+@@ -56,10 +55,12 @@ namespace mControl
+     {
+     }
+ 
++
+     GlobalConfig::~GlobalConfig()
+     {
+     }
+ 
++
+     void GlobalConfig::setTerminated(bool ter)
+     {
+         TRACE(HERE,"setTerminated[ %s ]", Tools::boolToChar(ter));
+@@ -193,125 +194,6 @@ namespace mControl
+     }
+ 
+ 
+-    void WindowConfig::createAlert()
+-    {
+-        try
+-        {
+-            m_globalConfig.setAlert( new alert(ALERT_M_PLATFORM) );
+-        }
+-        catch( alertException & e )
+-        {
+-            m_globalConfig.setAlert( NULL );
+-            TRACE(HERE,"(create)alertException: %s",e.toString().c_str());
+-        }
+-        catch( ... )
+-        {
+-            m_globalConfig.setAlert( NULL );
+-            TRACE(HERE,"(create)alertException (unknown)");
+-        }
+-
+-    } 
+-
+-
+-    void WindowConfig::sendAlert(char *s)
+-    {
+-        
+-        if(m_globalConfig.noLogActive())
+-        {
+-           TRACE(HERE,"sendAlert [%s], noLOG.",s);
+-           return;
+-        }
+-        TRACE(HERE,"sendAlert [%s], noSNMP=%s, started=%s.",
+-                   s,
+-                   m_globalConfig.noSNMPActive() ?"true":"false",
+-                   m_globalConfig.isStarted() ?"true":"false");
+-        if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
+-        {
+-            TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
+-                        s,
+-                        m_globalConfig.noSNMPActive()?"true":"false",
+-                        m_globalConfig.isStarted()?"true":"false");
+-            return;
+-        }
+-
+-        static bool initial = true;
+-        waitInitialForLoggingService();
+-
+-        int repetitions = 1;
+-
+-        if(initial && !m_globalConfig.serverMode())
+-        {
+-            initial = false;
+-            repetitions = 10;
+-        }
+-
+-        while(repetitions--)
+-        {
+-            if(s && *s)
+-            {
+-            if(m_globalConfig.getAlert())
+-            {
+-                alert::eventData e(s);
+-
+-                try
+-                {
+-                    m_globalConfig.getAlert()->send(e);
+-                    return;
+-                }
+-                catch( alertException & ex )
+-                {
+-                    TRACE(HERE,"alertException: %s",ex.toString().c_str());
+-                    delete m_globalConfig.getAlert();
+-                    createAlert();
+-                }
+-                catch( ... )
+-                {
+-                    TRACE(HERE,"unknown exception in SendAlert()");
+-                }
+-            }
+-            else
+-                TRACE(HERE,"Alert [%s] not sent.");
+-            }
+-
+-            if(repetitions)
+-            {
+-                TRACE(HERE,"sendAlert sleep for ... ");
+-
+-                //TODO: correct the time to 3000
+-                mSysTime::sleep( 50 );
+-            }
+-        }
+-    }
+-
+-
+-    void WindowConfig::waitInitialForLoggingService()
+-    {
+-        static bool init= false;
+-        if(!init)
+-        {
+-            TRACE(HERE,"waitInitialForLoggingService...");
+-            Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
+-            try
+-            {
+-                long rc= loggingSemaphore.wait(600);
+-                long error= GetLastError();
+-                TRACE(HERE,"waitInitialForLoggingService %d %d", rc, error);
+-            }
+-            catch( const std::exception& ex )
+-            {
+-                TRACE(HERE, ex.what());
+-            }
+-            catch( ... )
+-            {
+-                TRACE(HERE,"waitInitialForLoggingService failed: unknown exception");
+-            }
+-            TRACE(HERE,"waitInitialForLoggingService done.");
+-            createAlert();
+-        }
+-        init= true;
+-    }
+-
+-
+     LRESULT CALLBACK WindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+     { 
+         WindowConfig* pWnd;
+@@ -376,11 +258,12 @@ namespace mControl
+ 
+         switch (message)
+         {
+-            //original as in the old mControl
+-            //TODO: check the comments (outcommented code)
+-            case WM_CREATE:                                         
++        //original as in the old mControl
++        //TODO: check the comments (outcommented code)
++        case WM_CREATE:    
++            {
+                 TRACE(HERE,"WM_CREATE");
+-
++                
+ 
+                 /**
+                 *   Ensures that the common control DLL (Comctl32.dll) is loaded, and registers specific common control classes from the DLL. 
+@@ -561,10 +444,11 @@ namespace mControl
+ 
+                 ShowWindow(this->getHwndInfo1(),SW_HIDE);
+                 ShowWindow(this->getHwndInfo2(),SW_HIDE);
+-                
+-                break;
++            }
++            break;
+ 
+-            case WM_PAINT:                                          
++        case WM_PAINT:
++            {
+                 TRACE(HERE,"WM_PAINT");
+ 
+                 hdc = BeginPaint(hWnd, &ps);
+@@ -596,22 +480,23 @@ namespace mControl
+                 
+                 // End application specific layout section.
+                 EndPaint(hWnd, &ps);
+-                
+-                break;
++            }
++            break;
++
++        case WM_DESTROY:
++            {
+ 
+-            case WM_DESTROY:
+                 TRACE(HERE,"WM_DESTROY");
+ 
+                 DestroyWindow(this->m_hWndLoad);
+                 DestroyWindow(this->m_hWndInfo_1);
+                 DestroyWindow(this->m_hWndInfo_2);
+-                break;
++            }
++            break;
+ 
+-            case WM_CLOSE: 
++        case WM_CLOSE: 
+             {
+-                TRACE(HERE,"WM_CLOSE");
+-
+-                TRACE(HERE,"shutting down controller...");
++                TRACE(HERE,"WM_CLOSE, shutting down controller... ");
+ 
+                 Worker* worker = m_globalConfig.getWorker();
+                 if( worker )
+@@ -625,13 +510,14 @@ namespace mControl
+                     TRACE(HERE,"ERROR: no worker available");
+                 
+ 
+-                if(m_globalConfig.getAlert()) delete m_globalConfig.getAlert();
++                if(m_globalConfig.getAlert()) 
++                    delete m_globalConfig.getAlert();
+ 
+                 PostQuitMessage(0);
+             }
+             break;
+ 
+-            case WM_START_DELAY_TIMER:
++        case WM_START_DELAY_TIMER:
+             {
+                 TRACE(SecondaryRuntime_HERE,"WM_START_DELAY_TIMER");
+                 if( initialStart != INISTATUS_INITIAL )
+@@ -695,7 +581,7 @@ namespace mControl
+             break;
+             */
+ 
+-            case WM_MCONTROL_PROGRESS:
++        case WM_MCONTROL_PROGRESS:
+             {
+                 TRACE(SecondaryRuntime_HERE,"WM_MCONTROL_PROGRESS");
+                 
+@@ -779,163 +665,133 @@ namespace mControl
+             */
+ 
+             //original as in the old mControl
+-            case WM_KEYUP:
++        case WM_KEYUP:
++            {
+                 TRACE(SecondaryRuntime_HERE,"WM_KEYUP");
+ 
+                 switch(wParam)
+                 {
+                 case VK_F1:
+-                    TRACE(SecondaryRuntime_HERE,"VK_F1");
+-
+-                    if(m_globalConfig.isRunningAsUserShell())
+-                    {
+-                        MessageBox(hWnd,
+-                                TEXT("You may use the following function keys:\n\n"
+-                                        "[F1]\t\tto display this help message.\n"
+-                                        "[F8]/[F9]/[F11]\tto minimize this window and to start the Windows Explorer for administration work.\n"
+-                                        "[F12]\t\tto shut down the platform and stop all Massai-processes and to start the Windows Explorer.\n"
+-                                        "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
+-                                TEXT("Massai Shell-Help"),
+-                                MB_ICONINFORMATION | MB_OK);
+-                    }
+-                    else if(!m_globalConfig.serverMode())
+                     {
+-                        MessageBox(hWnd,
+-                                TEXT("You may use the following function keys:\n\n"
+-                                        "[F1]\t\tto display this help message.\n"
+-                                        "[F8]\t\tto minimize this window and to start the Windows Explorer for administration work.\n"
+-                                        "[F9]/[F11]\tto minimize this window for administration work.\n"
+-                                        "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"
+-                                        "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
+-                                TEXT("Massai Server-Help"),
+-                                MB_ICONINFORMATION | MB_OK);
+-                    }
+-                    else
+-                    {
+-                        MessageBox(hWnd,
+-                                TEXT("You may use the following function keys:\n\n"
+-                                        "[F1]\tto display this help message.\n"
+-                                        "[F9]/[F11]\tto minimize this window.\n"
+-                                        "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"),
+-                                TEXT("Massai Default-Help"),
+-                                MB_ICONINFORMATION | MB_OK);
++                        TRACE(SecondaryRuntime_HERE,"VK_F1");
++
++                        if(m_globalConfig.isRunningAsUserShell())
++                        {
++                            MessageBox(hWnd,
++                                    TEXT("You may use the following function keys:\n\n"
++                                            "[F1]\t\tto display this help message.\n"
++                                            "[F8]/[F9]/[F11]\tto minimize this window and to start the Windows Explorer for administration work.\n"
++                                            "[F12]\t\tto shut down the platform and stop all Massai-processes and to start the Windows Explorer.\n"
++                                            "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
++                                    TEXT("Massai Shell-Help"),
++                                    MB_ICONINFORMATION | MB_OK);
++                        }
++                        else if(!m_globalConfig.serverMode())
++                        {
++                            MessageBox(hWnd,
++                                    TEXT("You may use the following function keys:\n\n"
++                                            "[F1]\t\tto display this help message.\n"
++                                            "[F8]\t\tto minimize this window and to start the Windows Explorer for administration work.\n"
++                                            "[F9]/[F11]\tto minimize this window for administration work.\n"
++                                            "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"
++                                            "[CTRL+SHIFT+F12]\tto reboot the kiosk.\n\n"),
++                                    TEXT("Massai Server-Help"),
++                                    MB_ICONINFORMATION | MB_OK);
++                        }
++                        else
++                        {
++                            MessageBox(hWnd,
++                                    TEXT("You may use the following function keys:\n\n"
++                                            "[F1]\tto display this help message.\n"
++                                            "[F9]/[F11]\tto minimize this window.\n"
++                                            "[F12]\t\tto shut down the platform and stop all Massai-processes.\n"),
++                                    TEXT("Massai Default-Help"),
++                                    MB_ICONINFORMATION | MB_OK);
++                        }
+                     }
+                     break;
+ 
+-
+-              case VK_F8:
+-                  TRACE(SecondaryRuntime_HERE,"VK_F8");
+-                   if(!m_globalConfig.serverMode())
+-                   {
+-                     if(MessageBox(hWnd,
+-                                   TEXT("By pressing OK the WINDOWS EXPLORER will be started and the "
+-                                        "window will be minimized for administration work.\n\n"
+-                                        "Please don't forget to maximize this window again,"
+-                                        "after you finished your work."),
+-                                   TEXT("Massai"),
+-                                   MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
+-                     {
+-                       ShowWindow(hWnd,SW_MINIMIZE);
+-                       Tools::startExplorer();
+-                     }
+-                   }
+-                   break;
+-
+-          case VK_F11:
+-               TRACE(SecondaryRuntime_HERE,"VK_F11");
+-               if(!m_globalConfig.serverMode())
+-               {
+-                 if(MessageBox(hWnd,
+-                               TEXT("By pressing OK the window will be minimized for administration work.\n\n"
+-                                    "Please don't forget to maximize this window again,"
+-                                    "after you finished your work."),
+-                               TEXT("Massai"),
+-                               MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
+-                 {
+-                   ShowWindow(hWnd,SW_MINIMIZE);
+-                   if(m_globalConfig.isRunningAsUserShell())
+-                   {
+-                     Tools::startExplorer();
+-                   }
+-                 }
+-               }
+-               else
+-                 ShowWindow(hWnd,SW_MINIMIZE);
+-
+-               break;
+-
+-        case VK_F12:
+-            TRACE(SecondaryRuntime_HERE,"VK_F12");
+-                if(mDaemon_isService())
+-                {
+-                    MessageBox(hWnd,
+-                                TEXT("Please use the service control to stop the platform."),
+-                                TEXT("Massai - isService"),
+-                                MB_ICONEXCLAMATION | MB_OK);
+-                }
+-                else if(!m_globalConfig.serverMode() && (GetKeyState(VK_CONTROL) & 0xffff0000) && (GetKeyState(VK_SHIFT) & 0xffff0000))
+-                {
+-                    if(MessageBox(hWnd,
+-                                TEXT("Do you really want to reboot the kiosk?"),
+-                                TEXT("Massai - reboot Kiosk"),
+-                                MB_ICONQUESTION | MB_YESNO) == IDYES)
++                case VK_F8:
+                     {
+-                    sendAlert(ALERT_E_REBOOT_LOCAL);
++                        TRACE(SecondaryRuntime_HERE,"VK_F8");
++                        if(!m_globalConfig.serverMode())
++                        {
++                            if(MessageBox(hWnd,
++                                        TEXT("By pressing OK the WINDOWS EXPLORER will be started and the "
++                                            "window will be minimized for administration work.\n\n"
++                                            "Please don't forget to maximize this window again,"
++                                            "after you finished your work."),
++                                        TEXT("Massai"),
++                                        MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
++                            {
++                                ShowWindow(hWnd,SW_MINIMIZE);
++                                Tools::startExplorer();
++                            }
++                        }
++                    }
++                    break;
+ 
+-                    Worker* worker = m_globalConfig.getWorker();
+-                    if( worker )
++                case VK_F11:
+                     {
+-                        // execute system commands after platform stopped
+-                        worker->execSysCmdsShutdown();
++                        TRACE(SecondaryRuntime_HERE,"VK_F11");
++                        if(!m_globalConfig.serverMode())
++                        {
++                            if(MessageBox(hWnd,
++                                        TEXT("By pressing OK the window will be minimized for administration work.\n\n"
++                                            "Please don't forget to maximize this window again,"
++                                            "after you finished your work."),
++                                        TEXT("Massai"),
++                                        MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
++                            {
++                                ShowWindow(hWnd,SW_MINIMIZE);
++                                if(m_globalConfig.isRunningAsUserShell())
++                                {
++                                    Tools::startExplorer();
++                                }
++                            }
++                        }
++                        else
++                            ShowWindow(hWnd,SW_MINIMIZE);
+                     }
+-                    else
+-                        TRACE(HERE,"ERROR: no worker available");
+-
+-                    rc = Tools::shutdownOS_Now(true);
++                    break;
+ 
+-                    TRACE(HERE,"kiosk reboot, rc = %d",rc);
+-                    }
+-                }
+-                else
+-                {
+-                    if(MessageBox(hWnd,
+-                                TEXT("Do you really want to shut down the platform?"),
+-                                TEXT("Massai - shutdown Platform"),
+-                                MB_ICONQUESTION | MB_YESNO) == IDYES)
++                case VK_F12:
+                     {
+-                    sendAlert(ALERT_E_SHUTDOWN_LOCAL);
+-                    if(m_globalConfig.isRunningAsUserShell())
+-                    {
+-                        Tools::startExplorer();
+-                    }
+-                    PostMessage(hWnd,WM_CLOSE,0,0);
++                        m_globalConfig.getQueue().enqueueNotification( new MControlNotification("VK_F12", CONFIG_ID, VK_F12) );
+                     }
+-                }
++                    break;
+                 
++                }
+                 break;
+             }
+-            break;
+             
+         case WM_SYSKEYUP:
+-          TRACE(SecondaryRuntime_HERE,"WM_SYSKEYUP");
+-          // don't let windows process these messages
+-          return 0;
++            {
++                TRACE(SecondaryRuntime_HERE,"WM_SYSKEYUP");
++                // don't let windows process these messages
++            }
++            break;
+ 
+         case WM_SYSKEYDOWN:
+-            TRACE(SecondaryRuntime_HERE,"WM_SYSKEYDOWN");
+-            // don't let windows process these messages
+-            return 0;
++            {
++                TRACE(SecondaryRuntime_HERE,"WM_SYSKEYDOWN");
++                // don't let windows process these messages
++            }
++            break;
+ 
+         case WM_SYSCHAR:
+-            TRACE(SecondaryRuntime_HERE,"WM_SYSCHAR");
+-            // don't let windows process these messages
+-            return 0;
++            {
++                TRACE(SecondaryRuntime_HERE,"WM_SYSCHAR");
++                // don't let windows process these messages
++            }
++            break;
+ 
+         default:
++            {
+                 return DefWindowProc(hWnd, message, wParam, lParam);
+-                break;
++            }
++            break;
+         }
+-
+         return 0;
+     }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 8874d7a3..07eb3950 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -49,6 +49,40 @@ namespace mControl
+ 
+     Dialog::~Dialog()
+     {
++
++    }
++
++
++    int Dialog::init()
++    {
++        int rc;
++        
++        rc = m_windowConfig.registerWindow();
++        if( rc )
++        {
++            rc = m_windowConfig.createWindow();
++
++            if( rc )
++            {
++                m_windowConfig.showWindow(SW_SHOW);
++            }
++            else
++            {
++                MessageBox(m_windowConfig.getHwnd(),
++                        TEXT("Could not initalize the Dialog. \nFailed to create the Window"),
++                        NULL,
++                        MB_OK);
++            }
++        }
++        else
++        {
++            MessageBox(m_windowConfig.getHwnd(),
++                        TEXT("Could not initalize the Dialog. \nFailed to register the Window"),
++                        NULL,
++                        MB_OK);
++        }
++
++        return rc;
+     }
+ 
+ 
+@@ -124,22 +158,6 @@ namespace mControl
+     }
+ 
+ 
+-
+-    char Dialog::FirstDriveFromMask (ULONG unitmask)
+-    {
+-       char i;
+-
+-       for (i = 0; i < 26; ++i)
+-       {
+-          if (unitmask & 0x1)
+-             break;
+-          unitmask = unitmask >> 1;
+-       }
+-
+-       return (i + 'A');
+-    }
+-
+-
+     void Dialog::syserror(const string &msg)
+     {
+         char errbuf[256];
+@@ -154,4 +172,123 @@ namespace mControl
+         errbuf[len] = '\0';
+         TRACE(HERE, "[serverwin] %s: %s", msg.c_str(), errbuf);
+     }
++
++
++    void Dialog::createAlert()
++    {
++        try
++        {
++            m_globalConfig.setAlert( new alert(ALERT_M_PLATFORM) );
++        }
++        catch( alertException & e )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException: %s",e.toString().c_str());
++        }
++        catch( ... )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException (unknown)");
++        }
++
++    } 
++
++
++    void Dialog::sendAlert(char *s)
++    {
++        
++        if(m_globalConfig.noLogActive())
++        {
++           TRACE(HERE,"sendAlert [%s], noLOG.",s);
++           return;
++        }
++        TRACE(HERE,"sendAlert [%s], noSNMP=%s, started=%s.",
++                   s,
++                   m_globalConfig.noSNMPActive() ?"true":"false",
++                   m_globalConfig.isStarted() ?"true":"false");
++        if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
++        {
++            TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
++                        s,
++                        m_globalConfig.noSNMPActive()?"true":"false",
++                        m_globalConfig.isStarted()?"true":"false");
++            return;
++        }
++
++        static bool initial = true;
++        waitInitialForLoggingService();
++
++        int repetitions = 1;
++
++        if(initial && !m_globalConfig.serverMode())
++        {
++            initial = false;
++            repetitions = 10;
++        }
++
++        while(repetitions--)
++        {
++            if(s && *s)
++            {
++            if(m_globalConfig.getAlert())
++            {
++                alert::eventData e(s);
++
++                try
++                {
++                    m_globalConfig.getAlert()->send(e);
++                    return;
++                }
++                catch( alertException & ex )
++                {
++                    TRACE(HERE,"alertException: %s",ex.toString().c_str());
++                    delete m_globalConfig.getAlert();
++                    createAlert();
++                }
++                catch( ... )
++                {
++                    TRACE(HERE,"unknown exception in SendAlert()");
++                }
++            }
++            else
++                TRACE(HERE,"Alert [%s] not sent.");
++            }
++
++            if(repetitions)
++            {
++                TRACE(HERE,"sendAlert sleep for ... ");
++
++                //TODO: correct the time to 3000
++                mSysTime::sleep( 50 );
++            }
++        }
++    }
++
++
++    void Dialog::waitInitialForLoggingService()
++    {
++        static bool init= false;
++        if(!init)
++        {
++            TRACE(HERE,"waitInitialForLoggingService...");
++            Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
++            try
++            {
++                long rc= loggingSemaphore.wait(600);
++                long error= GetLastError();
++                TRACE(HERE,"waitInitialForLoggingService %d %d", rc, error);
++            }
++            catch( const std::exception& ex )
++            {
++                TRACE(HERE, ex.what());
++            }
++            catch( ... )
++            {
++                TRACE(HERE,"waitInitialForLoggingService failed: unknown exception");
++            }
++            TRACE(HERE,"waitInitialForLoggingService done.");
++            createAlert();
++        }
++        init= true;
++    }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 58f8d10c..bf7232e9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -368,10 +368,7 @@ int mDaemon_main( int argc, char const * const * argv )
+         //******************************************************************************************
+         TRACE(HERE,"initialize the main components...");
+ 
+-    
+-        mainDialog.getWindowConfig().registerWindow();
+-        mainDialog.getWindowConfig().createWindow();
+-        mainDialog.getWindowConfig().showWindow(SW_SHOW);
++        mainDialog.init();
+ 
+         if( mDaemon_isService() )
+         {
+@@ -399,7 +396,8 @@ int mDaemon_main( int argc, char const * const * argv )
+ 
+         corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl", 19998);
+ 
+-        
++
++        /*TODO: start rebooter
+         KioskReboot     rebooter ( globalConfig->getQueue(), *globalConfig, &servant);     
+         rebooter.saveRebootDateToMCC();
+         
+@@ -409,6 +407,7 @@ int mDaemon_main( int argc, char const * const * argv )
+         {
+             globalConfig->getThreadPool().start( rebooter );
+         }
++        */
+ 
+         
+         // load host file from configured server => mcTools
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+index 8912f739..d59d3bf9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+@@ -19,6 +19,7 @@
+ //Materna includes
+ #include "trc/trace.h"
+ 
++
+ using namespace std;
+ 
+ 
+@@ -32,27 +33,35 @@ namespace mControl
+         TRACE(HERE,"Create Notification: ID[ %d ], Command[ %d ]", id, cmd);
+     }
+ 
+-    string MControlNotification ::data() const
++
++    MControlNotification ::~MControlNotification ()
++    {
++    }
++
++
++    string MControlNotification::data() const
+     {
+       return m_info;
+     }
+ 
+-    int MControlNotification ::getId() const
++
++    int MControlNotification::getId() const
+     {
+       return m_parentID;
+     }
+ 
+-    int MControlNotification ::getCmd() const
++
++    int MControlNotification::getCmd() const
+     {
+       return m_cmd;
+     }
+ 
++
+     void MControlNotification::printString()
+     {
+       cout << "new dequeued Notification, Data[" << this->data() << "] , ID[" << this->getId() << "] " << endl;
+     }
+ 
+-    MControlNotification ::~MControlNotification ()
+-    {
+-    }
++
++    
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+index 4c038a2a..ec9dcf4e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_reboot.cpp
+@@ -92,7 +92,7 @@ namespace mControl
+         if ( m_cfgDelayRange == NULL )
+             m_cfgDelayRange = new cfgNum("PLATFORM.REBOOT.DelayRange",
+                                         "Specifies reboot the delay range in minutes for the kiosk. This protects servers from overloading. The value is computed randomly within the given range.");
+-
++        
+         if ( m_cfgStartDelay == NULL )
+             m_cfgStartDelay = new cfgNum ("PLATFORM.REBOOT.StartCheckingAfter",
+                                         "Specifies the delay time in minutes before reboot-checks are started, to let the platform come up completely.",
+@@ -215,6 +215,7 @@ namespace mControl
+         m_cfgRebootDate->set( sStream.str().c_str() );
+     }   
+ 
++
+     void KioskReboot::setRebootDateFromMCC()
+     {
+         if( m_cfgRebootDate == NULL )
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index b95706f0..bccdb2a3 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -138,8 +138,8 @@ namespace mControl
+             if( actualConfiguration.size() == 3)
+             {
+                 //FORMAT: [dd;] | [last;] | [mon;|tue;|wed;|thu;|fri;|sat;|sun;]<hh:mm>;<command string>
+-
+                 vector<string> time( Tools::tokenize( actualConfiguration[1], ':' ) );
++
+                 int hour, minute;
+ 
+                 try
+@@ -161,10 +161,9 @@ namespace mControl
+             else if(actualConfiguration.size() == 2)
+             {
+                 //FORMAT: <hh:mm>;<command string>
+-
+                 vector<string> time( Tools::tokenize( actualConfiguration[0], ':' ) );
+-                int hour, minute;
+ 
++                int hour, minute;
+                 try
+                 {
+                     hour    = stoi(time[0]);
+@@ -329,6 +328,7 @@ namespace mControl
+         }
+ 
+         //TODO: sleep, return mechanism
++        mSysTime::sleep( 50 );
+         //return (0);
+     }
+ //
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+index 64c45b08..cb6eacee 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+@@ -41,6 +41,7 @@ namespace mControl
+     }
+ 
+ 
++    //TODO: check-mechanism for notificationqueue
+     long MControlServant::shutdownOS(bool fReboot, bool fForced)
+     {
+         TRACE(HERE,"shutdownOS(...) ...");
+@@ -65,10 +66,7 @@ namespace mControl
+                     TRACE( HERE, "kiosk is busy, rc = %d", rc );
+                 }
+                 else
+-                {
+-                    // stop platform first
+-                    //TODO: check mechanism
+-                    //rc = 
++                { 
+                     m_notificationQueue.enqueueNotification( new MControlNotification("WM_MASSAISTOP_REMOTE", SERVANT_ID, WM_MASSAISTOP_REMOTE) );
+                 }
+             }
+@@ -246,7 +244,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::shutdownPlatform()
+     {
+         TRACE(HERE,"shutdownPlatform(): Kiosk busy: %s",Tools::noYes(m_kioskBusy));
+@@ -263,7 +261,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::startPlatform()
+     {
+         TRACE(HERE,"startPlatform() ...");
+@@ -276,7 +274,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::rebootKiosk()
+     {
+         TRACE(HERE,"rebootKiosk() ...");
+@@ -297,7 +295,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::shutdownKiosk()
+     {
+         TRACE(HERE,"shutdownKiosk() ...");
+@@ -318,7 +316,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::forcedShutdownPlatform()
+     {
+         TRACE(HERE,"forcedShutdownPlatform() ...");
+@@ -333,7 +331,7 @@ namespace mControl
+     }
+ 
+ 
+-    //TODO: check mechanism for notification
++    //TODO: check-mechanism for notification
+     CORBA::Long MControlServant::forcedRestartPlatform()
+     {
+         TRACE(HERE,"forcedRestartPlatform() ...");
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index 9cac16cf..9db1ab4a 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -27,12 +27,6 @@ using namespace std;
+ 
+ namespace mControl
+ {
+-    Tools::Tools(GlobalConfig& config) :
+-        m_globalConfig(config)
+-    {
+-    }
+-
+-
+     bool Tools::fileExists (const string& name) {
+         struct stat buffer;   
+         return (stat (name.c_str(), &buffer) == 0); 
+@@ -154,18 +148,17 @@ namespace mControl
+         long rc   = 0;
+ 
+         if(!serviceName || !*serviceName)
+-          return(-1);
++            return(-1);
+ 
+         if(lTimeout >= 0)
+-          lTimeout /= lTo;
++            lTimeout /= lTo;
+         else
+-          lCnt = MINLONG;
++            lCnt = MINLONG;
+ 
+         SC_HANDLE hSC = OpenSCManager(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE );
+ 
+         if(hSC == 0)
+         {
+-
+             TRACE(HERE,"%s OpenSCManager() failed, rc = %d\n", Tools::timeStamp(), GetLastError());
+             return(-2);
+         }
+@@ -183,49 +176,50 @@ namespace mControl
+ 
+         while( !fServiceRunning && ( lCnt <= lTimeout ) )
+         {
+-          SC_HANDLE hService = OpenService(hSC, serviceName, SERVICE_QUERY_STATUS);
++            SC_HANDLE hService = OpenService(hSC, serviceName, SERVICE_QUERY_STATUS);
+ 
+-          if(hService)
+-          {
+-            while( !fServiceRunning && ( lCnt <= lTimeout) )
++            if(hService)
+             {
+-              SERVICE_STATUS status;
+-
+-              if(QueryServiceStatus(hService, &status))
+-              {
+-                if(status.dwCurrentState == SERVICE_RUNNING)
+-                  fServiceRunning = true;
+-                else
++                while( !fServiceRunning && ( lCnt <= lTimeout) )
+                 {
+-                  Sleep(lTo);
+-                  if(lTimeout >= 0) lCnt++;
++                    SERVICE_STATUS status;
++
++                    if(QueryServiceStatus(hService, &status))
++                    {
++                        if(status.dwCurrentState == SERVICE_RUNNING)
++                            fServiceRunning = true;
++                        else
++                        {
++                            Sleep(lTo);
++                            if(lTimeout >= 0) lCnt++;
++                        }
++                    }
++                    else
++                    {
++                        Sleep(lTo);
++                        if(lTimeout >= 0) 
++                            lCnt++;
++                    }
+                 }
+-              }
+-              else
+-              {
++
++                // MaM try { CloseHandle(hService); } catch(...) {};
++                try { CloseServiceHandle(hService); } catch(...) {};
++            }
++
++            if( !fServiceRunning )
++            {
+                 Sleep(lTo);
+                 if(lTimeout >= 0) lCnt++;
+-              }
+             }
+ 
+-            // MaM try { CloseHandle(hService); } catch(...) {};
+-            try { CloseServiceHandle(hService); } catch(...) {};
+-          }
+-
+-          if( !fServiceRunning )
+-          {
+-            Sleep(lTo);
+-            if(lTimeout >= 0) lCnt++;
+-          }
+-
+-          // MaM try { CloseHandle(hSC); } catch(...) {};
+-          try { CloseServiceHandle(hSC); } catch(...) {};
++            // MaM try { CloseHandle(hSC); } catch(...) {};
++            try { CloseServiceHandle(hSC); } catch(...) {};
+         }
+ 
+         if(!fServiceRunning || lCnt > lTimeout)
+-          rc = -3;
++            rc = -3;
+ 
+-          TRACE(HERE, "%s waiting for service [%s], rc = %d\n", Tools::timeStamp(), serviceName, rc);
++        TRACE(HERE, "%s waiting for service [%s], rc = %d\n", Tools::timeStamp(), serviceName, rc);
+ 
+         return(rc);
+     }
+@@ -256,8 +250,10 @@ namespace mControl
+        s = strrchr (directoryBuf, '\\') ;
+        if (s)
+        {
+-          * (s+1) = 0 ;
+-       } else directoryBuf [0] = 0 ;
++            *(s+1) = 0 ;
++       } 
++       else 
++           directoryBuf [0] = 0 ;
+ 
+        hnd = FindFirstFile (file, &wfd) ;
+        if (hnd != INVALID_HANDLE_VALUE)
+@@ -632,14 +628,12 @@ namespace mControl
+         else if( sDay == "" )
+             iDay = -1;
+        
+-
+         return iDay;
+     }
+ 
+ 
+     int Tools::traceCurrentDir()
+     {
+-
+         char cCurrentPath[FILENAME_MAX];
+ 
+         if (!GetCurrentDir(cCurrentPath, sizeof(cCurrentPath)))
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 3d82473f..07152186 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -85,7 +85,7 @@ namespace mControl
+                     case WM_MASSAIREBOOT_REMOTE:
+                         {
+                             TRACE(SecondaryRuntime_HERE,"WM_MASSAIREBOOT_REMOTE");
+-                            m_dialog.getWindowConfig().sendAlert(ALERT_E_REBOOT_REMOTE);
++                            m_dialog.sendAlert(ALERT_E_REBOOT_REMOTE);
+                             rc = 0;
+                         }
+                         break;
+@@ -95,7 +95,7 @@ namespace mControl
+                         {
+                             TRACE(SecondaryRuntime_HERE,"WM_MASSAISHUTDOWN_REMOTE");
+ 
+-                            m_dialog.getWindowConfig().sendAlert(ALERT_E_SHUTDOWN_REMOTE);
++                            m_dialog.sendAlert(ALERT_E_SHUTDOWN_REMOTE);
+                             rc = 0;
+                         }
+                         break;
+@@ -109,7 +109,7 @@ namespace mControl
+ 
+                             if(m_globalConfig.isStarted())
+                             {
+-                                m_dialog.getWindowConfig().sendAlert(ALERT_E_STOPPED_REMOTE);
++                                m_dialog.sendAlert(ALERT_E_STOPPED_REMOTE);
+ 
+                                 m_globalConfig.setStarted(false);
+ 
+@@ -132,7 +132,7 @@ namespace mControl
+ 
+                                 TRACE(HERE,"scheduler requested STOP");
+ 
+-                                m_dialog.getWindowConfig().sendAlert(ALERT_E_STOPPED_SCHEDULED);
++                                m_dialog.sendAlert(ALERT_E_STOPPED_SCHEDULED);
+ 
+                                 m_globalConfig.setStarted(false);
+ 
+@@ -155,6 +155,59 @@ namespace mControl
+                             TRACE(HERE,"WM_MASSAISTART_SCHEDULER execution: rc = [%d]", rc);
+                         }
+                         break;
++
++                    case VK_F12:
++                        {
++                            TRACE(HERE,"VK_F12 command dequeued");
++
++                            if(mDaemon_isService())
++                            {
++                                MessageBox(m_dialog.getWindowConfig().getHwnd(),
++                                            TEXT("Please use the service control to stop the platform."),
++                                            TEXT("Massai - isService"),
++                                            MB_ICONEXCLAMATION | MB_OK);
++                            }
++                            else if(!m_globalConfig.serverMode() && (GetKeyState(VK_CONTROL) & 0xffff0000) && (GetKeyState(VK_SHIFT) & 0xffff0000))
++                            {
++                                if(MessageBox(m_dialog.getWindowConfig().getHwnd(),
++                                            TEXT("Do you really want to reboot the kiosk?"),
++                                            TEXT("Massai - reboot Kiosk"),
++                                            MB_ICONQUESTION | MB_YESNO) == IDYES)
++                                {
++                                m_dialog.sendAlert(ALERT_E_REBOOT_LOCAL);
++
++                                Worker* worker = m_globalConfig.getWorker();
++                                if( worker )
++                                {
++                                    // execute system commands after platform stopped
++                                    worker->execSysCmdsShutdown();
++                                }
++                                else
++                                    TRACE(HERE,"ERROR: no worker available");
++
++                                rc = Tools::shutdownOS_Now(true);
++
++                                TRACE(HERE,"kiosk reboot, rc = %d",rc);
++                                }
++                            }
++                            else
++                            {
++                                if(MessageBox(m_dialog.getWindowConfig().getHwnd(),
++                                            TEXT("Do you really want to shut down the platform?"),
++                                            TEXT("Massai - shutdown Platform"),
++                                            MB_ICONQUESTION | MB_YESNO) == IDYES)
++                                {
++                                m_dialog.sendAlert(ALERT_E_SHUTDOWN_LOCAL);
++                                if(m_globalConfig.isRunningAsUserShell())
++                                {
++                                    Tools::startExplorer();
++                                }
++                                PostMessage(m_dialog.getWindowConfig().getHwnd(),WM_CLOSE,0,0);
++                                }
++                            }
++                            
++                        }
++                        break;
+                     
+                     default:
+                         {
+@@ -389,7 +442,7 @@ namespace mControl
+         {
+             SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
+ 
+-            m_dialog.getWindowConfig().sendAlert(ALERT_E_START_REMOTE);
++            m_dialog.sendAlert(ALERT_E_START_REMOTE);
+ 
+             m_globalConfig.setStarted( true );
+ 
+@@ -439,7 +492,7 @@ namespace mControl
+         if(!m_globalConfig.isStarted())
+         {
+             TRACE(HERE,"scheduler requested START");
+-            m_dialog.getWindowConfig().sendAlert(ALERT_E_START_SCHEDULED);
++            m_dialog.sendAlert(ALERT_E_START_SCHEDULED);
+             
+             ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
+ 
+@@ -458,7 +511,7 @@ namespace mControl
+             {
+                 TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
+ 
+-                m_dialog.getWindowConfig().sendAlert(ALERT_E_REBOOT_UPDATE);
++                m_dialog.sendAlert(ALERT_E_REBOOT_UPDATE);
+ 
+                 rc = Tools::shutdownOS_Now(true);
+ 
+-- 
+2.41.0.windows.1
+

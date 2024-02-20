@@ -1,0 +1,107 @@
+From f9dc665f79d57055f4ea1821b72920fbda1048ac Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Tue, 14 Feb 2023 16:20:54 +0000
+Subject: [PATCH 460/462] Build: show commit text in HTML showPlfLastCommits.pl
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@927 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/showPlfLastCommits.pl       | 44 +++++++++++++++++--
+ 1 file changed, 40 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+index 1149e00..4b519aa 100644
+--- a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
++++ b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+@@ -5,7 +5,7 @@ use Getopt::Long;
+ use DateTime;
+ 
+ # ----------------------------------------------------------
+-#  showPlfLastCommit.pl                 kkluge 07.02.2023
++#  showPlfLastCommit.pl                 kkluge 14.02.2023
+ #
+ #  Show the last commit of the configured list of PLF
+ #  branches, if it was within 7 days.
+@@ -89,6 +89,31 @@ if ( $help ) {
+   exit 0;
+ }
+ 
++my $myCss = "<style>
++.tooltip {
++  position: relative;
++  display: inline-block;
++  border-bottom: 1px dotted black;
++}
++.tooltip .tooltiptext {
++  visibility: hidden;
++  width: auto;
++  background-color: black;
++  color: #fff;
++  text-align: left;
++  border-radius: 8px;
++  padding: 5px 0;
++  position: absolute;
++  z-index: 1;
++  bottom: 150%;
++  left: 50%;
++  margin-left: -60px;
++}
++.tooltip:hover .tooltiptext {
++  visibility: visible;
++}
++</style>";
++
+ # ----------------------------------------------------------
+ 
+ sub getUser
+@@ -99,6 +124,14 @@ sub getUser
+ 
+ # ----------------------------------------------------------
+ 
++sub getText
++{
++  my ($log) = @_;
++  my ($text) = ($log =~ / Zeilen  (.*)/);
++}
++
++# ----------------------------------------------------------
++
+ sub getDate
+ {
+   my ($log) = @_;
+@@ -159,11 +192,13 @@ sub showRevs
+   foreach my $rev (@revs2) {
+     my $result = `svn log $url -r $rev | perl -l40pe 's/^-+/\\n/'`;
+     my ($user) = getUser($result);
++    my ($text) = getText($result);
+     my (@mantis) = getMantis($result);
+     
+     my ($date) = getDateTime($result);
+     my ($dtDate) = newDateTime($date);
+-    my $days = $dtToday->delta_days($dtDate)->delta_days;    
++    my $days = $dtToday->delta_days($dtDate)->delta_days;
++        
+     if (($days < 8) || $optAll) {
+       if ($optHtml) {
+         $html .= "<tr>\n";
+@@ -172,7 +207,8 @@ sub showRevs
+         $html .= "<td>$date</td>\n";
+         # requires authentication
+         # $rev = "<a href=\"$url/!svn/bc/$rev\" target=\"_blank\">$rev</a>";        
+-        $html .= "<td>$rev</td>\n";
++        # $html .= "<td>$rev</td>\n";
++        $html .= "<td><span  class=\"tooltip\">$rev <span class=\"tooltiptext\">$text</span></span></td>\n";
+         $html .= "<td>$user</td>\n";
+         my $mantis = "";
+         if (@mantis) {
+@@ -192,7 +228,7 @@ sub showRevs
+ # ----------------------------------------------------------
+ 
+ if ($optHtml) {
+-  $html = "<html>\n$body\n<h1>Last PLF Commits</h1>\n";
++  $html = "<html>\n$myCss\n$body\n<h1>Last PLF Commits</h1>\n";
+   $html .= "<table border>\n";
+   $html .= "<tr>\n";
+   $html .= "<th align=\"left\">BRANCH</th>\n";
+-- 
+2.41.0.windows.1
+

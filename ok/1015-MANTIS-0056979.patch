@@ -1,0 +1,320 @@
+From da749c33a7b73ed0a66dca2c961428366738d8ea Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 12 May 2020 18:07:16 +0000
+Subject: [PATCH 1015/1077] MANTIS 0056979 Persistant print counter for
+ printers
+
+platform.idl V5.0
+
+add ComponentServiceListener::changeCounter
+ComponentServiceIF::getCounterId
+ComponentServiceIF::getCounterSettings
+ComponentServiceIF::setCounterLevel
+ComponentServiceIF::getCounterLevel
+ComponentServiceIF::getCounterName
+PlatformIF::logCounterValue
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1567 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/platform.idl            | 116 ++++++++++--------
+ 1 file changed, 67 insertions(+), 49 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/platform.idl b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+index c303d488..766f6c03 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/platform.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+@@ -27,7 +27,7 @@
+ 
+ module PlatformManagement
+ {
+-    const string interface_version = "4.0";
++    const string interface_version = "5.0";
+ 
+     /** Data type for text lists. */
+     typedef sequence<string> list;
+@@ -56,7 +56,7 @@ module PlatformManagement
+     };
+ 
+     typedef sequence<long> longList;
+-    
++
+     /** Base environment component definition(like in CUSS 'types.idl'). */
+     struct mEnvironmentComponent
+     {
+@@ -79,7 +79,7 @@ module PlatformManagement
+        POWER_OFF,
+        POWER_UNKNOWN
+     };
+-    
++
+     struct BinLevel
+     {
+       long good;
+@@ -87,9 +87,15 @@ module PlatformManagement
+       long error;
+     };
+ 
++    struct CounterSetting
++    {
++      long warning;
++    };
++
+     interface ComponentServiceListener
+     {
+       void changeLevel(in string bin, in long level);
++      void changeCounter(in string counterId, in long level);
+     };
+ 
+     interface ComponentServiceIF
+@@ -98,20 +104,25 @@ module PlatformManagement
+         PowerStatus getPowerStatus();
+         code switchPowerOff();
+         code switchPowerOn();
+-        
++
+         list getBins();                                  // get list of bin of the component
+-        BinLevel getBinSettings(in string bin);          // get settings for a bin 
+-        code setBinLevel(in string bin, in long level);  // set current no of documents for a bin   
+-        long getBinLevel(in string bin);                 // get current no of documents for a bin  
+-        string getType(in string bin);                   // get type for a bin        
+-        
++        BinLevel getBinSettings(in string bin);          // get settings for a bin
++        code setBinLevel(in string bin, in long level);  // set current no of documents for a bin
++        long getBinLevel(in string bin);                 // get current no of documents for a bin
++        string getType(in string bin);                   // get type for a bin
++
++        list getCounterId();                                      // get list of counter of the component
++        CounterSetting getCounterSettings(in string counterId);   // get settings for a counter
++        code setCounterLevel(in string counterId, in long level); // reset counter
++        long getCounterLevel(in string counterId);                // get current level of the counter
++        string getCounterName(in string counterId);               // get name of counter
++
+         code setListener(in ComponentServiceListener listener);
+         code rmvListener(in ComponentServiceListener listener);
+     };
+ 
+     /** Component interface for the platform management. Via this interface the platform
+         communicates with the device components internally. */
+-
+     interface ComponentIF: ComponentServiceIF
+     {
+         /** Prepares a device for a specific application context.
+@@ -139,11 +150,11 @@ module PlatformManagement
+         code terminate();
+ 
+ 
+-        /** prepare a device for using by CLA in media-roll-off mode. 
++        /** prepare a device for using by CLA in media-roll-off mode.
+             record events for playback after next prepareDevice
+         */
+         code beginMediaRecord(in string contextName, in string token);
+-        
++
+         /** same as resetDevices; except for mediaOffRoller components
+             the mediaOffRoller components will playback the stored events
+         */
+@@ -169,13 +180,13 @@ module PlatformManagement
+       DataStatusExtension dataStatusSupport;     /* cuss datastatus supported by application */
+       PaymentCardExtension paymentCardExtension; /* default media type for card reader components for the application */
+       string airlineCode;                        /* 3-letter ICAO airline code */
+-      string applicationName;                
++      string applicationName;
+     };
+-    
++
+     struct PlatformEnvironment
+     {
+       string dataPath;
+-      string programPath; 
++      string programPath;
+       string kioskType;
+     };
+ 
+@@ -205,22 +216,22 @@ module PlatformManagement
+       LC_INDICATOR,
+       LC_AUDIO
+     };
+-    
+-    struct LoggingComponentData 
++
++    struct LoggingComponentData
+     {
+-      string componentRef;      // identify virtual component by virtualComponentRef 
++      string componentRef;      // identify virtual component by virtualComponentRef
+       list unitId;              // list of strings(unitIds)
+                                 // - use one unitId for LC_APPLICATION, LC_PRINTER, LC_SCANNER, LC_CONVEYOR
+                                 //      LC_PRINTER_FEEDER and LC_CONVEYOR_FEEDER
+-                                // - LC_CAPTURE and LC_DISPENSER may be responsible for multiple units                                
+-      LoggingClass unitClass;// class of component 
++                                // - LC_CAPTURE and LC_DISPENSER may be responsible for multiple units
++      LoggingClass unitClass;// class of component
+                                 //   LC_BIN* not used in LoggingComponentData
+       string moduleName;        // needed for GAC_MODULENAME
+     };
+-    
++
+     struct LoggingCounterData
+     {
+-   	  string unitId;
++      string unitId;
+       LoggingClass unitClass;
+       long bin;                  //bin number
+       long mediaStatusTypeValue; //int value of mediaStatusType
+@@ -238,7 +249,7 @@ module PlatformManagement
+       BPP,
+       BTP
+     };
+-    
++
+     enum DataType
+     {
+       AEA,
+@@ -250,23 +261,23 @@ module PlatformManagement
+     {
+       string unitId;
+       long couponsproduced;
+-      DeviceType type;          
+-      DataType dataType; 
++      DeviceType type;
++      DataType dataType;
+       string request;
+       string response;
+       unsigned long long timestamp;        // utc time; number of milli seconds since 1.1.1970 00:00
+     };
+-	
+-	struct LoggingStatusData
++
++    struct LoggingStatusData
+     {
+-   	  string unitId;
+-      LoggingClass unitClass;	  
+-	  long cussUnitStatus;
+-	  long detailStatus;
+-	  long availability;
+-	  string reason;
++      string unitId;
++      LoggingClass unitClass;
++      long cussUnitStatus;
++      long detailStatus;
++      long availability;
++      string reason;
+     };
+-    
++
+     // Scanner statistics - scanner devices, which have reported the data
+     typedef sequence<string> ReaderIds;
+     struct ReaderOutput
+@@ -274,7 +285,7 @@ module PlatformManagement
+         string          data;           // Scanned data
+         ReaderIds       readers;        // Originating devices
+     };
+-    typedef sequence<ReaderOutput> ReaderOutputs;    
++    typedef sequence<ReaderOutput> ReaderOutputs;
+ 
+     struct IlluminationEvent
+     {
+@@ -288,7 +299,7 @@ module PlatformManagement
+         long blinkOnDuration;        // time in ms; for blinking
+         long blinkOffDuration;       // time in ms; for blinking
+     };
+-        
++
+     enum ApplicationsState
+     {
+       APP_INITIALIZE,                 // application is initializing or loading
+@@ -296,35 +307,40 @@ module PlatformManagement
+       APP_DEMANDED_UNAVAILABLE,       // cla is suspended by svc
+       APP_ALL_AVAILABLE,              // all scheduled applications are available
+       APP_AVAILABLE,                  // an application is available
+-      APP_SCHEDULED_UNAVAILABLE,      // no application is scheduled        
++      APP_SCHEDULED_UNAVAILABLE,      // no application is scheduled
+       APP_REQUESTED_UNAVAILABLE,      // all scheduled applications are stopped or resume
+       APP_UNAVAILABLE,                // no application is available, an scheduled application is unavailable or disabled
+       APP_ACTIVE                      // an application is active
+     };
+-    
++
+     interface AppStateListener
+     {
+       void appStateChanged(in ApplicationsState state);
+     };
+-    
+-    enum DataHandling    
++
++    enum DataHandling
+     {
+       DH_FORWARD_DATA_TO_APP,
+       DH_SUPPRESS_DATA
+     };
+     
++    enum CounterType    
++    {
++      CT_PRINT_COUNTER
++    };
++
+     interface PlatformIF
+     {
+-        typedef sequence<LoggingComponentData> LoggingComponentDataList;   
+-        
++        typedef sequence<LoggingComponentData> LoggingComponentDataList;
++
+         void initLogging(in string realComponentName, in LoggingComponentDataList init);
+         void logCounter(in LoggingCounterData lcd);
+         void logCommand(in LoggingCommandData command);
+         void logCounterFailure(in string unitId, in LoggingClass unitClass, in long numberOfFailed);
+         void updateMediaCount(in string compRef, in long mediaCount);
+         void logCounterSuccess(in string unitId, in LoggingClass unitClass, in long numberOfSuccesfullDocs);
+-		void logStatus(in LoggingStatusData statusData);
+-        
++        void logStatus(in LoggingStatusData statusData);
++
+         /** Checks the status of the token passed by the application.
+             @param token - The application token
+             @return the token status of the application token. */
+@@ -346,7 +362,7 @@ module PlatformManagement
+         /** Gets the activation token
+             @return the token of the application to be activated. */
+         string getPrepareToken();
+-        
++
+         /** Dispatches a platform event.
+             @param event - The plaform event
+             @return RC_OK if no error occurs, RC_ERROR if the event has the wrong format. */
+@@ -381,7 +397,7 @@ module PlatformManagement
+         /** Deletes a device component from the list of the current available device components.
+             @param realDeviceName - The name of the device component
+             @return RC_OK if no error occurs, RC_UNKNOWN if the device is unknown by the platform. */
+-        code unbindDevice(in string realDeviceName);        
++        code unbindDevice(in string realDeviceName);
+ 
+         /** gets the component by name
+             @param realDeviceName - The name of the device component
+@@ -392,20 +408,22 @@ module PlatformManagement
+             @param componentType - type of the component that received the data; e.g.: BCR for barcode reader
+             @param data - data as defined in cuss types.idl(msgDataType, aeaDataType, svgDataType, ...) */
+         DataHandling dataReceived(in string componentType, in any data);
+-        
++
+         void setupVCompListener(in string appRef, in string compRef, in any action, in any eventAcquireFilter, in any eventListener, in any elud);
+ 
+         void logCounterLevel(in string unitID, in LoggingClass loggingClass, in long currentNoOfDocs, in long mediaStatus);
+-        
++
+         PlatformEnvironment getEnvironment();
+ 
+         code setListener(in AppStateListener listener);
+-        
++
+         code rmvListener(in AppStateListener listener);
+ 
+         void logReaderOutput(in string unitID, in LoggingClass loggingClass, in ReaderOutputs readerData);
+ 
+         void logIllumination(in string unitID, in IlluminationEvent illuminationEvent);
++
++        void logCounterValue(in string unitId, in CounterType counter, in long currentLevel, in long warningLevel, in long status);
+     };
+ };
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,226 @@
+From 6ba8c6e814941d87f250737bd91b1182200a00e1 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 27 Jul 2015 14:41:23 +0000
+Subject: [PATCH 0673/1077] MANTIS 37475 Mantis 37475: Fix and integrate
+ NCTxtCache.cpp - NCTxtCache.exe has been buggy and also not part of the
+ build.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@876 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgClnt/dll/makefile.mak       |  12 ++
+ .../Massai/cpp/CfgClnt/src/NCTxtCache.cpp     | 145 +++++++++++-------
+ 2 files changed, 100 insertions(+), 57 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
+index 0d2076de..38d2f189 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/dll/makefile.mak
+@@ -185,4 +185,16 @@ MY_BIN11_LINKLIBS = $(NC_LINK_LIBS)
+ 
+ ######################################################################
+ 
++MY_BIN12 = \
++    $(_BIN)\NCTxtCache.exe
++
++MY_BIN12_OBJS = \
++    $(_OBJ)\NCTxtCache.obj
++
++MY_BIN12_USER_LIBS = $(NC_LINK_USER_LIBS)
++
++MY_BIN12_LINKLIBS = $(NC_LINK_LIBS)
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtCache.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtCache.cpp
+index d02ef477..550d9d51 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtCache.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCTxtCache.cpp
+@@ -1,3 +1,18 @@
++/**
++ **************************************************************************
++ *
++ * @file NCTxtCache.cpp
++ *
++ * Implements a test-client for cache-based configuration access
++ * for a text-type item.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
+ #include "cfgclnt/nConfigCache.hpp"
+ #include "cfgclnt/nConfigText.hpp"
+ 
+@@ -6,36 +21,74 @@
+ 
+ 
+ 
++/**
++ *
++ * Configuration client implementation class.
++ *
++**/
+ class testCachedText : public nConfig::cache<std::string,nConfig::gclText>
+ {
+ 
++   /**
++    *
++    * This method overloads the nConfig::cache base method to get
++    * the current value from the configuration service (not from cache).
++    *
++    * @return:                  The current value.
++    *
++   **/
+    std::string uncached()
+    {
+-      return get();
++      std::string const uncached = get();
++      std::cout
++         << "Get the uncached - \"" << uncached.c_str() << "\""
++         << std::endl;
++      return uncached;
+    }
+ 
+ protected:
+-  /**
+-   *
+-   * This method is called, when the configuration subsystem needs to
+-   *  create a new configuration item.
+-   *
+-  **/
+-  void create( char const * & Rights, char const * & Explanation, char const * & Def )
++
++   /**
++    *
++    * This method is called, when the configuration subsystem needs to
++    * create a new configuration item.
++    *
++    * @param rights:            Return the "rights" string.
++    *
++    * @param explanation:       Return the "explanation" string.
++    *
++    * @param default_value:     Return the "default value" string.
++    *
++   **/
++   void create
++      (
++         char const * & rights,
++         char const * & explanation,
++         char const * & default_value
++      )
+   {
+-    Rights = "rwl";
+-    Explanation = "Explanation.";
+-    Def = "";
++    rights = "rwl";
++    explanation = "Explanation.";
++    default_value = "";
+   }
+ 
+ public:
+ 
++   /**
++    *
++    * Constructor.
++    *
++    * @param item:              The configuration item.
++    *
++    * @param client:            The client's name.
++    *
++   **/
+    testCachedText
+    (
+-      char const *   Item,
+-      char const *   Client
++      char const *   item,
++      char const *   client
+    ) :
+-      nConfig::cache<std::string,nConfig::gclText>( Item, Client )
++      nConfig::cache<std::string,nConfig::gclText>( item, client )
+    {
+    }
+ 
+@@ -54,55 +107,33 @@ private:
+ **/
+ int main( int argc, char ** argv )
+ {
+-   char const * Item;
++   char const * item;
+    if( argc > 1 )
+-      Item = argv[1];
++   {
++      item = argv[1];
++   }
+    else
+-#if 0
+-      Item = "Test.CachedText";
+-#else
+-      Item = "ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­º
+-ð­ºIOR:010000002900000049444c3a6d61737361692e6d617465726e612e636f6d2f67656e6572696343492f434b493a312e3000000000010000000000000060000000010102ba060000006d75646961004c9c1b00000014010f00525354fa576444dc7c0100050000000100000006000000ba02000000000000000800000001f0adba004f4154010000001400000001f0adba01000100000000000901010000000000";
+-#endif
+-   testCachedText TestConfig( Item, argv[0] );
+-   char const * Val = TestConfig.get();
+-   std::cout << "The initial value is " << Val << std::endl;
+-   for( int I=0; I< 50; ++I )
++   {
++      item = "Test.CachedText";
++   }
++   testCachedText TestConfig( item, argv[0] );
++   std::string Val = TestConfig.get();
++   std::cout << "The initial value is " << Val.c_str() << std::endl;
++   for( int rep=0; rep < 50; ++rep )
+    {
+       Sleep( 2000 );
+-      Val = TestConfig.cached().c_str();
+-      std::cout << "The value now is " << Val << std::endl;
++      Val = TestConfig.cached();
++      std::cout << "The value now is " << Val.c_str() << std::endl;
+    }
+    return 0;
+ }
+ 
+ 
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

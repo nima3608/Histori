@@ -1,0 +1,196 @@
+From a98dc2444a80e98133423e388bb341a9b58b97d3 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 17 Nov 2011 18:15:50 +0000
+Subject: [PATCH 0127/1000] MANTIS0021571: SelfServiceCommon BillingService
+ changes for VC10 compatibilty
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@245 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/BillingService/makefile.mak       |  5 +++--
+ .../Massai/cpp/BillingService/res/BillingC.rc    |  4 ++--
+ .../Massai/cpp/BillingService/res/BillingS.rc    |  4 ++--
+ .../Massai/cpp/BillingService/src/PrinterRsp.cpp | 16 ++++++++--------
+ .../Massai/cpp/BillingService/src/main.cpp       |  7 +++++--
+ .../cpp/BillingService/src/sessionlist.cpp       |  9 +++++++--
+ .../cpp/BillingService/static/makefile.mak       |  5 +++--
+ 7 files changed, 30 insertions(+), 20 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak b/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
+index f7317cf4..297303ea 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/BillingService/makefile.mak
+@@ -7,10 +7,11 @@
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
+ MY_CFLAGS = \
+-    -Gi -GR \
++    $(MY_CFLAGS_3) \
+     -I$(_GEN) \
+     $(INC_INTERFACES) \
+-    $(INC_ACETAO)
++    $(INC_ACETAO) \
++	$(INC_MFC)
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/res/BillingC.rc b/SelfServiceCommon/Massai/cpp/BillingService/res/BillingC.rc
+index 7613e600..69608e0d 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/res/BillingC.rc
++++ b/SelfServiceCommon/Massai/cpp/BillingService/res/BillingC.rc
+@@ -9,7 +9,7 @@
+ //
+ // Generated from the TEXTINCLUDE 2 resource.
+ //
+-#include "afxres.h"
++#include "windows.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+ #undef APSTUDIO_READONLY_SYMBOLS
+@@ -79,7 +79,7 @@ END
+ 
+ 2 TEXTINCLUDE DISCARDABLE
+ BEGIN
+-    "#include ""afxres.h""\r\n"
++    "#include ""windows.h""\r\n"
+     "\0"
+ END
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/res/BillingS.rc b/SelfServiceCommon/Massai/cpp/BillingService/res/BillingS.rc
+index 536a5c50..149ff103 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/res/BillingS.rc
++++ b/SelfServiceCommon/Massai/cpp/BillingService/res/BillingS.rc
+@@ -9,7 +9,7 @@
+ //
+ // Generated from the TEXTINCLUDE 2 resource.
+ //
+-#include "afxres.h"
++#include "windows.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+ #undef APSTUDIO_READONLY_SYMBOLS
+@@ -79,7 +79,7 @@ END
+ 
+ 2 TEXTINCLUDE DISCARDABLE
+ BEGIN
+-    "#include ""afxres.h""\r\n"
++    "#include ""windows.h""\r\n"
+     "\0"
+ END
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
+index 2de93159..2f5a43db 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/PrinterRsp.cpp
+@@ -34,8 +34,8 @@
+ 
+ int parseBTP(int& iUsed, const char* pResponse)
+ {
+-char  *pStr;
+-char  *pEnd;
++const char* pStr;
++const char  *pEnd;
+ char   c;
+ int  n;
+ 
+@@ -46,8 +46,8 @@ int  n;
+     {
+       pEnd= pStr+strlen(pStr);
+       pStr += 4;
+-      if (pEnd <= pStr) return -1;
+-      c = *pStr;
++      if( pEnd <= pStr ) return -1;
++		c = *pStr;
+ 
+       // check for paper out flag !!
+ 
+@@ -128,8 +128,8 @@ int  n;
+ 
+ int parseATB(int& iUsed, const char* pResponse)
+ {
+-char      *pStr;
+-char      *pEnd;
++const char      *pStr;
++const char      *pEnd;
+ char       c;
+ /*
+ char       szCheck[256];
+@@ -357,8 +357,8 @@ ssdConfig  check("SERVICES","StockControl","CheckStocks");
+ 
+ int parseGPP(int& iUsed, const char* pResponse)
+ {
+-char      *pStr;
+-char      *pEnd;
++const char* pStr;
++const char* pEnd;
+ char       c;
+ 
+     if(!pResponse)
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/main.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/main.cpp
+index 67fe7814..79d7a89b 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/main.cpp
+@@ -8,15 +8,18 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++#include "massaidll/massai.hpp"
++#include "systools/eventSem.hpp"
++
++#include <winsock2.h>
+ #include <signal.h>
+ #include <iostream>
+ 
+-#include "massaidll/massai.hpp"
+ #include "server.h"
+ #include "trc/trace.h"
+ #include "tools/log.h"
+ #include "massaiCorba/corbasrvr.h"
+-#include "systools/eventSem.hpp"
++
+ 
+ extern char *getOutputPath();
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+index ec8bf9e4..c4ee6bb0 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/BillingService/src/sessionlist.cpp
+@@ -14,10 +14,15 @@
+ 
+ 
+ 
+-#include "trc/trace.h"
+ #include "sessionList.h"
+-#include "PrinterRsp.h"
++
++#include <winsock2.h>
++#include <windows.h>
+ #include <time.h>
++#include "trc/trace.h"
++
++#include "PrinterRsp.h"
++
+ 
+ using namespace BillingAccess;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/BillingService/static/makefile.mak b/SelfServiceCommon/Massai/cpp/BillingService/static/makefile.mak
+index a1333bd3..6bb01a56 100644
+--- a/SelfServiceCommon/Massai/cpp/BillingService/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/BillingService/static/makefile.mak
+@@ -8,11 +8,12 @@
+ 
+ MY_CFLAGS = \
+     -I$(P_INC) \
+-    -Gi -GR \
++    $(MY_CFLAGS_3) \
+     -I$(_GEN) \
+     -DTAO_AS_STATIC_LIBS -DACE_AS_STATIC_LIBS \
+     $(INC_INTERFACES) \
+-    $(INC_ACETAO)
++    $(INC_ACETAO) \
++	$(INC_MFC)
+ 
+ MY_RCFLAGS = \
+     -I$(P_INC)
+-- 
+2.41.0.windows.1
+

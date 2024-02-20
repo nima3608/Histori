@@ -1,0 +1,230 @@
+From efe41a7e9b065ca327fccd49c4feb977b327ba4b Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 5 Feb 2020 19:43:28 +0000
+Subject: [PATCH 1001/1076] MANTIS 0057237 bugfix: blocking configuration
+ access should not block checking tracelevel and topic
+
+trace.dll, tracehdl.dll, traceNoConfig.dll, tracehdlNoConfig.dll
+V1.0.0.10
+- decouple methods getTracelevel/isActive from command execution especially TRC_OPEN
+  - add synchronisation for accessing session
+  - add synchronisation for accessing configuration values tracelevel/topic
+  - do not use command synchronisation for methods getTracelevel/isActive
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1545 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Trace/inc/TraceConfig.h        |  2 +
+ .../Massai/cpp/Trace/inc/TraceProcessor.h     |  3 ++
+ .../Massai/cpp/Trace/inc/local_def.h          | 14 +++++--
+ .../Massai/cpp/Trace/src/TraceConfig.cpp      |  7 ++++
+ .../Massai/cpp/Trace/src/TraceProcessor.cpp   | 42 ++++++++++++-------
+ 5 files changed, 49 insertions(+), 19 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+index ca61ae63..4eb8af75 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+@@ -13,6 +13,7 @@
+ #include "boost/filesystem/path.hpp"
+ #include "boost/shared_ptr.hpp"
+ #include "systools/mSysTime.h"
++#include "systools/mMutexCS.h"
+ #include <string>
+ #include <map>
+ 
+@@ -45,6 +46,7 @@ namespace MASSAI
+         long m_tracelevel;
+         TopicMap m_topic;
+         boost::filesystem::path m_path;
++        mutable Materna::MSSD::Mutex m_access;
+     };
+ 
+     class TraceCommonConfig: public TraceBaseConfig
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+index 9e1a7b7c..1232caab 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceProcessor.h
+@@ -37,6 +37,8 @@ namespace MASSAI
+         void forward(const TraceCmd& cmd);
+         void forwardAll(const TraceCmd& cmd);
+         TraceSession* findSession(int hdl);
++        TraceSession* removeSession(int hdl);
++        void addSession(TraceSession* pSession);
+ 
+ 
+         typedef std::set<TraceSession*> SessionSet;
+@@ -49,6 +51,7 @@ namespace MASSAI
+         long m_threadCounter;
+         ThreadMap m_threadMap;
+         Materna::MSSD::Mutex m_access;
++        Materna::MSSD::Mutex m_sessionSetAccess;
+     };
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+index a22dc036..3abdcd02 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/local_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,0,9
+-#define FILE_VER_STR     "FileVersion", "1.0.0.9"
++#define FILE_VER_BIN     1,0,0,10
++#define FILE_VER_STR     "FileVersion", "1.0.0.10"
+ 
+ /*!
+ \file
+@@ -9,10 +9,18 @@
+ 
+ \section changehistory Change history
+ 
+-\version 1.0.0.9
++\version 1.0.0.10
+ 
+ trace.dll, tracehdl.dll, traceNoConfig.dll, tracehdlNoConfig.dll
+ 
++\version 1.0.0.10
++\li 05.02.2020
++\li bugfix SteT - Mantis 0057237: blocking configuration access should not block checking tracelevel and topic
++- decouple methods getTracelevel/isActive from command execution especially TRC_OPEN
++  - add synchronisation for accessing session
++  - add synchronisation for accessing configuration values tracelevel/topic
++  - do not use command synchronisation for methods getTracelevel/isActive
++
+ \version 1.0.0.9
+ \li 09.03.2017
+ \li bugfix SteT - Mantis 0045120: RADAR_PRE_LEAK_32 kills mControl
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+index cab3b50f..05ad9702 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+@@ -8,10 +8,12 @@
+ #include "trc/tracedef.h"
+ #include "boost/filesystem/path.hpp"
+ #include "systools/mSysTime.h"
++#include "systools/mAutoMutexCS.h"
+ #include <sstream>
+ #include <stdlib.h>
+ 
+ namespace fs = boost::filesystem;
++using Materna::MSSD::AutoMutexCS;
+ 
+ namespace
+ {
+@@ -58,11 +60,13 @@ namespace MASSAI
+ 
+     long TraceBaseConfig::getTracelevel() const
+     {
++      AutoMutexCS mx(m_access);
+       return m_tracelevel;
+     }
+ 
+     void TraceBaseConfig::setTracelevel(long level)
+     {
++      AutoMutexCS mx(m_access);
+       m_tracelevel= level;
+     }
+ 
+@@ -78,6 +82,7 @@ namespace MASSAI
+ 
+     bool TraceBaseConfig::isActive(const std::string& topic)
+     {
++      AutoMutexCS mx(m_access);
+       bool result= false;
+       TopicMap::const_iterator it= m_topic.find(topic);
+       if(it != m_topic.end())
+@@ -94,11 +99,13 @@ namespace MASSAI
+ 
+     void TraceBaseConfig::setTopic(const std::string& topic, bool active)
+     {
++      AutoMutexCS mx(m_access);
+       m_topic[topic]= active;
+     }
+ 
+     void TraceBaseConfig::cleanupTopic()
+     {
++      AutoMutexCS mx(m_access);
+       m_topic.clear();
+     }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+index 984e97b4..2af71e73 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceProcessor.cpp
+@@ -115,10 +115,29 @@ namespace MASSAI
+     void TraceProcessor::initSession(TraceSession* pSession)
+     {
+       const std::string& sessionId= pSession->getSessionId();
+-      m_sessionSet.insert(pSession);
++      addSession(pSession);
+       pSession->init();
+     }
+ 
++    void TraceProcessor::addSession(TraceSession* pSession)
++    {
++      AutoMutexCS mx(m_sessionSetAccess);
++      m_sessionSet.insert(pSession);
++    }
++
++    TraceSession* TraceProcessor::removeSession(int hdl)
++    {
++      AutoMutexCS mx(m_sessionSetAccess);
++      TraceSession* result = 0;
++      SessionSet::iterator it= m_sessionSet.find(reinterpret_cast<TraceSession*>(hdl));
++      if(it != m_sessionSet.end())
++      {
++        result = *it;
++        m_sessionSet.erase(it);
++      }
++      return result;
++    }
++
+     void TraceProcessor::close(int hdl)
+     {
+       if(hdl == 0)
+@@ -128,20 +147,11 @@ namespace MASSAI
+       }
+       else
+       {
+-        SessionSet::iterator it= m_sessionSet.find(reinterpret_cast<TraceSession*>(hdl));
+-        if(it != m_sessionSet.end())
++        TraceSession* pSession = removeSession(hdl);
++        if(pSession != 0)
+         {
+-          TraceSession* pSession = *it;
+-          if(pSession != 0)
+-          {
+-            pSession->close();
+-            m_sessionSet.erase(it);
+-            delete pSession;
+-          }
+-          else
+-          {
+-            m_sessionSet.erase(it);
+-          }
++          pSession->close();
++          delete pSession;
+         }
+       }
+     }
+@@ -187,7 +197,7 @@ namespace MASSAI
+     long TraceProcessor::getTracelevel(int handle)
+     {
+       long result = 0;
+-      AutoMutexCS mx(m_access);
++      AutoMutexCS mx(m_sessionSetAccess);
+       TraceSession* pSession= findSession(handle);
+       if(pSession != 0)
+       {
+@@ -199,7 +209,7 @@ namespace MASSAI
+     bool TraceProcessor::isActive(int handle, const char* pszTopic)
+     {
+       bool result = false;
+-      AutoMutexCS mx(m_access);
++      AutoMutexCS mx(m_sessionSetAccess);
+       TraceSession* pSession= findSession(handle);
+       if(pSession != 0 && pszTopic != 0)
+       {
+-- 
+2.41.0.windows.1
+

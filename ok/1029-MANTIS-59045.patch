@@ -1,0 +1,140 @@
+From fe46795d26084c2bdc721891c6b7f9c9fd4ddf83 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 13 Oct 2020 09:15:12 +0000
+Subject: [PATCH 1029/1076] MANTIS 59045 Mantis 59045: Config service returns
+ "alreadyExists" exception on wrong SELECTION values Fix the fix, retry with
+ setInitial also in case of notAuthorized exception
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1595 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgValues_def.h   | 34 +++++++++++++------
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 26 ++++++++++++++
+ 2 files changed, 50 insertions(+), 10 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 5944effc..a65220e5 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -75,37 +75,51 @@
+ // #define FILE_VER_BIN 1,1,4,0
+ // #define FILE_VER_DTS "1.1.4.0\0"
+ //
+-// 13.Sep.2017  JK      - Mantis 47432: CfgValuesS.exe stops processing file
+-//                        if syntax of single item config is wrong
++// 13.Sep.2017  JK      - Mantis 47432: CfgValuesS.exe stops processing
++//                        file if syntax of single item config is wrong
+ //                      - Generate a line-break warning, if one is detected
+ //                        within an input record.
+ // #define FILE_VER_BIN 1,1,6,0
+ // #define FILE_VER_DTS "1.1.6.0\0"
+ //
+-// 24.10.2017  GiT      - Mantis 0048136: CfgValues: command REMOVEFROMLIST does not remove values if escaped chars are included
++// 24.10.2017  GiT      - Mantis 0048136: CfgValues: command REMOVEFROMLIST
++//                        does not remove values if escaped chars are
++//                        included
+ //
+ // #define FILE_VER_BIN 1,2,0,0
+ // #define FILE_VER_DTS "1.2.0.0\0"
+ //
+-// 06.07.2018  Sven     - Mantis 0044960: Extend CfgValuesS by list operations through configuration file (and more)
++// 06.07.2018  Sven     - Mantis 0044960: Extend CfgValuesS by list
++//                        operations through configuration file (and more)
+ //
+ // #define FILE_VER_BIN 1,2,1,0
+ // #define FILE_VER_DTS "1.2.1.0\0"
+ //
+-// 29.10.2018  GiT     - Mantis 0052260: CfgValues: Bugfix removefromlist willfull ignored more than one operation
++// 29.10.2018  GiT     - Mantis 0052260: CfgValues: Bugfix removefromlist
++//                       willfull ignored more than one operation
+ //
+ // #define FILE_VER_BIN 1,2,1,1
+ // #define FILE_VER_DTS "1.2.1.1\0"
+ //
+-// 12.12.2019  GiT     - Mantis 0056855: CfgValues: add PORT commandline parameter
++// 12.12.2019  GiT     - Mantis 0056855: CfgValues: add PORT parameter
+ //
+ // #define FILE_VER_BIN 1,2,1,1
+ // #define FILE_VER_DTS "1.2.1.1\0"
+ //
+-// 29.Sep.2020  JK      - Mantis 59045: Config service returns "alreadyExists" exception on wrong SELECTION values
+-//                      - Retry with setInitial only in case of notFound exception
+-#define FILE_VER_BIN 1,2,2,0
+-#define FILE_VER_DTS "1.2.2.0\0"
++// 29.Sep.2020  JK      - Mantis 59045: Config service returns
++//                        "alreadyExists" exception on wrong SELECTION
++//                        values
++//                      - Retry with setInitial only in case of notFound
++// #define FILE_VER_BIN 1,2,2,0
++// #define FILE_VER_DTS "1.2.2.0\0"
++//
++// 13.Oct.2020  JK      - Mantis 59045: Config service returns
++//                        "alreadyExists" exception on wrong SELECTION
++//                        values
++//                      - Fix the fix, retry with setInitial also in case
++//                        of notAuthorized exception
++#define FILE_VER_BIN 1,2,3,0
++#define FILE_VER_DTS "1.2.3.0\0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index 7f128ed5..c49623bb 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -1154,6 +1154,14 @@ int main( int argc, char ** argv )
+                         {
+                            TextProxy->set( SAcc, ValString.c_str() );
+                         }
++                        catch( Config::Node::notAuthorized & )
++                        {
++                           TextProxy->setInitial
++                                       (
++                                          SAcc,
++                                          ValString.c_str()
++                                       );
++                        }
+                         catch( Config::Node::notFound & )
+                         {
+                            TextProxy->setInitial
+@@ -1323,6 +1331,14 @@ int main( int argc, char ** argv )
+                            {
+                               TextlistProxy->set( SAcc, ValStrings );
+                            }
++                           catch( Config::Node::notAuthorized & )
++                           {
++                              TextlistProxy->setInitial
++                                             (
++                                                SAcc,
++                                                ValStrings
++                                             );
++                           }
+                            catch( Config::Node::notFound & )
+                            {
+                               TextlistProxy->setInitial
+@@ -1402,6 +1418,11 @@ int main( int argc, char ** argv )
+                         {
+                            NumberProxy->set( SAcc, atoi( FVal.c_str() ) );
+                         }
++                        catch( Config::Node::notAuthorized & )
++                        {
++                           NumberProxy->
++                              setInitial( SAcc, atoi( FVal.c_str() ) );
++                        }
+                         catch( Config::Node::notFound & )
+                         {
+                            NumberProxy->
+@@ -1485,6 +1506,11 @@ int main( int argc, char ** argv )
+                         {
+                            SelectionProxy->setString( SAcc, FVal.c_str() );
+                         }
++                        catch( Config::Node::notAuthorized & )
++                        {
++                           SelectionProxy->
++                              setInitialString( SAcc, FVal.c_str() );
++                        }
+                         catch( Config::Node::notFound & )
+                         {
+                            SelectionProxy->
+-- 
+2.41.0.windows.1
+

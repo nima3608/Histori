@@ -1,0 +1,141 @@
+From 1edde08521e21a75ec461b86b450b217b7c9a547 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 12 Nov 2014 10:02:25 +0000
+Subject: [PATCH 162/462] Buildscript added tool parse_sv_commits.pl
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@242 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/parse_sv_commits.pl         | 121 ++++++++++++++++++
+ 1 file changed, 121 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/parse_sv_commits.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/parse_sv_commits.pl b/SelfServiceBuild/Build/scripts/parse_sv_commits.pl
+new file mode 100644
+index 0000000..89644d2
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/parse_sv_commits.pl
+@@ -0,0 +1,121 @@
++#!/usr/bin/perl -w
++#
++
++use strict;
++our $VERSION="0.0.0.1";
++
++use File::Copy;
++use Getopt::Long;
++use File::Slurp;
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++my $fileName;
++
++GetOptions ("file=s"   => \$fileName,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count != 1 or $help )
++{
++  print STDERR "usage: $0 --file=\"Filename\" \n" ;
++  exit 0;
++}
++
++my @replace_list = (
++  qq{---.*?^Revision:.*?^},
++  qq{},
++  qq{^Revision:.*?^},
++  qq{},
++  qq{Merged revision.s..*?^MANTIS.*?^},
++  qq{},
++  qq{^Author.*?^Date.*?^Message.*?^},
++  qq{},
++  q(^[\.]{8}),
++  qq{},
++  q{^MANTIS.[\d]*\n^Mantis},
++  qq{Mantis},
++  qq(^\n),
++  q{},
++  q(^MANTIS),
++  qq{\nMANTIS}
++  );
++if ( -e $fileName)
++{
++    &reg_replace_in_file($fileName,@replace_list);
++}
++
++my @rds_list = (
++  q{^MANTIS.*?(\d+)}
++  );
++if ( -e $fileName)
++{
++    &remove_double_sections($fileName,@rds_list);
++}
++
++exit 0;
++
++sub remove_double_sections
++{
++  my $filename = shift;
++  my $section_marker = shift;
++  
++  my @rdf = read_file($filename);
++  my @wdf;
++  my @idfs;
++  my $remove_lines = 0;
++  foreach (@rdf)
++  {
++    if( $_ =~ m/$section_marker/)
++    {
++      print "==== $section_marker matched: $1 ====\n";
++      $remove_lines = 0;
++      if( int($1) ~~ @idfs)
++      {
++        $remove_lines = 1;
++      } else
++      {
++        push(@idfs, int($1));
++      }
++    }
++    if($remove_lines == 1)
++    {
++      print "removed: $_\n";
++    } else
++    {
++      push(@wdf,$_);
++    }
++  }
++  write_file($filename,{overwrite => 1 },@wdf);
++  
++}
++
++sub reg_replace_in_file
++{
++  my $filename = shift;
++  my @replacelist = (@_);
++ 
++  if ( -e $filename.".orig" )
++  {
++    copy( $filename.".orig", $filename ) or die "reg_replace_in_file: $!";
++  } else
++  {
++    copy( $filename, $filename.".orig" ) or die "reg_replace_in_file: $!";
++  }
++  my $cf = read_file($filename);
++
++  my $k;
++  while (my $search_str = shift(@replacelist))
++  {
++    my $replace_str = shift(@replacelist);
++    print "++++\n";
++    
++    if( $cf =~ s/$search_str/$replace_str/gms )
++    {
++      print "==== $search_str $replace_str ====\n";
++    }
++  }
++
++  write_file($filename,$cf);
++}
+-- 
+2.41.0.windows.1
+

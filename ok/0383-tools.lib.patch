@@ -1,0 +1,215 @@
+From 20edb1bcedd96f5628ab52fd9d7ba347ba25e32e Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 7 Aug 2013 14:04:07 +0000
+Subject: [PATCH 0383/1000] tools.lib V1.0.1.13 Mantis 0028323: GPPDev: Custom
+ VKP-80II extension: added Interval.h
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@557 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/Interval.h           | 54 +++++++++++
+ .../cpp/Tools/inc/local_def_msystools.h       | 10 +-
+ .../Massai/cpp/Tools/makefile.mak             |  3 +-
+ .../Massai/cpp/Tools/src/Interval.cpp         | 92 +++++++++++++++++++
+ 4 files changed, 156 insertions(+), 3 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/Interval.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/Interval.h b/SelfServiceCommon/Interfaces/inc/Tools/Interval.h
+new file mode 100644
+index 00000000..a3e98855
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/Interval.h
+@@ -0,0 +1,54 @@
++// Wait
++#ifndef INTERVAL_H_INCLUDED
++#define INTERVAL_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "tools/TraceInterface.h"
++#include <string>
++
++namespace mInterval
++{
++  typedef unsigned long Time; // in ms
++
++  class Interval
++  {
++    public:
++      Interval(MASSAI::trace::TraceInterface& trc, const std::string& name, Time duration);
++      ~Interval();
++      void start();
++      void stop();
++      void wait();
++    private:
++      std::string m_name;
++      Time m_duration;
++      Time m_intervalStart;
++      bool m_isActive;
++      MASSAI::trace::TraceInterface& m_trc;
++  };
++
++  // start the interval
++  // and wait in destructor for the end of the interval
++  class Slot
++  {
++    public:
++      Slot(Interval& m_interval);
++      ~Slot();
++    private:
++      Interval& m_interval;
++  };
++
++  // gap between two intervals
++  // wait for the end of an interval in constructor
++  // and starts a new interval in destructor
++  class Gap
++  {
++    public:
++      Gap(Interval& m_interval);
++      ~Gap();
++    private:
++      Interval& m_interval;
++  };
++}
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 9168ccb5..585ab189 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,11 +1,17 @@
+-#define FILE_VER_BIN     1,0,1,12
+-#define FILE_VER_STR     "FileVersion", "1.0.1.12\0"
++#define FILE_VER_BIN     1,0,1,13
++#define FILE_VER_STR     "FileVersion", "1.0.1.13\0"
+ 
+ /*!
+ \page tools.lib tools.lib - Release Notes
+ 
+ tools.lib
+ 
++\date 07.08.2013
++\li V1.0.1.13
++\li SteT - Mantis 0028323: GPPDev: Custom VKP-80II
++\li extension: added Interval.h
++
++
+ \date 06.08.2013
+ \li V1.0.1.12
+ \li SteT - Mantis 0028323: GPPDev: Custom VKP-80II
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index cec4d092..6c7dcb73 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -42,7 +42,8 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\ResetTime.obj \
+                         $(_OBJ)\ActionTimeLimit.obj \
+                         $(_OBJ)\TraceSetLevel.obj \
+-                        $(_OBJ)\TraceSetLevelDelegate.obj
++                        $(_OBJ)\TraceSetLevelDelegate.obj \
++                        $(_OBJ)\Interval.obj \
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
+new file mode 100644
+index 00000000..9046aa0a
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/Interval.cpp
+@@ -0,0 +1,92 @@
++// Wait
++#include "tools/Interval.h"
++#include "systools/mSysTime.h"
++
++using namespace mInterval;
++using MASSAI::trace::TraceInterface;
++using mSysTime::Duration;
++
++namespace
++{
++  Time currentTime()
++  {
++    return mSysTime::getUpTime();
++  }
++
++  void traceDuration(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const std::string& name, const char* text, Time time)
++  {
++    Duration t = mSysTime::getDuration(time);
++    trc.writeTrace(level, file, line, function, "(%s) %s(%d:%02d:%02d,%02d)",
++      name.c_str(),
++      text,
++      t.days * 24 + t.hours,
++      t.minutes,
++      t.seconds,
++      t.milliseconds
++    );
++  }
++}
++
++namespace mInterval
++{
++  Interval::Interval(TraceInterface& trc, const std::string& name, Time duration):
++    m_name(name),
++    m_duration(duration),
++    m_intervalStart(0),
++    m_isActive(false),
++    m_trc(trc)
++  {}
++
++  Interval::~Interval()
++  {}
++
++  void Interval::start()
++  {
++    m_isActive = true;
++    m_intervalStart = currentTime();
++  }
++
++  void Interval::stop()
++  {
++    m_isActive = false;
++  }
++
++  void Interval::wait()
++  {
++    if(m_isActive)
++    {
++      Time now = currentTime();
++      Time delay = now - m_intervalStart;
++      if(delay < m_duration)
++      {
++        Time wait = m_duration - delay;
++        traceDuration(m_trc, BasicRuntime_HERE, m_name, "wait ", wait);
++        mSysTime::sleep(wait);
++      }
++    }
++  }
++
++  Gap::Gap(Interval& interval):
++    m_interval(interval)
++  {
++    m_interval.wait();
++  }
++
++  Gap::~Gap()
++  {
++    m_interval.start();
++  }
++
++  Slot::Slot(Interval& interval):
++    m_interval(interval)
++  {
++    m_interval.start();
++  }
++
++  Slot::~Slot()
++  {
++    m_interval.wait();
++  }
++}
+-- 
+2.41.0.windows.1
+

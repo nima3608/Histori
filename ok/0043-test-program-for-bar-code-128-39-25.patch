@@ -1,0 +1,344 @@
+From c0f40b22fc58eb8e4107a16ec2eb18e4ce529344 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 24 Sep 2010 14:42:23 +0000
+Subject: [PATCH 0043/1077] test program for bar code 128, 39, 25
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@45 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/src/TestBarcode128.cpp   | 93 +++++++++++++------
+ .../Massai/cpp/Tools/src/TestBarcode39.cpp    | 80 +++++++++++++---
+ .../Tools/src/TestBarcodeIndustrial2of5.cpp   | 79 +++++++++++++---
+ 3 files changed, 193 insertions(+), 59 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode128.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode128.cpp
+index 42f049e0..0b1a5f37 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode128.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode128.cpp
+@@ -1,6 +1,8 @@
++#include "mArgScan.hpp"
+ #include "barcode128.h"
+ #include "localtrace.h"
+ #include <fstream>
++#include <iostream>
+ 
+ using namespace MASSAI::localtrace;
+ using namespace MASSAI::Barcode;
+@@ -14,46 +16,79 @@ void createBarcode(const std::string& name, const std::string& data, Barcode128S
+   Bitmap bitmap= test.createBarcode(barcodeData);
+   dumpTrace(BasicRuntime_HERE, barcodeData.size(), barcodeData.data());
+   dumpTrace(BasicRuntime_HERE, bitmap.bmp.size(), bitmap.bmp.data());
+-  std::ofstream out((name + ".bmp").c_str());
++  std::ofstream out(name.c_str(), std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+   out.write(bitmap.bmp.data(), bitmap.bmp.size());
+ }
+ 
+-int main(int argc, char** argv)
++void printUsage(int argc, char** argv, char* error= 0)
+ {
+-  openTrace(argv[0]);
++  std::cout << std::endl;
++  std::cout << argv[0];
++  std::cout << " -data:<BarcodeData>";
++  std::cout << " -out:<BitmapFile>";
++  std::cout << " [-block:<BlockSize>]";
++  std::cout << " [-height:<height>]";
++  std::cout << " [-code_a_off]";
++  std::cout << " [-code_b_off]";
++  std::cout << " [-code_c_off]";
++  std::cout << " [-code_a_start_off]";
++  std::cout << " [-code_b_start_off]";
++  std::cout << " [-code_c_start_off]";
++  std::cout << " [-quietzone]";
++  std::cout << std::endl;
++  if(error)
+   {
+-    Barcode128Settings settings= {1, 1, true, true, true, true};
+-    createBarcode("Any_7", "7", settings);
+-    createBarcode("Any_123456789", "123456789", settings);
+-    createBarcode("Any_ABcDE", "AB\ncDE\n", settings);
+-    createBarcode("Any_AB12345", "AB12345", settings);
+-    createBarcode("Any_AB123456", "AB123456", settings);
++    std::cout << error << std::endl;
+   }
++}
++
++int main(int argc, char** argv)
++{
++  int result= 0;
++  openTrace(argv[0]);
++  try
+   {
+-    Barcode128Settings settings= {1, 1, true, true, false, false};
+-    createBarcode("A_7", "7", settings);
+-    createBarcode("A_123456789", "123456789", settings);
+-    createBarcode("A_ABcDE", "AB\ncDE\n", settings);
+-    createBarcode("A_AB12345", "AB12345", settings);
+-    createBarcode("A_AB123456", "AB123456", settings);
++    argScan args(argc, argv);
++    const char* filename= args.option("OUT");
++    const char* data= args.option("DATA");
++    if(args.help())
++    {
++      printUsage(argc, argv);
++      result= 1;
++    }
++    else if(!data)
++    {
++      printUsage(argc, argv, "Please specify the barcode data");
++      result= 2;
++    }
++    else if(!filename)
++    {
++      printUsage(argc, argv, "Please specify an output file");
++      result= 3;
++    }
++    else
++    {
++      Barcode128Settings settings;
++      settings.blockSize= args.optionInteger("BLOCK", 1);
++      settings.height= args.optionInteger("HEIGHT", 10);
++      settings.useQuietZone= args.option("QUIETZONE") != 0;
++      settings.allowCodeA= args.option("CODE_A_OFF") == 0;
++      settings.allowCodeB= args.option("CODE_B_OFF") == 0;
++      settings.allowCodeC= args.option("CODE_C_OFF") == 0;
++      settings.allowStartCodeA= args.option("CODE_A_START_OFF") == 0;
++      settings.allowStartCodeB= args.option("CODE_B_START_OFF") == 0;
++      settings.allowStartCodeC= args.option("CODE_C_START_OFF") == 0;
++      createBarcode(filename, data, settings);
++    }
+   }
++  catch(std::exception ex)
+   {
+-    Barcode128Settings settings= {1, 1, true, false, true, false};
+-    createBarcode("B_7", "7", settings);
+-    createBarcode("B_123456789", "123456789", settings);
+-    createBarcode("B_ABcDE", "AB\ncDE\n", settings);
+-    createBarcode("B_AB12345", "AB12345", settings);
+-    createBarcode("B_AB123456", "AB123456", settings);
++    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
+   }
++  catch(...)
+   {
+-    Barcode128Settings settings= {1, 1, true, false, false, true};
+-    createBarcode("C_7", "7", settings);
+-    createBarcode("C_123456789", "123456789", settings);
+-    createBarcode("C_ABcDE", "AB\ncDE\n", settings);
+-    createBarcode("C_AB12345", "AB12345", settings);
+-    createBarcode("C_AB123456", "AB123456", settings);
++    writeTraceText(MajorError_HERE, "unknown exception");
+   }
+-
+   closeTrace();
+-  return 0;
++  return result;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode39.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode39.cpp
+index 27311afa..c8733b42 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode39.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcode39.cpp
+@@ -1,6 +1,10 @@
++#include "mArgScan.hpp"
+ #include "barcode39.h"
+ #include "localtrace.h"
+ #include <fstream>
++#include <iostream>
++#include <ios>
++
+ 
+ using namespace MASSAI::localtrace;
+ using namespace MASSAI::Barcode;
+@@ -14,27 +18,73 @@ void createBarcode(const std::string& name, const std::string& data, Barcode39Se
+   Bitmap bitmap= test.createBarcode(barcodeData);
+   dumpTrace(BasicRuntime_HERE, barcodeData.size(), barcodeData.data());
+   dumpTrace(BasicRuntime_HERE, bitmap.bmp.size(), bitmap.bmp.data());
+-  std::ofstream out((name + ".bmp").c_str());
++  std::ofstream out(name.c_str(), std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+   out.write(bitmap.bmp.data(), bitmap.bmp.size());
+ }
+ 
+-      size_t narrowBlockSize;
+-      size_t wideBlockSize;
+-      size_t intermediateBlockSize;
+-      size_t height;
+-      bool useQuietZone;
+-      bool useChecksum;
++void printUsage(int argc, char** argv, char* error= 0)
++{
++  std::cout << std::endl;
++  std::cout << argv[0];
++  std::cout << " -data:<BarcodeData>";
++  std::cout << " -out:<BitmapFile>";
++  std::cout << " [-narrow:<NarrowBlockSize>]";
++  std::cout << " [-wide:<wideBlockSize>]";
++  std::cout << " [-intermediate:<intermediateBlockSize>]";
++  std::cout << " [-height:<height>]";
++  std::cout << " [-quietzone]";
++  std::cout << " [-checksum]";
++  std::cout << std::endl;
++  if(error)
++  {
++    std::cout << error << std::endl;
++  }
++}
+ 
+ int main(int argc, char** argv)
+ {
++  int result= 0;
+   openTrace(argv[0]);
+-  Barcode39Settings settings= {1, 2, 1, 1, true, true};
+-  createBarcode("7", "7", settings);
+-  createBarcode("123456789", "123456789", settings);
+-  createBarcode("ABcDE", "AB\ncDE\n", settings);
+-  createBarcode("AB12345", "AB12345", settings);
+-  createBarcode("AB123456", "AB123456", settings);
+-
++  try
++  {
++    argScan args(argc, argv);
++    const char* filename= args.option("OUT");
++    const char* data= args.option("DATA");
++    if(args.help())
++    {
++      printUsage(argc, argv);
++      result= 1;
++    }
++    else if(!data)
++    {
++      printUsage(argc, argv, "Please specify the barcode data");
++      result= 2;
++    }
++    else if(!filename)
++    {
++      printUsage(argc, argv, "Please specify an output file");
++      result= 3;
++    }
++    else
++    {
++      Barcode39Settings settings;
++      settings.narrowBlockSize= args.optionInteger("NARROW", 1);
++      settings.wideBlockSize= args.optionInteger("WIDE", 2);
++      settings.intercharacterBlockSize= args.optionInteger("INTERMEDIATE", settings.narrowBlockSize);
++      settings.height= args.optionInteger("HEIGHT", 10);
++      settings.useQuietZone= args.option("QUIETZONE") != 0;
++      settings.useChecksum= args.option("CHECKSUM") != 0;
++      createBarcode(filename, data, settings);
++    }
++  }
++  catch(std::exception ex)
++  {
++    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++  }
++  catch(...)
++  {
++    writeTraceText(MajorError_HERE, "unknown exception");
++  }
+   closeTrace();
+-  return 0;
++  return result;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcodeIndustrial2of5.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcodeIndustrial2of5.cpp
+index 62279256..c5ee2686 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcodeIndustrial2of5.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TestBarcodeIndustrial2of5.cpp
+@@ -1,6 +1,9 @@
++#include "mArgScan.hpp"
+ #include "barcodeIndustrial2of5.h"
+ #include "localtrace.h"
+ #include <fstream>
++#include <iostream>
++
+ 
+ using namespace MASSAI::localtrace;
+ using namespace MASSAI::Barcode;
+@@ -14,27 +17,73 @@ void createBarcode(const std::string& name, const std::string& data, BarcodeIndu
+   Bitmap bitmap= test.createBarcode(barcodeData);
+   dumpTrace(BasicRuntime_HERE, barcodeData.size(), barcodeData.data());
+   dumpTrace(BasicRuntime_HERE, bitmap.bmp.size(), bitmap.bmp.data());
+-  std::ofstream out((name + ".bmp").c_str());
++  std::ofstream out(name.c_str(), std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+   out.write(bitmap.bmp.data(), bitmap.bmp.size());
+ }
+ 
+-      size_t narrowBlockSize;
+-      size_t wideBlockSize;
+-      size_t intermediateBlockSize;
+-      size_t height;
+-      bool useQuietZone;
+-      bool useChecksum;
++void printUsage(int argc, char** argv, char* error= 0)
++{
++  std::cout << std::endl;
++  std::cout << argv[0];
++  std::cout << " -data:<BarcodeData>";
++  std::cout << " -out:<BitmapFile>";
++  std::cout << " [-narrow:<NarrowBlockSize>]";
++  std::cout << " [-wide:<wideBlockSize>]";
++  std::cout << " [-space:<spaceBlockSize>]";
++  std::cout << " [-height:<height>]";
++  std::cout << " [-quietzone]";
++  std::cout << " [-checksum]";
++  std::cout << std::endl;
++  if(error)
++  {
++    std::cout << error << std::endl;
++  }
++}
+ 
+ int main(int argc, char** argv)
+ {
++  int result= 0;
+   openTrace(argv[0]);
+-  BarcodeIndustrial2of5Settings settings= {1, 2, 1, 1, true, true};
+-  createBarcode("7", "7", settings);
+-  createBarcode("123456789", "123456789", settings);
+-  createBarcode("ABcDE", "AB\ncDE\n", settings);
+-  createBarcode("AB12345", "AB12345", settings);
+-  createBarcode("AB123456", "AB123456", settings);
+-
++  try
++  {
++    argScan args(argc, argv);
++    const char* filename= args.option("OUT");
++    const char* data= args.option("DATA");
++    if(args.help())
++    {
++      printUsage(argc, argv);
++      result= 1;
++    }
++    else if(!data)
++    {
++      printUsage(argc, argv, "Please specify the barcode data");
++      result= 2;
++    }
++    else if(!filename)
++    {
++      printUsage(argc, argv, "Please specify an output file");
++      result= 3;
++    }
++    else
++    {
++      BarcodeIndustrial2of5Settings settings;
++      settings.narrowBlockSize= args.optionInteger("NARROW", 1);
++      settings.wideBlockSize= args.optionInteger("WIDE", 2);
++      settings.spaceBlockSize= args.optionInteger("SPACE", settings.narrowBlockSize);
++      settings.height= args.optionInteger("HEIGHT", 10);
++      settings.useQuietZone= args.option("QUIETZONE") != 0;
++      settings.useChecksum= args.option("CHECKSUM") != 0;
++      createBarcode(filename, data, settings);
++    }
++  }
++  catch(std::exception ex)
++  {
++    wrtTrace(MajorError_HERE, "exception: (%s)", ex.what());
++  }
++  catch(...)
++  {
++    writeTraceText(MajorError_HERE, "unknown exception");
++  }
+   closeTrace();
+-  return 0;
++  return result;
+ }
+-- 
+2.41.0.windows.1
+

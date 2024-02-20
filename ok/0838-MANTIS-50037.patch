@@ -1,0 +1,406 @@
+From eddde0f407abf7557f1f16e89cb4a09fadd55c75 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 25 May 2018 13:40:57 +0000
+Subject: [PATCH 0838/1000] MANTIS 50037 massaiCfgXMgrB.exe, CfgXMgrB.exe
+ version 2.3.1 - MANTIS 50037: Changes to the payment configuration for ZVT
+ ... - Bugfix: Creating crypto items now can be setInitial'ed only in plain
+ form.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1351 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 16 +++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp  | 37 +++++---
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 16 +++-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp | 13 +++
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       | 10 ++-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   | 21 ++++-
+ .../Massai/cpp/CfgXMgrB/src/cfgValueText.cpp  | 86 +++++++++++++++++--
+ 7 files changed, 169 insertions(+), 30 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 1069376c..f7f6dfd1 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -560,10 +560,20 @@
+ //! - MANTIS 50037: Changes to the payment configuration for ZVT ...
+ //! - Changes in meta-data during create() are now immediately exercising
+ //!   the cryptification of text values. No restart necessary.
+-//! - Creating crypto items now can be setInitial'ed in both 
++//! - Creating crypto items now can be setInitial'ed in both
+ //!   crypted or in plain form.
+-#define FILE_VER_BIN 2,3,0,0
+-#define FILE_VER_DTS "2.3.0.0"
++// #define FILE_VER_BIN 2,3,0,0
++// #define FILE_VER_DTS "2.3.0.0"
++//
++//! @version 2.3.1
++//! @date    25.05.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 50037: Changes to the payment configuration for ZVT ...
++//! - Bugfix: Creating crypto items now can be setInitial'ed
++//!   only in plain form.
++#define FILE_VER_BIN 2,3,1,0
++#define FILE_VER_DTS "2.3.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+index 5f73bb7c..86a9f56c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+@@ -67,12 +67,30 @@ public:
+ 
+    /**
+     *
+-    * Constructor.
++    * Constructor for plain values
+     *
+-    * @param value:     The initial value.
++    * @param value:             The value.
+     *
+    **/
+-   explicit cfgValueText( char const * value );
++   explicit cfgValueText( std::string const & value );
++
++   /**
++    *
++    * Constructor for encrypted values.
++    *
++    * @param phrase:            Encryption phrase.
++    *
++    * @param already_encrypted: The initial value.
++    *
++    * @param value:             The value.
++    *
++   **/
++   cfgValueText
++      (
++         std::string const &    phrase,
++         bool                   already_encrypted,
++         std::string const &    value
++      );
+ 
+    /**
+     *
+@@ -92,7 +110,7 @@ public:
+     *
+     * Get current encryption details.
+     *
+-    * @return:          Encryption phrase.
++    * @return:                  Encryption phrase.
+     *
+    **/
+    std::string encryptionGet() const;
+@@ -101,7 +119,7 @@ public:
+     *
+     * Set encryption details.
+     *
+-    * @param phrase:    Encryption phrase.
++    * @param phrase:            Encryption phrase.
+     *
+    **/
+    void encryptionSet( std::string const & phrase );
+@@ -110,26 +128,25 @@ public:
+     *
+     * Save the object to an ostream.
+     *
+-    * @param dst:       The stream to write the object to.
++    * @param dst:               The stream to write the object to.
+     *
+    **/
+    bool save( std::ostream & dst ) const;
+ 
+    /**
+     *
+-    * Return the value as zero-terminated string.
++    * Return the value.
+     *
+-    * @return The value.
++    * @return:                  The value.
+     *
+    **/
+-   //char const * c_str() const;
+    std::string valueString() const;
+ 
+    /**
+     *
+     * Return the length of the text.
+     *
+-    * @return The length.
++    * @return:                  The length.
+     *
+    **/
+    unsigned length() const;
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 00896f38..0ef9e789 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -554,10 +554,20 @@
+ //! - MANTIS 50037: Changes to the payment configuration for ZVT ...
+ //! - Changes in meta-data during create() are now immediately exercising
+ //!   the cryptification of text values. No restart necessary.
+-//! - Creating crypto items now can be setInitial'ed in both 
++//! - Creating crypto items now can be setInitial'ed in both
+ //!   crypted or in plain form.
+-#define FILE_VER_BIN 2,3,0,0
+-#define FILE_VER_DTS "2.3.0.0"
++// #define FILE_VER_BIN 2,3,0,0
++// #define FILE_VER_DTS "2.3.0.0"
++//
++//! @version 2.3.1
++//! @date    25.05.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 50037: Changes to the payment configuration for ZVT ...
++//! - Bugfix: Creating crypto items now can be setInitial'ed
++//!   only in plain form.
++#define FILE_VER_BIN 2,3,1,0
++#define FILE_VER_DTS "2.3.1.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index 945ee673..d36b047c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -79,12 +79,25 @@ void cfgCorba_ServiceText::create
+                      explanation,
+                      static_cast<unsigned>( max_length )
+                   );
++#if 0
+       cfgValueText * nt = new cfgValueText( def );
+       if( !cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+       {
+          // Use the "explanation" as encryption prase.
+          nt->encryptionSet( explanation );
+       }
++#else
++      cfgValueText * nt = 0;
++      if( !cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
++      {
++         // Use the "explanation" as encryption prase.
++         nt = new cfgValueText( explanation, false, def  );
++      }
++      else
++      {
++         nt = new cfgValueText( def );
++      }
++#endif
+       M_ConfigEntity->itemCreate
+       (
+          obj, acc.Item, nt
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+index 9a3ce9b0..c927a288 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -98,11 +98,17 @@ class cfgCorba_ServiceText2 :
+                         regex,
+                         static_cast<unsigned>( meta_data.Semantic )
+                      );
+-         cfgValueText * nt = new cfgValueText( default_value );
++
++
++         cfgValueText * nt = 0;
+          if( !cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+          {
+             // Use the "explanation" as encryption prase.
+-            nt->encryptionSet( explanation );
++            nt = new cfgValueText( explanation, false, default_value );
++         }
++         else
++         {
++            nt = new cfgValueText( default_value );
+          }
+          M_ConfigEntity->itemCreate
+          (
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index 375ff57b..60ffb5ab 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -323,15 +323,30 @@ cfgValue * cfgMetaText::valueFactory
+ ) const
+ {
+    std::string const dr = cfgRightsMan::getDefault( getRights() );
+-   cfgValueText * ret = new cfgValueText( src.c_str() );
++   cfgValueText * ret = 0;
+    if (
+          !cfgRightsMan::mayRead( dr ) &&
+          !cfgRightsMan::mayCreate( dr )
+       )
+    {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "cfgMetaText::valueFactory - encrypted"
++         );
+       // Default rights is no-read
+-      // -> Crypt-extract value.
+-      ret->encryptionSet( getExplanation() );
++      // -> Value is already encrypted.
++      ret = new cfgValueText( getExplanation(), true, src.c_str() );
++   }
++   else
++   {
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            "cfgMetaText::valueFactory - plain"
++         );
++      // Default rights is normal
++      ret = new cfgValueText( src.c_str() );
+    }
+    return ret;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+index 04b4ddd5..a796690a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+@@ -234,12 +234,54 @@ namespace
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-cfgValueText::cfgValueText( char const * value ) :
++cfgValueText::cfgValueText( std::string const & value ) :
+    cfgValue(),
+-   m_coding( code_unknown ),
++   m_coding( code_plain ),
+    m_value_file( value )
+ {
+-   DBUGOUT_THIS( "cfgValueText - simple value \"" << value << "\"" );
++   DBUGOUT_THIS( "cfgValueText - plain value=\"" << value << "\"" );
++}
++
++
++
++/**
++ *
++ * Method implementation - see cfgValueText.hpp.
++ *
++**/
++cfgValueText::cfgValueText
++      (
++         std::string const &    phrase,
++         bool                   already_encrypted,
++         std::string const &    value
++      ) :
++   cfgValue(),
++   m_coding( code_plain ),
++   m_value_file( value )
++{
++   if( already_encrypted )
++   {
++      // Value parameter is already encrypted
++      if( !phrase.empty() )
++      {
++         m_coding = code_encrypt;
++         m_phrase = phrase;
++      }
++   }
++   else
++   {
++      // Value parameter is plain
++      encryptionSet( phrase );
++   }
++   if( m_coding )
++   {
++      DBUGOUT_THIS( "cfgValueText - phrase=\"" << phrase
++         << "\" value=\"" << value << "\"" );
++   }
++   else
++   {
++      DBUGOUT_THIS( "cfgValueText - plain value=\"" << value << "\"" );
++   }
+ }
+ 
+ 
+@@ -253,7 +295,8 @@ std::string cfgValueText::encryptionGet() const
+ {
+    if( m_coding == code_encrypt )
+    {
+-      DBUGOUT_THIS( "encryptionGet() = (crypt)" );
++      DBUGOUT_THIS( "encryptionGet() = (crypt) phrase=\"" 
++         << m_phrase << "\"" );
+       return m_phrase;
+    }
+    else
+@@ -272,6 +315,7 @@ std::string cfgValueText::encryptionGet() const
+ **/
+ void cfgValueText::encryptionSet( std::string const & phrase )
+ {
++#if 0
+    switch( m_coding )
+    {
+    case code_encrypt:
+@@ -292,25 +336,49 @@ void cfgValueText::encryptionSet( std::string const & phrase )
+          m_coding = code_plain;
+       }
+    }
++#endif
+    if( m_coding != code_encrypt )
+    {
++      // Old coding is plain
+       if( !phrase.empty() )
+       {
++         // New coding is encrypted
+          std::string const orig = m_value_file;
+          m_coding = code_encrypt;
+          m_phrase = phrase;
+          m_value_file = cryptWrite( phrase, m_value_file );
+-         DBUGOUT_THIS( "encryptionSet \"" << orig
+-            << "\" -> \"" << m_value_file << "\"" );
++         DBUGOUT_THIS( "encryptionSet phrase=\"" << phrase
++            << "\"  \"" << orig << "\" -> \"" << m_value_file << "\"" );
+       }
+       else
+       {
++         // New coding is plain too
+          DBUGOUT_THIS( "encryptionSet (plain) unchanged" );
+       }
+    }
+    else
+    {
+-      DBUGOUT_THIS( "encryptionSet (crypt) unchanged" );
++      // Old coding is encrypted, won't change from here
++      if( phrase.empty() )
++      {
++         // New coding is plain? Shall not happen.
++         DBUGOUT_THIS( "encryptionSet (crypt) to (plain)?" );
++      }
++      else
++      {
++         if( m_phrase == phrase )
++         {
++            // New coding is encrypted too with same phrase
++            DBUGOUT_THIS( "encryptionSet (crypt) unchanged" );
++         }
++         else
++         {
++            // New coding is encrypted too, but with different phrase
++            DBUGOUT_THIS( "encryptionSet (crypt) old phrase=\""
++               << m_phrase << "\" new phrase=\"" << phrase << "\"?" );
++            m_phrase = phrase;
++         }
++      }
+    }
+ }
+ 
+@@ -391,13 +459,13 @@ std::string cfgValueText::valueString() const
+    {
+       std::string r;
+       r = cryptRead( m_phrase, m_value_file );
+-      DBUGOUT_THIS( "c_str() = \"" << m_value_file
++      DBUGOUT_THIS( "valueString() = \"" << m_value_file
+          << "\" -(plain)-> \"" << r << "\"" );
+       return r;
+    }
+    else
+    {
+-      DBUGOUT_THIS( "::c_str() = \"" << m_value_file << "\"" );
++      DBUGOUT_THIS( "::valueString() = \"" << m_value_file << "\"" );
+       return m_value_file;
+    }
+ }
+-- 
+2.41.0.windows.1
+

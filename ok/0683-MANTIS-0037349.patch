@@ -1,0 +1,760 @@
+From 528af4e8d5ec0a740eb966b0f64afa941c471cc1 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 1 Oct 2015 18:07:55 +0000
+Subject: [PATCH 0683/1076] MANTIS 0037349 integration of ingenico payment
+ device for KIS kiosk
+
+tools for device handler
+enumeration.hpp convert enum to/from string
+configItem.h access configuration item
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@904 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/tools/Enumeration.h    |  69 ++++
+ .../Interfaces/generic/tools/Enumeration.hpp  | 156 +++++++++
+ .../Interfaces/inc/Tools/configItem.h         | 176 +++++++++++
+ .../Massai/cpp/Tools/makefile.mak             |   1 +
+ .../Massai/cpp/Tools/src/configItem.cpp       | 297 ++++++++++++++++++
+ 5 files changed, 699 insertions(+)
+ create mode 100644 SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+ create mode 100644 SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+new file mode 100644
+index 00000000..f35f2ef5
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+@@ -0,0 +1,69 @@
++// map enum to string
++#pragma once
++
++#include <map>
++#include <set>
++#include <string>
++
++namespace mipsTools
++{
++  template<class E, class Value, class Entry> class enumerationBase
++  {
++    public:
++      enumerationBase(const Entry& defaultEntry);
++      ~enumerationBase();
++
++      void addEntry(const Entry& entry);
++
++      Entry getEntry(E code) const;
++      std::set<Entry> getEntries() const;
++
++      std::string getValue(E code) const;
++
++      E getCode(const Value& value) const;
++      Entry getEntryFromValue(Value value) const;
++
++    private:
++      typedef std::map<E, Entry>  entryMap;
++      typedef std::set<Entry>     entrySet;
++      typedef std::map<Value, E>  codeMap;
++
++      Entry    m_defaultEntry;
++      entryMap m_entryMap;
++      entrySet m_entrySet;
++      codeMap  m_codeMap;
++  };
++
++  template<class E> class enumerationEntry
++  {
++    public:
++      enumerationEntry();
++      enumerationEntry(E code);
++      enumerationEntry(E code, const std::string& value, const std::string& description);
++
++      E getCode() const;
++      std::string getValue() const;
++      std::string getDescription() const;
++
++      bool operator<(const enumerationEntry<E>& cmp) const;
++      bool operator>(const enumerationEntry<E>& cmp) const;
++      bool operator<=(const enumerationEntry<E>& cmp) const;
++      bool operator>=(const enumerationEntry<E>& cmp) const;
++      bool operator==(const enumerationEntry<E>& cmp) const;
++    private:
++      E code;
++      std::string value;
++      std::string description;
++  };
++
++  template<class E> class enumeration: public enumerationBase<E, std::string, enumerationEntry<E> >
++  {
++    public:
++      enumeration(E defaultCode, const std::string& defaultValue, const std::string& defaultDescription);
++      ~enumeration();
++
++      void add(E code, const std::string& value, const std::string& description);
++
++      std::string getDescription(E code) const;
++  };
++}
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+new file mode 100644
+index 00000000..8e690913
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+@@ -0,0 +1,156 @@
++// map enum to string
++#pragma once
++
++#include "enumeration.h"
++
++namespace mipsTools
++{
++  template<class E>
++  enumerationEntry<E>::enumerationEntry():
++    code(),
++    value(),
++    description()
++  {}
++
++  template<class E>
++  enumerationEntry<E>::enumerationEntry(E code):
++    code(code),
++    value(),
++    description()
++  {}
++
++  template<class E>
++  enumerationEntry<E>::enumerationEntry(E code, const std::string& value, const std::string& description):
++    code(code),
++    value(value),
++    description(description)
++  {}
++
++  template<class E>
++  E enumerationEntry<E>::getCode() const
++  {
++    return code;
++  }
++
++  template<class E>
++  std::string enumerationEntry<E>::getValue() const
++  {
++    return value;
++  }
++
++  template<class E>
++  std::string enumerationEntry<E>::getDescription() const
++  {
++    return description;
++  }
++
++  template<class E>
++  bool enumerationEntry<E>::operator<(const enumerationEntry<E>& cmp) const
++  {
++    return code < cmp.code
++      || (code == cmp.code
++        && (value < cmp.value
++          || (value == cmp.value
++            && description < cmp.description)));
++  }
++
++  template<class E>
++  bool enumerationEntry<E>::operator>(const enumerationEntry<E>& cmp) const
++  {
++    return cmp < *this;
++  }
++
++  template<class E>
++  bool enumerationEntry<E>::operator<=(const enumerationEntry<E>& cmp) const
++  {
++    return !(*this > cmp);
++  }
++
++  template<class E>
++  bool enumerationEntry<E>::operator>=(const enumerationEntry<E>& cmp) const
++  {
++    return !(*this < cmp);
++  }
++
++  template<class E>
++  bool enumerationEntry<E>::operator==(const enumerationEntry<E>& cmp) const
++  {
++    return code == cmp.code
++      && value == cmp.value
++      && description == cmp.description;
++  }
++
++
++  template<class E, class Value, class Entry>
++  enumerationBase<E, Value, Entry>::enumerationBase(const Entry& defaultEntry):
++    m_defaultEntry(defaultEntry),
++    m_entryMap(),
++    m_entrySet(),
++    m_codeMap()
++  {}
++
++  template<class E, class Value, class Entry>
++  enumerationBase<E, Value, Entry>::~enumerationBase()
++  {}
++
++  template<class E, class Value, class Entry>
++  void enumerationBase<E, Value, Entry>::addEntry(const Entry& entry)
++  {
++    m_entryMap[entry.getCode()] = entry;
++    m_codeMap[entry.getValue()] = entry.getCode();
++    m_entrySet.insert(entry);
++  }
++
++  template<class E, class Value, class Entry>
++  std::set<Entry> enumerationBase<E, Value, Entry>::getEntries() const
++  {
++    return m_entrySet;
++  }
++
++  template<class E, class Value, class Entry>
++  E enumerationBase<E, Value, Entry>::getCode(const Value& value) const
++  {
++    E result = m_defaultEntry.getCode();
++    codeMap::const_iterator it = m_codeMap.find(value);
++    if(it != m_codeMap.end())
++    {
++      result = it->second;
++    }
++    return result;
++  }
++
++  template<class E, class Value, class Entry>
++  std::string enumerationBase<E, Value, Entry>::getValue(E code) const
++  {
++    return getEntry(code).getValue();
++  }
++
++  template<class E, class Value, class Entry>
++  Entry enumerationBase<E, Value, Entry>::getEntryFromValue(Value value) const
++  {
++    return getEntry(getCode(value));
++  }
++
++
++  template<class E>
++  enumeration<E>::enumeration(E defaultCode, const std::string& defaultValue, const std::string& defaultDescription):
++    enumerationBase<E, std::string, enumerationEntry<E> >(enumerationEntry<E>(defaultCode, defaultValue, defaultDescription))
++  {}
++
++  template<class E>
++  enumeration<E>::~enumeration()
++  {}
++
++  template<class E>
++  void enumeration<E>::add(E code, const std::string& value, const std::string& description)
++  {
++    enumerationEntry<E> entry(code, value, description);
++    addEntry(entry);
++  }
++
++  template<class E>
++  std::string enumeration<E>::getDescription(E code) const
++  {
++    return getEntry(code).getDescription();
++  }
++}
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+new file mode 100644
+index 00000000..7b1b0ba2
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -0,0 +1,176 @@
++#pragma once
++
++#include <string>
++#include "tools/TraceInterface.h"
++#include "cfgclnt/nConfigText.hpp"
++#include "cfgclnt/nConfigNumber.hpp"
++#include "cfgclnt/nConfigCache.hpp"
++
++namespace config
++{
++  class cfgRoot
++  {
++    public:
++      cfgRoot(const std::string& section, const std::string& client, MASSAI::trace::TraceInterface& trc);
++
++      std::string section;
++      std::string client;
++      MASSAI::trace::TraceInterface& trc;
++  };
++
++  class cfgCachedText: private nConfig::cache<std::string, nConfig::gclText>
++  {
++    public:
++      cfgCachedText
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::string& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgCachedText
++      (
++        const std::string& item,
++        const std::string& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgCachedText();
++      std::string getValue();
++      std::string getItem();
++
++    private:
++      std::string item;
++      std::string defaultValue;
++      long maxLength;
++      std::string rights;
++      std::string explanation;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength);
++      std::string uncached();
++  };
++
++  class cfgText: private nConfig::gcText
++  {
++    public:
++      cfgText
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::string& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgText
++      (
++        const std::string& item,
++        const std::string& defaultValue,
++        long maxLength,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgText();
++      std::string getValue() const throw(nConfig::exception);
++      std::string getItem();
++
++    private:
++      std::string item;
++      std::string defaultValue;
++      long maxLength;
++      std::string rights;
++      std::string explanation;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength);
++  };
++
++  class cfgCachedNumber: private nConfig::cache<long, nConfig::gclNumber>
++  {
++    public:
++      cfgCachedNumber
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        long defaultValue,
++        long min,
++        long max,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgCachedNumber
++      (
++        const std::string& item,
++        long defaultValue,
++        long min,
++        long max,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgCachedNumber();
++      long getValue();
++      std::string getItem();
++
++    private:
++      std::string explanation;
++      long defaultValue;
++      long min;
++      long max;
++      std::string rights;
++      std::string item;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max);
++      long uncached();
++  };
++
++  class cfgNumber: private nConfig::gcNumber
++  {
++    public:
++      cfgNumber
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        long defaultValue,
++        long min,
++        long max,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgNumber
++      (
++        const std::string& item,
++        long defaultValue,
++        long min,
++        long max,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
++      ~cfgNumber();
++      long getValue() const throw(nConfig::exception);
++      std::string getItem();
++
++    private:
++      std::string item;
++      long defaultValue;
++      long min;
++      long max;
++      std::string explanation;
++      std::string rights;
++      MASSAI::trace::TraceInterface& trc;
++
++      void create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max);
++  };
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index a6020a6c..3b7c68cf 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -45,6 +45,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\TraceSetLevel.obj \
+                         $(_OBJ)\TraceSetLevelDelegate.obj \
+                         $(_OBJ)\Interval.obj \
++                        $(_OBJ)\configItem.obj \
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+new file mode 100644
+index 00000000..d13b4024
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -0,0 +1,297 @@
++#include "tools/configItem.h"
++
++namespace config
++{
++  cfgCachedText::cfgCachedText
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::cache<std::string, nConfig::gclText>((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgCachedText::cfgCachedText
++  (
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::cache<std::string, nConfig::gclText>(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgCachedText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s)",
++      this->item.c_str(),
++      this->defaultValue.c_str(),
++      this->maxLength,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue.c_str();
++    maxLength = this->maxLength;
++  }
++
++  std::string cfgCachedText::getValue()
++  {
++    return cached();
++  }
++
++  std::string cfgCachedText::getItem()
++  {
++    return item;
++  }
++
++  std::string cfgCachedText::uncached()
++  {
++    const char* result = get();
++    if(result)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %.200s", item.c_str(), result);
++      return result;
++    }
++    else
++    {
++      trc.writeTrace(BasicRuntime_HERE, "get item-default %.200s: %.200s", item.c_str(), defaultValue.c_str());
++      return defaultValue;
++    }
++  }
++
++
++  cfgText::cfgText
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::gcText((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgText::cfgText
++  (
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::gcText(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s)",
++      this->item.c_str(),
++      this->defaultValue.c_str(),
++      this->maxLength,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue.c_str();
++    maxLength = this->maxLength;
++  }
++
++  std::string cfgText::getValue() const throw(nConfig::exception)
++  {
++    const char* result = get();
++    if(result)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %.200s", item.c_str(), result);
++      return result;
++    }
++    else
++    {
++      trc.writeTrace(BasicRuntime_HERE, "get item-default %.200s: %.200s", item.c_str(), defaultValue.c_str());
++      return defaultValue;
++    }
++  }
++
++  std::string cfgText::getItem()
++  {
++    return item;
++  }
++
++
++  cfgCachedNumber::cfgCachedNumber
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    long defaultValue,
++    long min,
++    long max,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::cache<long, nConfig::gclNumber>((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    min(min),
++    max(max),
++    rights(rights),
++    explanation(explanation),
++    trc(root.trc)
++  {}
++
++  cfgCachedNumber::cfgCachedNumber
++  (
++    const std::string& item,
++    long defaultValue,
++    long min,
++    long max,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::cache<long, nConfig::gclNumber>(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    min(min),
++    max(max),
++    rights(rights),
++    explanation(explanation),
++    trc(trc)
++  {}
++
++  void cfgCachedNumber::create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s)",
++      this->item.c_str(),
++      this->defaultValue,
++      this->min,
++      this->max,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    min = this->min;
++    max = this->max;
++  }
++
++  long cfgCachedNumber::getValue()
++  {
++    return cached();
++  }
++
++  long cfgCachedNumber::uncached()
++  {
++    long result = get();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d", item.c_str(), result);
++    return result;
++  }
++
++  std::string cfgCachedNumber::getItem()
++  {
++    return item;
++  }
++
++
++  cfgNumber::cfgNumber
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    long defaultValue,
++    long min,
++    long max,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::gcNumber((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    rights(rights),
++    explanation(explanation),
++    defaultValue(defaultValue),
++    min(min),
++    max(max),
++    trc(root.trc)
++  {}
++
++  cfgNumber::cfgNumber
++  (
++    const std::string& item,
++    long defaultValue,
++    long min,
++    long max,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::gcNumber(item.c_str(), client.c_str()),
++    item(item),
++    rights(rights),
++    explanation(explanation),
++    defaultValue(defaultValue),
++    min(min),
++    max(max),
++    trc(trc)
++  {}
++
++  void cfgNumber::create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s)",
++      this->item.c_str(),
++      this->defaultValue,
++      this->min,
++      this->max,
++      this->explanation.c_str(),
++      this->rights.c_str());
++    rights = this->rights.c_str();
++    explanation = this->explanation.c_str();
++    defaultValue = this->defaultValue;
++    min = this->min;
++    max = this->max;
++  }
++
++  long cfgNumber::getValue() const throw(nConfig::exception)
++  {
++    long result = get();
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d)", item.c_str(), result);
++    return result;
++  }
++
++  std::string cfgNumber::getItem()
++  {
++    return item;
++  }
++}
+-- 
+2.41.0.windows.1
+

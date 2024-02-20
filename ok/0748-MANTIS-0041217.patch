@@ -1,0 +1,107 @@
+From 8f4077b586f47d3db7cc4aa6040cd0f8fa2163d1 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 19 May 2016 13:31:10 +0000
+Subject: [PATCH 0748/1077] MANTIS 0041217 GPP sometimes not available minor
+ changes, changed logging output to console
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1014 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h  |  7 ++++++-
+ .../Massai/cpp/MassaiCorba/src/corbaorb.cpp       |  2 +-
+ .../Massai/cpp/MassaiCorba/src/corbasrvr.cpp      |  2 +-
+ .../Massai/cpp/MassaiCorba/src/trace.cpp          | 15 ++++++---------
+ 4 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index a8d85e91..b4fe23a3 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -4,12 +4,17 @@
+ 
+ \page mcorba.lib Release Notes - mcorba.lib - Massai CORBA library
+ 
+-@version 1.0.6.22
++@version 1.0.6.23
+ 
+ \section changehistory Change history
+ 
+ mcorba.lib
+ 
++\version 1.0.6.23
++\li 19.05.2016
++\li bugfix GiT Mantis 0041217: GPP sometimes not available, minor changes
++
++
+ \version 1.0.6.22
+ \li 15.09.2015
+ \li bugfix GiT Mantis 0038352: massaiCorba: ignored corba endpoint environment variable for listener
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+index 401f8a83..06d2492e 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+@@ -73,7 +73,7 @@ namespace
+     return result;
+   }
+ 
+-  ORBContainer* pContainer;
++  ORBContainer* pContainer = 0;
+ 
+   ORBContainer& getORBContainer()
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+index 7e6e24de..c573f6ea 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+@@ -34,7 +34,7 @@ namespace massaiCorba
+   void corbaServantBase::activate(const std::string& servantName, CORBA::ORB_ptr orb, PortableServer::POA_ptr poa)
+   {
+     objID = PortableServer::string_to_ObjectId(servantName.c_str());
+-    poa->activate_object_with_id(objID, getServant());
++    poa->activate_object_with_id(objID.in(), getServant());
+     m_ior = getIOR(orb);
+     // Get a reference to the IOR Table
+     CORBA::Object_var tableObj = orb->resolve_initial_references("IORTable");
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+index 20b34be5..78976845 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/trace.cpp
+@@ -15,15 +15,12 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "tools/TraceSetLevelDelegate.h"
+-#include "tools/TraceSystem.h"
++#include "tools/TraceLocal.h"
+ #include "tracedef.h"
+ 
+ #include <stdarg.h>
+ #include <stdio.h>
+ 
+-using MASSAI::trace::TraceSetLevelDelegate;
+-using MASSAI::trace::TraceSystem;
+-
+ namespace
+ {
+   enum Constants
+@@ -31,14 +28,14 @@ namespace
+     BUFFERSIZE = (1024L * 32L),
+   };
+ 
+-  TraceSetLevelDelegate* pTraceDelegate;
+-  TraceSystem* pTrace;
+-  TraceSetLevelDelegate& getTrace()
++  MASSAI::trace::TraceSetLevelDelegate* pTraceDelegate;
++  MASSAI::trace::TraceLocal* pTrace;
++  MASSAI::trace::TraceSetLevelDelegate& getTrace()
+   {
+     if(pTraceDelegate == 0)
+     {
+-      pTrace = new TraceSystem("mCorba");
+-      pTraceDelegate = new TraceSetLevelDelegate(5, true, pTrace);
++      pTrace = new MASSAI::trace::TraceLocal("mCorba");
++      pTraceDelegate = new MASSAI::trace::TraceSetLevelDelegate(5, true, pTrace);
+     }
+     return *pTraceDelegate;
+   }
+-- 
+2.41.0.windows.1
+

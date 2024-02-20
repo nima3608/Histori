@@ -1,0 +1,251 @@
+From e87b7f9e57de8dbda8c85b5f45afd9896e901d7a Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Sep 2011 12:50:21 +0000
+Subject: [PATCH 0146/1076] TEXT_LIB : New helper functions for environment
+ variable placeholder
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@182 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/cEnvSubst.hpp         |  47 ++++++
+ .../Massai/cpp/Text/makefile.mak              |   6 +-
+ .../Massai/cpp/Text/src/cEnvSubst.cpp         | 145 ++++++++++++++++++
+ 3 files changed, 197 insertions(+), 1 deletion(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+new file mode 100644
+index 00000000..ddae7701
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+@@ -0,0 +1,47 @@
++/**
++ **************************************************************************
++ *
++ * @file cEnvSubst.h
++ *
++ * encapsulates environment values and provides token string substitution
++ * with environment values
++ *
++ * @author GiT
++ *
++ * Copyright (c) 2011 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#if !defined _CSUBST_
++#define _CSUBST
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#pragma warning(disable:4786)
++
++#include <map>
++#include <list>
++#include <string>
++
++#if _MSC_VER > 1000
++#pragma once
++#endif // _MSC_VER > 1000
++
++class CEnvSubst
++{
++private:
++  std::map<std::string,std::string> env;
++
++public:
++  CEnvSubst();
++  void SetBaseEnvVars();
++  void SetEnvVars(const std::map<std::string,std::string> setEnv);
++  void ClearEnvVars();
++
++  std::string SubstEnvVars(const char* str);
++  std::string SubstEnvVars(const std::string& str);
++  std::list<std::string> substEnvList(const std::list<std::string>& el);
++
++};
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index e203c24d..b1a30613 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -8,18 +8,22 @@
+ 
+ ######################################################################
+ 
+-MY_CFLAGS =             -GR -G5 $(INC_INTERFACES) $(INC_REGEX) $(INC_BOOST)
++MY_CFLAGS =             -GR -G5 $(INC_INTERFACES) $(INC_BOOST)
+ 
+ MY_LIB1 =               $(LIB_TEXT)
+ 
++MY_LIB1_LIBS =          $(LIB_BOOST)
++
+ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mArgScan.obj \
+                         $(_OBJ)\mHex.obj \
+                         $(_OBJ)\mHexString.obj \
+                         $(_OBJ)\textTemplate.obj \
+                         $(_OBJ)\textTools.obj \
++                        $(_OBJ)\cEnvSubst.obj \
+                         $(_OBJ)\stoupper.obj
+ 
++
+ ######################################################################
+ 
+ MY_BIN1 =               $(_BIN)\HexDump.exe
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+new file mode 100644
+index 00000000..fffc3391
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+@@ -0,0 +1,145 @@
++/**
++ **************************************************************************
++ *
++ * @file cEnvSubst.cpp
++ *
++ * encapsulates environment values and provides token string substitution
++ * with environment values
++ *
++ * @author GiT
++ *
++ * Copyright (c) 2011 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "text/cEnvSubst.hpp"
++#include "boost/regex.hpp"
++#include "trace.h"
++
++CEnvSubst::CEnvSubst()
++{}
++
++void CEnvSubst::SetBaseEnvVars()
++{
++  env["PROGRAMFILES"] = "c:\\Program Files";
++  env["SYSTEMROOT"] = "c:\\tmp";
++  env["SYSTEMDRIVE"] = "c:";
++  char* strDummy;
++  strDummy = getenv("ProgramFiles");
++  if (strDummy) env["PROGRAMFILES"]= strDummy;
++  strDummy = getenv("SystemRoot");
++  if (strDummy) env["SYSTEMROOT"]= strDummy;
++  strDummy = getenv("SystemDrive");
++  if (strDummy) env["SYSTEMDRIVE"]= strDummy;
++
++  try
++  {
++    boost::regex ReplaceStr1( "\\\\",
++           boost::regex::normal | boost::regbase::icase | boost::regbase::escape_in_lists);
++    boost::regex ReplaceStr2( "\\$",
++           boost::regex::normal | boost::regbase::icase | boost::regbase::escape_in_lists);
++
++    std::string dummy;
++    for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++    {
++
++      //printf("\nSubstEnvVars %s %s",str.c_str(),(std::string("\\$")+ (*it).first).c_str());
++      dummy = boost::regex_replace((*it).second, ReplaceStr1, "\\\\\\\\", boost::match_default | boost::format_perl);
++      dummy = boost::regex_replace(dummy, ReplaceStr2, "\\\\$", boost::match_default | boost::format_perl);
++      TRACE(HERE,"SubstEnvVars %s %s",(*it).second.c_str(),dummy.c_str());
++      (*it).second = dummy;
++    }
++  }
++  catch(...)
++  {
++    TRACE(HERE,"Exception in SetBaseEnvVars");
++  }
++
++  TRACE(HERE,"Substitution constants:");
++  for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++  {
++    TRACE(HERE,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
++  }
++}
++
++void CEnvSubst::SetEnvVars(const std::map<std::string,std::string> setEnv)
++{
++  for(std::map<std::string, std::string>::const_iterator it=setEnv.begin(); it!=setEnv.end(); ++it)
++    env[(*it).first]=(*it).second;
++
++  try
++  {
++    boost::regex ReplaceStr1( "\\\\",
++           boost::regex::normal | boost::regbase::icase | boost::regbase::escape_in_lists);
++    boost::regex ReplaceStr2( "\\$",
++           boost::regex::normal | boost::regbase::icase | boost::regbase::escape_in_lists);
++
++    std::string dummy;
++    for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++    {
++
++      //printf("\nSubstEnvVars %s %s",str.c_str(),(std::string("\\$")+ (*it).first).c_str());
++      dummy = boost::regex_replace((*it).second, ReplaceStr1, "\\\\\\\\", boost::match_default | boost::format_perl);
++      (*it).second = boost::regex_replace(dummy, ReplaceStr2, "\\\\$", boost::match_default | boost::format_perl);
++    }
++  }
++  catch(...)
++  {
++    TRACE(HERE,"Exception in SetEnvVars");
++  }
++
++  TRACE(HERE,"New substitution constants:");
++  for(it=env.begin(); it !=env.end(); ++it)
++  {
++    TRACE(HERE,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
++  }
++}
++
++void CEnvSubst::ClearEnvVars()
++{
++  env.clear();
++}
++
++std::string CEnvSubst::SubstEnvVars(const char* str)
++{
++  return SubstEnvVars(std::string(str));
++}
++
++std::string CEnvSubst::SubstEnvVars(const std::string& str)
++{
++/*  TRACE(HERE,"Substitution constants:");
++  for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++  {
++    TRACE(HERE,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
++  }
++*/
++  std::string dummy(str);
++  try
++  {
++    for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++    {
++      boost::regex ReplaceStr( (std::string("$")+ (*it).first).c_str(),
++             boost::regex::icase | boost::regex::literal);
++      dummy = boost::regex_replace(dummy, ReplaceStr, ((*it).second).c_str(), boost::match_default | boost::format_perl);
++      //TRACE(HERE_2,"SearchString:%s, ReplaceWith:%s, Result:%s",ReplaceStr.str().c_str(),((*it).second).c_str(),dummy.c_str());
++    }
++  }
++  catch(...)
++  {
++    TRACE(HERE,"Exception in SubstEnvVars");
++  }
++  return dummy;
++}
++
++std::list<std::string> CEnvSubst::substEnvList(const std::list<std::string>& el)
++{
++  std::list<std::string> buff;
++  TRACE(HERE,"substEnvList:");
++  for(std::list<std::string>::const_iterator It=el.begin(); It!=el.end(); ++It)
++  {
++    buff.push_back(SubstEnvVars((*It)));
++    TRACE(HERE," -> %s",(*buff.rbegin()).c_str());
++  }
++  return buff;
++}
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

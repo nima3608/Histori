@@ -1,0 +1,348 @@
+From 41c24d7deea7704fdfa81e6e6ed3d25ffe8ead02 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 11 Apr 2019 17:00:51 +0000
+Subject: [PATCH 0954/1076] MANTIS 0054305 extension: Receipt Drucker: Nippon
+ Primex NP2411D
+
+tools.lib
+V1.0.1.23
+- allow to set regex and semantic in cfgCachedText and cfgText
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1447 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/configItem.h         |  61 ++++++++-
+ .../cpp/Tools/inc/local_def_msystools.h       |  11 +-
+ .../Massai/cpp/Tools/src/configItem.cpp       | 124 +++++++++++++++++-
+ 3 files changed, 189 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+index a9e016da..9130405a 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -42,6 +42,31 @@ namespace config
+         const std::string& client,
+         MASSAI::trace::TraceInterface& trc
+       );
++      cfgCachedText
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::string& defaultValue,
++        long minLength,
++        long maxLength,
++        const std::string& regEx,
++        nConfig::semanticType semantic,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgCachedText
++      (
++        const std::string& item,
++        const std::string& defaultValue,
++        long minLength,
++        long maxLength,
++        const std::string& regEx,
++        nConfig::semanticType semantic,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
+       ~cfgCachedText();
+       std::string getValue();
+       std::string getItem();
+@@ -53,9 +78,13 @@ namespace config
+       long maxLength;
+       std::string rights;
+       std::string explanation;
++      long minLength;
++      std::string regEx;
++      nConfig::semanticType semantic;
+       MASSAI::trace::TraceInterface& trc;
+ 
+-      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength);
++      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength, long& minLength, const char*& regEx, nConfig::semanticType& semantic);
++
+       std::string uncached();
+   };
+ 
+@@ -81,6 +110,31 @@ namespace config
+         const std::string& client,
+         MASSAI::trace::TraceInterface& trc
+       );
++      cfgText
++      (
++        const cfgRoot& root,
++        const std::string& item,
++        const std::string& defaultValue,
++        long minLength,
++        long maxLength,
++        const std::string& regEx,
++        nConfig::semanticType semantic,
++        const std::string& rights,
++        const std::string& explanation
++      );
++      cfgText
++      (
++        const std::string& item,
++        const std::string& defaultValue,
++        long minLength,
++        long maxLength,
++        const std::string& regEx,
++        nConfig::semanticType semantic,
++        const std::string& rights,
++        const std::string& explanation,
++        const std::string& client,
++        MASSAI::trace::TraceInterface& trc
++      );
+       ~cfgText();
+       std::string getValue() const throw(nConfig::exception);
+       std::string getItem();
+@@ -92,9 +146,12 @@ namespace config
+       long maxLength;
+       std::string rights;
+       std::string explanation;
++      long minLength;
++      std::string regEx;
++      nConfig::semanticType semantic;
+       MASSAI::trace::TraceInterface& trc;
+ 
+-      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength);
++      void create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength, long& minLength, const char*& regEx, nConfig::semanticType& semantic);
+   };
+ 
+   class cfgCachedNumber: private nConfig::cache<long, nConfig::gclNumber>
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index c5706b11..2eb1d1c7 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,22
+-#define FILE_VER_STR     "FileVersion", "1.0.1.22"
++#define FILE_VER_BIN     1,0,1,23
++#define FILE_VER_STR     "FileVersion", "1.0.1.23"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.22
++@version 1.0.1.23
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.23
++\li 11.04.2019
++\li SteT - Mantis  0054305: Receipt Drucker: Nippon Primex NP2411D
++- allow to set regex and semantic in cfgCachedText and cfgText
++
+ \version 1.0.1.22
+ \li 12.01.2018
+ \li JK - Mantis 45801: MassaiCfgxB: many trace files
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+index 98fb92c2..88e8f66f 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -2,6 +2,9 @@
+ 
+ namespace config
+ {
++  const std::string DEFAULT_REGEX = ".*";
++
++
+   cfgRoot::cfgRoot(const std::string& section, const std::string& client, MASSAI::trace::TraceInterface& trc):
+     section(section),
+     client(client),
+@@ -27,6 +30,55 @@ namespace config
+     maxLength(maxLength),
+     rights(rights),
+     explanation(explanation),
++    minLength(),
++    regEx(DEFAULT_REGEX),
++    semantic(nConfig::SEMANTIC_UNKNOWN),
++    trc(root.trc)
++  {}
++
++  cfgCachedText::cfgCachedText
++  (
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::cache<std::string, nConfig::gclText>(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    minLength(),
++    regEx(DEFAULT_REGEX),
++    semantic(nConfig::SEMANTIC_UNKNOWN),
++    trc(trc)
++  {}
++
++  cfgCachedText::cfgCachedText
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::string& defaultValue,
++    long minLength,
++    long maxLength,
++    const std::string& regEx,
++    nConfig::semanticType semantic,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::cache<std::string, nConfig::gclText>((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    minLength(minLength),
++    regEx(regEx),
++    semantic(semantic),
+     trc(root.trc)
+   {}
+ 
+@@ -34,7 +86,10 @@ namespace config
+   (
+     const std::string& item,
+     const std::string& defaultValue,
++    long minLength,
+     long maxLength,
++    const std::string& regEx,
++    nConfig::semanticType semantic,
+     const std::string& rights,
+     const std::string& explanation,
+     const std::string& client,
+@@ -46,10 +101,14 @@ namespace config
+     maxLength(maxLength),
+     rights(rights),
+     explanation(explanation),
++    minLength(minLength),
++    regEx(regEx),
++    semantic(semantic),
+     trc(trc)
+   {}
+ 
+-  void cfgCachedText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
++
++  void cfgCachedText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength, long& minLength, const char*& regEx, nConfig::semanticType& semantic)
+   {
+     trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s",
+       this->item.c_str(),
+@@ -61,6 +120,9 @@ namespace config
+     explanation = this->explanation.c_str();
+     defaultValue = this->defaultValue.c_str();
+     maxLength = this->maxLength;
++    minLength = this->minLength;
++    regEx = this->regEx.c_str();
++    semantic = this->semantic;
+   }
+ 
+   cfgCachedText::~cfgCachedText()
+@@ -116,6 +178,55 @@ namespace config
+     maxLength(maxLength),
+     rights(rights),
+     explanation(explanation),
++    minLength(),
++    regEx(DEFAULT_REGEX),
++    semantic(nConfig::SEMANTIC_UNKNOWN),
++    trc(root.trc)
++  {}
++
++  cfgText::cfgText
++  (
++    const std::string& item,
++    const std::string& defaultValue,
++    long maxLength,
++    const std::string& rights,
++    const std::string& explanation,
++    const std::string& client,
++    MASSAI::trace::TraceInterface& trc
++  ):
++    nConfig::gcText(item.c_str(), client.c_str()),
++    item(item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    minLength(),
++    regEx(DEFAULT_REGEX),
++    semantic(nConfig::SEMANTIC_UNKNOWN),
++    trc(trc)
++  {}
++
++  cfgText::cfgText
++  (
++    const cfgRoot& root,
++    const std::string& item,
++    const std::string& defaultValue,
++    long minLength,
++    long maxLength,
++    const std::string& regEx,
++    nConfig::semanticType semantic,
++    const std::string& rights,
++    const std::string& explanation
++  ):
++    nConfig::gcText((root.section + item).c_str(), root.client.c_str()),
++    item(root.section + item),
++    defaultValue(defaultValue),
++    maxLength(maxLength),
++    rights(rights),
++    explanation(explanation),
++    minLength(minLength),
++    regEx(regEx),
++    semantic(semantic),
+     trc(root.trc)
+   {}
+ 
+@@ -123,7 +234,10 @@ namespace config
+   (
+     const std::string& item,
+     const std::string& defaultValue,
++    long minLength,
+     long maxLength,
++    const std::string& regEx,
++    nConfig::semanticType semantic,
+     const std::string& rights,
+     const std::string& explanation,
+     const std::string& client,
+@@ -135,10 +249,13 @@ namespace config
+     maxLength(maxLength),
+     rights(rights),
+     explanation(explanation),
++    minLength(minLength),
++    regEx(regEx),
++    semantic(semantic),
+     trc(trc)
+   {}
+ 
+-  void cfgText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
++  void cfgText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength, long& minLength, const char*& regEx, nConfig::semanticType& semantic)
+   {
+     trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s",
+       this->item.c_str(),
+@@ -150,6 +267,9 @@ namespace config
+     explanation = this->explanation.c_str();
+     defaultValue = this->defaultValue.c_str();
+     maxLength = this->maxLength;
++    minLength = this->minLength;
++    regEx = this->regEx.c_str();
++    semantic = this->semantic;
+   }
+ 
+   cfgText::~cfgText()
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,319 @@
+From 3ebf4457a143d525c74e7b5fc2cbcd343933b603 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 2 Jan 2017 16:25:11 +0000
+Subject: [PATCH 0814/1077] MANTIS 0043661 DoorDevice: Move DoorDev to the
+ SelfServiceQBG repository
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1133 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/doordev.idl             | 285 ------------------
+ .../Massai/idl/Massai/makefile.mak            |   1 -
+ 2 files changed, 286 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/idl/Massai/doordev.idl
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/doordev.idl b/SelfServiceCommon/Massai/idl/Massai/doordev.idl
+deleted file mode 100644
+index 45b6e472..00000000
+--- a/SelfServiceCommon/Massai/idl/Massai/doordev.idl
++++ /dev/null
+@@ -1,285 +0,0 @@
+-/**
+- **************************************************************************
+- *
+- * @file doordev.idl
+- *
+- * Contains module doordev, which is the platform-internal interface
+- * definition to test the common use gate's door device component.
+- *
+- * @version 1.9
+- *
+- * @author Sven Bornemann
+- *
+- **************************************************************************
+-**/
+-#ifndef DOORDEV_IDL
+-#define DOORDEV_IDL
+-
+-#include "mdci.idl"
+-
+-#pragma prefix "massai.materna.com"
+-
+-/**
+- * Common Use Gate's Door Device Component
+- * (used e.g. for "Speed Boarding" or "Secure Access" gates)
+- */
+-module doordev
+-{
+-    /** Possible return codes **/
+-    enum RC
+-    {
+-        RC_OK,                          /**< Command processed successfully */
+-        RC_ERROR                        /**< Command cannot be processed */
+-    };
+-
+-    /** Definition of command types passed to this device handler */
+-    enum commandType
+-    {
+-        CMD_CAPABILITIES_QUERY,         /**< Query door capabilities */
+-        CMD_STATUS_QUERY,               /**< Query current door status */
+-        CMD_DOOR_OPEN,                  /**< Opens the door */
+-        CMD_DOOR_CLOSE,                 /**< Closes the door */
+-        CMD_DOOR_LOCK,                  /**< Lock the door */
+-        CMD_PANIC_OPEN,                 /**< Opens the door for panic situations */
+-        CMD_PAX_PASS,                   /**< Passes one passenger (opens door
+-                                             and closes automatically after pax passed;
+-                                             Depends on hardware, if supported) */
+-        CMD_SET_LEDS,                   /**< LED control command, command.commandData contains setLedCommandList in that case */
+-        CMD_SET_VALUE,                  /**< set device specific values */
+-        CMD_GET_VALUE,                  /**< read device specific values */
+-        CMD_BUZZER,                     /**< trigger a signal of a specified length, command.commandData contains buzzerData*/
+-        CMD_CANCEL                      /**< cancel a PAX PASS command */
+-    };
+-
+-    /** Definition of indication types received from door device */
+-    enum indicationType
+-    {
+-        IND_CAPABILITIES_INFO,          /**< Door capabilities indication */
+-        IND_STATUS_INFO,                /**< Door status indication */
+-        IND_DOOR_OPEN_DONE,             /**< Door opened indication, see statusType for status */
+-        IND_DOOR_CLOSE_DONE,            /**< Door closed indication, see statusType for status */
+-        IND_DOOR_LOCK_DONE,             /**< Door locked indication, see statusType for status */
+-        IND_PANIC_OPEN_DONE,            /**< Panic opened indication */
+-        IND_PAX_PASS_DONE,              /**< Pax passed indicatiom, see statusType for status */
+-        IND_SET_LEDS_DONE,
+-        IND_SET_VALUE_DONE,             /**< Value set indication */
+-        IND_GET_VALUE_DONE,             /**< Value get indication */
+-        IND_BUTTON_INFO,                /**< button state changed, indication.indicationData contains buttonList with button states*/
+-        IND_PAX_STATE,                  /**< Pax was detected or leaved the gate, indication.indicationData contains paxStateList with pax states*/
+-        IND_NORMAL_PASSED,              /**< Indication is send when a pax passed the lane in normal direction, indication.indicationData contains the count of paxes as VAL_PAX_COUNT that passed from entry side */  
+-        IND_REVERSE_PASSED              /**< Indication is send when a pax passed the lane in reverse direction, indication.indicationData contains the count of paxes as VAL_PAX_COUNT that passed from reverse side */  
+-        // To be continued...
+-    };
+-
+-    /**< Status of an indication */
+-    enum statusType
+-    {
+-        STAT_OK,                        /**< Command successfully executed */
+-        STAT_ERROR,                     /**< Generic error occurred during command execution */
+-        STAT_ERROR_TIMEOUT,             /**< Timeout occurred during command execution */
+-        STAT_NOT_PASSED                 /**< Passenger did no pass gate after CMD_PAX_PASS */
+-    };
+-
+-    enum GATE_STAT
+-    {
+-        STAT_GT_OK,                     /* Gate is OK */
+-        STAT_GT_ERROR,                  /* Gate is in errored state */
+-        STAT_GT_FRAUD,                  /* Fraud detected */
+-        STAT_GT_PANIC_OPEN,             /* Gate is in panic open/firealarm mode */
+-        STAT_GT_DOOR_BLOCKED,           /* Door is blocked*/
+-        STAT_GT_REVERSE_PASS,           /* Door is handling a reverse pass that was triggered automatically or by button*/
+-        STAT_GT_NORMAL_PASS             /* Door is handling a normal pass that was triggered automatically or by a remote switch*/
+-    };
+-    
+-    enum DOOR_STAT
+-    {
+-        DOOR_UNKNOWN,                   /* door state is unknown */
+-        DOOR_OPEN,                      /* door is open */
+-        DOOR_CLOSE                      /* door is closed */
+-    };
+-
+-    enum DOOR_INFO
+-    {
+-        DOOR_INFO_NONE,                  /* special door information is not available */
+-        DOOR_INFO_OPEN_NORMAL,           /* door is open in direction a->b. a is the entry side, b the exit side */
+-        DOOR_INFO_OPEN_REVERSE,          /* door is open in reverse direction b->a. a is the entry side, b the exit side */
+-        DOOR_INFO_SAFETY_STOPPED,        /* door movement is stopped because of safety */
+-        DOOR_INFO_OBSTACLE_STOPPED       /* door movement is stopped because of an obstacle */
+-    };
+-    
+-    enum ERROR_TYPE
+-    {
+-        ERROR_NONE,                     /* no error */
+-        ERROR_DISCONNECTED,             /* disconnected */
+-        ERROR_HW,                       /* general hardware failure */
+-        ERROR_OOS,                      /* out of service */
+-        ERROR_PWR                       /* power failure */
+-    };
+-
+-    enum ERROR_INFO_TYPE
+-    {
+-        ERROR_HW_SENSOR,                /* specific sensor failure information - value: failed sensor id(number) */
+-        ERROR_HW_MOTOR_DRIVER,          /* specific motor driver failure information - value: motor driver fault code  */
+-        ERROR_HW_ENCODER,               /* specific encoder failure information - value: encoder fault code  */
+-        ERROR_HW_RELAY,                 /* specific relay failure information - value: relay fault code */
+-        ERROR_HW_SAFETY_DEVICE          /* specific (Neplite) safety device failure information - value: safety device fault code */
+-    };
+-    
+-    struct fullErrorInfo
+-    {
+-        ERROR_INFO_TYPE error_info;     /**< type of specific error information */
+-        long            value;          /**< error specific value ( normally an error code or an id ) */
+-    };
+-
+-    /**< List full error information tuple */
+-    typedef sequence<fullErrorInfo> fullErrorInfoList;
+-    
+-    enum FRAUD_TYPE
+-    {
+-        FRAUD_NONE,                     /* no fraud pending */
+-        FRAUD_UNKNOWN,                  /* no fraud information is available */
+-        FRAUD_INTRUSION_ZONE_1,         /* The Zone 1 (Entry sensors) sensors have been obscured too long during the validation process */
+-        FRAUD_INTRUSION_ZONE_2,         /* The Zone 1 (Entry sensors) sensors have been obscured too long during the validation process */
+-        FRAUD_INTRUSION_BLOCKED_AISLE,  /* A person entered the blocked side */
+-        FRAUD_INTRUSION_LONG_TRANSIT,   /* A person took too much time to end the transit */
+-        FRAUD_TAIL_GATING,              /* Tail gating has been detected */
+-        FRAUD_WRONG_WAY,                /* Wrong Way has been detected */
+-        FRAUD_CRAWL_UNDER,              /* A person crawled under the flaps */
+-        FRAUD_TAMPER_DETECTED,          /* Any cabinet door is opened */
+-        FRAUD_DOOR_FORCED,              /* A closed door is forcefully opened */
+-        FRAUD_JUMP_OVER,                /* A person jumped over the flaps */
+-        FRAUD_TURNING_BACK              /* Someone after obscuring the last sensor turned back instead of completimng the transit */
+-    };
+-    
+-    enum BUTTON_TYPE
+-    {
+-        BUTTON_NONE,
+-        BUTTON_RESET,
+-        BUTTON_FIREALARM,
+-        BUTTON_ND2,
+-        BUTTON_ND3
+-    };
+-    
+-    /**< List of pressed buttons */
+-    typedef sequence<BUTTON_TYPE> buttonList;
+-
+-    /**< hardware status of the gate */
+-    struct hwStatusType
+-    {
+-        GATE_STAT           gate_state;
+-        ERROR_TYPE          error;
+-        DOOR_STAT           door_state;
+-        FRAUD_TYPE          fraud;
+-        DOOR_INFO           door_information;
+-        fullErrorInfoList   error_informations;
+-    };
+-    
+-    /**< Door device capabilities */
+-    enum capabilityType
+-    {
+-        CAP_DOOR_CONTROL,                   /**< Door open/close can explicitly being controlled  */
+-        CAP_PAX_PASS,                       /**< Door opens/closes automtically when an pax passes */
+-        CAP_DOOR_LOCK,                      /**< Door can be locked */
+-        CAP_PASS_TIMEOUT,                   /**< A value "PASS_TIMEOUT" may be read/set */
+-        CAP_AUDIBLE_ALARM_LENGTH,           /**< A value "AUDIBLE_ALARM_LENGTH" may be read/set */
+-        CAP_BLOCKED_DETECT_TIMEOUT,         /**< A value "BLOCKED_DETECT_TIMEOUT" may be read/set */
+-        CAP_NEPLITE_HARDWARE_VERSION        /**< A value "NEPLITE_HARDWARE_VERSION" may be read */
+-        //CAP_PASS_COMPLETE_TIMEOUT         /**< A value "PASS_COMPLETE_TIMEOUT" may be read/set */
+-        //CAP_NEPLITE_MODBUS_VERSION        /**< A value "NEPLITE_MODBUS_VERSION" may be read */
+-        //CAP_NEPLITE_FIRMWARE_VERSION      /**< A value "NEPLITE_FIRMWARE_VERSION" may be read only on newer firmware <> 515 */
+-        //CAP_NEPLITE_FIRMWARE_REVISION     /**< A value "NEPLITE_FIRMWARE_REVISION" may be read only on newer firmware <> 515 */
+-        //CAP_REVERSE_PASS_POSSIBLE         /**< A value "REVERSE_PASS_POSSIBLE" may be read, possible information: YES, NO */
+-        //CAP_VERSION                       /**< A value "VERSION" may be read, the result is a free formatted string depending on the hardware */
+-        // To be continued...
+-    };
+-
+-    /**< Door LED states */
+-    enum ledState
+-    {
+-        STATE_OFF,            /**< Switch off LED  */
+-        STATE_ON,             /**< Switch on LED  */
+-        STATE_GREEN,          /**< Switch on LED - green */
+-        STATE_RED,            /**< Switch on LED - red */
+-        STATE_GREEN_FLASH,    /**< Switch on LED - green flashing*/
+-        STATE_RED_FLASH       /**< Switch on LED - red flashing*/
+-    };
+-
+-    /**< Pax status information */
+-    enum PAXSTATE_TYPE
+-    {
+-        PAXSTATE_NONE,                /**< no pax is detected in the gate*/
+-        PAXSTATE_UNKNOWN,             /**< pax information is not available*/
+-        PAXSTATE_SIDEA,               /**< pax is detected at side a*/
+-        PAXSTATE_SIDEB,               /**< pax is detected at side b*/
+-        PAXSTATE_MIDDLE,              /**< pax is detected in the middle of the gate*/
+-        PAXSTATE_PRESENT              /**< pax is detected anywhere in the gate*/
+-    };
+- 
+-    /**< List of detected paxes */
+-    typedef sequence<PAXSTATE_TYPE> paxStateList;
+-
+-    /**< List of capabilityType */
+-    typedef sequence<capabilityType> capabilityList;
+-
+-    /**< Command to door device */
+-    struct setLedCommand
+-    {
+-        long            led;      /**< 0 based LED index (front 0...back n) */
+-        ledState        state;    /**< LED state  */
+-    };
+-
+-    /**< List of setLedCommand, used as commandData in case of type == CMD_SET_LEDS */
+-    typedef sequence<setLedCommand> setLedCommandList;
+-
+-    /**< Used as parameter/result for CMD_SET_VALUE,CMD_GET_VALUE Commands to door device */
+-    struct valueData
+-    {
+-        string          name;     /**< value name */
+-        string          data;     /**< value  */
+-    };
+-
+-    /**< Used as parameter for the CMD_BUZZER Command to door device */
+-    struct buzzerData
+-    {
+-        long            length;       /**< length of the signal in ms */
+-        long            volume;       /**< volume 0-255 (device dependent, not used with Gunnebo Gate) */
+-        long            tone;         /**< frequency or tone type (device dependent, not used with Gunnebo Gate) */
+-        long            repetition;   /**< repeat signal n times (device dependent, not used with Gunnebo Gate) */
+-    };
+-
+-    /**< Used as counter type in the indication.indicationData field of IND_REVERSE_PASS_DONE indication from the door device */
+-    typedef long VAL_PAX_COUNT;
+-    
+-    /**< Command to door device */
+-    struct command
+-    {
+-        long            requestID;      /**< A unique request identifier */
+-        commandType     type;           /**< One of the above defined command types */
+-        any             commandData;    /**< Optional data required for the command */
+-    };
+-
+-    /**< Indication from door device */
+-    struct indication
+-    {
+-        long            requestID;      /**< A unique indication identifier */
+-        indicationType  type;           /**< One of the above defined indication types */
+-        statusType      status;         /**< One of the above defined status types */
+-        hwStatusType    hw_status;      /**< Full information about the hardware state */
+-        any             indicationData; /**< Optional data of the indication,
+-                                             e.g. capabilityList of IND_CAPABILITIES_INFO */
+-    };
+-
+-   /**< Door device interface */
+-   interface Handler : DeviceComponents::Generic
+-   {
+-   };
+-};
+-
+-#endif // DOORDEV_IDL
+-/**
+- **************************************************************************
+- *
+- * End of file.
+- *
+- **************************************************************************
+-**/
+diff --git a/SelfServiceCommon/Massai/idl/Massai/makefile.mak b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+index c643a7a5..e075cb67 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/makefile.mak
++++ b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+@@ -38,7 +38,6 @@ MY_GEN_CPPS = \
+     $(_GEN)\ScaleDev.cpp \
+     $(_GEN)\screendev.cpp \
+     $(_GEN)\seldev.cpp \
+-    $(_GEN)\doordev.cpp \
+     $(_GEN)\second_screen.cpp \
+     $(_GEN)\illudev.cpp \
+     $(_GEN)\AnnounceDev.cpp \
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,214 @@
+From 756516e79ffe72f9e0224e60d70d566203934133 Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 23 Aug 2011 09:22:19 +0000
+Subject: [PATCH 0135/1076] =?UTF-8?q?=20-=20SetKioskData=20kann=20jetzt=20?=
+ =?UTF-8?q?auch=20die=20IP=20des=20Kiosk=20und=20die=20CommandLine=20der?=
+ =?UTF-8?q?=20Applikation=20=C3=A4ndern.=20=20=20=20-=20TODO:=20Mehrere=20?=
+ =?UTF-8?q?Airlines=20unterst=C3=BCtzen.=20=20=20=20-=20TODO:=20Dynamisch?=
+ =?UTF-8?q?=20die=20vorkonfigurierten=20Airlines=20verwenden.?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@170 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.iss | 129 +++++++++++++++---
+ 1 file changed, 112 insertions(+), 17 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 3bafae07..5f80f64c 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -71,22 +71,53 @@ ReadyLabel2b=Click Update to continue with the update.
+ WizardReady=Ready to update
+ FinishedLabel=Setup has finished updating the identifier and hostname on your computer.%nPlease update the IP address manually and then reboot the kiosk to finish the kiosk localisation.
+ ReadyLabel2a=Click Update to continue with the update, or click Back if you want to review or change any settings.
++
++
++[Icons]
++
++Name: {commonstartup}\Start Massai; Filename: {code:GetMassaiDir}\bin\mcontrol.exe; Parameters: -wait -NORMAL; WorkingDir: {code:GetMassaiDir}\bin; IconFilename: {code:GetMassaiDir}\bin\mcontrol.exe; Flags: runminimized
++[InstallDelete]
++Name: {commonstartup}\SetKioskData.lnk; Type: files
++[Run]
++Filename: {sys}\netsh; Parameters: "interface ip set address name=""LAN-Verbindung"" source=static addr={code:GetIPv4Address} mask={code:GetIPv4Subnet}"; WorkingDir: {sys}; Flags: runhidden
++Filename: {sys}\netsh; Parameters: "interface ip set address name=""LAN-Verbindung"" gateway={code:GetIPv4Gateway} gwmetric=0"; WorkingDir: {sys}; Flags: runhidden
++Filename: {sys}\netsh; Parameters: "interface ip set dns name=""LAN-Verbindung"" source=static addr=none"; WorkingDir: {sys}; Flags: runhidden
+ [Code]
+ var
+ 
+-	LevelData:array of String;
+-	LevelDataPrompts:array of String;
++	LevelData            : Array of String;
++	LevelDataPrompts     : Array of String;
++
++	IPv4LevelData        : Array of String;
++	IPv4LevelDataPrompts : Array of String;
+ 
++	AppIDs               : Array of String;
++	AppLevelData		     : Array of String;
++	AppLevelDataPrompts  : Array of String;
++
++	Space      : Integer;
++	LabelWidth : Integer;
++	MassaiDir  : String;
+ 
+-	Space:Integer;
+-	LabelWidth:Integer;
+-	MassaiDir: String;
+ 
+ 
+ #include "GlobalFunctionDefinition.code"
+ #include "ConfigFunctionDefinition.code"
+ 
++function GetIPv4Address(Param:String) : String;
++begin
++	Result := IPv4LevelData[0];
++end;
++
++function GetIPv4Subnet(Param:String) : String;
++begin
++	Result := IPv4LevelData[1];
++end;
+ 
++function GetIPv4Gateway(Param:String) : String;
++begin
++	Result := IPv4LevelData[2];
++end;
+ 
+ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+ var
+@@ -99,6 +130,17 @@ begin
+   S := S + LevelDataPrompts[2] + ' = ' + LevelData[2] + NewLine;
+   S := S + LevelDataPrompts[3] + ' = ' + LevelData[3] + NewLine;
+ 
++  S := S + NewLine + NewLine + NewLine;;
++  S := S + 'IP configuration:' + NewLine + NewLine;
++  S := S + IPv4LevelDataPrompts[0] + ' = ' + IPv4LevelData[0] + NewLine;
++  S := S + IPv4LevelDataPrompts[1] + ' = ' + IPv4LevelData[1] + NewLine;
++  S := S + IPv4LevelDataPrompts[2] + ' = ' + IPv4LevelData[2] + NewLine;
++
++  { TODO: Mehrere Airlines unterstuezen. }
++  S := S + NewLine + NewLine + NewLine;;
++  S := S + 'Application configuration for application ' + AppIDs[0] + ':' + NewLine + NewLine;
++  S := S + AppLevelDataPrompts[0] + ' = ' + AppLevelData[0] + NewLine;
++
+   Result := S;
+ end;
+ 
+@@ -131,7 +173,7 @@ begin
+     ScriptDlgPageOpen();
+     { Set some captions }
+ 
+-    while (CurSubPage >= 0) and (CurSubPage <= 0) and not Terminated do begin
++    while (CurSubPage >= 0) and (CurSubPage <= 2) and not Terminated do begin
+       case CurSubPage of
+ 		  0:
+ 			begin
+@@ -144,6 +186,27 @@ begin
+     			else
+     				NextOK := false;
+ 			end;
++		  1:
++			begin
++				ScriptDlgPageSetCaption('IPv4 address configuration');
++    			ScriptDlgPageSetSubCaption1('Please insert the IP configuration of this Kiosk.');
++    			Next := InputQueryArray(IPv4LevelDataPrompts, IPv4LevelData);
++    			if (Next = true) then
++    				NextOK := true
++    			else
++    				NextOK := false;
++			end;
++		  2:
++			begin
++				{ TODO: Mehrere Airlines unterstuezen. }
++				ScriptDlgPageSetCaption('Application configuration');
++    			ScriptDlgPageSetSubCaption1('Please insert the application configuration.');
++    			Next := InputQueryArray(AppLevelDataPrompts, AppLevelData);
++    			if (Next = true) then
++    				NextOK := true
++    			else
++    				NextOK := false;
++			end;
+     	end;
+     	if Next then begin
+         	{ Go to the next page, but only if the user entered correct information }
+@@ -183,6 +246,10 @@ begin
+ 	SetStringInConfig('ENVIRONMENT.LEVEL.Area'	 	 	,LevelData[2], 'Area name');
+ 	SetStringInConfig('ENVIRONMENT.LEVEL.Terminal'	 	,LevelData[3], 'Terminal name');
+ 
++	{ TODO: Mehrere Airlines unterstuezen. }
++	{ LOG('SetStringInConfig("APPLICATIONS.' + AppIDs[0] + '.Command_Line",' + AppLevelData[0] + ', "The command line to start the application");') }
++	SetStringInConfig('APPLICATIONS.' + AppIDs[0] + '.Command_Line', AppLevelData[0], 'The command line to start the application');
++
+ end;
+ 
+ procedure UpdateKioskHost();
+@@ -236,8 +303,11 @@ end;
+ 
+ function InitializeSetup(): Boolean;
+ var
+-	resultStr: String;
+-	i:Integer;
++	resultStr : String;
++	i         : Integer;
++	AppID	  : String;
++	DefaultID : String;
++	APPCMD    : String;
+ begin
+ 	resultStr:= '000';
+ 	Space:=10;
+@@ -293,16 +363,41 @@ begin
+ 			LevelData[2] := ProcessIniString('KIOSKDATA', LevelDataPrompts[2], 'Check-In');
+ 			LevelData[3] := ProcessIniString('KIOSKDATA', LevelDataPrompts[3], 'A');
+ 
++
++			SetArrayLength(IPv4LevelDataPrompts, 3);
++			IPv4LevelDataPrompts[0] := 'IPv4 Address:';
++			IPv4LevelDataPrompts[1] := 'Subnet:';
++			IPv4LevelDataPrompts[2] := 'Gateway:';
++			SetArrayLength(IPv4LevelData, 3);
++
++			IPv4LevelData[0]  := ProcessIniString('HOSTDATA', 'IPv4Address', '139.2.249.21');
++			IPv4LevelData[1]  := ProcessIniString('HOSTDATA', 'IPv4Subnet',  '255.255.240.0');
++			IPv4LevelData[2]  := ProcessIniString('HOSTDATA', 'IPv4Gateway', '139.2.240.1');
++
++
++			{ TODO: Mehrere Airlines unterstuezen. }
++			DefaultID := 'GWI_CKI';
++
++			{ TODO: Dynamisch die vorkonfiguierten Airlines verwenden.}
++			{ GetTextListValue('ENVIRONMENT.Applications.Installed_Applications', DefaultID, AppID, 100); }
++			AppID := DefaultID;
++			LOG('Found Applications: ' + AppID);
++
++			SetArrayLength(AppIDs, 1);
++			AppIDs[0] := AppID;
++
++			{ TODO: Dynamisch die vorkonfiguierten Airlines verwenden.}
++			{ GetTextValue('APPLICATIONS.' + AppIDs[0] + '.Command_Line','"C:\Programme\Internet Explorer\iexplore.exe" -K http://cus-cgn-003/Applications/gwi/gwi_app.html$ wnd=gwi_app', AppCMD, 256); }
++			AppCMD := '"C:\Programme\Internet Explorer\iexplore.exe" -K http://cus-cgn-003/Applications/GWI/GWI_App.html$ wnd=GWI_App';
++			LOG('Get CommandLine of Application ' + AppIDs[0] + ': ' + AppCMD);
++
++			SetArrayLength(AppLevelDataPrompts, 1);
++			AppLevelDataPrompts[0] := AppIDs[0] + ' application CMD:';
++			SetArrayLength(AppLevelData, 1);
++
++			AppLevelData[0]  := ProcessIniString('APPDATA_' + AppIDs[0], 'CMD', AppCMD);
++
+ 			Result:=true;
+ 	   end;
+ 	end;
+ end;
+-[Icons]
+-
+-Name: {commonstartup}\Start Massai; Filename: {code:GetMassaiDir}\bin\mcontrol.exe; Parameters: -wait -NORMAL; WorkingDir: {code:GetMassaiDir}\bin; IconFilename: {code:GetMassaiDir}\bin\mcontrol.exe; Flags: runminimized
+-[InstallDelete]
+-Name: {commonstartup}\SetKioskData.lnk; Type: files
+-[Run]
+-Filename: {sys}\netsh; Parameters: "set address name=""LAN-Verbindung"" source=static addr=139.2.249.21 mask=255.255.240.0"; WorkingDir: {sys}; Flags: runhidden
+-Filename: {sys}\netsh; Parameters: "set address name=""LAN-Verbindung"" gateway=139.2.240.1 gwmetric=0"; WorkingDir: {sys}; Flags: runhidden
+-Filename: {sys}\netsh; Parameters: "set dns name=""LAN-Verbindung"" source=static addr=none"; WorkingDir: {sys}; Flags: runhidden
+-- 
+2.41.0.windows.1
+

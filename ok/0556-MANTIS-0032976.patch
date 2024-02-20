@@ -1,0 +1,300 @@
+From b3f66987c4555bd510dd6d30aaea6d6f73a047d0 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 14 Jul 2014 09:01:03 +0000
+Subject: [PATCH 0556/1077] MANTIS 0032976 Platformsetup: CA get actual date
+ time information
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@696 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |   4 +-
+ .../src/MConfig_CustomAction.cpp              | 214 ++++++++++++++++++
+ .../src/MConfig_CustomAction.def              |  25 +-
+ 3 files changed, 232 insertions(+), 11 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index e102f8f6..59eb742c 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,11
+-#define FILE_VER_STR     "FileVersion", "1.0.0.11\0"
++#define FILE_VER_BIN     1,0,0,12
++#define FILE_VER_STR     "FileVersion", "1.0.0.12\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index ef9e6b7a..897842fb 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -125,6 +125,34 @@ std::string find_sub_par(std::string& sp, size_t& start_search)
+   return ret;
+ }
+ 
++enum DATETIME_TYPE
++{
++  DTT_DATETIME,
++  DTT_DATE,
++  DTT_TIME,
++};
++
++std::wstring getCADateTimeInfo(DATETIME_TYPE infoType)
++{
++  std::wstringstream mtstamp;
++  time_t rawtime;
++  time (&rawtime);
++  struct tm saveTime;
++  struct tm* pST= localtime(&rawtime);
++  if(pST)
++  {
++    saveTime= *pST;
++  }
++
++  if(infoType == DTT_DATETIME || infoType == DTT_DATE)
++    mtstamp << std::setfill(L'0')<<std::setw(4)<<(saveTime.tm_year%5000)+1900 << std::setfill(L'0')<<std::setw(2)<< (saveTime.tm_mon%12)+1 << std::setfill(L'0')<<std::setw(2)<< (saveTime.tm_mday%32);
++  if(infoType == DTT_DATETIME )
++    mtstamp << L"_";
++  if(infoType == DTT_DATETIME || infoType == DTT_TIME)
++    mtstamp << std::setfill(L'0')<<std::setw(2)<< saveTime.tm_hour << std::setfill(L'0')<<std::setw(2)<< saveTime.tm_min << std::setfill(L'0')<<std::setw(2)<< saveTime.tm_sec;
++  return mtstamp.str();
++}
++
+ int checkInstalled(MSIHANDLE hInstall, std::wstring& wstrFeature)
+ {
+   int ret = 0;
+@@ -2820,3 +2848,189 @@ extern "C" UINT __stdcall CA_WriteSNMPConfigFile (MSIHANDLE hInstall)
+     return WcaFinalize(er);
+ 
+ }
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_GetDateTimeString(MSIHANDLE hInstall)
++{
++  #define GET_DATETIME_PROP L"CURRENT_DATETIME_STRING"
++
++  std::wstringstream dbstrs;
++  std::wstring strres;
++  
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_GetDateTimeString");
++  dbstrs << L"CA_GetDateTimeString: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  strres = getCADateTimeInfo(DTT_DATETIME);
++   
++  if(!strres.empty())
++  {
++    hr = WcaSetProperty(GET_DATETIME_PROP, strres.c_str());
++    dbstrs << L"MSI SETUP CA_GetDateTimeString: SetProperty "<< GET_DATETIME_PROP <<" (" << strres.c_str() << L") Result:" << hr << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set CA_GetDateTimeString property value");
++  }
++
++LExit:
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++  
++extern "C" _declspec(dllexport) UINT __stdcall CA_GetDateString(MSIHANDLE hInstall)
++{
++  #define GET_DATE_PROP L"CURRENT_DATE_STRING"
++
++  std::wstringstream dbstrs;
++  std::wstring strres;
++  
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_GetDateString");
++  dbstrs << L"CA_GetDateString: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  strres = getCADateTimeInfo(DTT_DATE);
++   
++  if(!strres.empty())
++  {
++    hr = WcaSetProperty(GET_DATE_PROP, strres.c_str());
++    dbstrs << L"MSI SETUP CA_GetDateString: SetProperty "<< GET_DATE_PROP <<" (" << strres.c_str() << L") Result:" << hr << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set CA_GetDateString property value");
++  }
++
++LExit:
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++  
++extern "C" _declspec(dllexport) UINT __stdcall CA_GetTimeString(MSIHANDLE hInstall)
++{
++  #define GET_TIME_PROP L"CURRENT_TIME_STRING"
++
++  std::wstringstream dbstrs;
++  std::wstring strres;
++  
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_GetTimeString");
++  dbstrs << L"CA_GetTimeString: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  strres = getCADateTimeInfo(DTT_TIME);
++   
++  if(!strres.empty())
++  {
++    hr = WcaSetProperty(GET_TIME_PROP, strres.c_str());
++    dbstrs << L"MSI SETUP CA_GetTimeString: SetProperty "<< GET_TIME_PROP <<" (" << strres.c_str() << L") Result:" << hr << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, "Failed to set CA_GetTimeString property value");
++  }
++
++LExit:
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_CopyFile(MSIHANDLE hInstall)
++{
++  #define SOURCE_FILE_PROP L"CA_COPYFILE_PARAMETER"
++  #define LOC_SFP_SEP ';'
++
++  std::wstringstream dbstrs;
++  std::string tmp_params;
++  std::wstring source_file_name;
++  std::wstring dest_file_name;
++  
++  LPWSTR pwzPropertyValue = NULL;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_CopyFile");
++  dbstrs << L"CA_CopyFile: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(L"CustomActionData", &pwzPropertyValue);
++  if( hr != S_OK || pwzPropertyValue==NULL || *pwzPropertyValue==0)
++  {
++    hr = WcaGetProperty( SOURCE_FILE_PROP, &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get CA_COPYFILE_PARAMETER property value");
++    dbstrs << L"CA_CopyFile: Read " << SOURCE_FILE_PROP << " (" << pwzPropertyValue << L")" << std::endl;
++    Log_Str(dbstrs);
++  }
++  
++  tmp_params.assign(ToNarrow(pwzPropertyValue));
++  size_t cutPos = tmp_params.find(LOC_SFP_SEP);
++  if(cutPos!=std::string::npos)
++  {
++    source_file_name=ToWiden(tmp_params.substr(0,cutPos).c_str());
++    dest_file_name=ToWiden(tmp_params.substr(cutPos+1).c_str());
++  } else
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << L"MSI SETUP CA_CopyFile wrong format of CA_COPYFILE_PARAMETER:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of CA_COPYFILE_PARAMETER");
++  }
++
++  if(!CopyFile(source_file_name.c_str(),dest_file_name.c_str(),false))
++    hr = S_FALSE;
++
++LExit:
++  if(pwzPropertyValue)
++    ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_SetFeatureStateLocal(MSIHANDLE hInstall)
++{
++  #define PARAM_PROP L"CA_SETFEATURESTATELOCAL_PARAMETER"
++
++  std::wstringstream dbstrs;
++  
++  LPWSTR pwzPropertyValue = NULL;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++
++  hr = WcaInitialize(hInstall, "CA_SetFeatureStateLocal");
++  dbstrs << L"CA_SetFeatureStateLocal: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(L"CustomActionData", &pwzPropertyValue);
++  if( hr != S_OK || pwzPropertyValue==NULL || *pwzPropertyValue==0)
++  {
++    hr = WcaGetProperty( PARAM_PROP, &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get CA_SETFEATURESTATELOCAL_PARAMETER property value");
++    dbstrs << L"CA_SetFeatureStateLocal: Read " << PARAM_PROP << " (" << pwzPropertyValue << L")" << std::endl;
++    Log_Str(dbstrs);
++  }
++  
++  if (pwzPropertyValue && *pwzPropertyValue)
++  {
++    UINT hr = ::MsiSetFeatureState(hInstall, pwzPropertyValue, INSTALLSTATE_LOCAL );
++    dbstrs << L"MsiSetFeatureState (" << pwzPropertyValue << L"," << INSTALLSTATE_LOCAL << L") ret=" << hr << std::endl;
++    Log_Str(dbstrs);
++  }   
++
++LExit:
++  if(pwzPropertyValue)
++    ReleaseStr(pwzPropertyValue);
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++ 
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index 994c5642..178dddb2 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -4,15 +4,15 @@ EXPORTS
+   CA_PrevDialog
+   CA_FillPrinterListbox
+   CA_DirBrowser
+-	CA_ProcessCFGTable
+-	CA_ModifyJavaPolicy
+-	CA_MutuallyExclusive
+-	CA_ProcessFeatureTable
+-	CA_ProcessPropTable
+-	CA_WriteCfg
+-	CA_ProcessSetCfgTableTable
+-	CA_GetJavaHome
+-	CA_ClearTmpCfgfiles
++  CA_ProcessCFGTable
++  CA_ModifyJavaPolicy
++  CA_MutuallyExclusive
++  CA_ProcessFeatureTable
++  CA_ProcessPropTable
++  CA_WriteCfg
++  CA_ProcessSetCfgTableTable
++  CA_GetJavaHome
++  CA_ClearTmpCfgfiles
+   CA_WriteSNMPConfigFile
+   WriteSNMPConfigFile
+   PrepareAddressValues
+@@ -23,5 +23,12 @@ EXPORTS
+   CA_CheckFileInPath
+   CA_SetPredefinedUserFolder
+   CA_SetPreviousInstallMode
++  CA_GetDateTimeString
++  CA_GetDateString
++  CA_GetTimeString
++  CA_CopyFile
++  CA_SetFeatureStateLocal
++
++
+ 
+ 
+-- 
+2.41.0.windows.1
+

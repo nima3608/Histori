@@ -1,0 +1,1623 @@
+From 3ba98bb264b7e4fc855c3f97b33bd8b2bb684c29 Mon Sep 17 00:00:00 2001
+From: mpatzer <mpatzer@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 22 Feb 2007 12:23:04 +0000
+Subject: [PATCH 0012/1077] Update to Version 1.0.7.1 from CC
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@12 90b65887-3827-0410-9a23-83215b262276
+---
+ Massai/cpp/CfgTools/inc/CfgValues_def.h       |  15 +-
+ Massai/cpp/CfgTools/src/CfgValues.cpp         | 273 ++++++++++++------
+ Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h        |  13 +-
+ Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp           |  27 +-
+ Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h     |  13 +-
+ Massai/cpp/CfgXMgrB/src/cfgEntity.cpp         |  19 +-
+ Massai/cpp/CfgXMgrB/src/cfgMeta.cpp           |  39 ++-
+ Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp     |   6 +-
+ Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp  |   4 +-
+ Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp       |   4 +-
+ Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp   |   4 +-
+ Massai/cpp/Controller/inc/config.h            |  12 +-
+ Massai/cpp/Controller/inc/mcontrol_def.h      |  12 +-
+ Massai/cpp/Controller/inc/mstarter_def.h      |  11 +-
+ Massai/cpp/Controller/inc/reboot.h            |   3 +
+ Massai/cpp/Controller/inc/scheduler.h         |   2 +
+ Massai/cpp/Controller/src/mctools.cpp         |  44 +--
+ Massai/cpp/Controller/src/pslist.cpp          |  29 +-
+ Massai/cpp/Controller/src/reboot.cpp          |  31 +-
+ Massai/cpp/Controller/src/scheduler.cpp       |  15 +-
+ Massai/cpp/Controller/src/starter.cpp         |   1 +
+ .../cpp/LogServiceEx/eventConfiguration.txt   |  88 ++++--
+ Massai/cpp/LogServiceEx/statusBB.xslt         |  20 +-
+ Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h  |   9 +-
+ Massai/cpp/MassaiCorba/src/corbacfg.cpp       |  10 +-
+ 25 files changed, 505 insertions(+), 199 deletions(-)
+
+diff --git a/Massai/cpp/CfgTools/inc/CfgValues_def.h b/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 19ec6192..fb2274d2 100644
+--- a/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -19,9 +19,20 @@
+ // #define FILE_VER_DTS "1.0.1.0\0"
+ //
+ // 17.May.2006  JK      Add AUTOINITIAL option
+-#define FILE_VER_BIN 1,0,2,0
+-#define FILE_VER_DTS "1.0.2.0\0"
++// #define FILE_VER_BIN 1,0,2,0
++// #define FILE_VER_DTS "1.0.2.0\0"
+ //
++// 19.Jan.2007  JK      Bugfixes
++// #define FILE_VER_BIN 1,0,3,0
++// #define FILE_VER_DTS "1.0.3.0\0"
++//
++// 30.Jan.2007  JK      Bugfixes
++//                      CfgValues shall allow also " in Text-Configuration
++//                      values.
++#define FILE_VER_BIN 1,0,4,0
++#define FILE_VER_DTS "1.0.4.0\0"
++//
++
+ //-------------------------------------------------------------------------
+ 
+ 
+diff --git a/Massai/cpp/CfgTools/src/CfgValues.cpp b/Massai/cpp/CfgTools/src/CfgValues.cpp
+index d842ef9c..7cd21ef4 100644
+--- a/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -55,10 +55,38 @@ char _atsaver[] = MAT_VERS_ID FILE_VER_DTS;
+ 
+ /**
+  *
+- * Copy one cfg-format list-element an ostream.
++ * Copy one cfg-format text-element to an ostream.
+  *
+ **/
+-void copy( std::ostream & OS, char const * Src )
++void readTextCopy( std::ostream & OS, char const * Src )
++{
++   char CSrc = *Src++;
++   while( CSrc )
++   {
++
++      switch( CSrc )
++      {
++      case CFGTOKEN_ESCAPE:
++      case CCHR_VAL_BEG:
++      // case CCHR_VAL_END:
++         OS << CFGTOKEN_ESCAPE << CSrc;
++         break;
++      default:
++         OS << CSrc;
++      }
++
++      CSrc = *Src++;
++   }
++}
++
++
++
++/**
++ *
++ * Copy one cfg-format list-element to an ostream.
++ *
++**/
++void readTextListCopy( std::ostream & OS, char const * Src )
+ {
+    char CSrc = *Src++;
+    while( CSrc )
+@@ -82,13 +110,54 @@ void copy( std::ostream & OS, char const * Src )
+ 
+ 
+ 
++/**
++ *
++ * Copy from flat to string.
++ *
++**/
++void writeTextCopy( std::string & DstVal, char const * Src )
++{
++   DstVal.erase();
++   bool EscapeSeen = false;
++   for(;;)
++   {
++      if( *Src == 0 )
++      {
++         return;
++      }
++      else
++      {
++         if( EscapeSeen )
++         {
++            DstVal += *Src;
++            EscapeSeen = false;
++         }
++         else
++         {
++            switch( *Src )
++            {
++            case CFGTOKEN_ESCAPE:
++               EscapeSeen = true;
++               break;
++            default:
++               DstVal += *Src;
++            }
++         }
++      }
++      ++Src;
++   }
++}
++
++
++
+ /**
+  *
+  * Copy one list-element from flat to a cfg-format destination buffer.
+  *
+ **/
+-char const * listCopyNext( char * Dst, char const * Src )
++char const * writeTextListCopyN( std::string & DstVal, char const * Src )
+ {
++   DstVal.erase();
+    bool EscapeSeen = false;
+    for(;;)
+    {
+@@ -100,7 +169,7 @@ char const * listCopyNext( char * Dst, char const * Src )
+       {
+          if( EscapeSeen )
+          {
+-            *Dst++ = *Src;
++            DstVal += *Src;
+             EscapeSeen = false;
+          }
+          else
+@@ -111,10 +180,9 @@ char const * listCopyNext( char * Dst, char const * Src )
+                EscapeSeen = true;
+                break;
+             case CFGTOKEN_LISTSEP:
+-               *Dst = 0;
+                return Src + 1;
+             default:
+-               *Dst++ = *Src;
++               DstVal += *Src;
+             }
+          }
+       }
+@@ -126,30 +194,36 @@ char const * listCopyNext( char * Dst, char const * Src )
+ 
+ /**
+  *
+- * Copy from flat to string list
++ * Copy from flat to string list.
+  *
+ **/
+-void copy
++void writeTextListCopy
+ (
+    Config::Textlist::strings &  Dst,
+-   char const *                 Src
++   std::string const &          Src
+ )
+ {
+-   static char Buffer[32768];
++   std::string ValBuffer;
++   //
++   // Count the number of list elements.
++   //
+    unsigned Size = 0;
+-   char const * CSrc = listCopyNext( Buffer, Src );
++   char const * CSrc = writeTextListCopyN( ValBuffer, Src.c_str() );
+    while( CSrc )
+    {
+       ++Size;
+-      CSrc = listCopyNext( Buffer, CSrc );
++      CSrc = writeTextListCopyN( ValBuffer, CSrc );
+    }
+    Dst.length( Size );
+-   int Index = 0;
+-   CSrc = listCopyNext( Buffer, Src );
++   //
++   // Copy list elements.
++   //
++   unsigned Index = 0;
++   CSrc = writeTextListCopyN( ValBuffer, Src.c_str() );
+    while( CSrc )
+    {
+-      Dst[Index] = CORBA::string_dup( Buffer );
+-      CSrc = listCopyNext( Buffer, CSrc );
++      Dst[Index] = CORBA::string_dup( ValBuffer.c_str() );
++      CSrc = writeTextListCopyN( ValBuffer, CSrc );
+       ++Index;
+    }
+ }
+@@ -177,8 +251,8 @@ void cfgValuesRead
+ 
+    try
+    {
+-      Config::Directory::dir * Dir = Proxy->get( Acc );
+-      unsigned Num = Dir->length();
++      Config::Directory::dir * const Dir = Proxy->get( Acc );
++      unsigned const Num = Dir->length();
+       for( unsigned Ndx=0; Ndx<Num; ++Ndx )
+       {
+          Config::Directory::item Item = (*Dir)[Ndx];
+@@ -217,10 +291,11 @@ void cfgValuesRead
+             //
+             OS << CFGTOKEN_ITEM_NAME "=" CSTR_VAL_BEG
+                << TotalPath.c_str()
+-               << CSTR_VAL_END " " CFGTOKEN_TYPE "=" CSTR_VAL_BEG CFGTOKEN_TYPE_TEXT
+-               << CSTR_VAL_END " val=" CSTR_VAL_BEG
+-               << Item.Value.textValue()
+-               << CSTR_VAL_END << std::endl;
++               << CSTR_VAL_END " " CFGTOKEN_TYPE "="
++                  CSTR_VAL_BEG CFGTOKEN_TYPE_TEXT
++               << CSTR_VAL_END " val=" CSTR_VAL_BEG;
++            readTextCopy( OS, Item.Value.textValue() );
++            OS << CSTR_VAL_END << std::endl;
+             ++Records;
+             //
+             //-------------------------------------------------------------
+@@ -233,16 +308,18 @@ void cfgValuesRead
+             //
+             OS << CFGTOKEN_ITEM_NAME "=" CSTR_VAL_BEG
+                << TotalPath.c_str()
+-               << CSTR_VAL_END " " CFGTOKEN_TYPE "=" CSTR_VAL_BEG CFGTOKEN_TYPE_TEXTLIST
++               << CSTR_VAL_END " " CFGTOKEN_TYPE "="
++                  CSTR_VAL_BEG CFGTOKEN_TYPE_TEXTLIST
+                << CSTR_VAL_END " val=" CSTR_VAL_BEG;
+             //
+             {
+-               Config::Textlist::strings Val = Item.Value.textlistValue();
+-               int Length = Val.length();
+-               for( int Idx = 0; Idx < Length; ++Idx )
++               Config::Textlist::strings const Val =
++                  Item.Value.textlistValue();
++               unsigned const Length = Val.length();
++               for( unsigned Idx = 0; Idx < Length; ++Idx )
+                {
+                   // Write a listelement
+-                  copy( OS, Val[Idx].in() );
++                  readTextListCopy( OS, Val[Idx].in() );
+                   // List separator
+                   OS << CFGTOKEN_LISTSEP;
+                }
+@@ -281,15 +358,22 @@ void cfgValuesRead
+                << CFGTOKEN_TYPE_SELECTION
+                << CSTR_VAL_END " val=" CSTR_VAL_BEG;
+             {
+-               int SIndex = Item.Value.selectionValue().CurrentIndex;
++               int const SIndex =
++                  Item.Value.selectionValue().CurrentIndex;
+                bool Found = false;
+-               int Size = Item.Value.selectionValue().List.length();
+-               for( int i=0; i<Size ; ++i )
++               unsigned const Size =
++                  Item.Value.selectionValue().List.length();
++               for( unsigned i=0; i<Size ; ++i )
+                {
+-                  if( Item.Value.selectionValue().List[i].selLong == SIndex )
++                  if
++                  (
++                     Item.Value.selectionValue().List[i].selLong ==
++                     SIndex
++                  )
+                   {
+                      Found = true;
+-                     OS << Item.Value.selectionValue().List[i].selString.in();
++                     OS << Item.Value.selectionValue().List[i]
++                               .selString.in();
+                   }
+                }
+                if( !Found )
+@@ -322,12 +406,22 @@ void cfgValuesRead
+  * Read a token value.
+  *
+ **/
+-void cfgValuesFRead( char * Buffer, std::istream & IS, char const * Token )
++void cfgValuesFRead
++(
++   std::string &        DstBuf,
++   std::istream &       IS,
++   char const *         Token
++)
+ {
+-   char InC = IS.get();
++   char InC = static_cast<char>( IS.get() );
+    char const * CToken = Token;
+-   char * COut = 0;
+-   int ValState = 0;
++   enum
++   {
++      T0,
++      T1,
++      T2,
++      T3
++   } ValState = T0;
+    while( IS.good() )
+    {
+       if( *CToken != 0 )
+@@ -347,60 +441,58 @@ void cfgValuesFRead( char * Buffer, std::istream & IS, char const * Token )
+          // Token matched
+          switch( ValState )
+          {
+-         case 0:
++         case T0:
++            DstBuf = "";
+             if( InC == '=' )
+             {
+-               COut = Buffer;
+-               ValState = 1;
++               ValState = T1;
+             }
+             else
+             {
+                // Would have expected '='
+-               Buffer[0] = 0;
+                return;
+             }
+             break;
+-         case 1:
++         case T1:
+             if( InC == CCHR_VAL_BEG )
+             {
+-               ValState = 2;
++               ValState = T2;
+             }
+             else
+             {
+                // Would have expected '"'
+-               Buffer[0] = 0;
++               DstBuf = "";
+                return;
+             }
+             break;
+-         case 2:
++         case T2:
+             switch( InC )
+             {
+             case CFGTOKEN_ESCAPE:
+-               ValState = 3;
++               ValState = T3;
+                break;
+             case CCHR_VAL_END:
+-               *COut = 0;
+                return;
+             default:
+-               *COut++ = InC;
++               DstBuf += InC;
+             }
+             break;
+-         case 3:
++         case T3:
+             if( InC != CCHR_VAL_END )
+             {
+                // Just process escapes for end-marker in data
+-               *COut++ = CFGTOKEN_ESCAPE;
++               DstBuf += CFGTOKEN_ESCAPE;
+             }
+-            *COut++ = InC;
+-            ValState = 2;
++            DstBuf += InC;
++            ValState = T2;
+             break;
+          }
+       }
+       // Next character
+-      InC = IS.get();
++      InC = static_cast<char>( IS.get() );
+    }
+    // End of stream?
+-   Buffer[0] = 0;
++   DstBuf = "";
+    return;
+ }
+ 
+@@ -428,7 +520,7 @@ int main( int argc, char ** argv )
+       //
+       // First try, if the READ-option is given
+       //
+-      char const * DstFile = Arg.option( "READ" );
++      char const * const DstFile = Arg.option( "READ" );
+       if( DstFile )
+       {
+          std::cout
+@@ -439,7 +531,7 @@ int main( int argc, char ** argv )
+          //
+          corbaClient<Config::Directory>
+             DirClnt( Host, CFGMGR_PORT, CFGMGR_SRVNAME_DIRECTORY );
+-         Config::Directory * Proxy = DirClnt.proxy();
++         Config::Directory * const Proxy = DirClnt.proxy();
+          if( !Proxy )
+          {
+             std::cout
+@@ -462,23 +554,23 @@ int main( int argc, char ** argv )
+       //
+       // Then try, if the WRITE-option is given
+       //
+-      char const * SrcFile = Arg.option( "WRITE" );
++      char const * const SrcFile = Arg.option( "WRITE" );
+       if( SrcFile )
+       {
+          unsigned SetRecord = 0;
+ 
+-         static char FItm[1024];
+-         static char FTyp[1024];
+-         static char FVal[32768];
++         std::string FItm;
++         std::string FTyp;
++         std::string FVal;
+ 
+          Config::Text *         TxtProxy = 0;
+          Config::Textlist *     TxlProxy = 0;
+          Config::Number *       NumProxy = 0;
+          Config::Selection *    SelProxy = 0;
+ 
+-         char const * SetInitial = Arg.option( "SETINITIAL" );
++         char const * const SetInitial = Arg.option( "SETINITIAL" );
+ 
+-         char const * AutoInitial = Arg.option( "AUTOINITIAL" );
++         char const * const AutoInitial = Arg.option( "AUTOINITIAL" );
+ 
+          Config::access SAcc;
+          SAcc.Authorization = CORBA::string_dup( argv[0] );
+@@ -492,11 +584,11 @@ int main( int argc, char ** argv )
+             cfgValuesFRead( FItm, IS, CFGTOKEN_ITEM_NAME );
+             cfgValuesFRead( FTyp, IS, CFGTOKEN_TYPE );
+             cfgValuesFRead( FVal, IS, "val" );
+-            if( FItm[0] && FTyp[0] )
++            if( ( FItm.size() > 0 ) && ( FTyp.size() > 0 ) )
+             {
+                ++SetRecord;
+-               SAcc.Item = CORBA::string_dup( FItm );
+-               if( !strcmp( FTyp, CFGTOKEN_TYPE_TEXT ) )
++               SAcc.Item = CORBA::string_dup( FItm.c_str() );
++               if( !FTyp.compare( CFGTOKEN_TYPE_TEXT ) )
+                {
+                   //-------------------------------------------------------
+                   //
+@@ -504,7 +596,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( !TxtProxy )
+                   {
+-                     corbaClient<Config::Text> * Clnt =
++                     corbaClient<Config::Text> * const Clnt =
+                         new corbaClient<Config::Text>
+                         ( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXT );
+                      TxtProxy = Clnt->proxy();
+@@ -517,9 +609,11 @@ int main( int argc, char ** argv )
+                      }
+                   }
+                   //
++                  std::string ValString;
++                  writeTextCopy( ValString, FVal.c_str() );
+                   if( SetInitial )
+                   {
+-                     TxtProxy->setInitial( SAcc, FVal );
++                     TxtProxy->setInitial( SAcc, ValString.c_str() );
+                   }
+                   else
+                   {
+@@ -527,20 +621,20 @@ int main( int argc, char ** argv )
+                      {
+                         try
+                         {
+-                           TxtProxy->set( SAcc, FVal );
++                           TxtProxy->set( SAcc, ValString.c_str() );
+                         }
+                         catch( ... )
+                         {
+-                           TxtProxy->setInitial( SAcc, FVal );
++                           TxtProxy->setInitial( SAcc, ValString.c_str() );
+                         }
+                      }
+                      else
+-                        TxtProxy->set( SAcc, FVal );
++                        TxtProxy->set( SAcc, ValString.c_str() );
+                   }
+                   //
+                   //-------------------------------------------------------
+                }
+-               else if( !strcmp( FTyp, CFGTOKEN_TYPE_TEXTLIST ) )
++               else if( !FTyp.compare( CFGTOKEN_TYPE_TEXTLIST ) )
+                {
+                   //-------------------------------------------------------
+                   //
+@@ -548,7 +642,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( !TxlProxy )
+                   {
+-                     corbaClient<Config::Textlist> * Clnt =
++                     corbaClient<Config::Textlist> * const Clnt =
+                         new corbaClient<Config::Textlist>
+                         ( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXTLIST );
+                      TxlProxy = Clnt->proxy();
+@@ -563,7 +657,7 @@ int main( int argc, char ** argv )
+                   }
+                   //
+                   Config::Textlist::strings ValStrings;
+-                  copy( ValStrings, FVal );
++                  writeTextListCopy( ValStrings, FVal );
+                   if( SetInitial )
+                   {
+                      TxlProxy->setInitial( SAcc, ValStrings );
+@@ -587,7 +681,7 @@ int main( int argc, char ** argv )
+                   //
+                   //-------------------------------------------------------
+                }
+-               else if( !strcmp( FTyp, CFGTOKEN_TYPE_NUMBER ) )
++               else if( !FTyp.compare( CFGTOKEN_TYPE_NUMBER ) )
+                {
+                   //-------------------------------------------------------
+                   //
+@@ -595,7 +689,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( !NumProxy )
+                   {
+-                     corbaClient<Config::Number> * Clnt =
++                     corbaClient<Config::Number> * const Clnt =
+                         new corbaClient<Config::Number>
+                         ( Host, CFGMGR_PORT, CFGMGR_SRVNAME_NUMBER );
+                      NumProxy = Clnt->proxy();
+@@ -611,7 +705,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( SetInitial )
+                   {
+-                     NumProxy->setInitial( SAcc, atoi( FVal ) );
++                     NumProxy->setInitial( SAcc, atoi( FVal.c_str() ) );
+                   }
+                   else
+                   {
+@@ -619,20 +713,21 @@ int main( int argc, char ** argv )
+                      {
+                         try
+                         {
+-                           NumProxy->set( SAcc, atoi( FVal ) );
++                           NumProxy->set( SAcc, atoi( FVal.c_str() ) );
+                         }
+                         catch( ... )
+                         {
+-                           NumProxy->setInitial( SAcc, atoi( FVal ) );
++                           NumProxy->
++                              setInitial( SAcc, atoi( FVal.c_str() ) );
+                         }
+                      }
+                      else
+-                        NumProxy->set( SAcc, atoi( FVal ) );
++                        NumProxy->set( SAcc, atoi( FVal.c_str() ) );
+                   }
+                   //
+                   //-------------------------------------------------------
+                }
+-               else if( !strcmp( FTyp, CFGTOKEN_TYPE_SELECTION ) )
++               else if( !FTyp.compare( CFGTOKEN_TYPE_SELECTION ) )
+                {
+                   //-------------------------------------------------------
+                   //
+@@ -640,7 +735,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( !SelProxy )
+                   {
+-                     corbaClient<Config::Selection> * Clnt =
++                     corbaClient<Config::Selection> * const Clnt =
+                         new corbaClient<Config::Selection>
+                         ( Host, CFGMGR_PORT, CFGMGR_SRVNAME_SELECTION );
+                      SelProxy = Clnt->proxy();
+@@ -656,7 +751,7 @@ int main( int argc, char ** argv )
+                   //
+                   if( SetInitial )
+                   {
+-                     SelProxy->setInitialString( SAcc, FVal );
++                     SelProxy->setInitialString( SAcc, FVal.c_str() );
+                   }
+                   else
+                   {
+@@ -664,15 +759,16 @@ int main( int argc, char ** argv )
+                      {
+                         try
+                         {
+-                           SelProxy->setString( SAcc, FVal );
++                           SelProxy->setString( SAcc, FVal.c_str() );
+                         }
+                         catch( ... )
+                         {
+-                           SelProxy->setInitialString( SAcc, FVal );
++                           SelProxy->
++                              setInitialString( SAcc, FVal.c_str() );
+                         }
+                      }
+                      else
+-                        SelProxy->setString( SAcc, FVal );
++                        SelProxy->setString( SAcc, FVal.c_str() );
+                   }
+                   //
+                   //-------------------------------------------------------
+@@ -682,8 +778,8 @@ int main( int argc, char ** argv )
+                   //-------------------------------------------------------
+                   //
+                   std::cout
+-                     << DSPLERR "Ignore unknown type(" << FTyp << ") for"
+-                     << FItm << std::endl;
++                     << DSPLERR "Ignore unknown type(" << FTyp.c_str()
++                     << ") for" << FItm.c_str() << std::endl;
+                   //
+                   //-------------------------------------------------------
+                }
+@@ -695,12 +791,13 @@ int main( int argc, char ** argv )
+          return 0;
+       }
+       //
+-      // No peculiar command?
++      // No explicit command - invalid syntax!
+       //
+       std::cout
+          << "CfgValues Vers." << _atsaver + 22 << "\n"
+          << HINDENT1
+-            "Copyright (c) 2004-2006 MATERNA Information & Communications\n"
++            "Copyright (c) 2004-2007 MATERNA GmbH"
++            " Information & Communications\n"
+          << HINDENT1 "usage:"
+             " CfgValues"
+             " [-host:<Config-host>]\n"
+diff --git a/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 49b432a9..a2c103f3 100644
+--- a/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -116,8 +116,17 @@
+ //! @par     Change:
+ //! - Bugfix: delayed saved has not saved anything
+ //!
+-#define FILE_VER_BIN 1,0,14,0
+-#define FILE_VER_DTS "1.0.14.0"
++// #define FILE_VER_BIN 1,0,14,0
++// #define FILE_VER_DTS "1.0.14.0"
++//
++//! @version 1.0.15
++//! @date    26.Jan.2007
++//! @author  JK
++//! @par     Change:
++//! - Feature: Multiple setInitials
++//!   A second setInitial() will now respect the new config value.
++#define FILE_VER_BIN 1,0,15,0
++#define FILE_VER_DTS "1.0.15.0"
+ //
+ //-------------------------------------------------------------------------
+ 
+diff --git a/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp b/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+index ec5c3686..f2252beb 100644
+--- a/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
++++ b/Massai/cpp/CfgXMgrB/inc/cfgMeta.hpp
+@@ -43,17 +43,24 @@ class cfgMeta
+ 
+    /**
+     *
+-    * Access rights.
++    * Default constructed?
+     *
+    **/
+-   std::string M_Rights;
++   bool const           M_Default;
+ 
+    /**
+     *
+     * Verbose explanation.
+     *
+    **/
+-   std::string M_Explanation;
++   std::string const    M_Explanation;
++
++   /**
++    *
++    * Access rights.
++    *
++   **/
++   std::string          M_Rights;
+ 
+ public:
+ 
+@@ -139,10 +146,7 @@ public:
+     * @return The attribute string
+     *
+    **/
+-   std::string const & getExplanation() const
+-   {
+-      return M_Explanation;
+-   }
++   std::string const & getExplanation() const;
+ 
+    /**
+     *
+@@ -153,6 +157,15 @@ public:
+    **/
+    virtual char const * getTypeToken() const = 0;
+ 
++   /**
++    *
++    * How was the object created?
++    *
++    * @return true, if by default constructor
++    *
++   **/
++   bool isDefault() const;
++
+    /**
+     *
+     * Save the value object to an ostream.
+diff --git a/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index e6526ee4..4c208921 100644
+--- a/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -118,8 +118,17 @@
+ //! @par     Change:
+ //! - Bugfix: delayed saved has not saved anything
+ //!
+-#define FILE_VER_BIN 1,0,14,0
+-#define FILE_VER_DTS "1.0.14.0"
++// #define FILE_VER_BIN 1,0,14,0
++// #define FILE_VER_DTS "1.0.14.0"
++//
++//! @version 1.0.15
++//! @date    26.Jan.2007
++//! @author  JK
++//! @par     Change:
++//! - Feature: Multiple setInitials
++//!   A second setInitial() will now respect the new config value.
++#define FILE_VER_BIN 1,0,15,0
++#define FILE_VER_DTS "1.0.15.0"
+ //
+ //-------------------------------------------------------------------------
+ 
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index d0043489..69305cea 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -1831,7 +1831,23 @@ void cfgEntity::itemCreate
+          // No meta found, value probably from setInitial()
+          // Create the meta data for this item.
+          reference const RefNew = M_Meta->cemFromMeta( MetaData );
+-         M_Value->cevUpdate( Item, RefNew );
++         if( MetaData.isDefault() )
++         {
++            //
++            // This is again a call by setInitial().
++            // Accept a new value to overwrite the old one.
++            //
++            M_Value->cevUpdate( Item, RefNew, ValDef );
++         }
++         else
++         {
++            //
++            // This is a call by create().
++            // Do NOT set a new value, since we want to take the value
++            // from setInitial().
++            //
++            M_Value->cevUpdate( Item, RefNew );
++         }
+       }
+       catch( cfgEntity_NotAuthorized & )
+       {
+@@ -1844,6 +1860,7 @@ void cfgEntity::itemCreate
+       {
+          // Value not set, create meta and item data
+          reference const Ref = M_Meta->cemFromMeta( MetaData );
++         //-std::cout << "cfgEntity::itemCreate - update" << std::endl;
+          M_Value->cevUpdate( Item, Ref, ValDef );
+       }
+    }
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp b/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+index 77d384c3..75342e15 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgMeta.cpp
+@@ -105,8 +105,9 @@ std::string const cfgAuthRights_GetNamed
+  *
+ **/
+ cfgMeta::cfgMeta() :
+-   M_Rights( CFG_RIGHTS_STRING_C ),
+-   M_Explanation()
++   M_Default( true ),
++   M_Explanation(),
++   M_Rights( CFG_RIGHTS_STRING_C )
+ {
+ }
+ 
+@@ -118,8 +119,9 @@ cfgMeta::cfgMeta() :
+  *
+ **/
+ cfgMeta::cfgMeta( cfgMeta const & Src ) :
+-   M_Rights( Src.M_Rights ),
+-   M_Explanation( Src.M_Explanation )
++   M_Default( Src.M_Default ),
++   M_Explanation( Src.M_Explanation ),
++   M_Rights( Src.M_Rights )
+ {
+ }
+ 
+@@ -131,8 +133,9 @@ cfgMeta::cfgMeta( cfgMeta const & Src ) :
+  *
+ **/
+ cfgMeta::cfgMeta( std::string const & R, std::string const & X ) :
+-   M_Rights( R ),
+-   M_Explanation( X )
++   M_Default( false ),
++   M_Explanation( X ),
++   M_Rights( R )
+ {
+ }
+ 
+@@ -165,6 +168,18 @@ bool cfgMeta::operator==( cfgMeta const & Other ) const
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMeta.hpp.
++ *
++**/
++std::string const & cfgMeta::getExplanation() const
++{
++   return M_Explanation;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMeta.hpp.
+@@ -191,6 +206,18 @@ void cfgMeta::getRights( char const * Auth, std::string & Dst ) const
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgMeta.hpp.
++ *
++**/
++bool cfgMeta::isDefault() const
++{
++   return M_Default;
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgMeta.hpp.
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp b/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+index d2bed496..dd5a91e7 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgMetaNumber.cpp
+@@ -81,7 +81,7 @@ cfgMetaNumber::~cfgMetaNumber()
+ **/
+ bool cfgMetaNumber::operator==( cfgMeta const & Other ) const
+ {
+-   cfgMetaNumber const * pOther =
++   cfgMetaNumber const * const pOther =
+       dynamic_cast<cfgMetaNumber const *>( &Other );
+    if( pOther )
+    {
+@@ -139,11 +139,11 @@ void cfgMetaNumber::save
+ **/
+ bool cfgMetaNumber::valueAllowed( cfgValue const & Value ) const
+ {
+-   cfgValueNumber const * Val =
++   cfgValueNumber const * const Val =
+       dynamic_cast<cfgValueNumber const *>( &Value );
+    if( !Val )
+       return false;
+-   cfgType_Number V = Val->scalar();
++   cfgType_Number const V = Val->scalar();
+    if( V > M_MaxValue )
+       return false;
+    if( V < M_MinValue )
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp b/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+index 3ce200cf..5b452c61 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+@@ -337,7 +337,7 @@ cfgMetaSelection::~cfgMetaSelection()
+ bool cfgMetaSelection::operator==( cfgMeta const & Other ) const
+ {
+ 
+-   cfgMetaSelection const * pOther =
++   cfgMetaSelection const * const pOther =
+       dynamic_cast<cfgMetaSelection const *>( &Other );
+    if( pOther )
+    {
+@@ -441,7 +441,7 @@ void cfgMetaSelection::save
+ **/
+ bool cfgMetaSelection::valueAllowed( cfgValue const & Value ) const
+ {
+-   cfgValueSelection const * Val =
++   cfgValueSelection const * const Val =
+       dynamic_cast<cfgValueSelection const *>( &Value );
+    if( !Val )
+       return false;
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index 2de2ca25..7b561910 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -83,7 +83,7 @@ cfgMetaText::~cfgMetaText()
+ **/
+ bool cfgMetaText::operator==( cfgMeta const & Other ) const
+ {
+-   cfgMetaText const * pOther =
++   cfgMetaText const * const pOther =
+       dynamic_cast<cfgMetaText const *>( &Other );
+    if( pOther )
+    {
+@@ -136,7 +136,7 @@ void cfgMetaText::save
+ **/
+ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+ {
+-   cfgValueText const * Val =
++   cfgValueText const * const Val =
+       dynamic_cast<cfgValueText const *>( &Value );
+    if( !Val )
+       return false;
+diff --git a/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index b653e1fb..b3650306 100644
+--- a/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -85,7 +85,7 @@ cfgMetaTextlist::~cfgMetaTextlist()
+ **/
+ bool cfgMetaTextlist::operator==( cfgMeta const & Other ) const
+ {
+-   cfgMetaTextlist const * pOther =
++   cfgMetaTextlist const * const pOther =
+       dynamic_cast<cfgMetaTextlist const *>( &Other );
+    if( pOther )
+    {
+@@ -138,7 +138,7 @@ void cfgMetaTextlist::save
+ **/
+ bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
+ {
+-   cfgValueTextlist const * Val =
++   cfgValueTextlist const * const Val =
+       dynamic_cast<cfgValueTextlist const *>( &Value );
+    if( !Val )
+       return false;
+diff --git a/Massai/cpp/Controller/inc/config.h b/Massai/cpp/Controller/inc/config.h
+index 4f9df475..1d69fce2 100644
+--- a/Massai/cpp/Controller/inc/config.h
++++ b/Massai/cpp/Controller/inc/config.h
+@@ -120,7 +120,7 @@ public:
+ 
+ //---------------------------------------------------------------------------
+ //
+-//  function:   class cfgListSysCommands : public nConfig::gclTextList
++//  function:   class cfgListSysCommands : public nConfig::gcTextList
+ //
+ //  purpose:    List of system commands to be executed before platform start/shutdown
+ //
+@@ -130,7 +130,7 @@ public:
+ //
+ //---------------------------------------------------------------------------
+ 
+-class cfgListSysCommands : public nConfig::gclTextList
++class cfgListSysCommands : public nConfig::gcTextList
+ {
+     /** Default list */
+ 
+@@ -151,7 +151,7 @@ class cfgListSysCommands : public nConfig::gclTextList
+ 
+ public:
+ 
+-    cfgListSysCommands(char *pszItem) : nConfig::gclTextList(pszItem,"massaiControl")
++    cfgListSysCommands(char *pszItem) : nConfig::gcTextList(pszItem,"massaiControl")
+     {
+        //defStringList.push_back( "Eins" );
+        //defStringList.push_back( "Zwei" );
+@@ -160,7 +160,7 @@ public:
+ 
+ //---------------------------------------------------------------------------
+ //
+-//  function:   class cfgListScheduledCommands : public nConfig::gclTextList
++//  function:   class cfgListScheduledCommands : public nConfig::gcTextList
+ //
+ //  purpose:    list of commands to be passed to the windows AT command
+ //
+@@ -170,7 +170,7 @@ public:
+ //
+ //---------------------------------------------------------------------------
+ 
+-class cfgListScheduledCommands : public nConfig::gclTextList
++class cfgListScheduledCommands : public nConfig::gcTextList
+ {
+     /** Default list */
+ 
+@@ -193,7 +193,7 @@ class cfgListScheduledCommands : public nConfig::gclTextList
+ 
+ public:
+ 
+-    cfgListScheduledCommands(char *pszItem) : nConfig::gclTextList(pszItem,"massaiControl")
++    cfgListScheduledCommands(char *pszItem) : nConfig::gcTextList(pszItem,"massaiControl")
+     {
+        //defStringList.push_back( "Eins" );
+        //defStringList.push_back( "Zwei" );
+diff --git a/Massai/cpp/Controller/inc/mcontrol_def.h b/Massai/cpp/Controller/inc/mcontrol_def.h
+index 610f88f3..c74a48f7 100644
+--- a/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -12,10 +12,16 @@
+ 
+ /*! \mainpage mControl
+  *
+- *  @version 1.0.0.10
++ *  @version 1.0.0.12
+  *
+  *  \section change1 Change history
+  *
++ *  \date 29.09.2006 \li V 1.0.0.12
++ *                   \li bugfix memory display in processlist via mcc  (EDB:27057) (PtM)
++ *
++ *  \date 29.09.2006 \li V 1.0.0.11
++ *                   \li remove memory leaks (configuration) (PtM)
++ *
+  *  \date 29.09.2006 \li V 1.0.0.10  SteT
+  *                   \li catch CTRL-Break signal
+  *
+@@ -41,8 +47,8 @@
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+ 
+-#define FILE_VER_BIN     1,0,0,10
+-#define FILE_VER_STR     "FileVersion", "1.0.0.10\0"
++#define FILE_VER_BIN     1,0,0,12
++#define FILE_VER_STR     "FileVersion", "1.0.0.12\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"mcontrol\0"
+ #define INTERNALNAME     "InternalName"     ,"mcontrol\0"
+diff --git a/Massai/cpp/Controller/inc/mstarter_def.h b/Massai/cpp/Controller/inc/mstarter_def.h
+index 89c25b63..1f4a37c4 100644
+--- a/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -12,11 +12,14 @@
+ 
+ /*! \mainpage mStarter
+  *
+- *  @version 1.0.5.2
++ *  @version 1.0.5.3
+  *
+  *  \section change1 Change history
+  *
+- *  \date 27.04.2006 \li V 1.0.5.2
++ *  \date 24.01.2007 \li V 1.0.5.3
++ *                   \li SteT Send CTRL_C and CTRL_BREAK
++ *
++ *  \date 07.11.2006 \li V 1.0.5.2
+  *                   \li SteT EDB 26729: Remove CTRL_BREAK
+  *
+  *
+@@ -33,8 +36,8 @@
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+ 
+-#define FILE_VER_BIN     1,0,5,2
+-#define FILE_VER_STR     "FileVersion", "1.0.5.2\0"
++#define FILE_VER_BIN     1,0,5,3
++#define FILE_VER_STR     "FileVersion", "1.0.5.3\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"mstarter\0"
+ #define INTERNALNAME     "InternalName"     ,"mstarter\0"
+diff --git a/Massai/cpp/Controller/inc/reboot.h b/Massai/cpp/Controller/inc/reboot.h
+index a9613173..42a06d88 100644
+--- a/Massai/cpp/Controller/inc/reboot.h
++++ b/Massai/cpp/Controller/inc/reboot.h
+@@ -36,6 +36,9 @@ private:
+     long lStartDelay;
+ 
+     controllerServant *pServant;
++    cfgNum *pDelayRange;
++    cfgNum *pStartDelay;
++    cfgStr *pRebootTime;
+ 
+     long function();
+     void init();
+diff --git a/Massai/cpp/Controller/inc/scheduler.h b/Massai/cpp/Controller/inc/scheduler.h
+index f4b21ea5..66fea278 100644
+--- a/Massai/cpp/Controller/inc/scheduler.h
++++ b/Massai/cpp/Controller/inc/scheduler.h
+@@ -25,6 +25,8 @@ private:
+     long function();
+     void newList();
+     void deleteList();
++    
++    cfgListScheduledCommands *pSysCmdList;
+ 
+ public:
+ 
+diff --git a/Massai/cpp/Controller/src/mctools.cpp b/Massai/cpp/Controller/src/mctools.cpp
+index 41017ed0..a4583e86 100644
+--- a/Massai/cpp/Controller/src/mctools.cpp
++++ b/Massai/cpp/Controller/src/mctools.cpp
+@@ -31,6 +31,13 @@ using namespace std;
+ 
+ #define HOSTS_FILE  "/etc/hosts.massai"
+ 
++cfgStr *pHostFileLoadFrom = NULL;
++cfgStr *pHostFileSaveTo   = NULL;
++
++cfgListSysCommands *pShutDownCommands = NULL;
++cfgListSysCommands *pStartupCommands  = NULL;
++
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   long shutdownOS(bool fReboot)
+@@ -515,16 +522,13 @@ long execSysCmdsStartup()
+ long rc = -1;
+ list<string>::iterator i;
+ 
+-    cfgListSysCommands tempCreate("PLATFORM.SHUTDOWN.SystemCommands");
+-    cfgListSysCommands sysCmdList("PLATFORM.STARTUP.SystemCommands");
++    if (pStartupCommands==NULL)
++      pStartupCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
+ 
+     TRACE(HERE,"executing configured system commands...");
+ 
+-    // just create this config entry
+-
+-    tempCreate.get();
+ 
+-    list<string> cmdlist = sysCmdList.get();
++    list<string> cmdlist = pStartupCommands->get();
+ 
+     for(i = cmdlist.begin(); i != cmdlist.end(); i++)
+     {
+@@ -550,14 +554,15 @@ list<string>::iterator i;
+ 
+ long execSysCmdsShutdown()
+ {
+-cfgListSysCommands sysCmdList("PLATFORM.SHUTDOWN.SystemCommands");
++    if (pShutDownCommands==NULL)
++      pShutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
+ 
+ list<string>::iterator i;
+ long rc;
+ 
+     TRACE(HERE,"executing configured system commands...");
+ 
+-    list<string> cmdlist = sysCmdList.get();
++    list<string> cmdlist = pShutDownCommands->get();
+ 
+     for(i = cmdlist.begin(); i != cmdlist.end(); i++)
+     {
+@@ -585,24 +590,27 @@ long loadHostsFile()
+ {
+ long rc = 0;
+ 
+-    cfgStr loadFrom("PLATFORM.STARTUP.HostsFileServer",
+-                     "Specifies from which HTTP server to load the hosts file for host name resolving.",
+-                     "");
++    if (pHostFileLoadFrom==NULL)
++      pHostFileLoadFrom = new cfgStr("PLATFORM.STARTUP.HostsFileServer",
++                                     "Specifies from which HTTP server to load the "
++                                     "hosts file for host name resolving.",
++                                     "");
+ 
+-    cfgStr saveTo("PLATFORM.STARTUP.LocalHostsFile",
+-                   "Specifies where to save the hosts file for host name resolving.",
+-                   "c:\\winnt\\system32\\drivers\\etc\\hosts");
++    if (pHostFileSaveTo==NULL)
++      pHostFileSaveTo = new cfgStr("PLATFORM.STARTUP.LocalHostsFile",
++                                   "Specifies where to save the hosts file for host name resolving.",
++                                   "c:\\winnt\\system32\\drivers\\etc\\hosts");
+ 
+     try
+     {
+-        if(*loadFrom.get())
++        if(*pHostFileLoadFrom->get())
+         {
+-          rc = downloadToFile(loadFrom.get(),HOSTS_FILE,saveTo.get());
++          rc = downloadToFile(pHostFileLoadFrom->get(),HOSTS_FILE,pHostFileSaveTo->get());
+ 
+           if(rc < 0)
+-            TRACE(HERE,"failed to load [%s] from [%s], rc = %d (no hosts file written)",HOSTS_FILE,loadFrom.get(),rc);
++            TRACE(HERE,"failed to load [%s] from [%s], rc = %d (no hosts file written)",HOSTS_FILE,pHostFileLoadFrom->get(),rc);
+           else
+-            TRACE(HERE,"[%s] loaded from [%s], %d bytes",HOSTS_FILE,loadFrom.get(),rc);
++            TRACE(HERE,"[%s] loaded from [%s], %d bytes",HOSTS_FILE,pHostFileLoadFrom->get(),rc);
+         }
+     }
+     catch (nConfig::exception ce)
+diff --git a/Massai/cpp/Controller/src/pslist.cpp b/Massai/cpp/Controller/src/pslist.cpp
+index a01c57e7..eebd8857 100644
+--- a/Massai/cpp/Controller/src/pslist.cpp
++++ b/Massai/cpp/Controller/src/pslist.cpp
+@@ -298,6 +298,32 @@ long        lMem = -1;
+     return(lMem);
+ }
+ 
++
++int hextolong(int value)
++{
++    char test[128]="";
++    itoa(value,test,10);
++    return atoi(test);
++}
++
++void GetMemoryInfo(process *pProcess)
++{
++    HANDLE hProcess;
++    PROCESS_MEMORY_COUNTERS pmc;
++    
++    hProcess = OpenProcess( PROCESS_QUERY_INFORMATION |
++                            PROCESS_VM_READ,
++                            FALSE, pProcess->pid );
++
++    if ( GetProcessMemoryInfo( hProcess, &pmc, sizeof(pmc)) )
++    {
++        pProcess->memory  = hextolong(pmc.WorkingSetSize);
++        pProcess->vmemory = hextolong(pmc.PagefileUsage);
++    }
++
++    CloseHandle( hProcess );
++}
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   processList::processList() : procList(),
+@@ -357,8 +383,7 @@ unsigned int i;
+ 
+             if(pp->ppid >= 0)
+             {
+-              pp->memory  = getProcessMemory(aProcesses[i]);
+-              pp->vmemory = getProcessVirtualMemory(aProcesses[i]);
++              GetMemoryInfo(pp);
+               pp->usage   = getProcessTimes(aProcesses[i]);
+ 
+               strcpy(pp->szPath,getProcessPath(aProcesses[i]));
+diff --git a/Massai/cpp/Controller/src/reboot.cpp b/Massai/cpp/Controller/src/reboot.cpp
+index 41240ae5..dafee6d3 100644
+--- a/Massai/cpp/Controller/src/reboot.cpp
++++ b/Massai/cpp/Controller/src/reboot.cpp
+@@ -204,44 +204,45 @@ long checkReboot::function()
+ 
+ void checkReboot::init()
+ {
+-    cfgStr *pTmp = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
++  if (pRebootTime==NULL)
++    pRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
+ 
+     // wait for config service to be ready !!
+ 
+-    while(pTmp && !pTmp->get())
++    while(pRebootTime && !pRebootTime->get())
+     {
+       TRACE(HERE,"config service not yet ready, started ??");
+ 
+-      delete(pTmp);
++      delete(pRebootTime);
+ 
+-      pTmp = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
++      pRebootTime = new cfgStr(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
+ 
+       OS_Sleep(1000);
+     }
+ 
+-    cfgStr rtime(RTIME_ITEM,RTIME_EXPL,RTIME_DEF);
+-
+-    cfgNum delayRange("PLATFORM.REBOOT.DelayRange",
++    if (pDelayRange==NULL)
++      pDelayRange = new cfgNum("PLATFORM.REBOOT.DelayRange",
+                       "Specifies reboot the delay range in minutes for the kiosk. This protects servers from overloading. The value is computed randomly within the given range.");
+ 
+-    cfgNum startDelay("PLATFORM.REBOOT.StartCheckingAfter",
++    if (pStartDelay==NULL)
++      pStartDelay = new cfgNum ("PLATFORM.REBOOT.StartCheckingAfter",
+                       "Specifies the delay time in minutes before reboot-checks are started, to let the platform come up completely.",
+                       15,0,60);
+ 
+-    lStartDelay = startDelay.get();
++    lStartDelay = pStartDelay->get();
+ 
+-    if(delayRange.get() > 0)
++    if(pDelayRange->get() > 0)
+     {
+       srand(time(NULL));
+ 
+-      lDelay = rand() % delayRange.get();
++      lDelay = rand() % pDelayRange->get();
+     }
+     else
+       lDelay = 0;
+ 
+-    if(*rtime.get())
++    if(*pRebootTime->get())
+     {
+-      strcpy(szRebootTime,rtime.get());
++      strcpy(szRebootTime,pRebootTime->get());
+ 
+       if((pStr = strchr(szRebootTime,':')) != NULL)
+       {
+@@ -280,6 +281,10 @@ checkReboot::checkReboot(controllerServant *p)
+ {
+     pServant = p;
+ 
++    pDelayRange = NULL;
++    pStartDelay = NULL;
++    pRebootTime = NULL;
++
+     try
+     {
+         init();
+diff --git a/Massai/cpp/Controller/src/scheduler.cpp b/Massai/cpp/Controller/src/scheduler.cpp
+index 90961bc2..525ffbfd 100644
+--- a/Massai/cpp/Controller/src/scheduler.cpp
++++ b/Massai/cpp/Controller/src/scheduler.cpp
+@@ -49,6 +49,8 @@ private:
+     long _hour;
+     long _minute;
+     char _szCmd [2048];
++    
++    cfgListScheduledCommands *pSysCmdList;
+ 
+ public:
+ 
+@@ -63,6 +65,8 @@ public:
+       _dayOfWeek  = -1;
+       _dayOfMonth = -1;
+ 
++      pSysCmdList = NULL;
++
+       if(pszDay && *pszDay)
+       {
+         if(!strcmp(strlwr(pszDay),"last"))
+@@ -389,16 +393,16 @@ long    lHour,
+ 
+     deleteList();
+ 
+-    cfgListScheduledCommands tempCreate("PLATFORM.SCHEDULED.SystemCommands");
+-    cfgListScheduledCommands sysCmdList("PLATFORM.SCHEDULED.SystemCommands");
++    if (pSysCmdList == NULL)
++    {
++      pSysCmdList = new cfgListScheduledCommands("PLATFORM.SCHEDULED.SystemCommands");
++    }
+ 
+     //TRACE(HERE,"adding scheduled system commands ...");
+ 
+     // just create this config entry
+ 
+-    tempCreate.get();
+-
+-    list<string> cmdlist = sysCmdList.get();
++    list<string> cmdlist = pSysCmdList->get();
+ 
+     for(i = cmdlist.begin(); i != cmdlist.end(); i++)
+     {
+@@ -463,6 +467,7 @@ scheduledTasks::scheduledTasks(HWND hwnd)
+ {
+     this->hwnd = hwnd;
+ 
++    pSysCmdList = NULL;
+     newList();
+ }
+ 
+diff --git a/Massai/cpp/Controller/src/starter.cpp b/Massai/cpp/Controller/src/starter.cpp
+index c9c12810..0336c2ec 100644
+--- a/Massai/cpp/Controller/src/starter.cpp
++++ b/Massai/cpp/Controller/src/starter.cpp
+@@ -971,6 +971,7 @@ HWND  hwnd;
+     }
+ 
+     rc = GenerateConsoleCtrlEvent(CTRL_C_EVENT,0);
++    rc = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT,0);
+     TRACE(HERE,"CTRL-BREAK, rc = %d",rc);
+ 
+     cfgNum timeout("PLATFORM.TIMEOUTS.WaitForProcessTermination",
+diff --git a/Massai/cpp/LogServiceEx/eventConfiguration.txt b/Massai/cpp/LogServiceEx/eventConfiguration.txt
+index 7235610e..6d04e15f 100644
+--- a/Massai/cpp/LogServiceEx/eventConfiguration.txt
++++ b/Massai/cpp/LogServiceEx/eventConfiguration.txt
+@@ -177,25 +177,25 @@
+ 2237;30107,ATB_FEEDER_BP_ECONOMY;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_ECONOMY:MEDIA_LOW
+ 2238;30108,ATB_FEEDER_BP_ECONOMY;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_ECONOMY:MEDIA_EMPTY
+ 
+-2240;10000,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - Printer Stock BP_TK available
+-2241;10106,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_TK:MEDIA_FULL
+-2242;10105,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_TK:MEDIA_HIGH
+-2243;10107,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_TK:MEDIA_LOW
+-2244;10108,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_TK:MEDIA_EMPTY
+-2245;30106,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_TK:MEDIA_FULL
+-2246;30105,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_TK:MEDIA_HIGH
+-2247;30107,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_TK:MEDIA_LOW
+-2248;30108,ATB_FEEDER_BP_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_TK:MEDIA_EMPTY
+-
+-2250;10000,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - Printer Stock BP_GP available
+-2251;10106,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_GP:MEDIA_FULL
+-2252;10105,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_GP:MEDIA_HIGH
+-2253;10107,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_GP:MEDIA_LOW
+-2254;10108,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_GP:MEDIA_EMPTY
+-2255;30106,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_GP:MEDIA_FULL
+-2256;30105,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock BP_GP:MEDIA_HIGH
+-2257;30107,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_GP:MEDIA_LOW
+-2258;30108,ATB_FEEDER_BP_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock BP_GP:MEDIA_EMPTY
++2240;10000,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - Printer Stock TK available
++2241;10106,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock TK:MEDIA_FULL
++2242;10105,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock TK:MEDIA_HIGH
++2243;10107,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock TK:MEDIA_LOW
++2244;10108,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock TK:MEDIA_EMPTY
++2245;30106,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock TK:MEDIA_FULL
++2246;30105,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock TK:MEDIA_HIGH
++2247;30107,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock TK:MEDIA_LOW
++2248;30108,ATB_FEEDER_TK;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock TK:MEDIA_EMPTY
++
++2250;10000,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - Printer Stock GP available
++2251;10106,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock GP:MEDIA_FULL
++2252;10105,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock GP:MEDIA_HIGH
++2253;10107,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock GP:MEDIA_LOW
++2254;10108,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock GP:MEDIA_EMPTY
++2255;30106,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock GP:MEDIA_FULL
++2256;30105,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service - Stock GP:MEDIA_HIGH
++2257;30107,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock GP:MEDIA_LOW
++2258;30108,ATB_FEEDER_GP;[STAT][LOG][SNMP:#:1:30];ATB - In Service, attention required - Stock GP:MEDIA_EMPTY
+ // new feeder definition <<<< -------------------------------------------------------------
+ 
+ 3000;10000,BAGTAG_PRINTER;[STAT][LOG][SNMP:#:1:30];BTP - Printer available
+@@ -467,12 +467,62 @@
+ 18012;1280802,BMI_CKI;[STAT][LOG][SNMP:#:1:30];BMI CKI change state request from unavailable to stopped requested by System Manager
+ 18013;1050804,BMI_CKI;[STAT][LOG][SNMP:#:1:30];BMI CKI change state from available to active requestet by BMI_CKI
+ 
++19000;1190000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application initialize
++19001;1040000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application init ready
++19002;1050801,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application activated
++19003;1060000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application terminated
++19004;1130000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application unavailable
++19005;1120000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application available
++19006;1030001,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application disabled
++19006;1030801,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application disabled
++19006;1010001,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application disabled
++19007;1070000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped
++19007;1080000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped
++19007;1090000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped
++19007;1100000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped
++19007;1110000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped
++19008;1070802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI Application stopped by SM
++19008;1080802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI CheckIn Application stopped by SM
++19008;1090802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI CheckIn Application stopped by SM
++19008;1100802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI CheckIn Application stopped by SM
++19008;1110802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI CheckIn Application stopped by SM
++19009;1060801,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI CheckIn Application terminated
++19010;1300000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI changed state from available to unavailable
++19011;1290000,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI changed state from initialize to unavailable
++19012;1280802,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI change state request from unavailable to stopped requested by System Manager
++19013;1050804,BER_CKI;[STAT][LOG][SNMP:#:1:30];BER CKI change state from available to active requestet by BER_CKI
++
+ 20000;10000,_;[STAT][LOG][SNMP:#:0:30]; _ Eventhandling OK
+ 20001;10105,_;[STAT][LOG][SNMP:#:0:30]; _ Eventhandling MEDIA_HIGH
+ 20002;10106,_;[STAT][LOG][SNMP:#:0:30]; _ Eventhandling MEDIA_FULL
+ 20003;10107,_;[STAT][LOG][SNMP:#:0:30]; _ Eventhandling MEDIA_LOW
+ 20004;30304,_;[STAT][LOG][SNMP:#:0:30]; _ Eventhandling unavailable error: not reachable
+ 
++21000;1190000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application initialize
++21001;1040000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application init ready
++21002;1050801,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application activated
++21003;1060000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application terminated
++21004;1130000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application unavailable
++21005;1120000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application available
++21006;1030001,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application disabled
++21006;1030801,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application disabled
++21006;1010001,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application disabled
++21007;1070000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped
++21007;1080000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped
++21007;1090000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped
++21007;1100000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped
++21007;1110000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped
++21008;1070802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI Application stopped by SM
++21008;1080802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI CheckIn Application stopped by SM
++21008;1090802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI CheckIn Application stopped by SM
++21008;1100802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI CheckIn Application stopped by SM
++21008;1110802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI CheckIn Application stopped by SM
++21009;1060801,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI CheckIn Application terminated
++21010;1300000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI changed state from available to unavailable
++21011;1290000,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI changed state from initialize to unavailable
++21012;1280802,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI change state request from unavailable to stopped requested by System Manager
++21013;1050804,IB_IBAC;[STAT][LOG][SNMP:#:1:30];IB CKI change state from available to active requestet by IB_IBAC
++
+ 9000;10000,CONVEYOR;[STAT][LOG][SNMP:#:1:30];Conveyor available
+ 9001;10004,CONVEYOR;[STAT][LOG][SNMP:#:1:30];Conveyor Error
+ 9002;30101,CONVEYOR;[STAT][LOG][SNMP:#:1:30];Conveyor unavailable: MEDIA_JAMMED
+diff --git a/Massai/cpp/LogServiceEx/statusBB.xslt b/Massai/cpp/LogServiceEx/statusBB.xslt
+index 2e4179ab..a71fd04f 100644
+--- a/Massai/cpp/LogServiceEx/statusBB.xslt
++++ b/Massai/cpp/LogServiceEx/statusBB.xslt
+@@ -10,7 +10,7 @@
+    <xsl:text>status </xsl:text>
+    <xsl:value-of select="translate(@name,'&#xA;',' ')"/><xsl:text>.Kiosk </xsl:text>
+    <xsl:choose>
+-     <xsl:when test="@st = 'OK'">
++     <xsl:when test="@st = 'ALL_OK'">
+      <xsl:text>green</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'UNDER_SERVICE'">
+@@ -31,25 +31,31 @@
+ <xsl:template match="COMP">
+    <xsl:choose>
+      <xsl:when test="@st = 'OK'">
++       <xsl:text>&amp;green</xsl:text>
++     </xsl:when>
++     <xsl:when test="@st = 'ALL_OK'">
++       <xsl:text>&amp;green</xsl:text>
++     </xsl:when>
++     <xsl:when test="@st = 'OPERATION'">
+      <xsl:text>&amp;green</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'ACTIVE'">
+-     <xsl:text>&amp;green</xsl:text>
++       <xsl:text>&amp;green</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'AVAILABLE'">
+-     <xsl:text>&amp;green</xsl:text>
++       <xsl:text>&amp;green</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'UNDER_SERVICE'">
+-     <xsl:text>&amp;yellow</xsl:text>
++       <xsl:text>&amp;yellow</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'SERVICE'">
+-     <xsl:text>&amp;yellow</xsl:text>
++       <xsl:text>&amp;yellow</xsl:text>
+      </xsl:when>
+      <xsl:when test="@st = 'OPEN'">
+-     <xsl:text>&amp;yellow</xsl:text>
++       <xsl:text>&amp;yellow</xsl:text>
+      </xsl:when>
+      <xsl:otherwise>
+-     <xsl:text>&amp;red</xsl:text>
++       <xsl:text>&amp;red</xsl:text>
+      </xsl:otherwise>
+    </xsl:choose>
+    <xsl:text> </xsl:text>
+diff --git a/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index e431587f..9b82c92e 100644
+--- a/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -11,10 +11,13 @@
+ 
+ /*! \mainpage Massai CORBA library
+  *
+- *  @version 1.0.6.3
++ *  @version 1.0.6.4
+  *
+  *  \section change1 Change history
+  *
++ *  \date 17.01.2007 \li V1.0.6.4 MaM
++ *                   \li MaM EDB 27073: mCorba / mDisplay: kein CORBA Roundtrip TO bei Fremdplattform 
++ *
+  *  \date 09.08.2006 \li V1.0.6.3 SteT
+  *                   \li SteT EDB 26406: Erweiterung der massaiCORBA Funktionalität um ClearRTTimeout
+  *
+@@ -30,8 +33,8 @@
+  *
+  */
+ 
+-// #define FILE_VER_BIN     1,0,6,3
+-// #define FILE_VER_STR     "FileVersion", "1.0.6.3\0"
++// #define FILE_VER_BIN     1,0,6,4
++// #define FILE_VER_STR     "FileVersion", "1.0.6.4\0"
+ 
+ // #define FILEDESCRIPTION  "FileDescription"  ,"Massai CORBA library\0"
+ // #define INTERNALNAME     "InternalName"     ,MassaiCORBA"\0"
+diff --git a/Massai/cpp/MassaiCorba/src/corbacfg.cpp b/Massai/cpp/MassaiCorba/src/corbacfg.cpp
+index c3b0d9a9..b8a7eee2 100644
+--- a/Massai/cpp/MassaiCorba/src/corbacfg.cpp
++++ b/Massai/cpp/MassaiCorba/src/corbacfg.cpp
+@@ -203,11 +203,17 @@ char  szTmp [256];
+       }
+       catch(...)
+       {
+-          return( -1);
++          // MaM 17.01.2007 EDB 27073
++          // in case of error do not return -1!
++          // -1 causes clearing all CORBA Roundtrip TO in 
++          // setConfigInvocationTimeout
++          return CORBA_INVOCATION_TIMEOUT_DEFAULT;
+       };
+     }
+     else
+-      return(-1);
++      // MaM see above
++      //
++      return CORBA_INVOCATION_TIMEOUT_DEFAULT;
+ }
+ 
+ #endif // _TAO_1_4_
+-- 
+2.41.0.windows.1
+

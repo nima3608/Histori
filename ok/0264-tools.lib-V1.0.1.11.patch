@@ -1,0 +1,136 @@
+From 6dbf6a884873917eb9e69b81a33d14080b887ab4 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 31 Aug 2012 13:47:17 +0000
+Subject: [PATCH 0264/1000] tools.lib V1.0.1.11 Mantis 0020322: hs882 send a
+ lot of data_present extension: added ActionTimeLimit: restrict the number of
+ actions per period
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@407 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/ActionTimeLimit.h    | 33 ++++++++++++++++
+ .../cpp/Tools/inc/local_def_msystools.h       |  8 +++-
+ .../Massai/cpp/Tools/makefile.mak             |  1 +
+ .../Massai/cpp/Tools/src/ActionTimeLimit.cpp  | 39 +++++++++++++++++++
+ 4 files changed, 79 insertions(+), 2 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/ActionTimeLimit.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/ActionTimeLimit.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/ActionTimeLimit.h b/SelfServiceCommon/Interfaces/inc/Tools/ActionTimeLimit.h
+new file mode 100644
+index 00000000..93c82502
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/ActionTimeLimit.h
+@@ -0,0 +1,33 @@
++// restrict the number of actions per period
++#ifndef ACTION_TIME_LIMIT_H_INCLUDED
++#define ACTION_TIME_LIMIT_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <list>
++#include <string>
++#include "systools/mMutexSem.hpp"
++
++namespace mTools
++{
++  typedef unsigned long Time; // in ms
++
++  class ActionTimeLimit
++  {
++    public:
++      // set maximum number of actions allow in period
++      ActionTimeLimit(unsigned int actionCount, Time period);
++      // action done
++      void addAction();
++      // minimum number of ms until next action may occur
++      Time getActionTime();
++
++    private:
++      const unsigned int m_actionCount;
++      const Time m_period;
++      std::list<Time> m_actionTimestamp;
++      Materna::MSSD::mutexSemaphore m_access;
++  };
++}
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index 25deb7c5..0be9a96f 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,9 +1,13 @@
+-#define FILE_VER_BIN     1,0,1,10
+-#define FILE_VER_STR     "FileVersion", "1.0.1.10\0"
++#define FILE_VER_BIN     1,0,1,11
++#define FILE_VER_STR     "FileVersion", "1.0.1.11\0"
+ 
+ /*! \page tools.lib tools.lib - Release Notes
+  *
+  *
++ *  \date 31.08.2012 \li V1.0.1.11
++ *                   \li SteT -  Mantis 0020322: hs882 send a lot of data_present
++ *                   \li extension: added ActionTimeLimit: restrict the number of actions per period
++ *
+  *  \date 15.06.2012 \li V1.0.1.10
+  *                   \li SteT -  Mantis  0023249: GPP: support two different papertypes for a single printer
+  *                   \li bugfix: resize from size 0 to an other size does not reserve memory
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index c8d2f072..7b61011c 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -38,6 +38,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\tracesToLocal.obj \
+                         $(_OBJ)\tracesToTrc.obj \
+                         $(_OBJ)\ResetTime.obj \
++                        $(_OBJ)\ActionTimeLimit.obj \
+                         $(_OBJ)\TraceSetLevel.obj \
+                         $(_OBJ)\TraceSetLevelDelegate.obj
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/ActionTimeLimit.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/ActionTimeLimit.cpp
+new file mode 100644
+index 00000000..1115da80
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/ActionTimeLimit.cpp
+@@ -0,0 +1,39 @@
++#include "Tools/ActionTimeLimit.h"
++#include "systools/mAutoMutex.hpp"
++#include "systools/mSysTime.h"
++
++namespace mTools
++{
++  ActionTimeLimit::ActionTimeLimit(unsigned int actionCount, Time period):
++    m_actionCount(actionCount),
++    m_period(period),
++    m_actionTimestamp(),
++    m_access()
++  {}
++
++  void ActionTimeLimit::addAction()
++  {
++    Materna::MSSD::autoMutex mx(m_access);
++    m_actionTimestamp.push_back(mSysTime::getUpTime());
++    while(m_actionTimestamp.size() > m_actionCount)
++    {
++      m_actionTimestamp.pop_front();
++    }
++  }
++
++  Time ActionTimeLimit::getActionTime()
++  {
++    Time result = 0;
++    Materna::MSSD::autoMutex mx(m_access);
++    if(m_actionCount > 0 && m_actionTimestamp.size() == m_actionCount)
++    {
++      Time now = mSysTime::getUpTime();
++      Time first = m_actionTimestamp.front();
++      if(now - first < m_period)
++      {
++        result = m_period - (now - first);
++      }
++    }
++    return result;
++  }
++}
+-- 
+2.41.0.windows.1
+

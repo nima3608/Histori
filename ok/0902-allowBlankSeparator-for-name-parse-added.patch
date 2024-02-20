@@ -1,0 +1,87 @@
+From 6f5e90ce2b9cfcf42c2230ce0324b802a301c91d Mon Sep 17 00:00:00 2001
+From: jpetkau <jpetkau@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 13 Mar 2018 09:03:35 +0000
+Subject: [PATCH 0902/1076] allowBlankSeparator for name parse added
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1324 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/java/barcodeParserLib/pom.xml              |  2 +-
+ .../java/com/materna/buc/cugate/barcode/BCTest.java   |  3 ++-
+ .../com/materna/buc/cugate/barcode/BarcodeParser.java | 11 ++++++++++-
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/java/barcodeParserLib/pom.xml b/SelfServiceCommon/Massai/java/barcodeParserLib/pom.xml
+index 5bbec19d..eba1e4d9 100644
+--- a/SelfServiceCommon/Massai/java/barcodeParserLib/pom.xml
++++ b/SelfServiceCommon/Massai/java/barcodeParserLib/pom.xml
+@@ -7,7 +7,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/ma
+   <packaging>jar</packaging>
+   <name>barcodeParserLib</name>
+   <!-- Please check in dependencies of other modules -->
+-  <version>1.2.0.1</version>
++  <version>1.2.0.2</version>
+ 
+   <properties>
+     <!-- Please maintain this module version, since it is used as version information -->
+diff --git a/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BCTest.java b/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BCTest.java
+index 537336d4..bc2f9590 100644
+--- a/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BCTest.java
++++ b/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BCTest.java
+@@ -108,7 +108,7 @@ public class BCTest {
+         final String myTestZ = "M1DALAKOURAS/GEORGIOS EJHB389 ATHGVALX 1823 146Y008F0011 15C>5180 W7145BLX              3F72411671119460    A3 107450103           Y*30600000K09  A3G    ";
+         final String mmm = "M1DALAKOURAS/GEORGIOS EJHB389 ATHGVALX 1823 146Y008F0011 15C>5180 W7145BLX              3F72411671119460    A3 107450103           Y*30600000K09  A3G    ";
+         final String mSven = "M1DALAKOURAS/GEORGIOS EJHB389 ATHGVALX 1823 146Y008F0011 15C>5180 W7145BLX              3F72411671119460    A3 107450103          Y*30600000K09  A3G    ";
+-        final String fastTrack22 = "M2MICHAILOPOULOS/XXXXXEKKNYKC TBSATHA3 0983 182C001A0025 35D>5180  7181BA3              2A39024289051830    A3 120423306           Y*30600000K09  A3G    KKNYKC ATHSKGOA 0108 182Y015A0074 3372A39024289051830 A3 A3 120423306           Y09         ";
++        final String fastTrack22 = "M2MICHAILOPOULOS XXXXXEKKNYKC TBSATHA3 0983 182C001A0025 35D>5180  7181BA3              2A39024289051830    A3 120423306           Y*30600000K09  A3G    KKNYKC ATHSKGOA 0108 182Y015A0074 3372A39024289051830 A3 A3 120423306           Y09         ";
+ 
+         BCTest bct = new BCTest();
+         bct.parseAndDump(fastTrack22);
+@@ -117,6 +117,7 @@ public class BCTest {
+     public void parseAndDump(String barcodeString) {
+         BarcodeInfo bci;
+         BarcodeParser bcp = new BarcodeParser();
++        bcp.setAllowBlankSeparator(true);
+ 
+         LOG.info("Raw barcode data: '" + barcodeString + "'");
+         bci = bcp.parseBC(barcodeString);
+diff --git a/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BarcodeParser.java b/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BarcodeParser.java
+index 8ac61977..088c0a6a 100644
+--- a/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BarcodeParser.java
++++ b/SelfServiceCommon/Massai/java/barcodeParserLib/src/main/java/com/materna/buc/cugate/barcode/BarcodeParser.java
+@@ -18,9 +18,14 @@ public class BarcodeParser {
+ 	Calendar yearCalendar = null;
+ 	
+ 	 Pattern eTicketeMatcher = null;
+-	
++	 //if false  name without  "/" separator  will not be parsed for blank but det full as lastName
++	private boolean allowBlankSeparator= true;
+ 
+ 	private Pattern versionSizePattern=null;
++	
++	public void setAllowBlankSeparator(boolean b){
++		allowBlankSeparator =b;
++	}
+ 
+ 	public BarcodeParser()
+ 	{
+@@ -183,6 +188,7 @@ public class BarcodeParser {
+ 			log.debug("Found user name <" + name + ">");
+ 			int pos = name.indexOf("/");
+ 			if (pos == -1 || pos == name.length() - 1) {
++			 if(allowBlankSeparator){
+ 				int blank =name.indexOf(" ");
+ 				if(blank !=-1){
+ 					String l_name = name.substring(0, blank);
+@@ -195,6 +201,9 @@ public class BarcodeParser {
+ 				}else{
+ 				  info.setLastName(name);
+ 				}
++			 }else{
++				 info.setLastName(name); 
++			 }
+ 			} else {
+ 				String l_name = name.substring(0, pos);
+ 				String f_name = name.substring(pos + 1);
+-- 
+2.41.0.windows.1
+

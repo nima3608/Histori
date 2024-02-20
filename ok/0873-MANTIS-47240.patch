@@ -1,0 +1,572 @@
+From a52cd308842e81de389bf74368bfa73c6dc9449b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 30 Aug 2017 16:24:11 +0000
+Subject: [PATCH 0873/1077] MANTIS 47240 Mantis 47240: Config service meta data
+ access - Next implementation step
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1251 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp   | 102 ++++++++++++++----
+ .../Massai/cpp/CfgXMgrB/inc/cfgToken.h        |  21 ++++
+ .../cpp/CfgXMgrB/src/cfgCorba_Text2.cpp       |  47 +++++---
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   |  11 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   |  99 +++++++++++++----
+ 5 files changed, 226 insertions(+), 54 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
+index 9cf1447c..5eea2455 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaText.hpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -19,7 +19,7 @@
+ 
+ /**
+  *
+- * Meta-configuration class for "number" items.
++ * Meta-configuration class for "Text" items.
+  *
+ **/
+ class cfgMetaText :
+@@ -28,10 +28,31 @@ class cfgMetaText :
+ 
+    /**
+     *
+-    * Value restriction. A configuration value my not longer than this.
++    * Value restriction. A configuration value my not be longer.
+     *
+    **/
+-   unsigned M_MaxLength;
++   unsigned     m_max_length;
++
++   /**
++    *
++    * Value restriction. A configuration value my not be shorter.
++    *
++   **/
++   unsigned     m_min_length;
++
++   /**
++    *
++    * Value restriction. A configuration value shall follow this rule.
++    *
++   **/
++   std::string  m_regex;
++
++   /**
++    *
++    * Value restriction. A configuration value my not be shorter.
++    *
++   **/
++   unsigned     m_semantic;
+ 
+ public:
+ 
+@@ -40,7 +61,7 @@ public:
+     * Constructor.
+     *
+    **/
+-   explicit cfgMetaText( char const * Auth );
++   explicit cfgMetaText( char const * auth );
+ 
+    /**
+     *
+@@ -49,8 +70,21 @@ public:
+    **/
+    cfgMetaText
+    (
+-      std::string const & Rights, std::string const & Explanation,
+-      unsigned MaxLength
++      std::string const & rights, std::string const & explanation,
++      unsigned max_length
++   );
++
++   /**
++    *
++    * Constructor.
++    *
++   **/
++   cfgMetaText
++   (
++      std::string const & rights, std::string const & explanation,
++      unsigned max_length, unsigned min_length,
++      std::string const & regex,
++      unsigned semantic
+    );
+ 
+    /**
+@@ -86,12 +120,42 @@ public:
+ 
+    /**
+     *
+-    * Return maximum length of string.
++    * Return maximum length of text.
+     *
+    **/
+    unsigned getMaxLength() const
+    {
+-      return M_MaxLength;
++      return m_max_length;
++   }
++
++   /**
++    *
++    * Return maximum length of text.
++    *
++   **/
++   unsigned getMinLength() const
++   {
++      return m_min_length;
++   }
++
++   /**
++    *
++    * Return regex for text.
++    *
++   **/
++   char const * getRegex() const
++   {
++      return m_regex.c_str();
++   }
++
++   /**
++    *
++    * Return semantic for text.
++    *
++   **/
++   unsigned getSemantic() const
++   {
++      return m_semantic;
+    }
+ 
+    /**
+@@ -107,30 +171,30 @@ public:
+     *
+     * Save the text value object to an ostream.
+     *
+-    * @param Dst:       Destination stream
++    * @param dst:       Destination stream
+     *
+-    * @param Ref:       Reference number
++    * @param ref:       Reference number
+     *
+-    * @param Indent:    Indentation string
++    * @param indent:    Indentation string
+     *
+    **/
+    virtual void save
+    (
+-      std::ostream &            Dst,
+-      cfgEntity::reference      Ref,
+-      std::string const &       Indent
++      std::ostream &            dst,
++      cfgEntity::reference      ref,
++      std::string const &       indent
+    ) const;
+ 
+    /**
+     *
+     * Adapt restrictions to allow the value.
+     *
+-    * @param Value:     The value to allow now.
++    * @param value:     The value to allow now.
+     *
+     * @return:          Success?
+     *
+    **/
+-   bool valueAllow( cfgValue const & Value );
++   bool valueAllow( cfgValue const & value );
+ 
+    /**
+     *
+@@ -143,14 +207,14 @@ public:
+     *
+     * Create a new text value item.
+     *
+-    * @param Src:       Item flat value
++    * @param src:       Item flat value
+     *
+     * @return The new item.
+     *
+    **/
+    cfgValue * valueFactory
+    (
+-      cfgFlatZ const &          Src
++      cfgFlatZ const &          src
+    ) const;
+ 
+ };
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
+index a4fabb20..8a19d53a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
+@@ -1,5 +1,17 @@
++/**
++ **************************************************************************
++ *
++ * @file cfgToken.h
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
+ #ifndef CFGTOKEN_H
+ #define CFGTOKEN_H
++
+ #if defined(SHOW_INCLUDE_FILES)
+ #pragma message("including: " __FILE__)
+ #endif
+@@ -20,6 +32,8 @@
+ #define CFGTOKEN_TYPE           "typ"
+ #define CFGTOKEN_RIGHTS         "acc"
+ #define CFGTOKEN_EXPLANATION    "xpl"
++#define CFGTOKEN_REGEX          "rex"
++#define CFGTOKEN_SEMANTIC       "sem"
+ 
+ #define CFGTOKEN_TYPE_NUMBER    "NUMBER"
+ #define CFGTOKEN_TYPE_SELECTION "SELECTION"
+@@ -27,3 +41,10 @@
+ #define CFGTOKEN_TYPE_TEXTLIST  "TEXTLIST"
+ 
+ #endif
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+index bf83171b..691e81ab 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text2.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2016 MATERNA Information & Communications
++ * Copyright (c) 2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -81,18 +81,22 @@ class cfgCorba_ServiceText2 :
+       {
+          std::string const rights( meta_data.Desc.Rights );
+          std::string const explanation( meta_data.Desc.Explanation );
+-         cfgMetaText Obj
++         std::string const regex( meta_data.RegEx );
++         cfgMetaText cfg_meta_text
+                      (
+                         rights,
+                         explanation,
+-                        static_cast<unsigned>( meta_data.MaxLength )
++                        static_cast<unsigned>( meta_data.MaxLength ),
++                        static_cast<unsigned>( meta_data.MinLength ),
++                        regex,
++                        static_cast<unsigned>( meta_data.Semantic )
+                      );
+          if( cfgRightsMan::mayRead( cfgRightsMan::getDefault( rights ) ) )
+          {
+             // Read access -> plain text in file.
+             M_ConfigEntity->itemCreate
+             (
+-               Obj, acc.Item,
++               cfg_meta_text, acc.Item,
+                new cfgValueText( false, explanation, default_value )
+             );
+          }
+@@ -101,7 +105,7 @@ class cfgCorba_ServiceText2 :
+             //No read access -> encrypt in file.
+             M_ConfigEntity->itemCreate
+             (
+-               Obj, acc.Item,
++               cfg_meta_text, acc.Item,
+                new cfgValueText( true, explanation, default_value )
+             );
+          }
+@@ -194,10 +198,16 @@ class cfgCorba_ServiceText2 :
+                   dynamic_cast<cfgMetaText const *>( meta_data_cfg );
+                if( meta_text_cfg )
+                {
+-                  md->MinLength = 0;
++                  md->MinLength = meta_text_cfg->getMinLength();
+                   md->MaxLength = meta_text_cfg->getMaxLength();
+-                  md->RegEx = CORBA::string_dup( "" );
+-                  md->Semantic = Config::ST_NONE;
++                  md->RegEx = CORBA::string_dup
++                                 (
++                                    meta_text_cfg->getRegex()
++                                 );
++                  md->Semantic = static_cast<Config::semanticType>
++                                 (
++                                    meta_text_cfg->getSemantic()
++                                 );
+                }
+                else
+                {
+@@ -315,22 +325,33 @@ class cfgCorba_ServiceText2 :
+       writeTrace
+       (
+          BasicRuntime_HERE,
+-         SCT2 "setMeta2(%s) rights:%s",
+-         access2Str(acc).c_str(), meta_data.Desc.Rights
++         SCT2 "setMeta2(%s) Rights:%s Expl:%s MinL:%d"
++              " MaxL:%d RegEx:%s Sem:%d",
++         access2Str(acc).c_str(),
++         meta_data.Desc.Rights,
++         meta_data.Desc.Explanation,
++         meta_data.MinLength,
++         meta_data.MaxLength,
++         meta_data.RegEx,
++         meta_data.Semantic
+       );
+       try
+       {
+          std::string const rights( meta_data.Desc.Rights );
+          std::string const explanation( meta_data.Desc.Explanation );
+-         cfgMetaText Obj
++         std::string const regex( meta_data.RegEx );
++         cfgMetaText cfg_meta_text
+                      (
+                         rights,
+                         explanation,
+-                        static_cast<unsigned>( meta_data.MaxLength )
++                        static_cast<unsigned>( meta_data.MaxLength ),
++                        static_cast<unsigned>( meta_data.MinLength ),
++                        regex,
++                        static_cast<unsigned>( meta_data.Semantic )
+                      );
+          M_ConfigEntity->itemSetMeta
+          (
+-            Obj, acc.Item
++            cfg_meta_text, acc.Item
+          );
+       }
+       catch( cfgEntity_NotAuthorized & )
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+index d9c64541..b7ef7458 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -162,11 +162,20 @@ void document2Meta
+             {
+                std::string NMax;
+                getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               std::string NMin;
++               getAttribute( Attribs, CFGTOKEN_MINIMUM, NMin );
++               std::string NRex;
++               getAttribute( Attribs, CFGTOKEN_REGEX, NRex );
++               std::string NSem;
++               getAttribute( Attribs, CFGTOKEN_SEMANTIC, NSem );
+                cfgMetaText
+                   Meta
+                   (
+                      NRights, NExpl,
+-                     static_cast<unsigned>( atoi(NMax.c_str()) )
++                     static_cast<unsigned>( atoi(NMax.c_str()) ),
++                     static_cast<unsigned>( atoi(NMin.c_str()) ),
++                     NRex,
++                     static_cast<unsigned>( atoi(NSem.c_str()) )
+                   );
+                Dst.itemCreate( Meta, 0, 0, false );
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index f7ef05c1..95634d33 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -37,7 +37,10 @@
+ **/
+ cfgMetaText::cfgMetaText( char const * Auth ) :
+    cfgMeta( Auth ),
+-   M_MaxLength( 0 )
++   m_max_length( 0 ),
++   m_min_length( 0 ),
++   m_regex(),
++   m_semantic( 0 )
+ {
+ }
+ 
+@@ -48,9 +51,12 @@ cfgMetaText::cfgMetaText( char const * Auth ) :
+  * Method implementation - see cfgMetaText.hpp.
+  *
+ **/
+-cfgMetaText::cfgMetaText( cfgMetaText const & Src ) :
+-   cfgMeta( Src ),
+-   M_MaxLength( Src.M_MaxLength )
++cfgMetaText::cfgMetaText( cfgMetaText const & src ) :
++   cfgMeta( src ),
++   m_max_length( src.m_max_length ),
++   m_min_length( src.m_min_length ),
++   m_regex( src.m_regex ),
++   m_semantic( src.m_semantic )
+ {
+ }
+ 
+@@ -63,11 +69,36 @@ cfgMetaText::cfgMetaText( cfgMetaText const & Src ) :
+ **/
+ cfgMetaText::cfgMetaText
+ (
+-   std::string const & Rights, std::string const & Explanation,
+-   unsigned MaxLength
++   std::string const & rights, std::string const & explanation,
++   unsigned max_length
+ ) :
+-   cfgMeta( Rights, Explanation ),
+-   M_MaxLength( MaxLength )
++   cfgMeta( rights, explanation ),
++   m_max_length( max_length ),
++   m_min_length( 0 ),
++   m_regex(),
++   m_semantic( 0 )
++{
++}
++
++
++
++/**
++ *
++ * Method implementation - see cfgMetaText.hpp.
++ *
++**/
++cfgMetaText::cfgMetaText
++(
++   std::string const & rights, std::string const & explanation,
++   unsigned max_length, unsigned min_length,
++   std::string const & regex,
++   unsigned semantic
++) :
++   cfgMeta( rights, explanation ),
++   m_max_length( max_length ),
++   m_min_length( min_length ),
++   m_regex( regex ),
++   m_semantic( semantic )
+ {
+ }
+ 
+@@ -95,7 +126,12 @@ bool cfgMetaText::operator==( cfgMeta const & Other ) const
+       dynamic_cast<cfgMetaText const *>( &Other );
+    if( pOther )
+    {
+-      if( M_MaxLength == pOther->M_MaxLength )
++      if (
++            ( m_max_length == pOther->m_max_length ) &&
++            ( m_min_length == pOther->m_min_length ) &&
++            ( m_regex == pOther->m_regex ) &&
++            ( m_semantic == pOther->m_semantic )
++         )
+       {
+          return cfgMeta::operator==( Other );
+       }
+@@ -131,8 +167,20 @@ void cfgMetaText::save
+ {
+    Dst << Indent << "<" CFGTOKEN_META;
+    cfgMeta::saveCommon( Dst, Ref );
+-   Dst << " " CFGTOKEN_MAXIMUM "=\"" << M_MaxLength;
+-   Dst << "\"/>" << std::endl;
++   Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length << "\"";
++   if( m_min_length > 0 )
++   {
++      Dst << " " CFGTOKEN_MINIMUM "=\"" << m_min_length << "\"";
++   }
++   if( !m_regex.empty() )
++   {
++      Dst << " " CFGTOKEN_REGEX "=\"" << m_regex << "\"";
++   }
++   if( m_semantic != 0 )
++   {
++      Dst << " " CFGTOKEN_SEMANTIC "=\"" << m_semantic << "\"";
++   }
++   Dst << " />" << std::endl;
+ }
+ 
+ 
+@@ -156,15 +204,15 @@ bool cfgMetaText::valueAllow( cfgValue const & Value )
+       return false;
+    }
+    unsigned const Len = Val->length();
+-   if( Len > M_MaxLength )
++   if( Len > m_max_length )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaText::valueAllow - max: %d -> %d",
+-            M_MaxLength, Len
++            m_max_length, Len
+          );
+-      M_MaxLength = Len;
++      m_max_length = Len;
+    }
+    writeTrace
+       (
+@@ -204,21 +252,30 @@ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+       return false;
+    }
+    unsigned const Len = Val->length();
+-   if( Len > M_MaxLength )
++   if( Len > m_max_length )
+    {
+       writeTrace
+          (
+             MajorWarning_HERE,
+             "cfgMetaText::valueAllowed=false length:%d > max:%d",
+-            Len, M_MaxLength
++            Len, m_max_length
++         );
++      return false;
++   }
++   if( Len < m_min_length )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaText::valueAllowed=false length:%d < min:%d",
++            Len, m_min_length
+          );
+       return false;
+    }
+    writeTrace
+       (
+          SecondaryRuntime_HERE,
+-         "cfgMetaText::valueAllowed=true length:%d < max:%d",
+-         Len, M_MaxLength
++         "cfgMetaText::valueAllowed=true"
+       );
+    return true;
+ }
+@@ -232,7 +289,7 @@ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+ **/
+ cfgValue * cfgMetaText::valueFactory
+ (
+-   cfgFlatZ const & Src
++   cfgFlatZ const & src
+ ) const
+ {
+    std::string const dr = cfgRightsMan::getDefault( getRights() );
+@@ -242,13 +299,13 @@ cfgValue * cfgMetaText::valueFactory
+       )
+    {
+       // Normal processing
+-      return new cfgValueText( false, "", Src );
++      return new cfgValueText( false, "", src );
+    }
+    else
+    {
+       // Default rights is no-read
+       // -> Crypt-extract value.
+-      return new cfgValueText( true, getExplanation(), Src );
++      return new cfgValueText( true, getExplanation(), src );
+    }
+ }
+ 
+-- 
+2.41.0.windows.1
+

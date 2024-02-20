@@ -1,0 +1,1630 @@
+From 1cbfee76d562c1076e067bd645ae64d57e55bc7e Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 8 May 2015 12:44:05 +0000
+Subject: [PATCH 0664/1077] MANTIS 0032431 -Added new Constructor for creating
+ a Process under a specified User-Account
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@858 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 1303 +++++++++++++----
+ 1 file changed, 1017 insertions(+), 286 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index bc530894..e6728f63 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -25,25 +25,95 @@
+ // From SelfServiceCommon
+ #include "systools/mSysThread.hpp"
+ #include "systools/software_error.h"
+-#include "tools/StringBuffer.h"
++#include "tools\StringBuffer.h"
+ 
+ // Windows
+ #include "psapi.h"
+ #include <windows.h>
++#include <stdio.h>
++#include <Userenv.h>
++#include <TChar.h>
++#include <strsafe.h>
+ 
+ // Compiler lib
+ #include <string>
+ #include <sstream>
++#include <iostream>
+ #include <iomanip>
++#include <stdlib.h>
+ 
++#pragma comment(lib, "User32.lib")
+ 
+ 
+-#pragma comment(lib, "User32.lib")
+ 
++using namespace std;
+ 
+ 
+ namespace
+ {
++   /**
++    *
++    * Retrieves the fully qualified path for the file 
++    * that contains the specified module. The module must 
++    * have been loaded by the current process. 
++    *
++   **/
++  std::string getWorkingDir()
++  {
++      
++      char szPath[MAX_PATH];
++      *szPath = '\0';
++
++      long rc = GetModuleFileName(0,szPath,sizeof(szPath));
++
++      std::string sPath (szPath);
++
++      if( rc )
++      {
++          unsigned found = sPath.find_last_of("/\\");
++          sPath = sPath.substr(0,found);
++      }
++      else
++      {
++          sPath = "";
++      }
++      
++     
++     return sPath;
++  }
++  
++
++  /**
++    *
++    * Convert a wchar_t pointer to a std::string
++    *
++   **/
++  std::string ToNarrow( const wchar_t *s, char dfault = '?', const std::locale& loc = std::locale() )
++  {
++    std::ostringstream stm;
++    while( *s != L'\0' )
++    {
++      stm << std::use_facet< std::ctype<wchar_t> >( loc ).narrow( *s++, dfault );
++    }
++    return stm.str();
++  }
++
++  
++  /**
++    *
++    * Convert a char pointer to a std::wstring
++    * 
++    *
++   **/
++  std::wstring ToWiden( const char *s, const std::locale& loc = std::locale() )
++  {
++    std::wostringstream stm;
++    while( *s != '\0' )
++    {
++      stm << std::use_facet< std::ctype<wchar_t> >( loc ).widen( *s++ );
++    }
++    return stm.str();
++  }
+ 
+ 
+    /**
+@@ -76,11 +146,18 @@ namespace
+             );
+          ErrorString = szPrintBuffer;
+          LocalFree(lpvMessageBuffer);
+-         Logging->lineOut( ErrorString.c_str() );
++         try
++         {
++            Logging->lineOut( ErrorString.c_str() );
++         }
++         catch(...)
++         {
++             printf("Unknown Exception. (Maybe it's a write-permission-failure) \n");
++         }
+       }
+    }
+-
+-
++   
++  
+    std::string getStatusText(mSysProcess::status status)
+    {
+      switch(status)
+@@ -323,6 +400,38 @@ namespace
+   **/
+   class myChild: public mSysProcess::child
+   {
++    private:
++      void openProcess();
++      BOOL SetPrivilege(LPCTSTR lpszPrivilege, BOOL bEnablePrivilege); 
++
++      fromChild                        M_ChildErr;
++      fromChild                        M_ChildOut;
++      MASSAI::text::StringBuffer       M_Commandline;
++      std::string                      M_Directory;
++      HANDLE                           M_HandleInRead;
++      HANDLE                           M_HandleInWrite;
++      HANDLE                           M_HandleProcess;
++      bool                             M_CanTerminate;
++      bool                             M_CanQuery;
++      bool                             M_CanSynchronize;
++      mSysProcess::callBack const *    M_Logging;
++      bool                             M_Started;
++      mSysProcess::callBack const *    M_StdErr;
++      bool                             M_StdIn;
++      mSysProcess::callBack const *    M_StdOut;
++      DWORD                            M_ProcessId;
++      MASSAI::text::StringBuffer       M_Environment;
++      MASSAI::text::StringBuffer       M_Title;
++      MASSAI::text::StringBuffer       M_Desktop;
++      bool                             M_ReuseConsole;
++      bool                             M_NewProcessGroup;
++      child::Internal                  M_Internal;
++      DWORD                            M_Parent;
++
++      myChild( myChild const & );
++      myChild & operator=( myChild const & );
++
++
+     public:
+       myChild(DWORD pid, DWORD ppid, const std::string& module, const mSysProcess::callBack* logging);
+ 
+@@ -344,6 +453,28 @@ namespace
+         bool                             ReuseConsole,
+         bool                             NewProcessGroup
+       );
++      
++      myChild
++      (
++        std::string const &              Commandline,
++        std::string const &              Directory,
++        bool                             Hide,
++        mSysProcess::callBack const *    Logging,
++        bool                             Minimized,
++        bool                             Maximized,
++        mSysProcess::callBack const *    StdErr,
++        bool                             StdIn,
++        mSysProcess::callBack const *    StdOut,
++        threadException const *          ThreadExeption,
++        const mSysProcess::Environment&  Environment,
++        const std::string&               Title,
++        const std::string&               Desktop,
++        bool                             ReuseConsole,
++        bool                             NewProcessGroup,
++        char const*                      pUsername,
++        char const*                      pDomain,
++        char const*                      pPassword
++      );
+       ~myChild();
+       unsigned long getExitCode() const;
+       mSysProcess::status getStatus() const;
+@@ -376,33 +507,10 @@ namespace
+       unsigned long getProcessIoUsage() const;
+       unsigned long getProcessTimeUsage() const;
+       unsigned long getProcessMemoryUsage() const;
+-
+-    private:
+-      void openProcess();
+-
+-      fromChild                        M_ChildErr;
+-      fromChild                        M_ChildOut;
+-      MASSAI::text::StringBuffer       M_Commandline;
+-      std::string                      M_Directory;
+-      HANDLE                           M_HandleInRead;
+-      HANDLE                           M_HandleInWrite;
+-      HANDLE                           M_HandleProcess;
+-      mSysProcess::callBack const *    M_Logging;
+-      bool                             M_Started;
+-      mSysProcess::callBack const *    M_StdErr;
+-      bool                             M_StdIn;
+-      mSysProcess::callBack const *    M_StdOut;
+-      DWORD                            M_ProcessId;
+-      MASSAI::text::StringBuffer       M_Environment;
+-      MASSAI::text::StringBuffer       M_Title;
+-      MASSAI::text::StringBuffer       M_Desktop;
+-      bool                             M_ReuseConsole;
+-      bool                             M_NewProcessGroup;
+-      child::Internal                  M_Internal;
+-      DWORD                            M_Parent;
+-
+-      myChild( myChild const & );
+-      myChild & operator=( myChild const & );
++	  
++	    bool canTerminate() const;
++      bool canQuery() const;
++      bool canWait() const;
+   };
+ 
+ 
+@@ -419,6 +527,9 @@ namespace
+     M_HandleInRead(INVALID_HANDLE_VALUE),
+     M_HandleInWrite(INVALID_HANDLE_VALUE),
+     M_HandleProcess(INVALID_HANDLE_VALUE),
++    M_CanTerminate(true),
++    M_CanQuery(true),
++    M_CanSynchronize(true),
+     M_Logging(logging),
+     M_Started(true),
+     M_StdErr(0),
+@@ -436,23 +547,122 @@ namespace
+     openProcess();
+   }
+ 
++  
++  BOOL myChild::SetPrivilege(
++		LPCTSTR lpszPrivilege,  // name of privilege to enable/disable
++		BOOL bEnablePrivilege   // to enable or disable privilege	
++    ) 
++  {
++    //Define variables. 
++    LUID                tLUID; 
++    HANDLE              hToken; 
++    TOKEN_PRIVILEGES    tTP;
++    TOKEN_PRIVILEGES    tTPOld; 
++    DWORD               lengthReturned; 
++    BOOL                result = TRUE; 
++ 
++    //Fill the tLUID struct with our privilage info. 
++    if(LookupPrivilegeValue(NULL,lpszPrivilege,&tLUID)) { 
++        //Open the token up. 
++        if(OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) { 
++            //Modify it so we become teh debuggzors. 
++            tTP.PrivilegeCount=1; 
++
++            if (bEnablePrivilege)
++                tTP.Privileges->Attributes=SE_PRIVILEGE_ENABLED; 
++            else
++                tTP.Privileges->Attributes=SE_PRIVILEGE_REMOVED; 
++
++            tTP.Privileges->Luid.HighPart=tLUID.HighPart; 
++            tTP.Privileges->Luid.LowPart=tLUID.LowPart; 
++            //Make the changes and check for errors. 
++            if(!AdjustTokenPrivileges(hToken,0,&tTP,sizeof(tTP),&tTPOld,&lengthReturned)) 
++                result = FALSE;  
++        } 
++        else 
++            result = FALSE;  
++    } 
++    else 
++        result = FALSE;
++
++    return result; 
++  }
++
+ 
+   void myChild::openProcess()
+   {
+-    M_HandleProcess = OpenProcess(PROCESS_TERMINATE|PROCESS_QUERY_INFORMATION|SYNCHRONIZE, false, M_ProcessId);
+-    if(M_HandleProcess == 0)
++    HANDLE hToken;  
++	
++    if(!SetPrivilege(SE_DEBUG_NAME, TRUE))
++        logLastError(M_Logging, "SetPrivilege (SE_DEBUG_NAME)");
++
++    if(!SetPrivilege(SE_IMPERSONATE_NAME, TRUE))
++        logLastError(M_Logging, "SetPrivilege (SE_IMPERSONATE_NAME)");
++  
++    if(!OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, FALSE, &hToken))
+     {
+-      logLastError(M_Logging, "OpenProcess");
++        if (GetLastError() == ERROR_NO_TOKEN)
++        {
++            if (!ImpersonateSelf(SecurityImpersonation))
++                logLastError(M_Logging, "ImpersonateSelf");
++
++            if(!OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, FALSE, &hToken))
++                logLastError(M_Logging, "OpenThreadToken");
++         }
++    }
++      
++
++    std::string errorString = "OpenProcess";
++
++    if( !OpenProcess(PROCESS_TERMINATE, false, M_ProcessId))
++    {
++        errorString += " [TERMINATE]";
++        M_CanTerminate = false;
++    }
++
++    if( !OpenProcess(PROCESS_QUERY_INFORMATION, false, M_ProcessId))
++    {
++        errorString += " [QUERY]";
++        M_CanQuery = false;
++    }
++
++    if( !OpenProcess(SYNCHRONIZE, false, M_ProcessId))
++    {
++        errorString += " [SYNCHRONIZE]";
++        M_CanSynchronize = false;;
++    }
++
++    DWORD dwDesiredAccess = 0;
++
++    if( M_CanTerminate )
++      dwDesiredAccess = dwDesiredAccess | PROCESS_TERMINATE;
++
++    if( M_CanQuery )
++      dwDesiredAccess = dwDesiredAccess | PROCESS_QUERY_INFORMATION;
++
++    if( M_CanSynchronize )
++      dwDesiredAccess = dwDesiredAccess | SYNCHRONIZE;
++
++    if( dwDesiredAccess)
++    {
++      M_HandleProcess = OpenProcess(dwDesiredAccess, false, M_ProcessId);
++    }
++    else
++    {
++      logLastError(M_Logging, errorString.c_str());
+       M_HandleProcess = INVALID_HANDLE_VALUE;
+     }
++
+     M_Internal.handle = M_HandleProcess;
+     M_Internal.id = M_ProcessId;
++    
++    CloseHandle(hToken);
+   }
+ 
+ 
+   /**
+    *
+-   * Constructor.
++   * Constructor, CreateProcess
+    *
+   **/
+   myChild::myChild
+@@ -480,6 +690,9 @@ namespace
+      M_HandleInRead( INVALID_HANDLE_VALUE ),
+      M_HandleInWrite( INVALID_HANDLE_VALUE ),
+      M_HandleProcess( INVALID_HANDLE_VALUE ),
++     M_CanTerminate(true),
++     M_CanQuery(true),
++     M_CanSynchronize(true),
+      M_Logging( Logging ),
+      M_Started( false ),
+      M_StdErr( StdErr ),
+@@ -494,153 +707,435 @@ namespace
+      M_Internal(),
+      M_Parent(GetCurrentProcessId())
+   {
+-     STARTUPINFO Si;
+-     bool inheritHandles= false;
+-
+-     // Set up the start up info struct.
+-     ZeroMemory( &Si, sizeof(STARTUPINFO) );
+-     Si.cb = sizeof(STARTUPINFO);
+-     Si.dwFlags = STARTF_USESHOWWINDOW;        // Use the wShowWindow flag
+-     if(M_StdIn || M_StdErr || M_StdOut)
+-     {
+-       Si.dwFlags |= STARTF_USESTDHANDLES;     // Use the hStd... flags
+-       inheritHandles= true;
+-     }
+-     if( Hide )
+-     {
+-        Si.wShowWindow = SW_HIDE;
+-     }
+-     else if( Minimized )
+-     {
+-        Si.wShowWindow = SW_SHOWMINIMIZED;
+-     }
+-     else if( Maximized )
+-     {
+-        Si.wShowWindow = SW_SHOWMAXIMIZED;
+-     }
+-     else
+-     {
+-        Si.wShowWindow = SW_SHOW;
+-     }
+-
+-     if( M_StdErr )
+-     {
+-        Si.hStdError = M_ChildErr.getHandle( M_StdErr );
+-        M_ChildErr.start();
+-     }
+-     else if(inheritHandles)
+-     {
+-        Si.hStdError = GetStdHandle( STD_ERROR_HANDLE );
+-     }
+-     else
+-     {
+-        Si.hStdError = 0;
+-     }
+-
+-     if( M_StdIn )
+-     {
+-        SECURITY_ATTRIBUTES Sa;
+-        Sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+-        Sa.lpSecurityDescriptor = NULL;
+-        Sa.bInheritHandle = TRUE;
+-        HANDLE HandleInWriteTmp;
+-        if( !CreatePipe( &M_HandleInRead, &HandleInWriteTmp, &Sa, 0 ) )
+-           logLastError( M_Logging, "CreatePipe");
+-        if( !DuplicateHandle
+-                 (
+-                    GetCurrentProcess(),
+-                    HandleInWriteTmp,
+-                    GetCurrentProcess(),
+-                    &M_HandleInWrite, // Address of new handle.
+-                    0,FALSE, // Make it uninheritable.
+-                    DUPLICATE_SAME_ACCESS
+-                 ) )
+-           logLastError( M_Logging, "DupliateHandle" );
+-        if( !CloseHandle( HandleInWriteTmp ) )
+-           logLastError( M_Logging, "CloseHandle" );
+-        Si.hStdInput = M_HandleInRead;
+-     }
+-     else if(inheritHandles)
+-     {
+-        Si.hStdInput = GetStdHandle( STD_INPUT_HANDLE );
+-     }
+-     else
+-     {
+-        Si.hStdInput = 0;
+-     }
++    PROCESS_INFORMATION ProcInfo    = {0};
++    STARTUPINFO         StartUpInfo = {0};
++    bool                inheritHandles= false;
++    
++      // Set up the start up info struct.
++    StartUpInfo.cb = sizeof(STARTUPINFOW);
++
++    
++    //StartUpInfo.dwFlags
++    StartUpInfo.dwFlags = STARTF_USESHOWWINDOW;        // Use the wShowWindow flag
++    if(M_StdIn || M_StdErr || M_StdOut)
++    {
++     StartUpInfo.dwFlags |= STARTF_USESTDHANDLES;     // Use the hStd... flags
++     inheritHandles= true;
++    }
++    
++    
++    //StartUpInfo configure the window
++    if( Hide )
++    {
++      StartUpInfo.wShowWindow = SW_HIDE;
++    }
++    else if( Minimized )
++    {
++      StartUpInfo.wShowWindow = SW_SHOWMINIMIZED;
++    }
++    else if( Maximized )
++    {
++      StartUpInfo.wShowWindow = SW_SHOWMAXIMIZED;
++    }
++    else
++    {
++      StartUpInfo.wShowWindow = SW_SHOW;
++    }
+ 
+-     if( M_StdOut )
+-     {
+-        Si.hStdOutput = M_ChildOut.getHandle( M_StdOut );
+-        M_ChildOut.start();
+-     }
+-     else if(inheritHandles)
+-     {
+-        Si.hStdOutput = GetStdHandle( STD_OUTPUT_HANDLE );
+-     }
+-     else
+-     {
+-        Si.hStdOutput = 0;
+-     }
++    
++    //StartUpInfo configure StdError
++    if( M_StdErr )
++    {
++      StartUpInfo.hStdError = M_ChildErr.getHandle( M_StdErr );
++      M_ChildErr.start();
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdError = GetStdHandle( STD_ERROR_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdError = 0;
++    }
+ 
++    
++    //StartUpInfo configure StdIn
++    if( M_StdIn )
++    {
++      SECURITY_ATTRIBUTES Sa;
++      Sa.nLength = sizeof(SECURITY_ATTRIBUTES);
++      Sa.lpSecurityDescriptor = NULL;
++      Sa.bInheritHandle = TRUE;
++      HANDLE HandleInWriteTmp;
++      if( !CreatePipe( &M_HandleInRead, &HandleInWriteTmp, &Sa, 0 ) )
++         logLastError( M_Logging, "CreatePipe");
++      if( !DuplicateHandle
++               (
++                  GetCurrentProcess(),
++                  HandleInWriteTmp,
++                  GetCurrentProcess(),
++                  &M_HandleInWrite, // Address of new handle.
++                  0,FALSE, // Make it uninheritable.
++                  DUPLICATE_SAME_ACCESS
++               ) )
++         logLastError( M_Logging, "DupliateHandle" );
++      if( !CloseHandle( HandleInWriteTmp ) )
++         logLastError( M_Logging, "CloseHandle" );
++      StartUpInfo.hStdInput = M_HandleInRead;
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdInput = GetStdHandle( STD_INPUT_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdInput = 0;
++    }
++    
+ 
+-     DWORD creationFlags= 0;
+-     if(!M_ReuseConsole)
+-     {
+-       creationFlags |= CREATE_NEW_CONSOLE;
+-       if(M_Title.size() > 0)
+-       {
+-         Si.lpTitle = M_Title.data();
+-       }
+-     }
+-     else
+-     {
+-       M_Title= MASSAI::text::StringBuffer();
+-     }
+-     if(M_NewProcessGroup)
+-     {
+-       creationFlags |= CREATE_NEW_PROCESS_GROUP;
+-     }
++    //StartUpInfo  configure StdOut
++    if( M_StdOut )
++    {
++      StartUpInfo.hStdOutput = M_ChildOut.getHandle( M_StdOut );
++      M_ChildOut.start();
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdOutput = GetStdHandle( STD_OUTPUT_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdOutput = 0;
++    }
++    
++    
++    //StartUpInfo configure the Desktop
++    if(M_Desktop.size() > 0)
++    {      
++      StartUpInfo.lpDesktop = M_Desktop.data();
++    } 
++
++    //creationFlags, default to CREATE_UNICODE_ENVIRONMENT
++    DWORD creationFlags= 0;
++    if(!M_ReuseConsole)
++    {
++      creationFlags |= CREATE_NEW_CONSOLE;
++      if(M_Title.size() > 0)
++      {           
++        StartUpInfo.lpTitle =  M_Title.data();
++      }
++    }
++    else
++    {
++      M_Title= MASSAI::text::StringBuffer();
++    }
++    
++    
++    if(M_NewProcessGroup)
++    {
++      creationFlags |= CREATE_NEW_PROCESS_GROUP;
++    }
+ 
+ 
+ 
+      if(M_Desktop.size() > 0)
+      {
+-       Si.lpDesktop = M_Desktop.data();
++       StartUpInfo.lpDesktop = M_Desktop.data();
+      }
+      const char* directory= M_Directory.size() ? M_Directory.c_str() : NULL;
+      char* environment= Environment.size() ? M_Environment.data() : NULL;
+ 
+-     PROCESS_INFORMATION Pi;
+      if (
+         !CreateProcess
+            (
+-              NULL,                            // lpApplicationName
+-              M_Commandline.data(),            // lpCommandLine
+-              NULL,                            // lpProcessAttribute
+-              NULL,                            // lpThreadAttributes
+-              inheritHandles,                  // bInheritHandles
+-              creationFlags,                   // dwCreationFlags
+-              environment,                     // lpEnvironment
+-              directory,                       // lpCurrentDirectory
+-              &Si,                             // lpStartupInfo
+-              &Pi                              // lpProcessInformation
++              NULL,                           // lpApplicationName
++              M_Commandline.data(),           // lpCommandLine
++              NULL,                           // lpProcessAttribute
++              NULL,                           // lpThreadAttributes
++              inheritHandles,                 // bInheritHandles
++              creationFlags,                  // dwCreationFlags
++              environment,                    // lpEnvironment
++              directory,                      // lpCurrentDirectory
++              &StartUpInfo,                   // lpStartupInfo
++              &ProcInfo                       // lpProcessInformation
+            )
+         )
+-     {
++    {
+         logLastError( M_Logging, "CreateProcess" );
++
+         M_HandleProcess = INVALID_HANDLE_VALUE;
++        M_CanTerminate = false;
++        M_CanQuery = false;
++        M_CanSynchronize = false;
+         M_ProcessId = 0;
+-     }
+-     else
+-     {
+-       M_HandleProcess = Pi.hProcess;
+-       M_ProcessId = Pi.dwProcessId;
+-       M_Internal.handle= M_HandleProcess;
+-       M_Internal.id= M_ProcessId;
+-       CloseHandle( Pi.hThread );
+-       M_Started = true;
+-     }
++    }
++    else
++    {
++      M_HandleProcess               = ProcInfo.hProcess;
++      M_ProcessId                   = ProcInfo.dwProcessId;
++      
++      M_Internal.handle             = M_HandleProcess;
++      M_Internal.id                 = M_ProcessId;
++      
++      CloseHandle( ProcInfo.hThread );
++      
++      M_Started = true;
++    }
++  }
++  
++  
++  /**
++   *
++   * Constructor, CreateProcessWithLogonW
++   *
++  **/
++  myChild::myChild
++     (
++        std::string const &             Commandline,
++        std::string const &             Directory,
++        bool                            Hide,
++        mSysProcess::callBack const *   Logging,
++        bool                            Minimized,
++        bool                            Maximized,
++        mSysProcess::callBack const *   StdErr,
++        bool                            StdIn,
++        mSysProcess::callBack const *   StdOut,
++        threadException const *         ThreadExeption,
++        const mSysProcess::Environment& Environment,
++        const std::string&              Title,
++        const std::string&              Desktop,
++        bool                            ReuseConsole,
++        bool                            NewProcessGroup,
++        char const*                     pUsername,
++        char const*                     pDomain,
++        char const*                     pPassword
++     ) :
++     M_ChildErr( ThreadExeption ),
++     M_ChildOut( ThreadExeption ),
++     M_Commandline( Commandline ),
++     M_Directory( Directory ),
++     M_HandleInRead( INVALID_HANDLE_VALUE ),
++     M_HandleInWrite( INVALID_HANDLE_VALUE ),
++     M_HandleProcess( INVALID_HANDLE_VALUE ),
++     M_CanTerminate(true),
++     M_CanQuery(true),
++     M_CanSynchronize(true),
++     M_Logging( Logging ),
++     M_Started( false ),
++     M_StdErr( StdErr ),
++     M_StdIn( StdIn ),
++     M_StdOut( StdOut ),
++     M_ProcessId(0),
++     M_Environment(getEnvironmentBlock(Environment)),
++     M_Title(Title),
++     M_Desktop(Desktop),
++     M_ReuseConsole(ReuseConsole),
++     M_NewProcessGroup(NewProcessGroup),
++     M_Internal(),
++     M_Parent(GetCurrentProcessId())
++  {
++    //Set UserAccount
++    std::wstring wUser      ( ToWiden(pUsername) );
++    std::wstring wDomain    ( ToWiden(pDomain) );
++    std::wstring wPasswort  ( ToWiden(pPassword) );
++
++    LPCWSTR  lpwUsername = const_cast<LPCWSTR>(wUser.c_str());      // client to log on
++    LPCWSTR  lpwDomain   = const_cast<LPCWSTR>(wDomain.c_str());    // domain of client's account
++    LPCWSTR  lpwPassword = const_cast<LPCWSTR>(wPasswort.c_str());  // client's password
++    
++    
++    PROCESS_INFORMATION ProcInfo    = {0};
++    STARTUPINFOW        StartUpInfo = {0};
++    bool                inheritHandles= false;
++    
++    // Set up the start up info struct.
++    StartUpInfo.cb = sizeof(STARTUPINFOW);
++
++    
++    //StartUpInfo.dwFlags
++    StartUpInfo.dwFlags = STARTF_USESHOWWINDOW;        // Use the wShowWindow flag
++    if(M_StdIn || M_StdErr || M_StdOut)
++    {
++     StartUpInfo.dwFlags |= STARTF_USESTDHANDLES;     // Use the hStd... flags
++     inheritHandles= true;
++    }
++    
++    
++    //StartUpInfo configure the window
++    if( Hide )
++    {
++      StartUpInfo.wShowWindow = SW_HIDE;
++    }
++    else if( Minimized )
++    {
++      StartUpInfo.wShowWindow = SW_SHOWMINIMIZED;
++    }
++    else if( Maximized )
++    {
++      StartUpInfo.wShowWindow = SW_SHOWMAXIMIZED;
++    }
++    else
++    {
++      StartUpInfo.wShowWindow = SW_SHOW;
++    }
++
++    
++    //StartUpInfo configure StdError
++    if( M_StdErr )
++    {
++      StartUpInfo.hStdError = M_ChildErr.getHandle( M_StdErr );
++      M_ChildErr.start();
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdError = GetStdHandle( STD_ERROR_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdError = 0;
++    }
++
++    
++    //StartUpInfo configure StdIn
++    if( M_StdIn )
++    {
++      SECURITY_ATTRIBUTES Sa;
++      Sa.nLength = sizeof(SECURITY_ATTRIBUTES);
++      Sa.lpSecurityDescriptor = NULL;
++      Sa.bInheritHandle = TRUE;
++      HANDLE HandleInWriteTmp;
++      if( !CreatePipe( &M_HandleInRead, &HandleInWriteTmp, &Sa, 0 ) )
++         logLastError( M_Logging, "CreatePipe");
++      if( !DuplicateHandle
++               (
++                  GetCurrentProcess(),
++                  HandleInWriteTmp,
++                  GetCurrentProcess(),
++                  &M_HandleInWrite, // Address of new handle.
++                  0,FALSE, // Make it uninheritable.
++                  DUPLICATE_SAME_ACCESS
++               ) )
++         logLastError( M_Logging, "DupliateHandle" );
++      if( !CloseHandle( HandleInWriteTmp ) )
++         logLastError( M_Logging, "CloseHandle" );
++      StartUpInfo.hStdInput = M_HandleInRead;
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdInput = GetStdHandle( STD_INPUT_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdInput = 0;
++    }
++    
++
++    //StartUpInfo  configure StdOut
++    if( M_StdOut )
++    {
++      StartUpInfo.hStdOutput = M_ChildOut.getHandle( M_StdOut );
++      M_ChildOut.start();
++    }
++    else if(inheritHandles)
++    {
++      StartUpInfo.hStdOutput = GetStdHandle( STD_OUTPUT_HANDLE );
++    }
++    else
++    {
++      StartUpInfo.hStdOutput = 0;
++    }
++    
++    
++    //StartUpInfo configure the Desktop
++    if(M_Desktop.size() > 0)
++    {      
++      StartUpInfo.lpDesktop = const_cast<LPWSTR>(ToWiden( M_Desktop.data() ).c_str());
++    } 
++
++    //creationFlags, default to CREATE_UNICODE_ENVIRONMENT
++    DWORD creationFlags= 0;
++    if(!M_ReuseConsole)
++    {
++      creationFlags |= CREATE_NEW_CONSOLE;
++      if(M_Title.size() > 0)
++      {           
++        StartUpInfo.lpTitle = const_cast<LPWSTR>(ToWiden( M_Title.data() ).c_str());
++      }
++    }
++    else
++    {
++      M_Title= MASSAI::text::StringBuffer();
++    }
++    
++    
++    if(M_NewProcessGroup)
++    {
++      creationFlags |= CREATE_NEW_PROCESS_GROUP;
++    }
++
++    creationFlags |= CREATE_UNICODE_ENVIRONMENT;
++
++    
++    
++    const char*   directory = M_Directory.size() ? M_Directory.c_str() : NULL;
++    LPCWSTR       lpszDir = 0;
++    std::wstring  wDir = L"";
++    
++    if(directory)
++    {
++      printf("M_Directory: %s\n", M_Directory.c_str());  
++      wDir = ToWiden( M_Directory.c_str() );     
++      
++      lpszDir = wDir.c_str();
++    }
++    else
++    { 
++      wDir =  ToWiden( getWorkingDir().c_str());
++      
++      if( wDir != L"" )
++        lpszDir = wDir.c_str();
++      else
++        logLastError( M_Logging, "GetWorkingDirectory" );
++    }
++    
++    char* environment = Environment.size() ? M_Environment.data() : NULL;    
++        
++    if( !CreateProcessWithLogonW
++        (
++          lpwUsername,                                                  //LPCWSTR               lpUsername
++          lpwDomain,                                                    //LPCWSTR               lpDomain
++          lpwPassword,                                                  //LPCWSTR               lpPassword
++          0,                                                            //DWORD                 dwLogonFlags
++          NULL,                                                         //LPCWSTR               lpApplicationName
++          const_cast<LPWSTR>(ToWiden( M_Commandline.data() ).c_str()),	//LPWSTR                lpCommandLine	
++          creationFlags,                                                //DWORD                 dwCreationFlags
++          environment,                                                  //LPVOID                lpEnvironment
++          lpszDir,                                                      //LPCWSTR               lpCurrentDirectory  
++          &StartUpInfo,                                                 //LPSTARTUPINFOW        lpStartupInfo
++          &ProcInfo                                                     //LPPROCESS_INFORMATION lpProcessInfo
++        )
++      )
++    {
++        logLastError( M_Logging, "CreateProcessWithLogonW" );
++
++        M_HandleProcess = INVALID_HANDLE_VALUE;
++        M_CanTerminate = false;
++        M_CanQuery = false;
++        M_CanSynchronize = false;
++        M_ProcessId = 0;
++    }
++    else
++    {
++      M_HandleProcess               = ProcInfo.hProcess;
++      M_ProcessId                   = ProcInfo.dwProcessId;
++      
++      M_Internal.handle             = M_HandleProcess;
++      M_Internal.id                 = M_ProcessId;
++      
++      CloseHandle( ProcInfo.hThread );
++      
++      M_Started = true;
++    }
+   }
+ 
+ 
+@@ -651,11 +1146,29 @@ namespace
+   **/
+   myChild::~myChild()
+   {
+-     CloseHandle( M_HandleInRead );
+-     CloseHandle( M_HandleInWrite );
+-     CloseHandle( M_HandleProcess );
++    CloseHandle( M_HandleInRead );
++    CloseHandle( M_HandleInWrite );
++    CloseHandle( M_HandleProcess );
+   }
+ 
++  
++  bool myChild::canQuery() const
++  {
++    return M_CanQuery;
++  }  
++  
++  
++  bool myChild::canTerminate() const
++  {
++    return M_CanTerminate;
++  }
++  
++  
++  bool myChild::canWait() const
++  {
++    return M_CanSynchronize;
++  }
++  
+ 
+   /**
+    *
+@@ -668,10 +1181,20 @@ namespace
+      DWORD XCode = 0;
+      if( M_Started )
+      {
+-        if( !GetExitCodeProcess( M_HandleProcess, &XCode ) )
++        if( canQuery() )
+         {
+-           logLastError( M_Logging, "GetExitCodeProcess" );
+-           return 0;
++          if( !GetExitCodeProcess( M_HandleProcess, &XCode ) )
++          {
++             logLastError( M_Logging, "GetExitCodeProcess" );
++             return 0;
++          }
++        }
++        else
++        {
++          if( M_Logging )
++          {
++            M_Logging->lineOut( "getExitCode - query not allowed" );
++          } 
+         }
+      }
+      return XCode;
+@@ -686,8 +1209,10 @@ namespace
+   **/
+   mSysProcess::status myChild::getStatus() const
+   {
+-     if( M_Started )
+-     {
++    if( canWait() )
++    {
++      if( M_Started )
++      {
+         DWORD result= WaitForSingleObject( M_HandleProcess, 0 );
+         if(result == WAIT_TIMEOUT)
+            return mSysProcess::STATUS_RUNNING;
+@@ -695,9 +1220,19 @@ namespace
+            return mSysProcess::STATUS_TERMINATED;
+         else
+            return mSysProcess::STATUS_UNKNOWN;
+-     }
+-     else
++      }
++      else
+         return mSysProcess::STATUS_FAILED;
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getStatus - wait not allowed" );
++      } 
++      
++      return mSysProcess::STATUS_UNKNOWN;
++    }
+   }
+ 
+ 
+@@ -709,9 +1244,19 @@ namespace
+   **/
+   mSysProcess::child & myChild::waitForTermination()
+   {
+-     if( M_HandleProcess != INVALID_HANDLE_VALUE )
++    if( canWait() )
++    {
+         WaitForSingleObject( M_HandleProcess, INFINITE );
+-     return *this;
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "waitForTermination - wait not allowed" );
++      } 
++    }
++    
++    return *this;
+   }
+ 
+ 
+@@ -723,9 +1268,19 @@ namespace
+   **/
+   mSysProcess::child & myChild::waitForTermination( unsigned Seconds )
+   {
+-     if( M_HandleProcess != INVALID_HANDLE_VALUE )
+-        WaitForSingleObject( M_HandleProcess, 1000 * Seconds );
+-     return *this;
++    if( canWait() )
++    {
++         WaitForSingleObject( M_HandleProcess, 1000 * Seconds );
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "waitForTermination - wait not allowed" );
++      } 
++    }
++    
++    return *this;
+   }
+ 
+ 
+@@ -770,8 +1325,10 @@ namespace
+   mSysProcess::child & myChild::closeStdIn()
+   {
+     M_StdIn= false;
++	
+     CloseHandle(M_HandleInWrite);
+     M_HandleInWrite= INVALID_HANDLE_VALUE;
++	
+     return *this;
+   }
+ 
+@@ -795,7 +1352,7 @@ namespace
+    *
+   **/
+   bool myChild::sendCtrlC()
+-  {
++  {   
+     return sendEvent(CTRL_C_EVENT);
+   }
+ 
+@@ -825,16 +1382,21 @@ namespace
+   **/
+   mSysProcess::child& myChild::kill()
+   {
+-    if (
+-         !TerminateProcess
+-            (
+-               M_HandleProcess,
+-               static_cast<unsigned int>( -1 )
+-            )
+-       )
++    if( canTerminate() )
+     {
+-      logLastError( M_Logging, "TerminateProcess" );
++      if ( !TerminateProcess(M_HandleProcess, static_cast<unsigned int>( -1 )) )
++      {
++        logLastError( M_Logging, "TerminateProcess" );
++      }
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "kill not allowed" );
++      } 
+     }
++	
+     return *this;
+   }
+ 
+@@ -868,53 +1430,75 @@ namespace
+   **/
+   void myChild::printTime(std::ostream& out, mSysProcess::status state) const
+   {
+-    FILETIME creation;
+-    FILETIME exit;
+-    FILETIME kernel;
+-    FILETIME user;
+-    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    if( canQuery() )
+     {
+-      out << std::dec;
+-      out << "user\t" << mSysTime::getDuration(user)      << "\t";
+-      out << "kernel\t" << mSysTime::getDuration(kernel)    << std::endl;
+-      out << "start\t" << mSysTime::getTimestamp(creation) << "\t";
+-      if(state != mSysProcess::STATUS_RUNNING)
++      FILETIME creation;
++      FILETIME exit;
++      FILETIME kernel;
++      FILETIME user;
++      
++      if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
+       {
+-        out << "stop\t" << mSysTime::getTimestamp(exit);
++        out << std::dec;
++        out << "user\t" << mSysTime::getDuration(user)      << "\t";
++        out << "kernel\t" << mSysTime::getDuration(kernel)    << std::endl;
++        out << "start\t" << mSysTime::getTimestamp(creation) << "\t";
++        if(state != mSysProcess::STATUS_RUNNING)
++        {
++          out << "stop\t" << mSysTime::getTimestamp(exit);
++        }
++        out << std::endl;
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessTimes");
+       }
+-      out << std::endl;
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessTimes");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printTime - query not allowed" );
++      } 
+     }
+   }
+ 
+   void myChild::printShortTime(std::ostream& out, mSysProcess::status state) const
+   {
+-    FILETIME creation;
+-    FILETIME exit;
+-    FILETIME kernel;
+-    FILETIME user;
+-    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    if( canQuery() )
+     {
+-      out << std::dec;
+-      out << "user\t"   << mSysTime::getDuration(user)      << "\t";
+-      out << "kernel\t" << mSysTime::getDuration(kernel)    << "\t";
+-      out << "start\t"  << mSysTime::getTimestamp(creation) << "\t";
+-      if(state != mSysProcess::STATUS_RUNNING)
++      FILETIME creation;
++      FILETIME exit;
++      FILETIME kernel;
++      FILETIME user;
++      
++      if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
+       {
+-        out << "stop\t" << mSysTime::getTimestamp(exit)     << "\t";
++        out << std::dec;
++        out << "user\t"   << mSysTime::getDuration(user)      << "\t";
++        out << "kernel\t" << mSysTime::getDuration(kernel)    << "\t";
++        out << "start\t"  << mSysTime::getTimestamp(creation) << "\t";
++        if(state != mSysProcess::STATUS_RUNNING)
++        {
++          out << "stop\t" << mSysTime::getTimestamp(exit)     << "\t";
++        }
++        else
++        {
++          out << "\t\t";
++        }
+       }
+       else
+       {
+-        out << "\t\t";
++        out << "\t\t\t\t\t\t\t\t";
++        logLastError(M_Logging, "GetProcessTimes");
+       }
+     }
+     else
+     {
+-      out << "\t\t\t\t\t\t\t\t";
+-      logLastError(M_Logging, "GetProcessTimes");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printShortTime - query not allowed" );
++      } 
+     }
+   }
+ 
+@@ -926,82 +1510,125 @@ namespace
+   **/
+   void myChild::printCounters(std::ostream& out) const
+   {
+-    IO_COUNTERS ioCounters;
+-    if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
+-    {
+-      out << std::dec;
+-      out << "IO count(r/w/o)\t";
+-      out << ioCounters.ReadOperationCount  << "\t";
+-      out << ioCounters.WriteOperationCount << "\t";
+-      out << ioCounters.OtherOperationCount << std::endl;
+-      out << "IO byte (r/w/o)\t";
+-      out << ioCounters.ReadTransferCount   << "\t";
+-      out << ioCounters.WriteTransferCount  << "\t";
+-      out << ioCounters.OtherTransferCount  << std::endl;
++    if( canQuery() )
++    {
++      IO_COUNTERS ioCounters;
++      if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++      {
++        out << std::dec;
++        out << "IO count(r/w/o)\t";
++        out << ioCounters.ReadOperationCount  << "\t";
++        out << ioCounters.WriteOperationCount << "\t";
++        out << ioCounters.OtherOperationCount << std::endl;
++        out << "IO byte (r/w/o)\t";
++        out << ioCounters.ReadTransferCount   << "\t";
++        out << ioCounters.WriteTransferCount  << "\t";
++        out << ioCounters.OtherTransferCount  << std::endl;
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessIoCounters");
++      }
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessIoCounters");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printCounters(GetProcessIoCounters) - query not allowed" );
++      } 
+     }
+-    PROCESS_MEMORY_COUNTERS memoryCounters;
+-    if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
+-    {
+-      out << std::dec;
+-      out << "page faults\t";
+-      out << memoryCounters.PageFaultCount             << std::endl;
+-      out << "current ws/paged/non paged/file\t";
+-      out << memoryCounters.WorkingSetSize             << "\t";
+-      out << memoryCounters.QuotaPagedPoolUsage        << "\t";
+-      out << memoryCounters.QuotaNonPagedPoolUsage     << "\t";
+-      out << memoryCounters.PagefileUsage              << std::endl;
+-      out << "peak    ws/paged/non paged/file\t";
+-      out << memoryCounters.PeakWorkingSetSize         << "\t";
+-      out << memoryCounters.QuotaPeakPagedPoolUsage    << "\t";
+-      out << memoryCounters.QuotaPeakNonPagedPoolUsage << "\t";
+-      out << memoryCounters.PeakPagefileUsage          << std::endl;
++    
++    if( canQuery() )
++    {
++      PROCESS_MEMORY_COUNTERS memoryCounters;
++      if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++      {
++        out << std::dec;
++        out << "page faults\t";
++        out << memoryCounters.PageFaultCount             << std::endl;
++        out << "current ws/paged/non paged/file\t";
++        out << memoryCounters.WorkingSetSize             << "\t";
++        out << memoryCounters.QuotaPagedPoolUsage        << "\t";
++        out << memoryCounters.QuotaNonPagedPoolUsage     << "\t";
++        out << memoryCounters.PagefileUsage              << std::endl;
++        out << "peak    ws/paged/non paged/file\t";
++        out << memoryCounters.PeakWorkingSetSize         << "\t";
++        out << memoryCounters.QuotaPeakPagedPoolUsage    << "\t";
++        out << memoryCounters.QuotaPeakNonPagedPoolUsage << "\t";
++        out << memoryCounters.PeakPagefileUsage          << std::endl;
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessMemoryInfo");
++      }
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessMemoryInfo");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printCounters(GetProcessMemoryInfo) - query not allowed" );
++      } 
+     }
+   }
+ 
+   void myChild::printShortCounters(std::ostream& out) const
+   {
+     PROCESS_MEMORY_COUNTERS memoryCounters;
+-    if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
+-    {
+-      out << std::dec;
+-      out << "total\t"        << memoryCounters.PagefileUsage              << "\t";
+-      out << "ws\t"           << memoryCounters.WorkingSetSize             << "\t";
+-      out << "paged\t"        << memoryCounters.QuotaPagedPoolUsage        << "\t";
+-      out << "nonpaged\t"     << memoryCounters.QuotaNonPagedPoolUsage     << "\t";
+-      out << "max total\t"    << memoryCounters.PeakPagefileUsage          << "\t";
+-      out << "max ws\t"       << memoryCounters.PeakWorkingSetSize         << "\t";
+-      out << "max paged\t"    << memoryCounters.QuotaPeakPagedPoolUsage    << "\t";
+-      out << "max nonpaged\t" << memoryCounters.QuotaPeakNonPagedPoolUsage << "\t";
+-      out << "fault\t"        << memoryCounters.PageFaultCount             << "\t";
++    
++    if( canQuery() )
++    {
++      if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++      {
++        out << std::dec;
++        out << "total\t"        << memoryCounters.PagefileUsage              << "\t";
++        out << "ws\t"           << memoryCounters.WorkingSetSize             << "\t";
++        out << "paged\t"        << memoryCounters.QuotaPagedPoolUsage        << "\t";
++        out << "nonpaged\t"     << memoryCounters.QuotaNonPagedPoolUsage     << "\t";
++        out << "max total\t"    << memoryCounters.PeakPagefileUsage          << "\t";
++        out << "max ws\t"       << memoryCounters.PeakWorkingSetSize         << "\t";
++        out << "max paged\t"    << memoryCounters.QuotaPeakPagedPoolUsage    << "\t";
++        out << "max nonpaged\t" << memoryCounters.QuotaPeakNonPagedPoolUsage << "\t";
++        out << "fault\t"        << memoryCounters.PageFaultCount             << "\t";
++      }
++      else
++      {
++        out << "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
++        logLastError(M_Logging, "GetProcessMemoryInfo");
++      }
+     }
+     else
+     {
+-      out << "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
+-      logLastError(M_Logging, "GetProcessMemoryInfo");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printShortCounters(GetProcessMemoryInfo) - query not allowed" );
++      } 
+     }
+-    IO_COUNTERS ioCounters;
+-    if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++    
++    if( canQuery() )
+     {
+-      out << std::dec;
+-      out << "R Op\t" << ioCounters.ReadOperationCount   << "\t";
+-      out << "W Op\t" << ioCounters.WriteOperationCount  << "\t";
+-      out << "O Op\t" << ioCounters.OtherOperationCount  << "\t";
+-      out << "R Byte\t" << ioCounters.ReadTransferCount  << "\t";
+-      out << "W Byte\t" << ioCounters.WriteTransferCount << "\t";
+-      out << "O Byte\t" << ioCounters.OtherTransferCount << "\t";
++      IO_COUNTERS ioCounters;
++      if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++      {
++        out << std::dec;
++        out << "R Op\t" << ioCounters.ReadOperationCount   << "\t";
++        out << "W Op\t" << ioCounters.WriteOperationCount  << "\t";
++        out << "O Op\t" << ioCounters.OtherOperationCount  << "\t";
++        out << "R Byte\t" << ioCounters.ReadTransferCount  << "\t";
++        out << "W Byte\t" << ioCounters.WriteTransferCount << "\t";
++        out << "O Byte\t" << ioCounters.OtherTransferCount << "\t";
++      }
++      else
++      {
++        out << "\t\t\t\t\t\t\t\t\t\t\t\t";
++        logLastError(M_Logging, "GetProcessIoCounters");
++      }
+     }
+     else
+     {
+-      out << "\t\t\t\t\t\t\t\t\t\t\t\t";
+-      logLastError(M_Logging, "GetProcessIoCounters");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "printShortCounters(GetProcessIoCounters) - query not allowed" );
++      } 
+     }
+   }
+ 
+@@ -1083,7 +1710,10 @@ namespace
+   // get creation time of process
+   mSysTime::Timestamp myChild::getCreationTime() const
+   {
+-      mSysTime::Timestamp result;
++    mSysTime::Timestamp result;
++    
++    if( canQuery() )
++    {
+       FILETIME creation, exit, kernel, user;
+       if (
+             GetProcessTimes
+@@ -1101,7 +1731,17 @@ namespace
+          result = mSysTime::getTimestamp();
+          logLastError(M_Logging, "GetProcessTimes");
+       }
+-      return result;
++    }
++    else
++    {
++      if( M_Logging )
++      {
++        result = mSysTime::getTimestamp();
++        M_Logging->lineOut( "getCreationTime - query not allowed" );
++      } 
++    }
++    
++    return result;
+   }
+ 
+ 
+@@ -1134,17 +1774,29 @@ namespace
+     IO_COUNTERS ioCounters;
+ 
+     unsigned long sum = 0;
+-    if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++    
++    if( canQuery() )
+     {
+-      ULONGLONG read = ioCounters.ReadTransferCount;
+-      ULONGLONG write = ioCounters.WriteTransferCount;
+-      ULONGLONG other = ioCounters.OtherTransferCount;
+-      sum = static_cast<unsigned long> (read + write + other);
++      if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++      {
++        ULONGLONG read = ioCounters.ReadTransferCount;
++        ULONGLONG write = ioCounters.WriteTransferCount;
++        ULONGLONG other = ioCounters.OtherTransferCount;
++        sum = static_cast<unsigned long> (read + write + other);
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessIoCounters");
++      }
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessIoCounters");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getProcessIoUsage - query not allowed" );
++      } 
+     }
++    
+     return sum;
+   }
+ 
+@@ -1157,31 +1809,54 @@ namespace
+ 
+     unsigned long sum = 0;
+ 
+-    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    if( canQuery() )
+     {
+-      mSysTime::Duration usr = mSysTime::getDuration(user);
+-      mSysTime::Duration krnl = mSysTime::getDuration(kernel);
+-      sum = mSysTime::getDurationInMs(usr) + mSysTime::getDurationInMs(krnl);
++      if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++      {
++        mSysTime::Duration usr = mSysTime::getDuration(user);
++        mSysTime::Duration krnl = mSysTime::getDuration(kernel);
++        sum = mSysTime::getDurationInMs(usr) + mSysTime::getDurationInMs(krnl);
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessTimes");
++      }
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessTimes");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getProcessTimeUsage - query not allowed" );
++      } 
+     }
++     
+     return sum;
+   }
+ 
+   unsigned long myChild::getProcessMemoryUsage() const
+-  {
++  { 
+     PROCESS_MEMORY_COUNTERS memoryCounters;
+     unsigned long result = 0;
+-    if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++    
++    if( canQuery() )
+     {
+-      result = memoryCounters.WorkingSetSize;
++      if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++      {
++        result = memoryCounters.WorkingSetSize;
++      }
++      else
++      {
++        logLastError(M_Logging, "GetProcessMemoryInfo");
++      }
+     }
+     else
+     {
+-      logLastError(M_Logging, "GetProcessMemoryInfo");
++      if( M_Logging )
++      {
++        M_Logging->lineOut( "getProcessMemoryUsage - query not allowed" );
++      } 
+     }
++      
+     return result;
+   }
+ } // namespace
+@@ -1312,6 +1987,43 @@ public:
+                         M_NewProcessGroup
+                      );
+    }
++   
++   
++   /**
++    *
++    * Implementation method.
++    * See the comment in mSysProcess.hpp" to the interface method.
++    *
++   **/
++   mSysProcess::child * newChild
++      (
++        char const* pUsername,
++        char const* pDomain,
++        char const* pPassword
++      )
++   {
++      return new  myChild
++                     (
++                        M_Commandline,
++                        M_Directory,
++                        M_Hide,
++                        M_Logging,
++                        M_Minimized,
++                        M_Maximized,
++                        M_StdErr,
++                        M_StdIn,
++                        M_StdOut,
++                        M_ThreadExeption,
++                        M_Environment,
++                        M_Title,
++                        M_Desktop,
++                        M_ReuseConsole,
++                        M_NewProcessGroup,
++                        pUsername,
++                        pDomain,
++                        pPassword
++                     );
++   }
+ 
+ 
+    /**
+@@ -1639,6 +2351,24 @@ mSysProcess::child * mSysProcess::parent::newChild()
+ 
+ 
+ 
++/**
++ *
++ * Class mSysProcess::parent method implementation
++ * - see "systools/mSysProcess.hpp".
++ *
++**/
++mSysProcess::child * mSysProcess::parent::newChild
++  (
++    char const* pUsername,
++    char const* pDomain,
++    char const* pPassword
++  )
++{
++   return M_Impl->newChild(pUsername, pDomain, pPassword);
++}
++
++
++
+ /**
+  *
+  * Class mSysProcess::parent method implementation
+@@ -1861,3 +2591,4 @@ mSysProcess::child* mSysProcess::createProcess(DWORD pid, DWORD ppid, const std:
+  *
+  **************************************************************************
+ **/
++
+-- 
+2.41.0.windows.1
+

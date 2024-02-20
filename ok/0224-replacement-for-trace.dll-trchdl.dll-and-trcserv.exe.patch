@@ -1,0 +1,322 @@
+From a326ae6042977f8c55df99220770341a24a2ffd6 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 1 Aug 2012 17:49:17 +0000
+Subject: [PATCH 0224/1000] replacement for trace.dll, trchdl.dll and
+ trcserv.exe: process writes traces to file, using same interface as trace.dll
+ and trchdl.dll needs no trcserv.exe trace.dll trcHDL.dll traceNoConfig.dll
+ trcHDLNoConfig.dll traces.lib tracehdls.lib traceCompletes.lib
+ tracehdlCompletes.lib traceNoConfigs.lib tracehdlNoConfigs.lib
+ traceNoConfigCompletes.lib tracehdlNoConfigCompletes.lib
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@366 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Trace/inc/TraceConfig.h        |  3 +-
+ .../Massai/cpp/Trace/inc/TraceSession.h       |  2 +-
+ .../Massai/cpp/Trace/src/TraceConfig.cpp      | 12 ++--
+ .../Massai/cpp/Trace/src/TraceFormat.cpp      | 39 +++++++++-
+ .../Massai/cpp/Trace/src/TraceSession.cpp     | 72 +++++--------------
+ .../Massai/cpp/Trace/src/TraceSettings.cpp    |  2 +-
+ .../Massai/cpp/Trace/src/TraceSrvConfig.cpp   | 14 ++--
+ 7 files changed, 71 insertions(+), 73 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+index 7fc45fe7..cc221805 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceConfig.h
+@@ -94,9 +94,8 @@ namespace MASSAI
+         void setHandle(int hdl);
+         void setSessionPath(const std::string& path);
+ 
+-        boost::filesystem::path getBackupPath(const boost::filesystem::path& base, const mSysTime::Timestamp& ts);
++        boost::filesystem::path getBackupPath(const mSysTime::Timestamp& ts);
+         std::string getNewFilename();
+-        boost::filesystem::path getFullPath() const;
+         long getFileSizeLimit() const;
+ 
+       private:
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+index fa39677f..61363c31 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
++++ b/SelfServiceCommon/Massai/cpp/Trace/inc/TraceSession.h
+@@ -61,7 +61,7 @@ namespace MASSAI
+       private:
+         typedef std::auto_ptr<std::ostream> OutputPtr;
+         TraceConfig m_config;
+-        boost::filesystem::path m_path; // path for current trace file
++        boost::filesystem::path m_fullpath; // full filename
+         std::string m_filename;
+         OutputPtr m_pOut;
+         TraceLineCallback m_callback;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+index 0ce6cb27..3991431d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceConfig.cpp
+@@ -104,7 +104,7 @@ namespace MASSAI
+     TraceCommonConfig::TraceCommonConfig():
+       m_envConfig(),
+       m_processId(getProcessId()),
+-      m_basePath(getBasePath()),
++      m_basePath(MASSAI::trace::getBasePath()),
+       m_pSrvCommonConfig(),
+       m_useConfig(true)
+     {
+@@ -189,14 +189,14 @@ namespace MASSAI
+       }
+       return result;
+     }
+-    fs::path TraceConfig::getBackupPath(const fs::path& base, const mSysTime::Timestamp& ts)
++    fs::path TraceConfig::getBackupPath(const mSysTime::Timestamp& ts)
+     {
+-      fs::path result= base;
++      fs::path result = concat(m_commonConfig.getBasePath(), concat(getPath(), m_sessionPath));
+       try
+       {
+         TraceFormat& fmt= getTraceFormat();
+         fs::path relative(fmt.backupPath(ts), fs::native);
+-        result= base/relative;
++        result/= relative;
+       }
+       catch(std::exception& ex)
+       {
+@@ -212,10 +212,6 @@ namespace MASSAI
+     {
+       m_sessionPath= fs::path(path, fs::native);
+     }
+-    fs::path TraceConfig::getFullPath() const
+-    {
+-      return concat(m_commonConfig.getBasePath(), concat(getPath(), m_sessionPath));
+-    }
+     const std::string& TraceConfig::getSessionId() const
+     {
+       return m_sessionId;
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
+index c9ec1670..9f871a76 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceFormat.cpp
+@@ -19,6 +19,7 @@
+ #include "trc/tracedef.h"
+ #include "boost/filesystem/path.hpp"
+ #include <iomanip>
++#include <algorithm>
+ 
+ namespace fs = boost::filesystem;
+ 
+@@ -39,6 +40,42 @@ namespace
+     }
+     return result;
+   }
++  int normalize_ch(int c)
++  {
++    switch(c)
++    {
++      case '<':
++      case '>':
++      case ':':
++      case '"':
++      case '/':
++      case '\\':
++      case '|':
++      case '?':
++      case '*':
++      case '.':
++      {
++        return '_';
++      }
++      default:
++      {
++        if(c < 32)
++        {
++          return '_';
++        }
++        else
++        {
++          return c;
++        }
++      }
++    }
++  }
++  std::string normalize(const std::string& sessionId)
++  {
++    std::string result= sessionId;
++    std::transform(result.begin(), result.end(), result.begin(), normalize_ch);
++    return result;
++  }
+ }
+ 
+ namespace MASSAI
+@@ -58,7 +95,7 @@ namespace MASSAI
+     std::string TraceFormat::filename(const std::string& sessionId,
+       ProcessId processId, const mSysTime::Timestamp& timestamp)
+     {
+-      std::string result= sessionId;
++      std::string result= normalize(sessionId);
+       char buffer[100];
+       sprintf(buffer, "_%04d%02d%02d_%02d%02d%02d_%03d_%04d.trc",
+         timestamp.year, timestamp.month, timestamp.day,
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+index f49238bc..eca7ea3d 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSession.cpp
+@@ -23,49 +23,12 @@
+ #include "boost/filesystem/operations.hpp"
+ #include "boost/filesystem/convenience.hpp"
+ #include <fstream>
+-#include <algorithm>
+ #include <iostream>
+ 
+ namespace fs = boost::filesystem;
+ 
+ namespace
+ {
+-  int normalize_ch(int c)
+-  {
+-    switch(c)
+-    {
+-      case '<':
+-      case '>':
+-      case ':':
+-      case '"':
+-      case '/':
+-      case '\\':
+-      case '|':
+-      case '?':
+-      case '*':
+-      case '.':
+-      {
+-        return '_';
+-      }
+-      default:
+-      {
+-        if(c < 32)
+-        {
+-          return '_';
+-        }
+-        else
+-        {
+-          return c;
+-        }
+-      }
+-    }
+-  }
+-  std::string normalize(const std::string& sessionId)
+-  {
+-    std::string result= sessionId;
+-    std::transform(result.begin(), result.end(), result.begin(), normalize_ch);
+-    return result;
+-  }
+   const char* TOPIC= "TRACE";
+ }
+ 
+@@ -93,7 +56,7 @@ namespace MASSAI
+     TraceSession::TraceSession(TraceCommonConfig& config):
+       m_config(config),
+       m_pOut(),
+-      m_path(),
++      m_fullpath(),
+       m_filename(),
+       m_callback(),
+       m_format(m_callback),
+@@ -117,7 +80,6 @@ namespace MASSAI
+     {
+       try
+       {
+-        m_path= m_config.getFullPath();
+         m_filename= m_config.getNewFilename();
+         openFile();
+       }
+@@ -146,10 +108,10 @@ namespace MASSAI
+     {
+       try
+       {
+-        fs::path backup= m_config.getBackupPath(m_path, mSysTime::getTimestamp());
++        fs::path backup= m_config.getBackupPath(mSysTime::getTimestamp());
+         fs::create_directories(backup);
+-        fs::path file= backup / m_filename;
+-        setOut(new std::ofstream(file.native_file_string().c_str(),
++        m_fullpath = backup / m_filename;
++        setOut(new std::ofstream(m_fullpath.native_file_string().c_str(),
+           std::ios_base::out | std::ios_base::app | std::ios::binary));
+       }
+       catch(std::exception& ex)
+@@ -159,20 +121,22 @@ namespace MASSAI
+     }
+     void TraceSession::move()
+     {
+-      try
+-      {
+-        setOut(0);
+-        fs::path newPath= m_config.getFullPath();
+-        fs::create_directories(newPath);
+-        fs::path source= m_path / m_filename;
+-        fs::rename(source, newPath / m_filename);
+-        m_path= newPath;
+-      }
+-      catch(std::exception& ex)
++      if(m_pOut.get() != 0)
+       {
+-        MASSAI::trace::tracetrace(MinorWarning_HERE, "move file: (%.1000s)", ex.what());
++        try
++        {
++          setOut(0);
++          fs::path newPath= m_config.getBackupPath(mSysTime::getTimestamp());
++          fs::create_directories(newPath);
++          fs::rename(m_fullpath, newPath / m_filename);
++          m_fullpath = newPath / m_filename;
++        }
++        catch(std::exception& ex)
++        {
++          MASSAI::trace::tracetrace(MinorWarning_HERE, "move file: (%.1000s)", ex.what());
++        }
++        openFile();
+       }
+-      openFile();
+     }
+     void TraceSession::process(const TraceCmd& cmd)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSettings.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSettings.cpp
+index e9447391..577e4192 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSettings.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSettings.cpp
+@@ -18,7 +18,7 @@ using namespace MASSAI::trace;
+ 
+ void _stdcall setTraceDirectory(const char* pszPath)
+ {
+-  getTrace().send(new TraceCmd(TRC_CHANGEDIRECTORY, 0, -1, pszPath));
++  getTrace().send(new TraceCmd(TRC_CHANGEDIRECTORY, 0, pszPath, -1));
+ }
+ void _stdcall setTraceLevel(trcHandle hdl, long lTraceLevel)
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
+index 87c5ac9f..ab55ac99 100644
+--- a/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/Trace/src/TraceSrvConfig.cpp
+@@ -50,18 +50,20 @@ namespace
+ 
+   std::string configItem(const std::string& session, const std::string& item)
+   {
++    std::string configSession = session;
++    std::string configItem = item;
++    std::replace(configSession.begin(), configSession.end(), '.', '_');
++    std::replace(configItem.begin(), configItem.end(), '.', '_');
++
+     std::string result= "TRACES.";
+-    result+= session;
++    result+= configSession;
+     result+= ".";
+-    result+= item;
++    result+= configItem;
+     return result;
+   }
+   std::string configItemTopic(const std::string& session, const std::string& topic)
+   {
+-    std::string topicItem= "Topic_";
+-    topicItem+= topic;
+-    std::replace(topicItem.begin(), topicItem.end(), '.', '_');
+-    return configItem(session, topicItem);
++    return configItem(session, "Topic_" + topic);
+   }
+ }
+ 
+-- 
+2.41.0.windows.1
+

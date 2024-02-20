@@ -1,0 +1,180 @@
+From 829244a393ca38fcc0f90e1825ff72d752377852 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 9 Feb 2023 16:05:12 +0000
+Subject: [PATCH 09/10] MANTIS 0063812 extension: BER: SAS AEA support - GPP
+ DEV massai_text.lib 1.0.0.12
+
+- add split functions with maxCount parameter
+- add getDefaultCode to enumerationBase
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1769 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/tools/Enumeration.h    |  2 +
+ .../Interfaces/generic/tools/Enumeration.hpp  |  6 +++
+ .../Interfaces/inc/text/textTools.h           | 10 ++--
+ .../Massai/cpp/Text/src/local_def.cpp         |  9 +++-
+ .../Massai/cpp/Text/src/textTools.cpp         | 48 ++++++++++++++++++-
+ 5 files changed, 68 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+index 52fdce0f..856ce6ae 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+@@ -24,6 +24,8 @@ namespace mipsTools
+       E getCode(const Value& value) const;
+       Entry getEntryFromValue(Value value) const;
+ 
++      E getDefaultCode() const;
++
+     private:
+       typedef std::map<E, Entry>  entryMap;
+       typedef std::set<Entry>     entrySet;
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+index 0ee2495e..b84269ec 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+@@ -167,6 +167,12 @@ namespace mipsTools
+     return result;
+   }
+ 
++  template<class E, class Value, class Entry>
++  E enumerationBase<E, Value, Entry>::getDefaultCode() const
++  {
++    return m_defaultEntry.getCode();
++  }
++
+ 
+   template<class E>
+   enumeration<E>::enumeration(E defaultCode, const std::string& defaultValue, const std::string& defaultDescription):
+diff --git a/SelfServiceCommon/Interfaces/inc/text/textTools.h b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+index 073ce858..b3a8f367 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/textTools.h
++++ b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+@@ -30,6 +30,10 @@ namespace MASSAI
+     void split(const std::string& input, const std::string& delimiter, TextList& partList);
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList);
+ 
++    TextList split(const std::string& input, const std::string& delimiter, int maxCount);
++    void split(const std::string& input, const std::string& delimiter, TextList& partList, int maxCount);
++    void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList, int maxCount);
++
+     std::string fromHex(const std::string& hexdata);
+ 
+     bool startsWith(const std::string& text, const std::string& prefix);
+@@ -37,13 +41,13 @@ namespace MASSAI
+     std::string toLower(const std::string& text);
+ 
+     void replaceAll(std::string& text, const std::string& search, const std::string& replace);
+-    
+-    
++
++
+     /**
+     *   Transforms a wchar_t* to a std::string
+     *
+     *   @pararm s:      the wchar_t* to transform
+-    *   @param default: 
++    *   @param default:
+     *   @param loc:
+     *
+     *   @return the wchar_t* as std::string
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 96597c14..3871c698 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,23 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 11);
++VERSION_ID_DT(text, 1, 0, 0, 12);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.11
++\version 1.0.0.12
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.12
++\li 09.02.2023
++\li extension - SteT Mantis extension: BER: SAS AEA support - GPP DEV
++- add split functions with maxCount parameter
++
+ \version 1.0.0.11
+ \li 04.03.2020
+ \li extension - SteT Mantis 0056312: Extend Desko-Penta Device-Handler by Accufill-SDK for reading US driving-licenses
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+index 32d035f3..a16861bf 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+@@ -124,6 +124,50 @@ namespace MASSAI
+       }
+     }
+ 
++    TextList split(const std::string& input, const std::string& delimiter, int maxCount)
++    {
++      TextList result;
++      split(input, delimiter, result, maxCount);
++      return result;
++    }
++
++    void split(const std::string& input, const std::string& delimiter, TextList& partList, int maxCount)
++    {
++      TextList delimiterList;
++      split(input, delimiter, partList, delimiterList, maxCount);
++    }
++
++    void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList, int maxCount)
++    {
++      size_t start= 0;
++      for(int i = 1; i < maxCount; i++)
++      {
++        size_t end= input.find_first_of(delimiter, start);
++        if(end == std::string::npos)
++        {
++          partList.push_back(std::string(input, start, input.size() - start));
++          start = input.size();
++          break;
++        }
++        else
++        {
++          partList.push_back(std::string(input, start, end-start));
++          delimiterList.push_back(std::string(input, end, 1));
++          start = end + 1;
++          if(start == input.size())
++          {
++            partList.push_back("");
++            break;
++          }
++        }
++      }
++      if(start < input.size())
++      {
++        partList.push_back(std::string(input, start));
++      }
++    }
++
++
+     std::string fromHex(const std::string& hexdata)
+     {
+       std::string result;
+@@ -185,8 +229,8 @@ namespace MASSAI
+         pos += replace.length();
+       }
+     }
+-    
+-    
++
++
+     std::string ToNarrow( const wchar_t *s, char dfault, const std::locale& loc)
+     {
+       std::ostringstream stm;
+-- 
+2.41.0.windows.1
+

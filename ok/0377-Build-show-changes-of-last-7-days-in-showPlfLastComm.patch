@@ -1,0 +1,89 @@
+From 361f43195f508c083f7a05ad87baed2a23602d95 Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 26 Jun 2020 08:37:32 +0000
+Subject: [PATCH 377/462] Build: show changes of last 7 days in
+ showPlfLastCommits.pl
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@693 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/showPlfLastCommits.pl       | 33 +++++++++++++++----
+ 1 file changed, 26 insertions(+), 7 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+index 69e1433..f38654e 100644
+--- a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
++++ b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+@@ -5,10 +5,10 @@ use Getopt::Long;
+ use DateTime;
+ 
+ # ----------------------------------------------------------
+-#  showPlfLastCommit.pl                 kkluge 28.05.2020
++#  showPlfLastCommit.pl                 kkluge 26.06.2020
+ #
+ #  Show the last commit of the configured list of PLF
+-#  branches, if it was in the current month.
++#  branches, if it was within 7 days.
+ #
+ #  With the option "--all" the last commit of all branches
+ #  are shown, no matter when it was done.
+@@ -50,8 +50,8 @@ my @allURLs =
+   "$ipsPlfBranchURL/RC_4.30.00",
+ );
+ 
++my ($dtToday) = DateTime->now(time_zone => "local");
+ my $optAll = 0;
+-my $thisMonth;
+ 
+ GetOptions ("all!"       => \$optAll,
+             "help!"      => \$help
+@@ -88,6 +88,24 @@ sub getDateTime
+ 
+ # ----------------------------------------------------------
+ 
++sub newDateTime
++{
++  my ($dtString) = @_;
++  my ($dt) = DateTime->new(
++  year       => $dtString =~ /^(....)/,
++  month      => $dtString =~ /^....-(..)/,
++  day        => $dtString =~ /^....-..-(..)/,
++  hour       => $dtString =~ /^....-..-.. (..)/,
++  minute     => $dtString =~ /^....-..-.. ..:(..)/,
++  second     => 0,
++  nanosecond => 500000000,
++  time_zone  => 'local',
++  );
++  $dt;
++}
++
++# ----------------------------------------------------------
++
+ sub getRevision
+ {
+   my ($log) = @_;
+@@ -105,8 +123,9 @@ sub showRevs
+     my $result = `svn log $url -r $rev | perl -l40pe 's/^-+/\\n/'`;
+     my ($user) = getUser($result);
+     my ($date) = getDateTime($result);
+-    my ($ym) = $date =~ /^(....-..)/;
+-    if (($thisMonth eq $ym) || $optAll) {
++    my ($dtDate) = newDateTime($date);
++    my ($dur) = $dtToday - $dtDate;
++    if (($dur->delta_days < 8) || $optAll) {
+       printf("%-20s $date $rev $user\n", $branch);
+     }
+   }
+@@ -114,8 +133,8 @@ sub showRevs
+ 
+ # ----------------------------------------------------------
+ 
+-my ($today) = DateTime->now(time_zone => "local")->ymd('-'); 
+-($thisMonth) = $today =~ /^(....-..)/; 
++
++my ($today) = $dtToday->ymd('-');
+ print "-- PLF BRANCHES ---- $today ----- LAST COMMIT ---\n";
+ foreach my $url (@allURLs) {
+   my ($repo) = ($url =~ /svn-repos\/([^\/]*)/);
+-- 
+2.41.0.windows.1
+

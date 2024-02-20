@@ -1,0 +1,562 @@
+From 05690c4c196e2b46c7d6b712baca1a77cecd0cce Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 13 Sep 2017 14:33:44 +0000
+Subject: [PATCH 0800/1000] MANTIS 47432 CfgValues*.exe Version 1.1.5 - Mantis
+ 47432: CfgValuesS.exe stops processing file if syntax of single item config
+ is wrong - Generate a line-break warning, if one is detected within an input
+ record.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1257 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgValues_def.h   |  11 +-
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 297 ++++++++++--------
+ 2 files changed, 181 insertions(+), 127 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 1b4447f0..15eb4575 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -72,8 +72,15 @@
+ // 09.Dec.2009  JK      - Mantis 41103: CfgValues should mecker
+ //                        Set an exit code, and display "could not read",
+ //                        if a file could not be read.
+-#define FILE_VER_BIN 1,1,4,0
+-#define FILE_VER_DTS "1.1.4.0\0"
++// #define FILE_VER_BIN 1,1,4,0
++// #define FILE_VER_DTS "1.1.4.0\0"
++//
++// 13.Sep.2017  JK      - Mantis 47432: CfgValuesS.exe stops processing file
++//                        if syntax of single item config is wrong
++//                      - Generate a line-break warning, if one is detected
++//                        within an input record.
++#define FILE_VER_BIN 1,1,5,0
++#define FILE_VER_DTS "1.1.5.0\0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index e2793316..a2da2f2f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2004-2016 MATERNA Information & Communications
++ * Copyright (c) 2004-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -466,6 +466,25 @@ void cfgReadDirectory
+ 
+ 
+ 
++/**
++ *
++ * cfgValuesFRead() execution status.
++ *
++**/
++struct cfgValuesFStatus
++{
++
++   unsigned     m_newlines;
++
++   cfgValuesFStatus() :
++      m_newlines( 0 )
++   {
++   }
++   
++};
++
++
++
+ /**
+  *
+  * Read a token value.
+@@ -473,44 +492,49 @@ void cfgReadDirectory
+ **/
+ void cfgValuesFRead
+ (
+-   std::string &        DstBuf,
+-   std::istream &       IS,
+-   char const *         Token
++   std::string &        result_value,
++   cfgValuesFStatus &   status,
++   std::istream &       input_stream,
++   char const *         token
+ )
+ {
+-   char InC = static_cast<char>( IS.get() );
+-   char const * CToken = Token;
++   char input_char = static_cast<char>( input_stream.get() );
++   char const * token_scanner = token;
+    enum
+    {
+-      T0,
+-      T1,
+-      T2,
+-      T3
+-   } ValState = T0;
+-   while( IS.good() )
++      VS_IDLE,
++      VS_BEGIN,
++      VS_COPY,
++      VS_ESCAPE
++   } value_state = VS_IDLE;
++   while( input_stream.good() )
+    {
+-      if( *CToken != 0 )
++      if( input_char == CCHR_CR )
++      {
++         status.m_newlines += 1;
++      }
++      if( *token_scanner != 0 )
+       {
+          // Still comparing the token
+-         if( InC == *CToken )
++         if( input_char == *token_scanner )
+          {
+-            ++CToken;
++            ++token_scanner;
+          }
+          else
+          {
+-            CToken = Token;
++            token_scanner = token;
+          }
+       }
+       else
+       {
+          // Token matched
+-         switch( ValState )
++         switch( value_state )
+          {
+-         case T0:
+-            DstBuf = "";
+-            if( InC == '=' )
++         case VS_IDLE:
++            result_value = "";
++            if( input_char == '=' )
+             {
+-               ValState = T1;
++               value_state = VS_BEGIN;
+             }
+             else
+             {
+@@ -518,46 +542,46 @@ void cfgValuesFRead
+                return;
+             }
+             break;
+-         case T1:
+-            if( InC == CCHR_VAL_BEG )
++         case VS_BEGIN:
++            if( input_char == CCHR_VAL_BEG )
+             {
+-               ValState = T2;
++               value_state = VS_COPY;
+             }
+             else
+             {
+                // Would have expected '"'
+-               DstBuf = "";
++               result_value = "";
+                return;
+             }
+             break;
+-         case T2:
+-            switch( InC )
++         case VS_COPY:
++            switch( input_char )
+             {
+             case CFGTOKEN_ESCAPE:
+-               ValState = T3;
++               value_state = VS_ESCAPE;
+                break;
+             case CCHR_VAL_END:
+                return;
+             default:
+-               DstBuf += InC;
++               result_value += input_char;
+             }
+             break;
+-         case T3:
+-            if( InC != CCHR_VAL_END )
++         case VS_ESCAPE:
++            if( input_char != CCHR_VAL_END )
+             {
+                // Just process escapes for end-marker in data
+-               DstBuf += CFGTOKEN_ESCAPE;
++               result_value += CFGTOKEN_ESCAPE;
+             }
+-            DstBuf += InC;
+-            ValState = T2;
++            result_value += input_char;
++            value_state = VS_COPY;
+             break;
+          }
+       }
+       // Next character
+-      InC = static_cast<char>( IS.get() );
++      input_char = static_cast<char>( input_stream.get() );
+    }
+    // End of stream?
+-   DstBuf = "";
++   result_value = "";
+    return;
+ }
+ 
+@@ -570,95 +594,95 @@ void cfgValuesFRead
+ **/
+ void cfgValuesFReadE
+ (
+-   std::string &        DstBuf,
+-   std::istream &       IS,
+-   char const *         Token
++   std::string &        result_value,
++   std::istream &       input_stream,
++   char const *         token
+ )
+ {
+-   std::streampos sRewind = IS.tellg();
+-   char InC = static_cast<char>( IS.get() );
+-   char const * CToken = Token;
++   std::streampos pos_rewind = input_stream.tellg();
++   char input_char = static_cast<char>( input_stream.get() );
++   char const * token_scanner = token;
+    enum
+    {
+-      T0,
+-      T1,
+-      T2,
+-      T3
+-   } ValState = T0;
+-   while( IS.good() && InC != CCHR_CR)
++      VS_IDLE,
++      VS_BEGIN,
++      VS_COPY,
++      VS_ESCAPE
++   } value_state = VS_IDLE;
++   while( input_stream.good() && input_char != CCHR_CR)
+    {
+-      if( *CToken != 0 )
++      if( *token_scanner != 0 )
+       {
+          // Still comparing the token
+-         if( InC == *CToken )
++         if( input_char == *token_scanner )
+          {
+-            ++CToken;
++            ++token_scanner;
+          }
+          else
+          {
+-            CToken = Token;
++            token_scanner = token;
+          }
+       }
+       else
+       {
+          // Token matched
+-         switch( ValState )
++         switch( value_state )
+          {
+-         case T0:
+-            DstBuf = "";
+-            if( InC == '=' )
++         case VS_IDLE:
++            result_value = "";
++            if( input_char == '=' )
+             {
+-               ValState = T1;
++               value_state = VS_BEGIN;
+             }
+             else
+             {
+                // Would have expected '='
+-               IS.seekg(sRewind);
++               input_stream.seekg( pos_rewind );
+                return;
+             }
+             break;
+-         case T1:
+-            if( InC == CCHR_VAL_BEG )
++         case VS_BEGIN:
++            if( input_char == CCHR_VAL_BEG )
+             {
+-               ValState = T2;
++               value_state = VS_COPY;
+             }
+             else
+             {
+                // Would have expected '"'
+-               DstBuf = "";
+-               IS.seekg(sRewind);
++               result_value = "";
++               input_stream.seekg( pos_rewind );
+                return;
+             }
+             break;
+-         case T2:
+-            switch( InC )
++         case VS_COPY:
++            switch( input_char )
+             {
+             case CFGTOKEN_ESCAPE:
+-               ValState = T3;
++               value_state = VS_ESCAPE;
+                break;
+             case CCHR_VAL_END:
+                return;
+             default:
+-               DstBuf += InC;
++               result_value += input_char;
+             }
+             break;
+-         case T3:
+-            if( InC != CCHR_VAL_END )
++         case VS_ESCAPE:
++            if( input_char != CCHR_VAL_END )
+             {
+                // Just process escapes for end-marker in data
+-               DstBuf += CFGTOKEN_ESCAPE;
++               result_value += CFGTOKEN_ESCAPE;
+             }
+-            DstBuf += InC;
+-            ValState = T2;
++            result_value += input_char;
++            value_state = VS_COPY;
+             break;
+          }
+       }
+       // Next character
+-      InC = static_cast<char>( IS.get() );
++      input_char = static_cast<char>( input_stream.get() );
+    }
+    // End of stream?
+-   DstBuf = "";
+-   IS.seekg(sRewind);
++   result_value = "";
++   input_stream.seekg( pos_rewind );
+    return;
+ }
+ 
+@@ -910,8 +934,8 @@ int main( int argc, char ** argv )
+          Config::description CDescr;
+          SAcc.Authorization = CORBA::string_dup( ACC_NAME );
+ 
+-         ifstream IS( SrcFile );
+-         if( !IS.good() )
++         ifstream input_stream( SrcFile );
++         if( !input_stream.good() )
+          {
+             // File not opened
+             std::cout
+@@ -922,22 +946,23 @@ int main( int argc, char ** argv )
+          std::cout
+             << DSPLLIN "Writing configuration value(s) from file \""
+             << SrcFile << "\" ..." << std::endl;
+-         while( IS.good() )
++         cfgValuesFStatus sta_fst, sta_nxt;
++         while( input_stream.good() )
+          {
+-            cfgValuesFRead( FItm, IS, CFGTOKEN_ITEM_NAME );
+-            cfgValuesFRead( FTyp, IS, CFGTOKEN_TYPE );
+-            cfgValuesFRead( FVal, IS, "val" );
+-            cfgValuesFReadE( FDescr, IS, "descr" );
+-            cfgValuesFReadE( FRights, IS, "rights" );
+-            cfgValuesFReadE( FMax, IS, "max" );
+-            cfgValuesFReadE( FMin, IS, "min" );
+-            cfgValuesFReadE( FSelInd, IS, "selind" );
+-            cfgValuesFReadE( FSelStr, IS, "selstr" );
+-            cfgValuesFReadE( FSelExp, IS, "selexpl" );
+-
+-            if(FDescr.length())
++            cfgValuesFRead( FItm, sta_fst, input_stream, CFGTOKEN_ITEM_NAME );
++            cfgValuesFRead( FTyp, sta_nxt, input_stream, CFGTOKEN_TYPE );
++            cfgValuesFRead( FVal, sta_nxt, input_stream, "val" );
++            cfgValuesFReadE( FDescr, input_stream, "descr" );
++            cfgValuesFReadE( FRights, input_stream, "rights" );
++            cfgValuesFReadE( FMax, input_stream, "max" );
++            cfgValuesFReadE( FMin, input_stream, "min" );
++            cfgValuesFReadE( FSelInd, input_stream, "selind" );
++            cfgValuesFReadE( FSelStr, input_stream, "selstr" );
++            cfgValuesFReadE( FSelExp, input_stream, "selexpl" );
++
++            if( FDescr.length() )
+             {
+-              if (!FRights.length()) FRights = "rwl";
++              if( !FRights.length() ) FRights = "rwl";
+               CDescr.Rights = CORBA::string_dup( FRights.c_str() );
+               CDescr.Explanation = CORBA::string_dup( FDescr.c_str() );
+             }
+@@ -994,13 +1019,13 @@ int main( int argc, char ** argv )
+                         }
+                         catch( Config::Node::notFound & )
+                         {
+-                           if(FDescr.length())
++                           if( FDescr.length() )
+                            {
+                               long lMax;
+-                              if(!FMax.length())
++                              if( !FMax.length() )
+                                  lMax = 1024;
+                               else
+-                                 lMax = atoi(FMax.c_str());
++                                 lMax = atoi( FMax.c_str() );
+                               TextProxy->create
+                                           (
+                                              SAcc,
+@@ -1165,7 +1190,7 @@ int main( int argc, char ** argv )
+                                  if(!FMax.length())
+                                     lMax = 1024;
+                                  else
+-                                    lMax = atoi(FMax.c_str());
++                                    lMax = atoi( FMax.c_str() );
+                                  TextlistProxy->create
+                                                    (
+                                                       SAcc,
+@@ -1238,11 +1263,11 @@ int main( int argc, char ** argv )
+                               if(!FMax.length())
+                                  lMax = 65535;
+                               else
+-                                 lMax = atoi(FMax.c_str());
+-                              if(!FMin.length())
++                                 lMax = atoi( FMax.c_str() );
++                              if( !FMin.length() )
+                                  lMin = 0;
+                               else
+-                                 lMin = atoi(FMin.c_str());
++                                 lMin = atoi( FMin.c_str() );
+                               NumberProxy->create
+                                           (
+                                              SAcc,
+@@ -1310,14 +1335,14 @@ int main( int argc, char ** argv )
+                         }
+                         catch( Config::Node::notFound & )
+                         {
+-                           if(FDescr.length())
++                           if( FDescr.length() )
+                            {
+                               long lDefInd;
+                               Config::Selection::selectList selList;
+-                              if(!FVal.length())
++                              if( !FVal.length() )
+                                  lDefInd = 0;
+                               else
+-                                 lDefInd = atoi(FVal.c_str());
++                                 lDefInd = atoi( FVal.c_str() );
+ 
+                               Config::Textlist::strings StrSelInd;
+                               bool Err1 =
+@@ -1358,7 +1383,7 @@ int main( int argc, char ** argv )
+                                  selList.length(selList.length()+1);
+                                  selList[selList.length()-1] = selEntry;
+                               }
+-                              if(selList.length())
++                              if( selList.length() )
+                                  SelectionProxy->create
+                                                    (
+                                                       SAcc,
+@@ -1390,6 +1415,23 @@ int main( int argc, char ** argv )
+                }
+             }
+          }
++         switch( sta_nxt.m_newlines )
++         {
++         case 0:
++            // Ok
++            break;
++         case 1:
++            // One line break
++            std::cout << DSPLLIN;
++            std::cout << "WARNING: Line break in input file record!";
++            std::cout << std::endl;
++            break;
++         default:
++            // More than one line break
++            std::cout << DSPLLIN;
++            std::cout << "WARNING: Line breaks in input file records!";
++            std::cout << std::endl;
++         }
+          if( SetRecordsFailed )
+          {
+             std::cout << DSPLLIN;
+@@ -1436,7 +1478,8 @@ int main( int argc, char ** argv )
+         }
+         catch( Config::Node::notFound & )
+         {
+-          std::cout << DSPLERR "Erase item [" << DelItem << "] not found - ignored." << std::endl;
++          std::cout << DSPLERR "Erase item [" << DelItem << "]"
++            " not found - ignored." << std::endl;
+         }
+         std::cout
+            << DSPLLIN "Erased [" << DelItem << "]"
+@@ -1485,39 +1528,43 @@ int main( int argc, char ** argv )
+             {
+                readTextListCopy( strbuf, Val[Idx].in() );
+ 
+-               if(strbuf.str().compare(RemValue) != 0)
++               if( strbuf.str().compare(RemValue) != 0 )
+                {
+                  cstrbuflist[IdxNew++]=(CORBA::string_dup(Val[Idx].in()));
+                }
+                strbuf.str(""); strbuf.clear();
+             }
+-            if(IdxNew != Length && (IdxNew > 0))
++            if( IdxNew != Length && ( IdxNew > 0 ) )
+             {
+-              cstrbuflist.length(IdxNew);
+-              try
+-              {
+-                TextlistProxy->set( SAcc, cstrbuflist );
+-                std::cout
+-                   << "Removed [" << RemValue << "] from Listitem [" << RemItem << "] "
+-                   << std::endl;
+-              }
+-              catch( ... )
+-              {
+-                std::cout
+-                   << DSPLERR "Unable to write changed list to "
+-                   << RemItem << " servant."
+-                   << std::endl;
+-                return c_exit_connection_failed;
+-              }
+-            } else
++               cstrbuflist.length(IdxNew);
++               try
++               {
++                  TextlistProxy->set( SAcc, cstrbuflist );
++                  std::cout
++                     << "Removed [" << RemValue << "]"
++                        " from Listitem [" << RemItem << "] "
++                     << std::endl;
++               }
++               catch( ... )
++               {
++                  std::cout
++                     << DSPLERR "Unable to write changed list to "
++                     << RemItem << " servant."
++                     << std::endl;
++                  return c_exit_connection_failed;
++               }
++            } 
++            else
+             {
+-              std::cout << DSPLLIN "Listitem [" << RemValue << "] not found in List - ignored." << std::endl;
++               std::cout << DSPLLIN "Listitem [" << RemValue << "]"
++                     " not found in List - ignored." << std::endl;
+             }            
+-          }
++         }
+         }
+         catch( Config::Node::notFound & )
+         {
+-          std::cout << DSPLERR "REMOVEFROMLIST item [" << RemItem << "] not found - ignored." << std::endl;
++          std::cout << DSPLERR "REMOVEFROMLIST item [" << RemItem << "]"
++            " not found - ignored." << std::endl;
+         }
+         return c_exit_good;         
+       }
+-- 
+2.41.0.windows.1
+

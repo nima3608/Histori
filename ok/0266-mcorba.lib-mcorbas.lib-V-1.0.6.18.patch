@@ -1,0 +1,107 @@
+From 351b2ccdc604a77cb88e8c4458a33d18d218f900 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 13 Apr 2012 15:25:39 +0000
+Subject: [PATCH 0266/1077] mcorba.lib, mcorbas.lib V 1.0.6.18
+
+Mantis 0018942: mCorba: creation order of servant orb and client orb and synchronization problems
+
+environment settings
+  CORBA_AUTOPOLL_ENABLE     enable auto polling, client only
+  CORBA_AUTOPOLL_DISABLE    disable auto polling, client only
+  CORBA_AUTOPOLL_TIMEOUT    poll timeout in ms, default 60000 ms, client only
+  CORBA_INVOCATION_TIMEOUT  default invocation timeout in ms, default 60000ms
+  ORBENDPOINT_PORT          default orb endpoint port
+  CORBA_NUMERIC_ORB         use ip instead of hostname in ior
+  CORBA_ENABLE_LOGGING      enable ORB logging
+  CORBA_USE_NESTED_CALLS    allow nested calls: use the threads in client calls for processing servant calls
+
+logging
+  TAO ORB logging is written to stderr
+  massaiCORBA logging is written with OutputDebugString
+
+localhost
+  cfg: empty host in configuration (CORBA.SERVANTS.*) is mapped to localhost
+  servant creation: localhost is mapped to 0.0.0.0
+  client connecting servant: localhost is mapped to local hostname
+  to bind and connect to 127.0.0.1 use 127.0.0.1 for hostname
+
+multiple network interfaces
+  the hostname in the ior is set to the local hostname, if the servant is listening on all interfaces (interface = localhost or no interface)
+  to use multiple hostnames in the ior use the interface = 0.0.0.0
+
+multiple orbs
+  every module creates his own orbs (avoid interaction between orb creation in dlls and executable)
+  for every ORBEndpoint a new orb is created
+  clients use the first servant orb or an own client orb, if no servant orb is created
+  for implicit activation the first servant orb is used
+     warning: this is not module independent, all modules use the same orb for implicit activation
+              the first servant orb of the module that creates its first servant orb at last is used
+              => avoid creating servants in dlls
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@319 90b65887-3827-0410-9a23-83215b262276
+---
+ SelfServiceCommon/Massai/cpp/MassaiCorba/inc/envSettings.h    | 2 +-
+ .../Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h              | 2 +-
+ SelfServiceCommon/Massai/cpp/MassaiCorba/src/envSettings.cpp  | 4 ++--
+ SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp | 2 +-
+ 4 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/envSettings.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/envSettings.h
+index ead71fde..fccc1fdf 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/envSettings.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/envSettings.h
+@@ -20,7 +20,7 @@ namespace massaiCorba
+ 
+   bool useLogging();
+ 
+-  bool preventNestedCalls();
++  bool allowNestedCalls();
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index 2326247c..34dd8faa 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -29,7 +29,7 @@
+  *                      ORBENDPOINT_PORT          default orb endpoint port
+  *                      CORBA_NUMERIC_ORB         use ip instead of hostname in ior
+  *                      CORBA_ENABLE_LOGGING      enable ORB logging
+- *                      CORBA_NO_NESTED_CALLS     disable nested calls, do not use the threads in client calls for processing servant calls
++ *                      CORBA_USE_NESTED_CALLS    allow nested calls: use the threads in client calls for processing servant calls
+  *
+  *                   \li logging
+  *                      TAO ORB logging is written to stderr
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/envSettings.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/envSettings.cpp
+index 1878e9ca..52c3d90c 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/envSettings.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/envSettings.cpp
+@@ -67,8 +67,8 @@ namespace massaiCorba
+     return checkKey("CORBA_ENABLE_LOGGING");
+   }
+ 
+-  bool preventNestedCalls()
++  bool allowNestedCalls()
+   {
+-    return checkKey("CORBA_NO_NESTED_CALLS");
++    return checkKey("CORBA_USE_NESTED_CALLS");
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
+index 6d90560b..a59ef216 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/orbContainer.cpp
+@@ -42,7 +42,7 @@ namespace massaiCorba
+     invocationTimeout(getORBInvocationTimeout()),
+     numericAddress(useNumericAddress()),
+     logging(useLogging()),
+-    nestedCalls(!preventNestedCalls())
++    nestedCalls(allowNestedCallsNestedCalls())
+   {
+     if(port == 0)
+     {
+-- 
+2.41.0.windows.1
+

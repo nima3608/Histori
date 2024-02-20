@@ -1,0 +1,116 @@
+From 16183177482c62bdad23a93958c60e2729103480 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 16 Dec 2010 14:59:08 +0000
+Subject: [PATCH 0073/1076] Console: IT_SELECTION added
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@91 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/Console.h         |  3 +-
+ .../Massai/cpp/Systools/src/Console.cpp       | 52 ++++++++++++++-----
+ 2 files changed, 40 insertions(+), 15 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/Console.h b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+index ec2c273a..add3aa44 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/Console.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+@@ -42,7 +42,8 @@ namespace Console
+   {
+     IT_IGNORE,
+     IT_INPUT,
+-    IT_FILENAME
++    IT_FILENAME,
++    IT_SELECTION
+   };
+   struct Input
+   {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+index 271675d5..9697b926 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+@@ -126,7 +126,8 @@ namespace Console
+     printHelp();
+     while(!m_quit)
+     {
+-      if(select() == Console::RC_NOT_FOUND)
++      ResultCode result= select();
++      if(result ==  Console::RC_NOT_FOUND)
+       {
+         printHelp();
+       }
+@@ -148,29 +149,45 @@ namespace Console
+       for(int i= 0; (it != end) && (i < size); it++, i++)
+       {
+         const InputStore& input= *it;
+-        std::string command= getLine(input.prompt);
+-        if(input.type == IT_FILENAME)
++        switch(input.type)
+         {
+-          mInFile<std::string> file(command.c_str());
+-          if(file.success())
++          case IT_FILENAME:
+           {
+-            parameterList[i]= file.container();
++            std::string command= getLine(input.prompt);
++            mInFile<std::string> file(command.c_str());
++            if(file.success())
++            {
++              parameterList[i]= file.container();
++            }
++            else
++            {
++              std::cout << "Reading failed: (" << command << ")" << std::endl;
++              result= RC_FAILED;
++              break;
++            }
++            break;
+           }
+-          else
++          case IT_INPUT:
+           {
+-            std::cout << "Reading failed: (" << command << ")" << std::endl;
+-            result= RC_FAILED;
++            parameterList[i]= getLine(input.prompt);
++            break;
++          }
++          case IT_SELECTION:
++          {
++            std::cout << input.prompt << std::endl;
++            char s= readChar();
++            parameterList[i]= std::string(1, s);
+             break;
+           }
+-        }
+-        else
+-        {
+-          parameterList[i]= command;
+         }
+       }
+       if(result != RC_FAILED)
+       {
+         result= pSelect->pCmd->execute(c, pSelect->parameter, parameterList);
++        if(result == RC_FAILED)
++        {
++          std::cout << "Execution failed: " << pSelect->help << std::endl;
++        }
+       }
+     }
+     return result;
+@@ -198,7 +215,14 @@ namespace Console
+     std::cout << "Commands:" << std::endl;
+     for(; it != end; it++)
+     {
+-      std::cout << " " << it->selector << ": " << it->help << std::endl;
++      if(it->parameterList.size() > 0)
++      {
++        std::cout << " " << it->selector << ": " << it->help << " ..." << std::endl;
++      }
++      else
++      {
++        std::cout << " " << it->selector << ": " << it->help << std::endl;
++      }
+     }
+   }
+   std::string ConsoleSelection::getLine(const std::string& help) const
+-- 
+2.41.0.windows.1
+

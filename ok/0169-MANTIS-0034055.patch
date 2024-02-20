@@ -1,0 +1,102 @@
+From 1f799a7a5b365da61853a1f55dc1e8a1932b3f4e Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Thu, 18 Dec 2014 16:24:04 +0000
+Subject: [PATCH 169/462] MANTIS 0034055 extension: Payment: support CCV
+ OPP-C60; SCR-C added JarOPI.13 added target create-xml-bean-directories
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@252 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ SelfServiceBuild/Build/java/AntProperties.xml |  1 +
+ SelfServiceBuild/Build/java/AntTargets.xml    | 43 +++++++++++++++----
+ 2 files changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/java/AntProperties.xml b/SelfServiceBuild/Build/java/AntProperties.xml
+index 1d3299a..20486a4 100644
+--- a/SelfServiceBuild/Build/java/AntProperties.xml
++++ b/SelfServiceBuild/Build/java/AntProperties.xml
+@@ -207,6 +207,7 @@
+ 
+ <!-- MASSAI-JARs ================================================= -->
+ 
++<property name="JarOPI_1.3"                 value="${JarDir}/OPI_1.3.jar"/>
+ <property name="JarCUSS"                    value="${JarDir}/cuss.jar"/>
+ <property name="JarMassaiConfig"            value="${JarDir}/massai-config.jar"/>
+ <property name="JarMassaiControlCenter"     value="${JarDir}/massai-controlcenter.jar"/>
+diff --git a/SelfServiceBuild/Build/java/AntTargets.xml b/SelfServiceBuild/Build/java/AntTargets.xml
+index 61ca1ff..11563b1 100644
+--- a/SelfServiceBuild/Build/java/AntTargets.xml
++++ b/SelfServiceBuild/Build/java/AntTargets.xml
+@@ -87,7 +87,20 @@
+     <mkdir dir="${GenXMLSrcDir}/${GenFile}"/>
+     <!-- Die angegebene Schema-Datei wird compiliert. -->
+     <echo message="Compiling XML-Beans Schema: ${SchemaFile}"/>
+-    <xmlbean schema="${SchemaFile}" srcgendir="${GenXMLSrcDir}/${GenFile}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}"/>
++    <xmlbean  srcgendir="${GenXMLSrcDir}/${GenFile}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}">
++      <fileset file="${SchemaFile}" />
++    </xmlbean>
++    <jar destfile="${JarDir}/${GenFile}.jar" manifest="${ManifestDir}/${ManifestName}" update="true"/>
++</target>
++
++<target name="create-xml-bean-dir">
++    <basename property="GenFile" file="${SchemaDir}" suffix=".xsd"/>    
++    <mkdir dir="${GenXMLSrcDir}/${GenFile}"/>
++    <!-- Die angegebene Schema-Datei wird compiliert. -->
++    <echo message="Compiling XML-Beans Schema: ${SchemaDir}"/>
++    <xmlbean  srcgendir="${GenXMLSrcDir}/${GenFile}" destfile="${JarDir}/${GenFile}.jar" classpath="${JarXMLBeans};${JarJSR173}">
++      <fileset dir="${SchemaDir}" />
++    </xmlbean>
+     <jar destfile="${JarDir}/${GenFile}.jar" manifest="${ManifestDir}/${ManifestName}" update="true"/>
+ </target>
+ 
+@@ -100,6 +113,13 @@
+     <foreach list="${project.xmlBean}" delimiter=" " param="SchemaFile" target="create-xml-bean-file" inheritall="true"/>
+ </target>
+ 
++<target name="create-xml-bean-directories" if="project.xmlBeanDir" depends="create-manifest">
++    <mkdir dir="${GenSrcDir}"/>
++
++    <!-- Alle Schema-Dateien werden compiliert. -->
++    <foreach list="${project.xmlBeanDir}" delimiter=" " param="SchemaDir" target="create-xml-bean-dir" inheritall="true"/>
++</target>
++
+ 
+ <!-- prepare-compile ============================================= -->
+ 
+@@ -166,6 +186,7 @@
+ <target name="compile-all"
+         depends="create-flex,
+                  create-xml-bean,
++                 create-xml-bean-directories,
+                  create-idl,
+                  prepare-compile,
+                  compile-src">
+@@ -244,14 +265,18 @@
+     <!-- Das benoetigte Unterverzeichnis wird erstellt. -->
+     <mkdir dir="${JarDir}"/>
+ 
+-    <!-- Die JAR-Datei wird erstellt. -->
+-    <jar jarfile="${JarName}"
+-         basedir="${ClassDir}"
+-         compress="${jar.compress}"
+-         filesonly="${jar.filesonly}"
+-         manifest="${ManifestDir}/${ManifestName}">
+-    </jar>
+-
++    <if>
++    <isset property="JarName"/>
++    <then>
++      <!-- Die JAR-Datei wird erstellt. -->
++      <jar jarfile="${JarName}"
++           basedir="${ClassDir}"
++           compress="${jar.compress}"
++           filesonly="${jar.filesonly}"
++           manifest="${ManifestDir}/${ManifestName}">
++      </jar>
++    </then>  
++    </if>
+ </target>
+ 
+ <!-- clean ======================================================= -->
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,393 @@
+From 5cfbbb8ebcad3f0f6c52647eb4e9dce774b4d068 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 28 Nov 2011 15:53:40 +0000
+Subject: [PATCH 0219/1077] Mantis 0021373 Implement incrementGet() method for
+ number-type configuration items.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@269 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/cfgclnt/nConfig.hpp        | 10 +++
+ .../inc/cfgclnt/nConfigBasicNumber.hpp        | 13 ++++
+ .../Massai/cpp/CfgClnt/src/NCNumBasic.cpp     | 18 ++++-
+ .../Massai/cpp/CfgClnt/src/nConfig.cpp        | 11 ++-
+ .../cpp/CfgClnt/src/nConfigBasicNumber.cpp    | 75 +++++++++++++++++--
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 24 +++++-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 17 +++--
+ .../cpp/CfgXMgrB/src/cfgCorba_Number.cpp      | 17 ++++-
+ 8 files changed, 164 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
+index 626d15ec..65af37bd 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfig.hpp
+@@ -312,6 +312,16 @@ namespace nConfig
+ 
+ 
+ 
++   /**
++    *
++    * Configuration exception class. This is thrown, when a configuration
++    * value does not match the restriction given.
++    *
++   **/
++   NCONFIG_DEF_EXCEPTION( exception_OutOfRange )
++
++
++
+    /**
+     *
+     * Configuration exception class. This is thrown, when a configuration
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicNumber.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicNumber.hpp
+index 5e83bf58..1e157314 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicNumber.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigBasicNumber.hpp
+@@ -133,6 +133,19 @@ namespace nConfig
+       long get( char const * Item )
+          const throw( exception );
+ 
++      /**
++       *
++       * Increment the configuration value and retrieve the result.
++       *
++       * @param Item:   The name of the configuration item.
++       *
++       * @param Inc:    The increment to apply.
++       *
++       * @return The new value of the configuration item.
++       */
++      long incrementGet( char const * Item, long Inc )
++         throw( exception );
++
+       /**
+        *
+        * Set the configuration value.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCNumBasic.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCNumBasic.cpp
+index e132ff27..6147cc9b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCNumBasic.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/NCNumBasic.cpp
+@@ -39,13 +39,25 @@ int main( int argc, char ** argv )
+          if( argc >= 3 )
+          {
+             // Assume a text value in argv[2]
++#if 0
+             std::cout
+                << "Setting new value [" << argv[2] << "]"
+                << std::endl;
+             NumberItem.set( argv[1], atol( argv[2] ) );
++#else
++            std::cout
++               << "Incrementing by [" << argv[2] << "]"
++               << std::endl;
++            long const IncVal =
++               NumberItem.incrementGet( argv[1], atol( argv[2] ) );
++            std::cout
++               << "The new value of " << argv[1]
++               << " is "  << IncVal << "."
++               << std::endl;
++#endif
+          }
+       }
+-      catch( nConfig::exception & X )
++      catch( nConfig::exception_ItemNotFound & X )
+       {
+          std::cout << "Error: " << X.what() << std::endl;
+          if( argc >= 3 )
+@@ -77,6 +89,10 @@ int main( int argc, char ** argv )
+             }
+          }
+       }
++      catch( nConfig::exception & X )
++      {
++         std::cout << "Error: " << X.what() << std::endl;
++      }
+       catch( std::exception & X )
+       {
+          std::cout << "Error: " << X.what() << std::endl;
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfig.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfig.cpp
+index de745bd7..3230a5dd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfig.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfig.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2008 MATERNA Information & Communications
++ * Copyright (c) 2002-2011 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -360,6 +360,15 @@ namespace nConfig
+ 
+ 
+ 
++   /*
++    *
++    * Exception implementation.
++    *
++    */
++   NCONFIG_IMPL_EXCEPTION( exception_OutOfRange )
++
++
++
+    /*
+     *
+     * Exception implementation.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
+index df407e45..a57bc5c0 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigBasicNumber.cpp
+@@ -24,6 +24,7 @@
+ 
+ #define CBNCR "nConfig::basicNumber::create"
+ #define CBNGT "nConfig::basicNumber::get"
++#define CBNIG "nConfig::basicNumber::incrementGet"
+ #define CBNSI "nConfig::basicNumber::setInitial"
+ #define CBNST "nConfig::basicNumber::set"
+ 
+@@ -59,6 +60,14 @@
+       throw nConfig::exception_ItemNotFound( I, S ); \
+    } while(0)
+ 
++#define THROW_R( I, S ) \
++   do \
++   { \
++      if( M_pOS ) \
++         *M_pOS << S << " Item=" << I << std::endl; \
++      throw nConfig::exception_OutOfRange( I, S ); \
++   } while(0)
++
+ #define THROW_S( I, S ) \
+    do \
+    { \
+@@ -226,10 +235,6 @@ namespace nConfig
+          {
+             THROW_I( Item, CBNGT " - notFound exception" );
+          }
+-         catch( Config::Node::wrongParam & )
+-         {
+-            THROW_( Item, CBNGT " - wrongParam exception" );
+-         }
+          catch( CORBA::Exception & )
+          {
+             THROW_S( Item, CBNGT " - CORBA::Exception" );
+@@ -241,6 +246,51 @@ namespace nConfig
+          return M_Got;
+       }
+ 
++      /**
++       *
++       * Implementation class method.
++       *
++      **/
++      long incrementGet( char const * Item, long Inc )
++         throw( exception )
++      {
++         if( M_pOS ) *M_pOS << CBNIG " ..." << std::endl;
++         Materna::MSSD::autoMutex Block( M_GotMutex );
++         try
++         {
++            Config::access Access;
++            Access.Item = CORBA::string_dup( Item );
++            Access.Authorization = CORBA::string_dup( M_Auth.c_str() );
++            M_Got = validProxy()->incrementGet( Access, Inc );
++            if( M_pOS ) *M_pOS << CBNIG "." << std::endl;
++         }
++         catch( Config::Node::noConfiguration & )
++         {
++            THROW_S( Item, CBNIG " - noConfiguration exception" );
++         }
++         catch( Config::Node::notAuthorized & )
++         {
++            THROW_A( Item, CBNIG " - notAuthorized exception" );
++         }
++         catch( Config::Node::notFound & )
++         {
++            THROW_I( Item, CBNIG " - notFound exception" );
++         }
++         catch( Config::Node::outOfRange & )
++         {
++            THROW_R( Item, CBNIG " - outOfRange exception" );
++         }
++         catch( CORBA::Exception & )
++         {
++            THROW_S( Item, CBNIG " - CORBA::Exception" );
++         }
++         catch( ... )
++         {
++            THROW_( Item, CBNIG " - Unknown exception" );
++         }
++         return M_Got;
++      }
++
+       /**
+        *
+        * Implementation class method.
+@@ -270,9 +320,9 @@ namespace nConfig
+          {
+             THROW_I( Item, CBNST " - notFound exception" );
+          }
+-         catch( Config::Node::wrongParam & )
++         catch( Config::Node::outOfRange & )
+          {
+-            THROW_( Item, CBNST " - wrongParam exception" );
++            THROW_R( Item, CBNIG " - outOfRange exception" );
+          }
+          catch( CORBA::Exception & )
+          {
+@@ -415,6 +465,19 @@ namespace nConfig
+ 
+ 
+ 
++   /*
++    *
++    * Public method - see nConfigBasicNumber.hpp
++    *
++    */
++   long basicNumber::incrementGet( char const * Item, long Inc )
++      throw( exception )
++   {
++      return M_Impl->incrementGet( Item, Inc );
++   }
++
++
++
+    /*
+     *
+     * Public method - see nConfigBasicNumber.hpp
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index fd461045..5dfb2cfa 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -73,8 +73,10 @@
+ //! @date    20.Mar.2006
+ //! @author  JK
+ //! @par     Change:
+-//! - Make an ".error" backup, if parsing a configuration file fails.
+-//!   Might help with later problem analysis.
++//! - Make an "<filename>-error.xml" backup, if parsing a configuration
++//!   file fails. Might help with later problem analysis.
++//! - Rename backup from "<filename>.backup" to "<filename>-backup.xml".
++//!   Helps with tools, which want a .XML extension.
+ // #define FILE_VER_BIN 1,0,10,0
+ // #define FILE_VER_DTS "1.0.10.0"
+ //
+@@ -156,6 +158,8 @@
+ //! @par     Change:
+ //! - Recent changes accidentially undone in Clearcase
+ //!   -> this should it be then.
++// #define FILE_VER_BIN 1,1,2,0
++// #define FILE_VER_DTS "1.1.2.0"
+ //
+ //! @version 1.1.3
+ //! @date    07.11.2007
+@@ -164,6 +168,8 @@
+ //! - Changed IDL requires to implement the new interface methods
+ //!   - Config::Textlist::addU()
+ //!   - Config::Textlist::addUInitial()
++// #define FILE_VER_BIN 1,1,3,0
++// #define FILE_VER_DTS "1.1.3.0"
+ //
+ //! @version 1.1.4
+ //! @date    24.06.2008
+@@ -283,15 +289,25 @@
+ //! - Implement optional "-ipinterface" parameter.
+ //! - Replace enviroment settings for trace control by commandline
+ //!   parameters "-tracedir" and "-tracefile".
++// #define FILE_VER_BIN 1,2,0,0
++// #define FILE_VER_DTS "1.2.0.0"
+ //
+ //! @version 1.2.1
+ //! @date    15.11.2011
+ //! @author  GiT
+ //! @par     Change:
+ //! - Mantis	0021521: SelfServiceCommon CfgXMgrB changes for VC10 compatibilty 
+-#define FILE_VER_BIN 1,2,1,0
+-#define FILE_VER_DTS "1.2.1.0"
++// #define FILE_VER_BIN 1,2,1,0
++// #define FILE_VER_DTS "1.2.1.0"
+ //
++//! @version 1.2.2
++//! @date    17.Nov.2011
++//! @author  JK
++//! @par     Change:
++//! - Implement incrementGet() method.
++#define FILE_VER_BIN 1,2,2,0
++#define FILE_VER_DTS "1.2.2.0"
++
+ //-------------------------------------------------------------------------
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 78020653..552312dd 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -280,18 +280,25 @@
+ //! - Implement optional "-ipinterface" parameter.
+ //! - Replace enviroment settings for trace control by commandline
+ //!   parameters "-tracedir" and "-tracefile".
+-//#define FILE_VER_BIN 1,2,0,0
+-//#define FILE_VER_DTS "1.2.0.0"
++// #define FILE_VER_BIN 1,2,0,0
++// #define FILE_VER_DTS "1.2.0.0"
+ //
+ //! @version 1.2.1
+ //! @date    15.11.2011
+ //! @author  GiT
+ //! @par     Change:
+ //! - Mantis	0021521: SelfServiceCommon CfgXMgrB changes for VC10 compatibilty 
+-
+-#define FILE_VER_BIN 1,2,1,0
+-#define FILE_VER_DTS "1.2.1.0"
++// #define FILE_VER_BIN 1,2,1,0
++// #define FILE_VER_DTS "1.2.1.0"
+ //
++//! @version 1.2.2
++//! @date    17.Nov.2011
++//! @author  JK
++//! @par     Change:
++//! - Implement incrementGet() method.
++#define FILE_VER_BIN 1,2,2,0
++#define FILE_VER_DTS "1.2.2.0"
++
+ //-------------------------------------------------------------------------
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+index 0484bd55..68c3070e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2011 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -211,10 +211,19 @@ class serviceCfgNumber :
+     * Increment and get the incremented configuration value
+     *
+    **/
+-   CORBA::Long incrementGet( Config::access const &, CORBA::Long Diff )
++   CORBA::Long incrementGet( Config::access const & Acc, CORBA::Long Inc )
+    {
+-      writeTrace( SecondaryRuntime_HERE, SCN "incrementGet: %d", Diff );
+-      throw Config::Node::notFound();
++      verifyAccess( SCN "get", Acc );
++      writeTrace
++      (
++         SecondaryRuntime_HERE, SCN "incrementGet(%s,%d) ...",
++         access2Str(Acc).c_str(),
++         Inc
++      );
++      CORBA::Long Val = get( Acc );
++      Val += Inc;
++      set( Acc, Val );
++      return Val;
+    }
+ 
+    /**
+-- 
+2.41.0.windows.1
+

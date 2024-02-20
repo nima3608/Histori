@@ -1,0 +1,165 @@
+From 7f00642db876f3e715475cc8d50dc6dcd93ac698 Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 21 Feb 2018 16:22:46 +0000
+Subject: [PATCH 290/462] Build: Buildenvironment gen_idllist.pl tool created
+ and integrated
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@479 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/release/makefile-jenkins            |  5 +-
+ SelfServiceBuild/Build/release/makefile-svn   |  7 +-
+ SelfServiceBuild/Build/scripts/gen_idllist.pl | 90 +++++++++++++++++++
+ 3 files changed, 99 insertions(+), 3 deletions(-)
+ create mode 100644 SelfServiceBuild/Build/scripts/gen_idllist.pl
+
+diff --git a/SelfServiceBuild/Build/release/makefile-jenkins b/SelfServiceBuild/Build/release/makefile-jenkins
+index c22cb68..a953bc8 100644
+--- a/SelfServiceBuild/Build/release/makefile-jenkins
++++ b/SelfServiceBuild/Build/release/makefile-jenkins
+@@ -105,6 +105,9 @@ build_cpp:     $(SELF)
+ kidlist:       $(SELF)
+                - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl" --notestfiles --kidlist="$(LOCALSTORE)\SelfServiceBuild\Build\output\KID-List.txt" --outputpath="$(LOCALSTORE)\SelfServiceBuild\Build\output" --listheader="$(B_NAME)"  )
+ 
++idllist:       $(SELF)
++               - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_idllist.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_idllist.pl" --kidlist="$(LOCALSTORE)\SelfServiceBuild\Build\output\IDL-List.txt" --outputpath="$(LOCALSTORE)\SelfServiceBuild\Build\output" --rootpath="$(LOCALSTORE)" --listheader="$(B_NAME)"  )
++
+ copy:          $(SELF)
+                cmd.exe /c $(MAKEDIR)\distributeFiles.cmd $(LOCALSTORE) $(DISTRIBUTETARGET)
+ 
+@@ -147,7 +150,7 @@ nb_application:     build_cpp sendMailZip
+ 
+ nb_Platform:        clean init checkout set_props build_cpp sendMailZip
+ nb_Platform_java:   clean init checkout set_props build_java sendMailZip
+-nb_Platform_full_nomail:   clean init set_props syncBuildResources build_cpp build_java build_maven build_installer kidlist 
++nb_Platform_full_nomail:   clean init set_props syncBuildResources build_cpp build_java build_maven build_installer kidlist idllist
+ nb_Platform_full:   nb_Platform_full_nomail sendMailZip
+ 
+ build_mavenQBG:     $(SELF)
+diff --git a/SelfServiceBuild/Build/release/makefile-svn b/SelfServiceBuild/Build/release/makefile-svn
+index 9c1e3de..69a4432 100644
+--- a/SelfServiceBuild/Build/release/makefile-svn
++++ b/SelfServiceBuild/Build/release/makefile-svn
+@@ -1,4 +1,4 @@
+-################################################################################
++###############################################################################
+ ##
+ ##  PROJECT:        MASSAI
+ ##
+@@ -131,6 +131,9 @@ build_cpp:     $(SELF)
+ kidlist:       $(SELF)
+                - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl" --notestfiles --kidlist="$(LOCALSTORE)\SelfServiceBuild\Build\output\KID-List.txt" --outputpath="$(LOCALSTORE)\SelfServiceBuild\Build\output" --listheader="$(B_NAME)"  )
+ 
++idllist:       $(SELF)
++               - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_idllist.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_idllist.pl" --idllist="$(LOCALSTORE)\SelfServiceBuild\Build\output\IDL-List.txt" --outputpath="$(LOCALSTORE)\SelfServiceBuild\Build\output" --rootpath="$(LOCALSTORE)" --listheader="$(B_NAME)"  )
++
+ copy:          $(SELF)
+                cmd.exe /c $(MAKEDIR)\distributeFiles.cmd $(LOCALSTORE) $(DISTRIBUTETARGET)
+ 
+@@ -170,7 +173,7 @@ nb_application:     build_cpp sendMailZip
+ 
+ nb_Platform:        clean init checkout set_props update build_cpp sendMailZip
+ nb_Platform_java:   clean init checkout set_props update build_java sendMailZip
+-nb_Platform_full:   clean init checkout set_props update build_cpp build_java build_maven build_installer kidlist sendMailZip
++nb_Platform_full:   clean init checkout set_props update build_cpp build_java build_maven build_installer kidlist idllist sendMailZip
+ 
+ build_mavenQBG:     $(SELF)
+                     - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\java && \
+diff --git a/SelfServiceBuild/Build/scripts/gen_idllist.pl b/SelfServiceBuild/Build/scripts/gen_idllist.pl
+new file mode 100644
+index 0000000..4ab2cad
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/gen_idllist.pl
+@@ -0,0 +1,90 @@
++#!/usr/bin/perl -w
++
++# ===================================================================
++#  Create a list of the interface versions of the platform IDLs
++#  of this release.
++# ===================================================================
++
++use strict;
++our $VERSION="0.0.0.0";
++
++use Getopt::Long;
++use DateTime;
++
++my $rootPath = "";
++my $outputPath = "";
++my $idllist = "idllist.txt";
++my $listheader = "";
++
++my $format="%-30s %s\n";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("outputpath=s" => \$outputPath,
++            "rootpath=s"   => \$rootPath,
++            "idllist:s"    => \$idllist,
++            "listheader:s" => \$listheader,
++            "help!"        => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count < 1 or $argv_count > 4 or ($outputPath eq "") or ($rootPath eq "") or $help )
++{
++  print STDERR "usage: $0 [--idllist=\"filename\"] [--listheader=\"header text\"] --rootpath=\"PATH\" --outputpath=\"PATH\" \n" ;
++  exit 0;
++}
++
++open IL, ">", $idllist or die $!;
++my $dt = DateTime->now;
++print IL "IDL-List ";
++print IL join ' ', $dt->ymd, $dt->hms;
++print IL " ".$listheader,"\n";
++
++checkDir("$rootPath/SelfServiceCommon/Massai/idl/Cuss");
++checkDir("$rootPath/SelfServiceCommon/Massai/idl/Massai");
++checkDir("$rootPath/SelfServicePlatform/Massai/idl/Massai");
++
++close IL;
++
++# ----- process one IDL file ----------------------------------------
++sub checkIdl
++{
++  my ($idlPath) = @_;
++  my ($idlFile) = ($idlPath =~ /([a-zA-Z0-9\.]*)$/);
++  my ($versionLine) = `grep interface_version $idlPath`;
++  if (defined $versionLine) {
++    my ($version) = ($versionLine =~ /\"(.*)\"/);
++    printf IL $format, $idlFile, $version;
++  } else {
++    printf IL $format, $idlFile, "UNKNOWN";
++  }
++}
++
++# ----- find IDL files ----------------------------------------------
++sub checkDir
++{
++  my ($path) = @_;
++  print IL "\nDirectory: $path\n";
++
++  my @dirs;
++  if (!opendir(DIR, $path)) {
++    print IL  $!."\n";
++    return;
++  }  
++  
++  while (readdir(DIR)) {
++    my $this = $_;
++    unless ($this =~ /^\./) {
++      if ($this =~ /.idl$/) {
++        checkIdl("$path/$this");
++      }
++    }
++  }
++  close DIR;
++}
++
++# -------------------------------------------------------------------
++
++exit 0;
++
++# ===================================================================
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,2137 @@
+From 0880aca8643baa1e94c92d47a9df82d5ccdf4a57 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 6 Jan 2012 12:21:39 +0000
+Subject: [PATCH 0234/1077] Mantis 21947: mstarter, appControl problems at
+ shutdown
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@284 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysWindow.h      |    6 +-
+ .../Massai/cpp/Controller/src/starter.cpp     | 1420 -----------------
+ .../cpp/LogService/inc/LogService_def.h       |   12 +-
+ .../Massai/cpp/LogService/src/mlog.cpp        |   79 +-
+ .../Systools/inc/mSysProcessIOCountersW32.h   |   19 +-
+ .../cpp/Systools/inc/mSysSwitchWindowW32.h    |   21 +
+ .../Massai/cpp/Systools/makefile.mak          |    4 +-
+ .../Systools/src/mSysProcessIOCountersW32.cpp |   32 +
+ .../cpp/Systools/src/mSysProcessListW32.cpp   |   61 +-
+ .../cpp/Systools/src/mSysProcessW32.cpp       |    9 +-
+ .../cpp/Systools/src/mSysSwitchWindowW32.cpp  |   27 +
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |   85 +-
+ 12 files changed, 280 insertions(+), 1495 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessIOCountersW32.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index cb16bb89..436d9cfb 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -29,9 +29,11 @@ namespace mSysWindow
+       virtual void hide()= 0;
+       virtual void close()= 0;
+       virtual bool isVisible()= 0;
+-      virtual bool isActive()= 0;
+       virtual std::string getTitle()= 0;
+       virtual std::string getClass()= 0;
++      // Warning: this may simulate pressing F5 in the current process
++      //   to get the right to activate the window
++      virtual bool isActive()= 0;
+   };
+   /*
+    *  process (window owner)
+@@ -83,6 +85,8 @@ namespace mSysWindow
+     public:
+       WindowSearch(const WindowSearchData& data, WindowSearchMatch& match,
+         MASSAI::trace::TraceInterface& trc);
++      WindowSearch(const WindowSearch& search, const WindowSearchData& data,
++        WindowSearchMatch& match, MASSAI::trace::TraceInterface& trc);
+       ~WindowSearch();
+       void search();
+       const WindowList& getList() const;
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+deleted file mode 100644
+index 746faf64..00000000
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
++++ /dev/null
+@@ -1,1420 +0,0 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       starter.cpp
+-//
+-//  purpose:    Start processes in a new process group
+-//
+-//  date:       12.01.01, 14:05
+-//
+-//  author:     Dr. Materna GmbH (AGe)
+-//
+-//---------------------------------------------------------------------------
+-//  history:
+-//  28-apr-06rb 1.0.5.1 change startup order
+-//                      from: devices  -> services -> platform
+-//                      to:   services -> platform -> devices
+-
+-#if defined(_MSC_VER)
+-// That compiler cannot handle names in debug information > 255 character.
+-#pragma warning( disable : 4786 )
+-#endif /* _MSC_VER */
+-
+-#include "text/mArgScan.hpp"
+-#include "systools/mSysException.hpp"
+-#include "systools/mSysSignal.hpp"
+-
+-#include "cfgclnt/nConfigSelection.hpp"
+-#include "cfgclnt/nConfigNumber.hpp"
+-#include "cfgclnt/nConfigTextList.hpp"
+-#include "cfgclnt/nConfigBasicTextList.hpp"
+-
+-#include "trc/trace.h"
+-
+-#include "massaidll/BASE_OS.h"
+-
+-#include "text/cEnvSubst.hpp"
+-
+-#ifndef _lint
+-#include "boost/regex.hpp"
+-using boost::/*smatch;*/smatch;
+-using boost::regex_search;
+-using boost::regex;
+-using boost::regbase;
+-#endif // #ifndef _lint
+-
+-
+-namespace
+-{
+-
+-#ifndef _lint
+-  regex const option_pattern
+-         (
+-            "WND *= *\"([^\"]+)\"|CWD *= *\"([^\"]+)\"|SHOW *= *([A-Z]+)|WAIT *= *([0-9]+|terminate)|(SHOW)",
+-            regbase::normal | regbase::icase
+-         );
+-#endif // #ifndef _lint
+-
+-}
+-
+-
+-std::string const DefaultExplanation =
+-               "List of executables depending on Hardware Devices and Software Services.\n"
+-               "Example: c:\\massai-1.0\\program.exe param1 param2 ...; [options]\n"
+-               "  quote the parameters with \", if a parameter contains \\ or \","
+-               " or if the path of the executables contains a space\n"
+-               "    Example: c:\\massai-1.0\\program.exe \"param1 param2 ...\"; [options]\n"
+-               "  change the delimiter if ; is used in the options\n"
+-               "    Example: [ c:\\massai-1.0\\program.exe param1 param2 ...[ [options]\n"
+-               "Options: (please separate all options by comma or blank)\n"
+-               "wnd = \"window name\" - specifies the window name of the process used for process shutdown.\n"
+-               "cwd = \"current working directory\" - sets the current working directory for the created process.\n"
+-               "wait = [milliseconds | terminate] - MILLISECONDS specifies a pause"
+-               " after creating the process, TERMINATE waits until the process terminates.\n"
+-               "show = [yes | no | hide | minimized] - specifies how the process window is shown"
+-               "The following substitution environment variables are supported:"
+-               "$PROGRAMFILES, $SYSTEMROOT, $SYSTEMDRIVE";
+-
+-
+-
+-
+-
+-// private defintions & vars ------------------------------------------------
+-
+-#define DEFAULT_WATCHDOG_POLLTIME 1000  // MaM: 1sec Poll Intervall
+-
+-#define M_MAX_DEVICES   128
+-
+-struct M_PROCESS
+-   {
+-      long      lProcessID;
+-      long      lSessionID;
+-      HANDLE    hProcess;
+-//      char      szWndName[256];     // MaM: wird nur fuer das spaeteren Retrieval des HWND benoetigt; koennte auch direkt durch HWND ersetzt werden...
+-      std::string    WndName;
+-      std::string    Component;          // MaM: neu: Component Name fuer WatchDog Funktionalitaet
+-      std::string    Prog;               // MaM: neu: Program Name fuer WatchDog Funktionalitaet
+-   };
+-
+-static M_PROCESS mProcesses [M_MAX_DEVICES];
+-
+-static long      lAllProcesses = 0;
+-static bool      fServerMode   = false;
+-static bool      fConfigMode   = false;
+-static HWND      hwndMControl  = NULL;
+-static int       iWatchDogPoll = DEFAULT_WATCHDOG_POLLTIME;
+-
+-bool  cfgChange = false;
+-
+-
+-class cfgBool : public nConfig::gcSelection
+-{
+-private:
+-
+-    char szExplanation[1024];
+-    char szItem [256];
+-    long lIndex;
+-    nConfig::selection Sellist[2];
+-
+-
+-    void create (char const * & Rights, char const * & Explanation, long & DefaultNdx,
+-                 nConfig::selection const * & Begin, nConfig::selection const * & End )
+-    {
+-         Rights = "rwl";    // "[r][w][+]"
+-
+-         Explanation = szExplanation;
+-
+-         //--------------------------------------
+-
+-         Explanation = szExplanation;
+-         Begin       = Sellist +0;
+-         End         = Sellist +2;
+-         DefaultNdx  = lIndex;
+-    }
+-
+-public:
+-
+-    bool asBoolean()
+-    {
+-        lIndex = getIndex();
+-
+-        //lIndex > 0 ? lIndex = --lIndex : lIndex;
+-
+-        return(lIndex == 1);
+-    }
+-
+-    explicit cfgBool
+-      (
+-         char const * pszItem = "No Item given!",
+-         char const * pszExplanation = "",
+-         long defaultIndex = 1
+-      ) :
+-      nConfig::gcSelection(pszItem,"MSTARTER"),
+-      lIndex( defaultIndex )
+-    {
+-       strcpy(szExplanation,pszExplanation);
+-       strcpy(szItem,pszItem);
+-       //--------------------------------------
+-       // Build std::list   Ndx Val        Explanation
+-       Sellist[0].set(0,"no",  "");
+-       Sellist[1].set(1,"yes", "");
+-    }
+-};
+-
+-
+-class cfgNum : public nConfig::gcNumber
+-{
+-
+-    char szExplanation[1024];
+-    char lDefault;
+-
+-    /** This method is called, when the configuration subsystem needs to
+-     *  create a new confuguration item.
+-     */
+-
+-   void create(char const * & Rights, char const * & Explanation, long & Def, long & Min, long & Max)
+-   {
+-       Rights = "rwl";    // "[r][w][+]"
+-
+-       Explanation = szExplanation;
+-
+-       Def = lDefault;
+-       Min = 0;
+-       Max = 3600;
+-   }
+-
+-   cfgNum();
+-
+-public:
+-
+-    /** Constructor */
+-    cfgNum
+-      (
+-         char const * pszItem,
+-         char const * pszUser,
+-         char const * pszExplanation = "",
+-         long  Default = 0
+-      ) :
+-      nConfig::gcNumber(pszItem,pszUser),
+-      lDefault( Default )
+-    {
+-        strcpy(szExplanation,pszExplanation);
+-    }
+-
+-};
+-
+-
+-// hardware configuration class
+-
+-class cfgHwList : public nConfig::gclTextList
+-{
+-
+-   /** Default std::list */
+-
+-   std::list<std::string>  defStringList;
+-
+-   /** This method is called, when the configuration subsystem needs to
+-    *  create a new configuration item.
+-    */
+-
+-   void create(char const * & Rights,char const * & Explanation, std::list<std::string> & Default)
+-   {
+-      Rights = "rwl";    // "[r][w][+]"
+-
+-      Explanation = "List of platform hardware devices.";
+-
+-      Default = *(&defStringList);
+-   }
+-
+-   cfgHwList();
+-
+-public:
+-
+-   cfgHwList( char const * pszItem, char const * pszUser) :
+-      nConfig::gclTextList( pszItem, pszUser ),
+-      defStringList()
+-   {
+-      if(!fServerMode)
+-      {
+-        // no need for HW devices on the ABLS
+-
+-        defStringList.push_back("ATB");
+-        defStringList.push_back("BTP");
+-        defStringList.push_back("CRD");
+-        defStringList.push_back("SEL");
+-      }
+-   }
+-
+-   void valueChanged()
+-   {
+-        TRACE(HERE_6,"PLATFORM.HARDWARE.devices changed ...");
+-        cfgChange = true;
+-   }
+-};
+-
+-// software configuration class
+-
+-class cfgSwList : public nConfig::gclTextList
+-{
+-   /** Default std::list */
+-
+-   std::list<std::string> defStringList;
+-
+-   /** This method is called, when the configuration subsystem needs to
+-    *  create a new configuration item.
+-    */
+-
+-   void create( char const * & Rights, char const * & Explanation, std::list<std::string> & Default )
+-   {
+-      Rights = "rwl";    // "[r][w][+]"
+-
+-      Explanation = "List of platform software services.";
+-
+-      Default = *(&defStringList);
+-   }
+-
+-   cfgSwList();
+-
+-public:
+-
+-   cfgSwList( char const * pszItem, char const * pszUser) :
+-      nConfig::gclTextList( pszItem, pszUser ),
+-      defStringList()
+-   {
+-      if(fServerMode)
+-      {
+-        defStringList.push_back("LOGGING"   );
+-        defStringList.push_back("BILLING"   );
+-        defStringList.push_back("STATISTICS");
+-        defStringList.push_back("ABLSCTRL"  );
+-      }
+-      else
+-        defStringList.push_back("LOG");
+-   }
+-   void valueChanged()
+-   {
+-        TRACE(HERE_6,"PLATFORM.SOFTWARE.Services changed ...");
+-        cfgChange = true;
+-   }
+-};
+-
+-// platform executables configuration class
+-
+-class cfgPlfExecList : public nConfig::gcTextList
+-{
+-   /** Default std::list */
+-
+-   std::list<std::string> defStringList;
+-
+-   /** This method is called, when the configuration subsystem needs to
+-    *  create a new configuration item.
+-    */
+-
+-   void create(char const * & Rights,char const * & Explanation, std::list<std::string> & Default)
+-   {
+-      Rights = "rwl";    // "[r][w][+]"
+-
+-      Explanation = "List of executables to run the basic platform services.";
+-
+-      Default = *(&defStringList);
+-   }
+-
+-   cfgPlfExecList();
+-
+-public:
+-
+-   cfgPlfExecList( char const * pszItem, char const * pszUser) :
+-      nConfig::gcTextList(pszItem,pszUser),
+-      defStringList()
+-   {
+-      if(!fServerMode)
+-        defStringList.push_back("%INSTPATH%\\appcontrol.exe");
+-   }
+-};
+-
+-CEnvSubst EnvS;
+-
+-cfgHwList      *pHardwareList = NULL;
+-cfgSwList      *pSoftwareList = NULL;
+-
+-cfgPlfExecList execList
+-                  (
+-                     "PLATFORM.EXEC.Platform",
+-                     "massaiControl"
+-                  );
+-
+-cfgBool        ListenOnChange
+-                  (
+-                     "SERVICES.STARTER.listenOnConfigChange",
+-                     "Should the starter listen on the hardware and software component std::list \r\n"
+-                     "and start or stop the modified processes",
+-                     0
+-                  );
+-
+-nConfig::basicTextList TextListItem ("MSTARTER");
+-
+-std::list<std::string> platformExecGet( std::string const & Itm )
+-{
+-   std::list<std::string> StringList;
+-   std::string Tmp = "PLATFORM.EXEC.";
+-   Tmp += Itm;
+-   char const * pItem = Tmp.c_str();
+-   try
+-   {
+-      return TextListItem.get( pItem );
+-   }
+-   catch( nConfig::exception const & X1 )
+-   {
+-      TRACE(HERE_3,"Config exception reading %s (%s)", pItem, X1.what());
+-      try
+-      {
+-         TextListItem.create(pItem, "rwl", DefaultExplanation.c_str(), StringList, 9000);
+-         return (TextListItem.get(pItem));
+-      }
+-      catch ( std::exception const & X2 )
+-      {
+-         TRACE(HERE,"Config exception writing %s %s", pItem, X2.what());
+-      }
+-      catch (...)
+-      {
+-         TRACE(HERE,"Config exception writing %s", pItem);
+-      }
+-   }
+-   catch( std::exception const & X )
+-   {
+-      TRACE(HERE,"Config exception reading %s %s", pItem, X.what());
+-   }
+-   catch( ... )
+-   {
+-      TRACE(HERE,"Config exception reading %s", pItem);
+-   }
+-   return StringList;
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void scanArguments(char  *pszInput,
+-//                                 long  *plTimeOut,
+-//                                 bool  *pfShow,
+-//                                 char  *pszArgs,
+-//                                 char  *pszWndName)
+-//
+-//  purpose:    scan for program arguments and start options
+-//
+-//  date:       08.08.2001, 08:56
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-void scanArguments(char *pszInput,
+-                   long *plTimeOut,
+-                   int  *piShow,
+-                   char *pszArgs,
+-                   char *pszWndName,
+-                   char *pszWorkingDir)
+-{
+-  char *pStr;
+-  char  cDelimiter = ';';
+-  std::string options;
+-
+-  // reset this in all cases !!!
+-  *plTimeOut     = 0;
+-  *pszArgs       = '\0';
+-  *pszWndName    = '\0';
+-  *pszWorkingDir = '\0';
+-  *piShow        = PROCESS_HIDE;
+-
+-  if(pszInput[0] > ' ' && pszInput[1] == ' ')
+-  {
+-    // save specified delimter
+-    cDelimiter = pszInput[0];
+-    // skip delimiter specification
+-    strcpy(pszInput, pszInput + 2);
+-  }
+-  else
+-  {
+-    // use ';' as the standard delimiter
+-    cDelimiter = ';';
+-  }
+-
+-  pStr = strrchr(pszInput, cDelimiter);
+-  if(pStr != NULL)
+-  {
+-    *pStr = '\0';
+-    options= pStr + 1;
+-
+-#ifndef _lint
+-    /*cmatch */smatch parsed;
+-    std::string::const_iterator position= options.begin();
+-    std::string::const_iterator end= options.end();
+-
+-
+-    while(regex_search(position, end, parsed, option_pattern))
+-    {
+-      if(parsed[1].matched)       // WND *= *"([^"]+)"
+-      {
+-        int length= parsed[1].second - parsed[1].first;
+-        strncpy(pszWndName, &*parsed[1].first, length);
+-        pszWndName[length]= 0;
+-      }
+-      else if(parsed[2].matched)  // CWD *= *"([^"]+)"
+-      {
+-        int length= parsed[2].second - parsed[2].first;
+-        strncpy(pszWorkingDir, &*parsed[2].first, length);
+-        pszWorkingDir[length]= 0;
+-      }
+-      else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+-      {
+-        int length= parsed[3].second - parsed[3].first;
+-        if(_strnicmp(&*parsed[3].first,      "YES", length) == 0)       { *piShow = PROCESS_SHOW; }
+-        else if(_strnicmp(&*parsed[3].first, "NO", length) == 0)        { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(&*parsed[3].first, "HIDE", length) == 0)      { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) { *piShow = PROCESS_MINIMIZED; }
+-      }
+-      else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+-      {
+-        int length= parsed[4].second - parsed[4].first;
+-        if(_strnicmp(&*parsed[4].first, "terminate", length) == 0)
+-        {
+-          *plTimeOut = -1;
+-        }
+-        else
+-        {
+-          *plTimeOut = atol(&*parsed[4].first);
+-        }
+-      }
+-      else if(parsed[5].matched)  // (SHOW)
+-      {
+-        *piShow = PROCESS_SHOW;
+-      }
+-      position= parsed[0].second;
+-    }
+-#endif // #ifndef _lint
+-
+-  }
+-
+-  // scan for program arguments
+-
+-  //TRACE(HERE,"pszInput = %s",pszInput);
+-
+-  if((pStr = strchr(pszInput,'"')) != NULL)
+-  {
+-    *pStr= 0;
+-    pStr++;
+-    const char* pEnd= strrchr(pStr, '"');
+-    if(pEnd != NULL)
+-    {
+-      while(pStr != pEnd)
+-      {
+-        *pszArgs++ = *pStr++;
+-      }
+-    }
+-    else
+-    {
+-      while(*pStr && *pStr != '"')
+-      {
+-        *pszArgs++ = *pStr++;
+-      }
+-    }
+-
+-    *pszArgs = '\0';
+-
+-//      TRACE(HERE,"pszArgs = %s",pszArgs);
+-  }
+-  else
+-  {
+-    if((pStr = strrchr(pszInput,'\\')) != NULL)
+-    {
+-      while(*pStr && *pStr != ' ')
+-        pStr++;
+-
+-      // cut off arguments from program name
+-
+-      //@@MaK 7-25-97, 4:20 PM
+-
+-      if(*pStr)
+-      {
+-        *pStr = '\0';
+-
+-        pStr++;
+-
+-        if(*pStr)
+-        {
+-          // save program arguments
+-
+-          strcpy(pszArgs,pStr);
+-
+-          pStr = pszArgs + strlen(pszArgs) -1;
+-
+-          while(*pStr <= ' ')
+-          {
+-            *pStr = '\0';
+-            pStr--;
+-          }
+-        }
+-      }
+-    }
+-  }
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long OS_ExecWait(char *pszPgmName,char *pszPgmArgs,char *pszWorkingDir,int iShow)
+-//
+-//  purpose:    Execute & wait for program
+-//
+-//  date:       15.01.2003, 08:57
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long OS_ExecWait(char *pszPgmName,char *pszPgmArgs,char *pszWorkingDir,int iShow)
+-{
+-STARTUPINFO         si;
+-PROCESS_INFORMATION pi;
+-BOOL                rc;
+-char                szPgmName   [1024];
+-char                szWorkingDir[512];
+-char               *pStr;
+-char               *pszWDir;
+-
+-    memset(&si,0,sizeof(STARTUPINFO));
+-
+-    si.cb = sizeof(STARTUPINFO);
+-    si.dwFlags = STARTF_USESHOWWINDOW;
+-
+-    switch(iShow)
+-    {
+-    case PROCESS_SHOW:      si.wShowWindow = SW_SHOW;          break;
+-    case PROCESS_MINIMIZED: si.wShowWindow = SW_SHOWMINIMIZED; break;
+-    default:                si.wShowWindow = SW_HIDE;          break;
+-    }
+-
+-    strcpy(szPgmName,pszPgmName);
+-    strcat(szPgmName," ");
+-    strcat(szPgmName,pszPgmArgs);
+-
+-    if(pszWorkingDir && *pszWorkingDir)
+-    {
+-      // set as configured
+-
+-      pszWDir = pszWorkingDir;
+-    }
+-    else
+-    {
+-      strcpy(szWorkingDir,pszPgmName);
+-
+-      if((pStr = strrchr(szWorkingDir,'\\')) != NULL)
+-      {
+-        // set working dir from program path
+-
+-        *pStr   = '\0';
+-        pszWDir = szWorkingDir;
+-
+-      }
+-      else
+-        pszWDir = NULL;
+-    }
+-
+-    rc = CreateProcess(NULL,        // application name
+-                       szPgmName,   // command line with args
+-                       NULL,        // use default
+-                       NULL,        // use default
+-                       FALSE,       // don`t inherit handles
+-                       0,           // creation flags
+-                       NULL,        // use parents env.
+-                       pszWDir,     // current directory name
+-                       &si,         // startup information
+-                       &pi);        // returned process information
+-
+-    if(!rc)
+-    {
+-      TRACE(HERE_1,"program name = [%s]",pszPgmName);
+-      TRACE(HERE_1,"program args = [%s]",pszPgmArgs);
+-      TRACE(HERE_1,"program wdir = [%s]",pszWDir);
+-
+-      TRACE(HERE_1,"error = %d",GetLastError());
+-
+-      return(GetLastError());
+-    }
+-    else
+-    {
+-      // wait for the process to terminate
+-
+-      WaitForSingleObject(pi.hProcess,INFINITE);
+-
+-      CloseHandle(pi.hThread);
+-      CloseHandle(pi.hProcess);
+-
+-      return(0);
+-    }
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long OS_StartSession(char   *pszPgmName,
+-//                                   char   *pszPgmArgs,
+-//                                   char   *pszWorkingDir,
+-//                                   long   *plSessID,
+-//                                   long   *plPID,
+-//                                   HANDLE *phProcess,
+-//                                   int     iShow)
+-//
+-//  purpose:    Starts a program -
+-//              replacement for old OS_StartSession() from massai.dll
+-//
+-//  date:       21.03.2002, 09:58
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-long OS_StartSession(char   *pszPgmName,
+-                     char   *pszPgmArgs,
+-                     char   *pszWorkingDir,
+-                     long   *plSessID,
+-                     long   *plPID,
+-                     HANDLE *phProcess,
+-                     int     iShow)
+-{
+-STARTUPINFO         si;
+-PROCESS_INFORMATION pi;
+-BOOL                rc;
+-char                szPgmName   [1024];
+-char                szWorkingDir[512];
+-char               *pStr;
+-char               *pszWDir;
+-
+-    memset(&si,0,sizeof(STARTUPINFO));
+-
+-    si.cb      = sizeof(STARTUPINFO);
+-    si.dwFlags = STARTF_USESHOWWINDOW;
+-
+-    switch(iShow)
+-    {
+-    case PROCESS_SHOW:      si.wShowWindow = SW_SHOW;          break;
+-    case PROCESS_MINIMIZED: si.wShowWindow = SW_SHOWMINIMIZED; break;
+-    default:                si.wShowWindow = SW_HIDE;          break;
+-    }
+-
+-    strcpy(szPgmName,pszPgmName);
+-    strcat(szPgmName," ");
+-    strcat(szPgmName,pszPgmArgs);
+-
+-    if(pszWorkingDir && *pszWorkingDir)
+-    {
+-      // set as configured
+-
+-      pszWDir = pszWorkingDir;
+-    }
+-    else
+-    {
+-      strcpy(szWorkingDir,pszPgmName);
+-
+-      if((pStr = strrchr(szWorkingDir,'\\')) != NULL)
+-      {
+-        // set working dir from program path
+-
+-        *pStr   = '\0';
+-        pszWDir = szWorkingDir;
+-
+-      }
+-      else
+-        pszWDir = NULL;
+-    }
+-
+-    rc = CreateProcess(NULL,        // application name
+-                       szPgmName,   // command line with args
+-                       NULL,        // use default
+-                       NULL,        // use default
+-                       FALSE,       // don`t inherit handles
+-                       0,           // creation flags
+-                       NULL,        // use parents env.
+-                       pszWDir,     // current directory name
+-                       &si,         // startup information
+-                       &pi);        // returned process information
+-
+-    *plSessID  = pi.dwProcessId;
+-    *plPID     = pi.dwProcessId;
+-    *phProcess = pi.hProcess;
+-
+-    TRACE(HERE_5,"program name = [%s]",pszPgmName);
+-    TRACE(HERE_5,"program args = [%s]",pszPgmArgs);
+-    TRACE(HERE_5,"program wdir = [%s]",pszWDir);
+-
+-    if(!rc)
+-    {
+-      TRACE(HERE_1,"error = %d",GetLastError());
+-
+-      if (GetLastError())
+-        return(GetLastError());
+-      else
+-        return -1;
+-    }
+-    else
+-    {
+-      CloseHandle(pi.hThread);
+-      return(0);
+-    }
+-}
+-
+-
+-void notifyMcontrol(DWORD pid)
+-{
+-      int prcCount=0;
+-      for(int i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-      {
+-        if(mProcesses[i].lSessionID)
+-          prcCount++;
+-      }
+-      if (lAllProcesses<prcCount)
+-          lAllProcesses = prcCount;
+-
+-      if(hwndMControl)
+-        PostMessage(hwndMControl,WM_USER,lAllProcesses,pid);
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   long startProgs(void)
+-//
+-//  purpose:    Starts programs specified in massaiConfigManager
+-//
+-//  date:       15.02.2002, 13:16
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//  param       pComponent, pProg, iUseIndex: selective (re-)start of prog in Group (watchDog)
+-//
+-//---------------------------------------------------------------------------
+-
+-long startProgs(const std::string& component, const std::string& prog, int index)
+-{
+-  char      szProgName[2048];
+-  char      szProgArgs[256];
+-  char      szWndName [256];
+-  char      szWorkDir [512];
+-  long      lSessionID;
+-  long      lTimeOut;
+-  long      rc;
+-  int       iShow;
+-  long      ProcID;
+-  HANDLE    ProcHandle;
+-  long      result= false;
+-
+-
+-  TRACE(HERE_7,"[%s] = [%s]",component.c_str(), prog.c_str());
+-
+-  strcpy(szProgName, prog.c_str());
+-
+-  scanArguments(szProgName, &lTimeOut, &iShow, szProgArgs, szWndName, szWorkDir);
+-
+-  if(!fConfigMode)
+-  {
+-    if(lTimeOut < 0)
+-    {
+-      // start and wait for this process
+-
+-      if(rc = OS_ExecWait(szProgName,szProgArgs,szWorkDir,iShow))
+-        TRACE(HERE_1,"Can't execute: %s, rc = %ld\n",szProgName,rc);
+-    }
+-    else
+-    {
+-      if(rc = OS_StartSession(szProgName, szProgArgs, szWorkDir, &lSessionID, &ProcID, &ProcHandle, iShow))
+-      {
+-        TRACE(HERE_1,"Can't start: %s, rc = %ld\n",szProgName,rc);
+-
+-        /* reset session identifier */
+-        mProcesses[index].lSessionID = 0;
+-      }
+-      else
+-      {
+-        /* store session identifier */
+-
+-        TRACE(HERE_5,"[%s] = [%s], pid = %ld",component.c_str(), prog.c_str(),ProcID);
+-
+-        mProcesses[index].lSessionID = lSessionID;
+-        mProcesses[index].lProcessID = ProcID;
+-        mProcesses[index].hProcess   = ProcHandle;
+-        mProcesses[index].WndName    = szWndName;
+-        mProcesses[index].Component  = component;
+-        mProcesses[index].Prog       = prog;
+-
+-        notifyMcontrol(ProcID);
+-
+-        if(lTimeOut)
+-        {
+-          TRACE(HERE_6,"waiting: %d ms",lTimeOut);
+-
+-          OS_Sleep(lTimeOut);
+-        }
+-        result= true;
+-      }
+-    }
+-  }
+-  return result;
+-}
+-
+-long startProgs()
+-{
+-  long                   nProcIdx=0;
+-  std::list<std::string>::iterator i,j;
+-
+-  std::list<std::string> hwlist;
+-  std::list<std::string> swlist;
+-  if (pHardwareList)
+-        hwlist = pHardwareList->get();
+-  if (pSoftwareList)
+-        swlist = pSoftwareList->get();
+-
+-  std::list<std::string> ExecProcsPlatform = EnvS.substEnvList(execList.get());
+-
+-  TRACE(HERE_9,">> startProgs");
+-
+-  TRACE(HERE_5,"starting PLATFORM...");
+-  // first start all software components ('PLATFORM.SOFTWARE.Services')
+-  for(i = swlist.begin(); i != swlist.end(); ++i)
+-  {
+-    std::list<std::string> ExecSwServices = EnvS.substEnvList(platformExecGet( *i ));
+-    for(j = ExecSwServices.begin(); j != ExecSwServices.end(); ++j)
+-    {
+-      if(startProgs(*i, *j, nProcIdx)) nProcIdx++;
+-    }
+-  }
+-  // then start platform... ('PLATFORM.EXEC.Platform')
+-  for(i = ExecProcsPlatform.begin(); i != ExecProcsPlatform.end(); ++i)
+-  {
+-      if(startProgs("PLATFORM.EXEC.Platform", *i, nProcIdx)) nProcIdx++;
+-  }
+-  // at last start all the hardware devices ('PLATFORM.HARDWARE.Devices')
+-  for(i = hwlist.begin(); i != hwlist.end(); ++i)
+-  {
+-    std::list<std::string> ExecHwDevices = EnvS.substEnvList(platformExecGet( *i ));
+-    for(j = ExecHwDevices.begin(); j != ExecHwDevices.end(); ++j)
+-    {
+-      if(startProgs(*i, *j, nProcIdx)) nProcIdx++;
+-    }
+-  }
+-  TRACE(HERE_9,"<< startProgs");
+-  return(0);
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void stopProgs()
+-//
+-//  purpose:    stop processes according to given flags
+-//
+-//  date:       15.02.2002, 13:16
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-void stopProgs()
+-{
+-int   i;
+-long  rc;
+-long  lCnt;
+-HWND  hwnd;
+-
+-    for(i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-    {
+-      if( mProcesses[i].WndName.size() )
+-      {
+-        // find the window of this process with it's class- and window name
+-
+-        hwnd = FindWindowEx(NULL,NULL,NULL,mProcesses[i].WndName.c_str());
+-
+-        // and post a CLOSE message to do the rest
+-
+-        if(hwnd)
+-        {
+-          TRACE(HERE_5,"posted WM_CLOSE to = %s, %d",mProcesses[i].WndName.c_str(),mProcesses[i].lSessionID);
+-
+-          PostMessage(hwnd,WM_CLOSE,0,0);
+-
+-          lCnt = 0;
+-
+-          // wait at least 30s for the app to finish
+-
+-          while(FindWindowEx(NULL,NULL,NULL,mProcesses[i].WndName.c_str()) && lCnt < 300)
+-          {
+-            OS_Sleep(100);
+-            lCnt++;
+-          }
+-        }
+-        else
+-          TRACE(HERE_3,"no handle for window [%s]",mProcesses[i].WndName.c_str());
+-      }
+-    }
+-
+-    rc = GenerateConsoleCtrlEvent(CTRL_C_EVENT,0);
+-    rc = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT,0);
+-    TRACE(HERE_5,"CTRL-BREAK, rc = %d",rc);
+-
+-    cfgNum timeout("PLATFORM.TIMEOUTS.WaitForProcessTermination",
+-                   "massaiControl",
+-                   "Specifies how long to wait (in seconds) after platform shutdown notification.",
+-                   30);
+-
+-    TRACE( HERE_5, "Waiting a maximum of %d seconds after CTRL_BREAK event.", timeout.get() );
+-
+-    int waitTime = timeout.get();
+-    DWORD dwExitCode;
+-
+-    while( --waitTime > 0 )
+-    {
+-        OS_Sleep(1000);
+-        for(i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-        {
+-          /* check process handle */
+-
+-          if(mProcesses[i].lSessionID)
+-          {
+-            if( GetExitCodeProcess( mProcesses[i].hProcess, &dwExitCode ) )
+-            {
+-                if( dwExitCode == STILL_ACTIVE)
+-                {
+-                    break;
+-                }
+-                mProcesses[i].lSessionID = 0;
+-            }
+-          }
+-        }
+-        if( i == -1 )
+-        {
+-            //all processes are gone ...
+-            //leave the sleep ...
+-            waitTime=0;
+-        }
+-    }
+-
+-    for(i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-    {
+-      /* check which session to stop */
+-
+-      if(mProcesses[i].lSessionID)
+-      {
+-        rc = OS_StopSession(STOP_SESSION_SPECIFIED, mProcesses[i].hProcess);
+-
+-        TRACE(HERE_5,"OS_StopSession, Index = %ld, rc = %ld",i,rc);
+-      }
+-    }
+-}
+-
+-/*
+-    negative return value signals that module exists at position (*-1)-1
+-    e.g. 5 -> -6; 8 -> -9 0 -> -1
+-    positive value signals module doesn't exist and this is a free position.
+-
+-*/
+-int processExists( std::string const & comp, std::string const & prog )
+-{
+-    int freepos = (M_MAX_DEVICES -1);
+-    for(int i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-    {
+-        if (mProcesses[i].lSessionID != 0)
+-        {
+-            TRACE(HERE_8,"Existing process [%d] (%s): '%s'", i,
+-            mProcesses[i].Component.c_str(), mProcesses[i].Prog.c_str());
+-            if ((mProcesses[i].Component.compare(comp)==0) && (mProcesses[i].Prog.compare(prog)==0))
+-                return ((i*-1)-1);
+-        }
+-        if (mProcesses[i].Prog.size()==0)
+-            freepos=i;
+-    }
+-
+-    return freepos;
+-}
+-
+-void checkListAndLoad()
+-{
+-  TRACE(HERE_8,">> checkListAndLoad");
+-  long      nProcIdx=0;
+-
+-  std::list<std::string>::iterator i,j;
+-
+-  std::list<std::string> hwlist;
+-  std::list<std::string> swlist;
+-  if (pHardwareList)
+-        hwlist = pHardwareList->get();
+-  if (pSoftwareList)
+-        swlist = pSoftwareList->get();
+-
+-  std::list<std::string> ExecProcsPlatform = EnvS.substEnvList(execList.get());
+-  std::list<std::string> fullExlist;
+-
+-  cfgChange = false;//reset
+-
+-  // first check all software components ('PLATFORM.SOFTWARE.Services')
+-  for(i = swlist.begin(); i != swlist.end(); ++i)
+-  {
+-    std::list<std::string> ExecSwServices = EnvS.substEnvList(platformExecGet( *i ));
+-    for(j = ExecSwServices.begin(); j != ExecSwServices.end(); ++j)
+-    {
+-      TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+-      int rc = processExists(*i, *j);
+-      if (rc > -1)
+-        startProgs(*i, *j, rc);
+-    }
+-    fullExlist.merge(ExecSwServices);//merge deletes ExecSwServices, so do this after using it.
+-  }
+-
+-  // then start platform... ('PLATFORM.EXEC.Platform')
+-  for(i = ExecProcsPlatform.begin(); i != ExecProcsPlatform.end(); ++i)
+-  {
+-      //if(startProgs("PLATFORM.EXEC.Platform", *i, nProcIdx)) nProcIdx++;
+-      TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+-  }
+-  fullExlist.merge(ExecProcsPlatform);//merge deletes ExecProcsPlatform, so do this after using it.
+-
+-  // at last check all the hardware devices ('PLATFORM.HARDWARE.Devices')
+-  for(i = hwlist.begin(); i != hwlist.end(); ++i)
+-  {
+-    std::list<std::string> ExecHwDevices = EnvS.substEnvList(platformExecGet( *i ));
+-    for(j = ExecHwDevices.begin(); j != ExecHwDevices.end(); ++j)
+-    {
+-      TRACE(HERE_6,"check: (%s)[%d] '%s'", (*i).c_str(), nProcIdx++, (*j).c_str());
+-      int rc = processExists(*i, *j);
+-      if (rc > -1)
+-        startProgs(*i, *j, rc);
+-    }
+-    fullExlist.merge(ExecHwDevices);//merge deletes ExecHwDevices, so do this after using it.
+-  }
+-
+-  HWND   hwnd = NULL;
+-  for(int index = M_MAX_DEVICES -1; index >= 0 ; index--)
+-  {
+-    if (mProcesses[index].lSessionID != 0)
+-    {
+-        //check if process should still be available
+-        bool stopProcess = true;
+-        for(j = fullExlist.begin(); j != fullExlist.end(); ++j)
+-        {
+-          if ((*j).compare(mProcesses[index].Prog)==0)
+-          {
+-             stopProcess = false;
+-             break;//process should stay available
+-          }
+-        }
+-        if (stopProcess)
+-        {
+-            TRACE(HERE_5,"Stopping existing process because of a configuration change [%d] (%s): '%s'",
+-                    index, mProcesses[index].Component.c_str(), mProcesses[index].Prog.c_str());
+-            if( mProcesses[index].WndName.size() )
+-            {
+-                // find the window of this process with it's class- and window name
+-                hwnd = FindWindowEx(NULL,NULL,NULL,mProcesses[index].WndName.c_str());
+-                // and post a CLOSE message to do the rest
+-                if(hwnd)
+-                {
+-                  TRACE(HERE_5,"posted WM_CLOSE to = %s, %d (%s)",
+-                                mProcesses[index].WndName.c_str(),mProcesses[index].lSessionID,
+-                                mProcesses[index].WndName.c_str());
+-                  PostMessage(hwnd,WM_CLOSE,0,0);
+-                  int lCnt = 0;
+-                  // wait at least 30s for the app to finish
+-                  while(FindWindowEx(NULL,NULL,NULL,mProcesses[index].WndName.c_str()) && lCnt < 300)
+-                  {
+-                    OS_Sleep(100);
+-                    lCnt++;
+-                  }
+-                  if (FindWindowEx(NULL,NULL,NULL,mProcesses[index].WndName.c_str()))
+-                     OS_StopSession(STOP_SESSION_SPECIFIED, mProcesses[index].hProcess);
+-                }
+-                else
+-                  TRACE(HERE_3,"no handle for window [%s]",mProcesses[index].WndName.c_str());
+-            }
+-            else
+-               OS_StopSession(STOP_SESSION_SPECIFIED, mProcesses[index].hProcess);
+-
+-            mProcesses[index].lSessionID = 0;
+-            lAllProcesses = fullExlist.size();
+-
+-            if(hwndMControl)
+-                PostMessage(hwndMControl,WM_USER,lAllProcesses,0);
+-
+-        }
+-    }
+-  }
+-
+-  TRACE(HERE_8,"<< checkListAndLoad");
+-}
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void watchDog()
+-//
+-//  purpose:    check if process handle is alive and restart process if not
+-//
+-//  date:       21.03.2006
+-//
+-//  author:     Materna Information & Communications (MaM)
+-//
+-//---------------------------------------------------------------------------
+-void watchDog()
+-{
+-int   i;
+-DWORD dwExitCode;
+-
+-//    int * XXXX = 0;
+-//    XXXX[0] += 1;
+-
+-    if (ListenOnChange.asBoolean())
+-    {
+-        if (cfgChange)
+-            checkListAndLoad();
+-    }
+-
+-    for(i = M_MAX_DEVICES -1; i >= 0 ; i--)
+-    {
+-      /* check process handle */
+-
+-      if(mProcesses[i].lSessionID)
+-      {
+-        if( GetExitCodeProcess( mProcesses[i].hProcess, &dwExitCode ) )
+-        {
+-            if( dwExitCode != STILL_ACTIVE)
+-            {
+-                // If -1 then the process couldn't be started before,
+-                // so don't inform mcontrol to count down the running processes.
+-                if (mProcesses[i].lSessionID!=-1)
+-                {
+-                    //the process was running before, inform mcontrol
+-                    PostMessage(hwndMControl,WM_USER,lAllProcesses,0);
+-                }
+-                TRACE
+-                  (
+-                     HERE_1,
+-                     "watchDog:\n############\nprocess [%s] [%s]\n"
+-                     "has terminated with return code %d\n############",
+-                     mProcesses[i].Component.c_str(),
+-                     mProcesses[i].Prog.c_str(),
+-                     static_cast<int>( dwExitCode )
+-                  );
+-                CloseHandle(mProcesses[i].hProcess);
+-                startProgs(mProcesses[i].Component, mProcesses[i].Prog, i);
+-
+-            }
+-        }
+-        else
+-        {
+-            int err = GetLastError();
+-            TRACE
+-               (
+-                  HERE_1,
+-                  "watchDog:\n############\nerror when checking process [%s]"
+-                  " [%s]\n (err %d)\n############",
+-                  mProcesses[i].Component.c_str(),
+-                  mProcesses[i].Prog.c_str(),
+-                  err
+-               );
+-
+-        }
+-      }
+-    }
+-}
+-
+-
+-void ignoredArgument( char const * Argument )
+-{
+-   TRACE( HERE_5, "argument %s ignored!", Argument );
+-}
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   void main(int argc, char **argv)
+-//
+-//  purpose:    program entry
+-//
+-//  date:       21.08.2001, 10:10
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-void main(int argc, char **argv)
+-{
+-
+-   //
+-   // This object will by its mere presence in this block catch
+-   // structured Windows exceptions and throw them as C++ std::exceptions
+-   //
+-   mSysException::standardException Guard;
+-
+-   openTrace("mStarter");
+-
+-   try
+-   {
+-
+-      EnvS.SetBaseEnvVars();
+-
+-#define USESEM
+-
+-#ifdef USESEM
+-      std::string StartSemaphore;
+-#endif
+-      // A new block to force Args destruction at the end of block.
+-      // See tellIgnored comment below.
+-      {
+-         argScan Args( argc, argv );
+-         // Will be called when this block is left to tell about
+-         // ignored arguments.
+-         Args.tellIgnored( ignoredArgument );
+-         if( Args.option( "server" ) )
+-         {
+-            fServerMode = true;
+-         }
+-         if( Args.option( "cfg" ) )
+-         {
+-            fConfigMode = true;
+-         }
+-         char const * WatchdogOption = Args.option( "watchdog" );
+-         if( WatchdogOption )
+-         {
+-            char const * WatchdogValue = Args.next( WatchdogOption );
+-            if( !WatchdogValue )
+-            {
+-               printf("not enough cmd line param for option 'watchDog'\n");
+-               TRACE(HERE_1,"not enough cmd line param for option 'watchDog'");
+-            }
+-            else
+-            {
+-               // This is not the semaphore!
+-               Args.hide( WatchdogValue );
+-               sscanf( WatchdogValue, "%d", &iWatchDogPoll );
+-               if( iWatchDogPoll == -1 )
+-               {
+-                  printf("watchDog disabled\n");
+-                  TRACE(HERE_5,"watchDog disabled");
+-               }
+-            }
+-         }
+-#ifdef USESEM
+-         if( Args.argument( 1 ) )
+-          StartSemaphore = Args.argument( 1 );
+-         else
+-          StartSemaphore = "";
+-#endif
+-      }
+-#ifdef USESEM
+-      if( StartSemaphore.size() == 0 )
+-      {
+-         printf("no semaphor name given. -> exit\n");
+-         TRACE(HERE_1,"no semaphor name given. -> exit\n");
+-         exit(1);
+-      }
+-#endif
+-      //
+-      if (!pHardwareList)
+-         pHardwareList  = new cfgHwList("PLATFORM.HARDWARE.Devices", "massaiControl");
+-      if (!pSoftwareList)
+-         pSoftwareList = new cfgSwList("PLATFORM.SOFTWARE.Services","massaiControl");
+-
+-      if( fConfigMode)
+-      {
+-         printf("reading configuration ...\n");
+-
+-         startProgs();
+-
+-         exit(0);
+-      }
+-
+-      if( fServerMode )
+-      {
+-         TRACE(HERE_5,"SERVER-MODE\n");
+-      }
+-      //
+-      // Signal handler.
+-      //
+-      Materna::MSSD::sysSignal SysSignal;
+-      // Register for all, prevent e.g. a ctrl-break to lead to exit(0).
+-      SysSignal.registerForAll();
+-
+-      hwndMControl = FindWindowEx(NULL,NULL,NULL,"MassaiController");
+-
+-      if(hwndMControl)
+-      {
+-         TRACE(HERE_6,"MCONTROL WINDOW FOUND !!!!");
+-      }
+-
+-#ifdef USESEM
+-      HANDLE hSem = OpenEvent(SYNCHRONIZE,false, StartSemaphore.c_str() );
+-      if(!hSem)
+-      {
+-         TRACE(HERE_3,"can't open semaphor [%s], rc = %d\n",StartSemaphore.c_str(),GetLastError());
+-
+-         printf("can't open semaphor [%s], rc = %d\n",StartSemaphore.c_str(),GetLastError());
+-         printf("please press RETURN to terminate...");
+-
+-         getchar();
+-
+-         exit(2);
+-      }
+-#endif
+-
+-      startProgs();
+-
+-#ifdef USESEM
+-
+-      TRACE(HERE_5,"waiting for semaphor [%s] to be posted...", StartSemaphore.c_str());
+-
+-      // iWatchDogPoll == -1 -> switched off!
+-      //
+-      if( iWatchDogPoll == -1)
+-         WaitForSingleObject(hSem, INFINITE);
+-      else
+-      {
+-         while( WAIT_TIMEOUT == WaitForSingleObject(hSem, iWatchDogPoll) )
+-            watchDog();
+-      }
+-      CloseHandle(hSem);
+-
+-      TRACE(HERE_5,"... semaphor posted\n");
+-
+-#else
+-
+-      printf("waiting for termination (CTRL-C) ...");
+-      while( !SysSignal.occured() )
+-      {
+-         watchDog();
+-         if( iWatchDogPoll == -1)
+-            OS_Sleep(100);
+-         else
+-            OS_Sleep(iWatchDogPoll);
+-      }
+-
+-#endif
+-
+-      stopProgs();
+-
+-      OS_Sleep(2000);
+-
+-      // this piece of code terminates the window definitely !!
+-      char   szName[512] = "";
+-      GetModuleFileName(NULL,szName,sizeof(szName));
+-      // find the window of this process with it's class- and window name
+-      HWND hwnd = FindWindowEx(NULL,NULL,"ConsoleWindowClass",szName);
+-      // and post a CLOSE message to do the rest
+-      PostMessage(hwnd,WM_CLOSE,0,0);
+-   }
+-   catch( std::exception const & X )
+-   {
+-      char const * se = X.what();
+-      TRACE( HERE, "%s", se );
+-      std::cout << se << std::endl;
+-   }
+-   catch(...)
+-   {
+-      char const * se = "unknown exception";
+-      TRACE( HERE, "%s", se );
+-      std::cout << se << std::endl;
+-   }
+-
+-}
+-
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+index 2f4e5ac3..79f1536c 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
++++ b/SelfServiceCommon/Massai/cpp/LogService/inc/LogService_def.h
+@@ -13,14 +13,18 @@
+  *                         writes logging\svc.log logging\platform*.log logging\statistics*.log
+  *                         alternativ solution: massaiSNMP.dll
+  *
+- *  @version 1.0.3.19
++ *  @version 1.0.3.20
+  *
+  *  !!! immer auch wenn nötig massaiSNMP_def.h pflegen !!!
+  *
+  *  \section change1 Change history
+  *
++ *  \date 16.12.2011 \li V1.0.3.20
++ *                   \li SteT Mantis 0021947: mstarter: problems at shutdown
++ *                       shutdown on SIGBREAK, ignore CTRL_LOGOFF_EVENT
++ *
+  *  \date 17.11.2011 \li V1.0.3.19
+- *                   \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty 
++ *                   \li MANTIS0021562: SelfServiceCommon LogService changes for VC10 compatibilty
+  *
+  *  \date 27.06.2011 \li V1.0.3.18
+  *                   \li enhancement - SteT Mantis 0007390: use more tolerant parser for compDefinition (spaces)
+@@ -135,8 +139,8 @@
+ 
+ #include "Tools/VERSION.H"
+ 
+-#define FILE_VER_BIN     1,0,3,19
+-#define FILE_VER_STR     "FileVersion", "1.0.3.19\0"
++#define FILE_VER_BIN     1,0,3,20
++#define FILE_VER_STR     "FileVersion", "1.0.3.20\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"Log Service (Ex)\0"
+ #define INTERNALNAME     "InternalName"     ,"Log Service (Ex)\0"
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+index e246c6dd..0c510811 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+@@ -59,11 +59,14 @@
+ #include "systools/mEventSem.hpp"
+ #include "systools/mSysProcessTerminate.h"
+ #include "tools/TraceClient.h"
++#include "systools/mSysException.hpp"
+ 
+ 
+ VERSION_ID_DT( 01, 01, 01 );
+ // history:
+ 
++using mSysException::standardException;
++
+ static std::list<trapListener*> trapListeners;
+ 
+ Materna::MSSD::eventSemaphore terminateEvent;
+@@ -295,36 +298,47 @@ private:
+   long function()
+   {
+     writeTrace(SecondaryFrequent_HERE, "eventDispatcher started");
+-
+-    long rc = 0;
+-    trapEvent *pE = NULL;
+-    bool fTerminate = false;
+-
+-    while(!fTerminate)
++    standardException guard;
++    try
+     {
+-      rc = queue.read(pE);
+-      if(pE != NULL)
++      long rc = 0;
++      trapEvent *pE = NULL;
++      bool fTerminate = false;
++
++      while(!fTerminate)
+       {
+-        pE->trace(BasicRuntime_HERE, "dispatching:");
+-        for(std::list<trapListener*>::iterator it = trapListeners.begin(); it != trapListeners.end(); ++it)
++        rc = queue.read(pE);
++        if(pE != NULL)
+         {
+-          if((*it)->isTarget(pE->getTargets()))
++          pE->trace(BasicRuntime_HERE, "dispatching:");
++          for(std::list<trapListener*>::iterator it = trapListeners.begin(); it != trapListeners.end(); ++it)
+           {
+-            long duration = 0;
++            if((*it)->isTarget(pE->getTargets()))
+             {
+-              Materna::MSSD::execTime et(duration);
+-
+-              writeTrace(BasicRuntime_HERE, "trap to target <%d>", (*it)->getTarget());
+-              (*it)->trap(*pE);
++              long duration = 0;
++              {
++                Materna::MSSD::execTime et(duration);
++
++                writeTrace(BasicRuntime_HERE, "trap to target <%d>", (*it)->getTarget());
++                (*it)->trap(*pE);
++              }
++              writeTrace(BasicRuntime_HERE, "trap to target <%d> took %dms", (*it)->getTarget(), duration);
+             }
+-            writeTrace(BasicRuntime_HERE, "trap to target <%d> took %dms", (*it)->getTarget(), duration);
+           }
+-        }
+-        delete pE;
+-      } else
+-        fTerminate = true;
++          delete pE;
++        } else
++          fTerminate = true;
++      }
++      writeTrace(SecondaryFrequent_HERE, "eventDispatcher terminated");
++    }
++    catch(const std::exception& x)
++    {
++      writeTrace(MajorError_HERE, x.what());
++    }
++    catch(...)
++    {
++      writeTrace(MajorError_HERE, "unknown exception");
+     }
+-    writeTrace(SecondaryFrequent_HERE, "eventDispatcher terminated");
+     return (-1);
+   }
+ 
+@@ -586,14 +600,25 @@ int main(int argc, char ** argv)
+ {
+   MASSAI::trace::TraceClient trc;
+   openTrace("logging");
++  standardException guard;
++  try
++  {
++    mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_NORMAL, &terminateEvent, &trc);
+ 
+-  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_NORMAL, &terminateEvent, &trc);
+-
+-  mLog::runService();
++    mLog::runService();
+ 
+-  configSNMP::cleanUp();
++    configSNMP::cleanUp();
+ 
+-  closeTrace();
++    closeTrace();
++  }
++  catch(const std::exception& x)
++  {
++    writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    writeTrace(MajorError_HERE, "unknown exception");
++  }
+   return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessIOCountersW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessIOCountersW32.h
+index a6df00b7..b606fe27 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessIOCountersW32.h
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysProcessIOCountersW32.h
+@@ -14,6 +14,9 @@
+ extern "C" {
+ #endif
+ 
++#ifdef _MSC_VER
++#if _MSC_VER <= 1200 // 1200 == VC6
++
+ typedef struct _IO_COUNTERS {
+   ULONGLONG ReadOperationCount;
+   ULONGLONG WriteOperationCount;
+@@ -24,18 +27,10 @@ typedef struct _IO_COUNTERS {
+ } IO_COUNTERS;
+ typedef IO_COUNTERS *PIO_COUNTERS;
+ 
+-BOOL WINAPI GetProcessIoCounters(HANDLE hProcess, PIO_COUNTERS lpIoCounters)
+-{
+-  BOOL result= false;
+-  typedef BOOL (WINAPI *GetProcessIoCountersPtr)(HANDLE, PIO_COUNTERS);
+-  GetProcessIoCountersPtr func = reinterpret_cast<GetProcessIoCountersPtr>
+-    (GetProcAddress(GetModuleHandle("kernel32"), "GetProcessIoCounters"));
+-  if(func)
+-  {
+-    result= func(hProcess, lpIoCounters);
+-  }
+-  return result;
+-}
++BOOL WINAPI GetProcessIoCounters(HANDLE hProcess, PIO_COUNTERS lpIoCounters);
++
++#endif
++#endif
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
+new file mode 100644
+index 00000000..be403a09
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/inc/mSysSwitchWindowW32.h
+@@ -0,0 +1,21 @@
++// switchToWindow
++
++#ifndef MSYSSWITCHWINDOWW32_H_INCLUDED
++#define MSYSSWITCHWINDOWW32_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <windows.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++BOOL WINAPI SwitchToThisWindow(HWND hWnd, BOOL fAltTab);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index bdff2729..d15861ed 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -8,7 +8,7 @@
+ 
+ ######################################################################
+ 
+-MY_CFLAGS =             $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_BOOST) $(INC_PSAPI)
++MY_CFLAGS =             -D_WIN32_WINNT=0x0500 $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_BOOST) $(INC_PSAPI)
+ 
+ MY_LIB1 =               $(LIB_SYSTOOLS)
+ 
+@@ -27,6 +27,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysProcessW32.obj \
+                         $(_OBJ)\mSysProcessListW32.obj \
+                         $(_OBJ)\mSysProcessTerminateW32.obj \
++                        $(_OBJ)\mSysProcessIOCountersW32.obj \
++                        $(_OBJ)\mSysSwitchWindowW32.obj \
+                         $(_OBJ)\mSysSignalW32.obj \
+                         $(_OBJ)\mSysThreadW32.obj \
+                         $(_OBJ)\nt_evsem.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessIOCountersW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessIOCountersW32.cpp
+new file mode 100644
+index 00000000..40b812d5
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessIOCountersW32.cpp
+@@ -0,0 +1,32 @@
++// read IOCounters (API missing in VC6)
++
++#include "mSysProcessIOCountersW32.h"
++
++#ifdef _MSC_VER
++#if _MSC_VER <= 1200 // 1200 == VC6
++
++namespace
++{
++  typedef BOOL (WINAPI *GetProcessIoCountersPtr)(HANDLE, PIO_COUNTERS);
++  GetProcessIoCountersPtr getProcessIoCountersPtr = 0;
++  bool getProcessIoCountersLoaded = false;
++}
++
++BOOL WINAPI GetProcessIoCounters(HANDLE hProcess, PIO_COUNTERS lpIoCounters)
++{
++  BOOL result= false;
++  if(!getProcessIoCountersLoaded)
++  {
++    getProcessIoCountersLoaded = true;
++    getProcessIoCountersPtr = reinterpret_cast<GetProcessIoCountersPtr>
++      (GetProcAddress(GetModuleHandle("kernel32"), "GetProcessIoCounters"));
++  }
++  if(getProcessIoCountersPtr)
++  {
++    result= getProcessIoCountersPtr(hProcess, lpIoCounters);
++  }
++  return result;
++}
++
++#endif
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index afebef45..414a2eaf 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -111,6 +111,12 @@ namespace
+   typedef boost::shared_ptr<Process> ProcessPtr;
+   typedef std::list<ProcessPtr> ProcessPtrList;
+ 
++  /*
++    store search result for a group (in ApplicationList)
++  */
++  typedef boost::shared_ptr<WindowSearch> WindowSearchPtr;
++  typedef std::map<std::string, WindowSearchPtr> WindowSearchMap;
++
+   /*
+     control list of child processes
+   */
+@@ -134,7 +140,9 @@ namespace
+ 
+       virtual void notify(WaitNotification* pNotification);
+ 
+-      WindowList searchWindows(WindowSearchType search, const std::string& group);
++      WindowSearchPtr searchWindows(const WindowSearchPtr oldsearch,
++        WindowSearchType search, const std::string& group);
++
+       void stop(const std::string& group);
+ 
+     private:
+@@ -143,6 +151,8 @@ namespace
+ 
+       void stoppingProcesses(const ProcessSet& processSet);
+       WindowList searchWindows(WindowSearchType search, ProcessSet& processSet);
++      WindowSearchPtr prepareSearchWindows(const WindowSearchPtr oldsearch,
++        WindowSearchType search, ProcessSet& processSet);
+       void closeWindows(const WindowList& winList);
+       void sendBreak(ProcessSet& processSet);
+       void sendCtrlC(ProcessSet& processSet);
+@@ -216,6 +226,9 @@ namespace
+       virtual bool match(Window& window, mSysWindow::Process* pProcess);
+   };
+ 
++  WindowMatch windowMatch;
++
++
+   std::string showText(Show show)
+   {
+     switch(show)
+@@ -647,16 +660,15 @@ namespace
+     }
+     return result;
+   }
+-  WindowList ProcessListImpl::searchWindows(WindowSearchType search, const std::string& group)
++  WindowSearchPtr ProcessListImpl::searchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, const std::string& group)
+   {
+-    return searchWindows(search, getProcessSet(group));
++    return prepareSearchWindows(oldsearch, search, getProcessSet(group));
+   }
+   void ProcessListImpl::stop(const std::string& group)
+   {
+     stop(getProcessSet(group));
+   }
+-
+-  WindowList ProcessListImpl::searchWindows(WindowSearchType search, ProcessSet& processSet)
++  WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, ProcessSet& processSet)
+   {
+     WindowSearchData data;
+     ProcessSet::const_iterator it = processSet.begin();
+@@ -669,11 +681,21 @@ namespace
+     m_windowSearch = processSet;
+     data.useProcessId = true;
+     data.useProcessDesktop = true;
+-    WindowMatch windowMatch;
+-    WindowSearch searchWindow(data, windowMatch, m_trc);
+-    searchWindow.search();
++    if(oldsearch.get())
++    {
++      return WindowSearchPtr(new WindowSearch(*oldsearch, data, windowMatch, m_trc));
++    }
++    else
++    {
++      return WindowSearchPtr(new WindowSearch(data, windowMatch, m_trc));
++    }
++  }
++  WindowList ProcessListImpl::searchWindows(WindowSearchType search, ProcessSet& processSet)
++  {
++    WindowSearchPtr searchWindow = prepareSearchWindows(WindowSearchPtr(), search, processSet);
++    searchWindow->search();
+     processSet = m_windowSearch;
+-    return searchWindow.getList();
++    return searchWindow->getList();
+   }
+   void ProcessListImpl::sendBreak(ProcessSet& processSet)
+   {
+@@ -749,8 +771,8 @@ namespace
+   }
+   /*
+     - send WM_CLOSE to windows found by title/class
+-    - send WM_CLOSE to visible windows of remaining processes
+     - send Ctrl-Break to remaining processes
++    - send WM_CLOSE to visible windows of remaining processes
+     - send WM_CLOSE to all windows of remaining processes
+     - wait for process termination
+ 
+@@ -766,8 +788,8 @@ namespace
+     stoppingProcesses(processSet);
+     ProcessSet remain = processSet;
+     closeWindows(searchWindows(WND_TITLE_CLASS, remain));
+-    closeWindows(searchWindows(WND_VISIBLE, remain));
+     sendBreak(remain);
++    closeWindows(searchWindows(WND_VISIBLE, remain));
+     closeWindows(searchWindows(WND_ALL, remain));
+     wait(processSet);
+ 
+@@ -883,6 +905,9 @@ namespace mSysProcess
+       WindowList findWinByTitleClassName(const std::string& group);
+       WindowList findVisibleWin(const std::string& group);
+       Time checkForTerminatedProcesses();
++
++    private:
++      WindowSearchMap m_searchMap;
+   };
+ 
+   /*
+@@ -1028,7 +1053,8 @@ namespace mSysProcess
+     control list of child processes
+   */
+   ApplicationList::Impl::Impl(TraceInterface& trc, const WatchdogSettings& settings):
+-    ProcessListImpl(trc, settings)
++    ProcessListImpl(trc, settings),
++    m_searchMap()
+   {
+     startWatchdog();
+   }
+@@ -1055,11 +1081,16 @@ namespace mSysProcess
+   }
+   WindowList ApplicationList::Impl::findWinByTitleClassName(const std::string& group)
+   {
+-    return searchWindows(WND_TITLE_CLASS, group);
++    WindowSearchPtr& search = m_searchMap[group];
++    search = searchWindows(search, WND_TITLE_CLASS, group);
++    search->search();
++    return search->getList();
+   }
+   WindowList ApplicationList::Impl::findVisibleWin(const std::string& group)
+   {
+-    return searchWindows(WND_VISIBLE, group);
++    WindowSearchPtr search = searchWindows(WindowSearchPtr(), WND_VISIBLE, group);
++    search->search();
++    return search->getList();
+   }
+   /*
+     settings for a process
+@@ -1154,6 +1185,6 @@ namespace mSysProcess
+   }
+   WindowList ApplicationList::findVisibleWin(const std::string& group)
+   {
+-    return m_pImpl->findWinByTitleClassName(group);
++    return m_pImpl->findVisibleWin(group);
+   }
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 05596223..5bb38300 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -29,17 +29,10 @@
+ #include <iomanip>
+ #include <windows.h>
+ 
+-#ifdef _MSC_VER
+-#if _MSC_VER <= 1200 // 1200 == VC6
+ #include "mSysProcessIOCountersW32.h"
+-#endif
+-#endif
+-
+ 
+ #pragma comment(lib, "User32.lib")
+ 
+-
+-
+ namespace
+ {
+    /**
+@@ -93,7 +86,7 @@ namespace
+      out << std::right << std::setfill('0');
+      out << std::setw(2) << duration.minutes << ":";
+      out << std::setw(2) << duration.seconds << ",";
+-     out << std::setw(2) << duration.milliseconds;
++     out << std::setw(3) << duration.milliseconds;
+      return out;
+    }
+    std::ostream& operator<<(std::ostream& out, const mSysTime::Timestamp& timestamp)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
+new file mode 100644
+index 00000000..bc1440b6
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSwitchWindowW32.cpp
+@@ -0,0 +1,27 @@
++// switchToWindow
++
++#include "mSysSwitchWindowW32.h"
++
++namespace
++{
++  typedef VOID (WINAPI *SwitchToThisWindowPtr)(HWND, BOOL);
++  SwitchToThisWindowPtr switchToThisWindowPtr = 0;
++  bool switchToThisWindowLoaded = false;
++}
++
++BOOL WINAPI SwitchToThisWindow(HWND hWnd, BOOL fAltTab)
++{
++  BOOL result= false;
++  if(!switchToThisWindowLoaded)
++  {
++    switchToThisWindowLoaded = true;
++    switchToThisWindowPtr = reinterpret_cast<SwitchToThisWindowPtr>
++      (GetProcAddress(GetModuleHandle("user32"), "SwitchToThisWindow"));
++  }
++  if(switchToThisWindowPtr)
++  {
++    switchToThisWindowPtr(hWnd, fAltTab);
++    result= true;
++  }
++  return result;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 2e525adc..4489266c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -4,6 +4,7 @@
+ 
+ #pragma warning (disable:4786)
+ #include "systools/mSysWindow.h"
++#include "mSysSwitchWindowW32.h"
+ #include "mSysErrorW32.h"
+ #include "mSysProcessW32.h"
+ #include "tools/StringBuffer.h"
+@@ -51,6 +52,9 @@ namespace
+       void maximize();
+       bool isTopMost();
+       void setTopMost();
++      bool switchToWindow();
++      bool setForeGroundWindow();
++      void simulateInput();
+ 
+       HWND m_hwnd;
+       DWORD m_processId;
+@@ -130,20 +134,61 @@ namespace
+       traceLastError(MinorError_HERE, "SetWindowPos", mSysError::getErrorCode());
+     }
+   }
++  bool WindowW32::switchToWindow()
++  {
++    bool result = true;
++    if(!SwitchToThisWindow(m_hwnd, false))
++    {
++      traceLastError(MinorError_HERE, "SwitchToThisWindow", mSysError::getErrorCode());
++      result = false;
++    }
++    return result;
++  }
++  bool WindowW32::setForeGroundWindow()
++  {
++    bool result = true;
++    if(!SetForegroundWindow(m_hwnd))
++    {
++      result = false;
++      traceLastError(MinorError_HERE, "SetForegroundWindow", mSysError::getErrorCode());
++    }
++    return result;
++  }
++  void WindowW32::simulateInput()
++  {
++    const KEYBDINPUT pressF5   = {VK_F5, 0,               0, 0, 0};
++    const KEYBDINPUT releaseF5 = {VK_F5, 0, KEYEVENTF_KEYUP, 0, 0};
++    INPUT input[] =
++    {
++      {INPUT_KEYBOARD},
++      {INPUT_KEYBOARD},
++    };
++    input[0].ki = pressF5;
++    input[1].ki = releaseF5;
++    UINT count = sizeof(input)/sizeof(*input);
++    int size = sizeof(*input);
++    if(SendInput(count, input, size) != count)
++    {
++      traceLastError(MinorError_HERE, "SendInput", mSysError::getErrorCode());
++    }
++  }
+   void WindowW32::activate()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "activate (%d)(%s)", m_hwnd, m_title.c_str());
+-    if(m_threadId)
++    if(!BringWindowToTop(m_hwnd))
++    {
++      traceLastError(MinorError_HERE, "BringWindowToTop", mSysError::getErrorCode());
++    }
++    if(!switchToWindow())
+     {
+-      if(!BringWindowToTop(m_hwnd))
+-      {
+-        traceLastError(MinorError_HERE, "BringWindowToTop", mSysError::getErrorCode());
+-      }
+       // if SetForegroundWindow fails sometimes
+       // set HKEY_CURRENT_USER\Control Panel\Desktop\ForegroundLockTimeout to 0
+-      if(!SetForegroundWindow(m_hwnd))
++      if(!setForeGroundWindow())
+       {
+-        traceLastError(MinorError_HERE, "SetForegroundWindow", mSysError::getErrorCode());
++        // If SetForeGroundWindow fails, we simulateInput to become
++        // the process that received the last input event.
++        simulateInput();
++        setForeGroundWindow();
+       }
+     }
+   }
+@@ -260,6 +305,9 @@ namespace mSysWindow
+     public:
+       Impl(const WindowSearchData& data, WindowSearchMatch& match,
+         MASSAI::trace::TraceInterface& trc);
++      Impl(const Impl& search, const WindowSearchData& data, WindowSearchMatch& match,
++        MASSAI::trace::TraceInterface& trc);
++
+       ~Impl();
+       void search();
+       const WindowList& getList() const;
+@@ -268,6 +316,7 @@ namespace mSysWindow
+       WindowW32& getWindow(HWND hwnd);
+ 
+     private:
++      void init();
+       void found(HWND hwnd, WindowW32& win, DWORD id, Process* pProcess);
+       void searchDesktop(const std::string& desktop);
+       void addProcess(Process* pProcess);
+@@ -337,6 +386,22 @@ namespace mSysWindow
+     m_trc(trc),
+     m_processes(),
+     m_desktopSet()
++  {
++    init();
++  }
++  WindowSearch::Impl::Impl(const Impl& search, const WindowSearchData& data, WindowSearchMatch& match,
++    MASSAI::trace::TraceInterface& trc):
++    m_data(data),
++    m_test(match),
++    m_match(),
++    m_found(search.m_found),
++    m_trc(trc),
++    m_processes(),
++    m_desktopSet()
++  {
++    init();
++  }
++  void WindowSearch::Impl::init()
+   {
+     if(m_data.useProcessId)
+     {
+@@ -361,6 +426,7 @@ namespace mSysWindow
+       m_desktopSet.insert(m_data.desktop);
+     }
+   }
++
+   WindowSearch::Impl::~Impl()
+   {}
+   void WindowSearch::Impl::addProcess(Process* pProcess)
+@@ -484,6 +550,11 @@ namespace mSysWindow
+     MASSAI::trace::TraceInterface& trc):
+     m_pImpl(new Impl(data, match, trc))
+   {}
++  WindowSearch::WindowSearch(const WindowSearch& search, const WindowSearchData& data,
++    WindowSearchMatch& match, MASSAI::trace::TraceInterface& trc):
++    m_pImpl(new Impl(*search.m_pImpl, data, match, trc))
++  {}
++
+   WindowSearch::~WindowSearch()
+   {}
+   void WindowSearch::search()
+-- 
+2.41.0.windows.1
+

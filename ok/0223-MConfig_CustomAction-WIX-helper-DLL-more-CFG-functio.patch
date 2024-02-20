@@ -1,0 +1,621 @@
+From 94995b804efba3594613fe371cec57b4903e4dad Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 30 Jul 2012 15:17:25 +0000
+Subject: [PATCH 0223/1000] MConfig_CustomAction WIX helper DLL more CFG
+ functions
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@365 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |   4 +-
+ .../src/MConfig_CustomAction.cpp              | 442 ++++++++++++++++--
+ .../src/MConfig_CustomAction.def              |   3 +
+ 3 files changed, 410 insertions(+), 39 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index 9eb797a5..dfb63f36 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,2
+-#define FILE_VER_STR     "FileVersion", "1.0.0.2\0"
++#define FILE_VER_BIN     1,0,0,3
++#define FILE_VER_STR     "FileVersion", "1.0.0.3\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 5d182bfc..9ba6f325 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -529,16 +529,76 @@ bool exec_commandline(MSIHANDLE hInstall, std::wstring& cmdLine)
+ 	return exec_hr==S_OK;
+ }
+ 
++//
++// ExtractBinary extracts the data from the Binary table row with the given ID into a file. 
++// If wzDirectory is NULL, ExtractBinary defaults to the temporary directory.
++//
++// taken from the wix library
++
++HRESULT ExtractBinary(
++    __in LPCWSTR wzBinaryId,
++    __out BYTE** pbData,
++    __out DWORD* pcbData
++    )
++{
++    HRESULT hr = S_OK;
++    LPWSTR pwzSql = NULL;
++    PMSIHANDLE hView;
++    PMSIHANDLE hRec;
++
++    // make sure we're not horked from the get-go
++    hr = WcaTableExists(L"Binary");
++    if (S_OK != hr)
++    {
++        if (SUCCEEDED(hr))
++        {
++            hr = E_UNEXPECTED;
++        }
++        ExitOnFailure(hr, "There is no Binary table.");
++    }
++
++    ExitOnNull(wzBinaryId, hr, E_INVALIDARG, "Binary ID cannot be null");
++    ExitOnNull(*wzBinaryId, hr, E_INVALIDARG, "Binary ID cannot be empty string");
++
++    hr = StrAllocFormatted(&pwzSql, L"SELECT `Data` FROM `Binary` WHERE `Name`=\'%s\'", wzBinaryId);
++    ExitOnFailure(hr, "Failed to allocate Binary table query.");
++
++    hr = WcaOpenExecuteView(pwzSql, &hView);
++    ExitOnFailure(hr, "Failed to open view on Binary table");
++
++    hr = WcaFetchSingleRecord(hView, &hRec);
++    ExitOnFailure(hr, "Failed to retrieve request from Binary table");
++
++    hr = WcaGetRecordStream(hRec, 1, pbData, pcbData);
++    ExitOnFailure(hr, "Failed to read Binary.Data.");
++
++LExit:
++    ReleaseStr(pwzSql);
++
++    return hr;
++}
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ {
++#define CFGVALUES_BINARY_ID L"CfgValues_Static"
++#define CFGERASE_BINARY_ID L"CfgErase_Static"
++#define CFGVALUES_FILENAME "CfgValuesS.exe"
++#define CFGERASE_FILENAME "CfgEraseS.exe"
++
+ 	std::wstringstream dbstrs;
+ 	std::wstringstream strbuf;
+ 
++    char* pbData = NULL;
++    DWORD cbData = 0;
++
+ 	std::wstring cmdline;
+ 	std::string strItem;
+ 	std::string del_file_name;
+ 	std::ifstream del_file;
++	std::ofstream tmp_file;
+ 	std::wstring tmp_cmdline;
++	std::string cfgvalues_filename,cfgerase_filename,tmp_params;
++    LPWSTR pwzCAData = NULL;
+ 
+ 	dbstrs << L"MSI SETUP: CA_WriteCfg" << std::endl;
+ 
+@@ -549,29 +609,68 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ 	Log_Str(dbstrs);
+ 	ExitOnFailure(hr, "Failed to initialize");
+ 
+-	LPWSTR pwzCfgValues = NULL;
+-	hr = WcaGetProperty(L"[#CfgValuesS]", &pwzCfgValues);
+-	ExitOnFailure(hr, "Failed to get pwzCfgValues property value");
+-	dbstrs << "MSI SETUP CA_WriteCfg: Read CfgValuesS [" << pwzCfgValues << "]";
+-	Log_Str(dbstrs);
++	char * pPath;
++	pPath = getenv ("TMP");
++	if (pPath==NULL) pPath="c:";
++
++/*	hr = ExtractBinary(CFGVALUES_BINARY_ID, (BYTE**)&pbData, &cbData);
++    ExitOnFailure(hr, "failed to extract binary data for CFGVALUES");
++	cfgvalues_filename.assign(pPath);
++	cfgvalues_filename.append("\\" CFGVALUES_FILENAME);
++	tmp_file.open(cfgvalues_filename, std::ios::out | std::ios::binary);
++	if (tmp_file.is_open())
++	{
++		tmp_file.write (const_cast<char *>(pbData), cbData);
++		tmp_file.close();
++	} else
++	{
++			dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGVALUES_FILENAME  << std::endl;
++			Log_Str(dbstrs);
++			hr = E_UNEXPECTED;
++			ExitOnFailure(hr, "failed to write " CFGVALUES_FILENAME);
++	};
+ 
+-	LPWSTR pwzCfgEraseS = NULL;
+-	hr = WcaGetProperty(L"[#CfgEraseS]", &pwzCfgEraseS);
+-	ExitOnFailure(hr, "Failed to get pwzCfgEraseS property value");
+-	dbstrs << "MSI SETUP CA_WriteCfg: Read CfgEraseS [" << std::wstring(pwzCfgEraseS).c_str() << "]";
++	hr = ExtractBinary(CFGERASE_BINARY_ID, (BYTE**)&pbData, &cbData);
++    ExitOnFailure(hr, "failed to extract binary data for CFGERASE");
++	cfgerase_filename.assign(pPath);
++	cfgerase_filename.append("\\" CFGERASE_FILENAME);
++	tmp_file.open(cfgerase_filename, std::ios::out | std::ios::binary);
++	if (tmp_file.is_open())
++	{
++		tmp_file.write (const_cast<char *>(pbData), cbData);
++		tmp_file.close();
++	} else
++	{
++			dbstrs << "MSI SETUP CA_WriteCfg failed to write " CFGERASE_FILENAME  << std::endl;
++			Log_Str(dbstrs);
++			hr = E_UNEXPECTED;
++			ExitOnFailure(hr, "failed to write " CFGERASE_FILENAME);
++	}
++*/
++	hr = WcaGetProperty( L"CustomActionData", &pwzCAData);
++	ExitOnFailure(hr, "failed to get CustomActionData");
++	dbstrs << "MSI SETUP CA_WriteCfg CustomActionData:" << pwzCAData << std::endl;
+ 	Log_Str(dbstrs);
+ 
+-	char * pPath;
+-	pPath = getenv ("TEMP");
+-	if (pPath==NULL) pPath="";
++	tmp_params.assign(ToNarrow(pwzCAData));
++	size_t cutPos = tmp_params.find(';');
++	if(cutPos!=std::string::npos)
++	{
++		cfgvalues_filename=tmp_params.substr(0,cutPos);
++		cfgerase_filename=tmp_params.substr(cutPos+1);
++	} else
++	{
++		hr = E_UNEXPECTED;
++		dbstrs << "MSI SETUP CA_WriteCfg wrong format of CustomActionData:" << pwzCAData << std::endl;
++		Log_Str(dbstrs);
++		ExitOnFailure(hr, " wrong format of CustomActionData");
++	}
+ 
+ 	tmp_cmdline.assign(L"\"");
+-	tmp_cmdline.append(pwzCfgEraseS);
++	tmp_cmdline.append(ToWiden(cfgerase_filename.c_str()));
+ 	tmp_cmdline.append(L"\"");
+-
+-	del_file_name.assign("\"");
+-	del_file_name.append(pPath);
+-	del_file_name.append("\\" DEL_CFG_FILE_NAME "\"");
++	del_file_name.assign(pPath);
++	del_file_name.append("\\" DEL_CFG_FILE_NAME );
+ 
+ 	del_file.open(del_file_name);
+ 	if (del_file.is_open())
+@@ -590,11 +689,12 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ 			dbstrs << "MSI SETUP CA_WriteCfg failed to open " << del_file_name.c_str() << std::endl;
+ 			Log_Str(dbstrs);
+ 	}
++
+ 	tmp_cmdline.assign(L"\"");
+-	tmp_cmdline.append(pwzCfgValues);
++	tmp_cmdline.append(ToWiden(cfgvalues_filename.c_str()));
+ 	tmp_cmdline.append(L"\" -write:\"");
+ 	tmp_cmdline.append(ToWiden(pPath));
+-	tmp_cmdline.append(L"\"");
++	tmp_cmdline.append(L"\\");
+ 
+ 	cmdline.assign(tmp_cmdline);
+ 	cmdline.append(ToWiden(SET_FILE_NAME "\""));
+@@ -617,8 +717,8 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_WriteCfg(MSIHANDLE hInstall)
+ 	exec_commandline(hInstall,cmdline);
+ 
+ LExit:
+-	ReleaseStr(pwzCfgValues);
+-	ReleaseStr(pwzCfgEraseS);
++	ReleaseStr(pwzCAData);
++
+ 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+@@ -634,6 +734,7 @@ bool JEscape( std::wstring& res, wchar_t ch, wchar_t ch1 )
+ 			if(ch1==';')
+ 			{
+ 				ret = true;
++				res.push_back( ch1 );
+ 				break;
+ 			}
+ 		res.append(L"//");
+@@ -684,6 +785,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 	};
+ 	enum eCfgSetlistFlags
+ 	{
++		cf_none,
+ 		cf_addtolist,
+ 		cf_addtolistunique,
+ 	};
+@@ -745,6 +847,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+     {
+ 		fDelete = false;
+ 		fCfgSet = cf_set;
++		fCfgSetList = cf_none;
+ 		strbuf.str(std::wstring());
+ 
+ 		if(cfg_table_condition_present)
+@@ -775,7 +878,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 		std::wstring wstrPath(pwzPath);
+ 		size_t cutPos = wstrPath.rfind(CFGPATHSEPERATOR);
+ 		if(cutPos!=std::wstring::npos) wstrPath=wstrPath.erase(cutPos);
+-		strbuf << "itm=\"" << pwzPath << "\" ";
++		strbuf << "itm=\"" << wstrPath.c_str() << "\" ";
+ 
+ 
+         hr = WcaGetRecordFormattedString(hRec, cn_Cfg_Entry_Type, &pwzType);
+@@ -818,13 +921,13 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 				fCfgSet = cf_autoinitial;
+ 			};
+ 
+-			if(strFlags.compare(L"addtolist")!=std::wstring::npos)
+-			{
+-				fCfgSetList = cf_addtolist;
+-			}
+ 			if(strFlags.compare(L"addtolistunique")!=std::wstring::npos)
+ 			{
+ 				fCfgSetList = cf_addtolistunique;
++			} else
++			if(strFlags.compare(L"addtolist")!=std::wstring::npos)
++			{
++				fCfgSetList = cf_addtolist;
+ 			}
+ 			dbstrs << L"Cfg_Entry_Flags from [CFG_TABLE_PROP] : " << pwzFlags << std::endl;
+ 			Log_Str(dbstrs);
+@@ -833,7 +936,7 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 		std::string cfg_file_name;
+ 
+ 		char * pPath;
+-		pPath = getenv ("TEMP");
++		pPath = getenv ("TMP");
+ 		if (pPath==NULL) pPath="";
+ 		std::string strPath(pPath);
+ 
+@@ -860,16 +963,35 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessCFGTable(MSIHANDLE hIns
+ 			else 
+ 				cfg_file_name=SET_FILE_NAME;
+ 		}
+-		std::string buf_filename("\""+strPath);
++		std::string buf_filename(strPath);
+ 		buf_filename.append("\\");
+ 		buf_filename.append(cfg_file_name);
+-		buf_filename.append("\"");
+ 		dbstrs << L"CA_ProcessCFGTable write Entry to " << ToWiden(buf_filename.c_str()).c_str() << std::endl;
+ 		Log_Str(dbstrs);
+ 		test_file.open(buf_filename.c_str(), std::ios::out | std::ios::app);
+-		test_file << ToNarrow(strbuf.str().c_str()) << std::endl;
+-		test_file.flush();
+-		test_file.close();
++		if (test_file.is_open())
++		{
++			test_file << ToNarrow(strbuf.str().c_str()).c_str() << std::endl;
++			test_file.flush();
++			test_file.close();
++		} else
++		{
++			DWORD err = GetLastError();
++			LPVOID lpMsgBuf;
++			FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
++						  FORMAT_MESSAGE_FROM_SYSTEM | 
++						  FORMAT_MESSAGE_IGNORE_INSERTS,
++						  NULL, 
++						  GetLastError(), 
++						  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
++						  (LPTSTR) &lpMsgBuf, 
++						  0, 
++						  NULL);
++
++			dbstrs << "MSI SETUP CA_ProcessCFGTable failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
++			Log_Str(dbstrs);
++			LocalFree( lpMsgBuf );
++		}
+ 	}
+     if (hr == E_NOMOREITEMS)
+         hr = S_OK;
+@@ -887,6 +1009,83 @@ LExit:
+     return WcaFinalize(er);
+ }
+ 
++HRESULT clearTmpCfgFile(MSIHANDLE hInstall, std::string& basePath, std::string& filename)
++{
++	HRESULT hr = S_OK;
++
++	std::wstringstream dbstrs;
++	std::ofstream test_file;
++
++	std::string buf_filename;
++	buf_filename.assign(basePath);
++	buf_filename.append("\\");
++	buf_filename.append(filename);
++	dbstrs << L"CA_ClearTmpCfgfiles" << ToWiden(buf_filename.c_str()).c_str() << std::endl;
++	Log_Str(dbstrs);
++	test_file.open(buf_filename.c_str(), std::ios::out);
++	if (test_file.is_open())
++	{
++		test_file.close();
++	} else
++	{
++		DWORD err = GetLastError();
++		LPVOID lpMsgBuf;
++		FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | 
++						FORMAT_MESSAGE_FROM_SYSTEM | 
++						FORMAT_MESSAGE_IGNORE_INSERTS,
++						NULL, 
++						GetLastError(), 
++						MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
++						(LPTSTR) &lpMsgBuf, 
++						0, 
++						NULL);
++
++		dbstrs << "CA_ClearTmpCfgfiles failed to open " << ToWiden(buf_filename.c_str()).c_str() << L" " << (LPTSTR) lpMsgBuf << std::endl;
++		Log_Str(dbstrs);
++		LocalFree( lpMsgBuf );
++		hr = E_UNEXPECTED;
++	}
++	return hr;
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_ClearTmpCfgfiles(MSIHANDLE hInstall)
++{
++	std::wstringstream dbstrs;
++
++	std::string strPath;
++	std::string cfg_file_name;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++	hr = WcaInitialize(hInstall, "CA_ClearTmpCfgfiles");
++	dbstrs << L"CA_ClearTmpCfgfiles: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	char * pPath;
++	pPath = getenv ("TMP");
++	if (pPath==NULL) pPath="";
++	strPath.assign(pPath);
++
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(DEL_CFG_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(SETINITIAL_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(AUTOINITIAL_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLIST_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_ADDLISTUNIQUE_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++	hr = clearTmpCfgFile(hInstall,strPath,std::string(SET_FILE_NAME));
++    ExitOnFailure(hr, "Failure while clearing temporary cfg files");
++
++LExit:
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessFeatureTable(MSIHANDLE hInstall)
+ {
+ 	const LPCWSTR vcsCfgTableQuery = L"SELECT `Feature`, `State`, `Feature_Condition` FROM `";
+@@ -1105,10 +1304,28 @@ extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessPropTable(MSIHANDLE hIn
+ 		if(strFlags.find(L"ifempty")!=std::wstring::npos)
+ 			fl_ifempty=true;
+ 
+-		HRESULT er = WcaSetProperty(pwzProperty,pwzValue);
+-		dbstrs << L"WcaSetProperty (" << pwzProperty << "," << pwzValue << ") ret=" << er << std::endl;
+-		Log_Str(dbstrs);
+-	}    
++		bool setit=true;
++		if(fl_ifempty)
++		{
++			if(WcaIsPropertySetW(pwzProperty))
++			{
++				setit = false;
++			}
++		}
++
++		if(setit)
++		{
++			HRESULT er = WcaSetProperty(pwzProperty,pwzValue);
++			dbstrs << L"WcaSetProperty (" << pwzProperty << "," << pwzValue << ") ret=" << er << std::endl;
++			Log_Str(dbstrs);
++		}
++		else
++		{
++			dbstrs << L"WcaSetProperty not set (" << pwzProperty << ") ifempty=" << fl_ifempty << std::endl;
++			Log_Str(dbstrs);
++		}
++
++}    
+ 
+   }
+   if (hr == E_NOMOREITEMS)
+@@ -1127,9 +1344,112 @@ LExit:
+     return WcaFinalize(er);
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_ProcessSetCfgTableTable(MSIHANDLE hInstall)
++{
++	const LPCWSTR vcsCfgTableTableQuery = L"SELECT `TableName`, `TableExec_Condition` FROM `";
++	
++	#define CA_NAMESETCFGTAB L"CA_GLOBAL_PROCESS_SETCFGTAB"
++
++	enum eCfgTableQuery
++	{
++		cn_TableName = 1,
++		cn_TableExec_Condition,
++	};
++
++	bool fl_ifempty = false;
++
++	LPWSTR pwzTableName = NULL, pwzTE_Condition = NULL;
++
++	PMSIHANDLE hView, hRec;
++
++	std::wstringstream dbstrs;
++
++	std::wstring sql_gen_select;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++
++	hr = WcaInitialize(hInstall, "CA_ProcessSetCfgTableTable");
++	dbstrs << L"MSI SETUP CA_ProcessSetCfgTableTable: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	LPWSTR pwzTablePropertyValue = NULL;
++
++	hr = WcaGetProperty(L"TABLE_TABLE_PROP", &pwzTablePropertyValue);
++	ExitOnFailure(hr, "Failed to get TABLE_TABLE_PROP property value");
++	dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Read TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "]";
++	Log_Str(dbstrs);
++
++	if (S_OK != WcaTableExists(pwzTablePropertyValue))
++	{
++		dbstrs << "MSI SETUP CA_ProcessSetCfgTableTable: Skipping CA_ProcessPropTable() because TABLE_TABLE_PROP [" << std::wstring(pwzTablePropertyValue).c_str() << "] table not present";
++		Log_Str(dbstrs);
++
++		hr = S_FALSE;
++		ExitOnFailure(hr, "Skipping CA_ProcessSetCfgTableTable()");
++	}
++
++	sql_gen_select.assign(vcsCfgTableTableQuery);
++	sql_gen_select.append(pwzTablePropertyValue);
++	sql_gen_select.append(L"`");
++	hr = WcaOpenExecuteView(sql_gen_select.c_str(), &hView);
++	ExitOnFailure(hr, "Failed to open view on [TABLE_TABLE_PROP] table");
++
++	while ((hr = WcaFetchRecord(hView, &hRec)) == S_OK)
++  {
++    hr = WcaGetRecordFormattedString(hRec, cn_TableExec_Condition, &pwzTE_Condition);
++    ExitOnFailure(hr, "failed to get TableExec_Condition from [TABLE_TABLE_PROP] table");
++    dbstrs << L"Prop_Condition from [TABLE_TABLE_PROP] Condition=" << pwzTE_Condition << std::endl;
++    Log_Str(dbstrs);
++    if (pwzTE_Condition && *pwzTE_Condition)
++    {
++      MSICONDITION condition = ::MsiEvaluateConditionW(hInstall, pwzTE_Condition);
++      if (MSICONDITION_ERROR == condition)
++      {
++        hr = E_INVALIDARG;
++        ExitOnFailure(hr, "failed to process condition from [TABLE_TABLE_PROP] table");
++      }
++      else if (MSICONDITION_FALSE == condition)
++      {
++        continue; // skip processing this entry
++      }
++    }
++
++    hr = WcaGetRecordFormattedString(hRec, cn_TableName, &pwzTableName);
++    ExitOnFailure(hr, "failed to get Propertyname from [TABLE_TABLE_PROP] table");
++	std::wstring wstrPropname(pwzTableName);
++	dbstrs << L"Propertyname from [TABLE_TABLE_PROP] Feature=" << pwzTableName << std::endl;
++	Log_Str(dbstrs);
++
++	if (pwzTableName && *pwzTableName )
++	{
++		HRESULT er = WcaSetProperty(L"CFG_TABLE_PROP",pwzTableName);
++		dbstrs << L"WcaSetProperty (" << L"CFG_TABLE_PROP" << "," << pwzTableName << ") ret=" << er << std::endl;
++		Log_Str(dbstrs);
++	}
++	else
++		continue;
++	::MsiDoAction(hInstall,CA_NAMESETCFGTAB);
++
++  }
++  if (hr == E_NOMOREITEMS)
++      hr = S_OK;
++      
++  ExitOnFailure(hr, "Failure while processing [TABLE_TABLE_PROP]");
++  hr = S_OK;
++
++LExit:
++	ReleaseStr(pwzTablePropertyValue);
++	ReleaseStr(pwzTableName);
++	ReleaseStr(pwzTE_Condition);
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
+ void fetchJavaVersions(TUNIQUESET& RegJavaVersionList)
+ {
+-	const TCHAR* java_Registry_Path = L"Software\\JavaSoft\\java Runtime Environment";
++	const TCHAR* java_Registry_Path = L"Software\\JavaSoft\\Java Runtime Environment";
+ 	const int MAX_KEY_LENGTH = 255;
+ 	const int MAX_VALUE_NAME = 16383;
+ 
+@@ -1345,6 +1665,54 @@ LExit:
+ 	ReleaseStr(pwzJPSPropertyValue);
+ 	ReleaseStr(pwzJPSBackupFValue);
+ 	
++	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++    return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_GetJavaHome(MSIHANDLE hInstall)
++{
++	std::wstringstream dbstrs;
++	std::wstring verbuf;
++	TUNIQUESET sJavaVersion;
++	TUNIQUESET sJavaHomes;
++
++	HRESULT hr = S_OK;
++	UINT er = ERROR_SUCCESS;
++
++	hr = WcaInitialize(hInstall, "CA_GetJavaHome");
++	dbstrs << L"CA_GetJavaHome: WcaInitialize " << std::hex << (int)hr << std::endl;
++	Log_Str(dbstrs);
++	ExitOnFailure(hr, "Failed to initialize");
++
++	LPWSTR pwzJVPropertyValue = NULL;
++
++	hr = WcaGetProperty(L"JAVAVERSION", &pwzJVPropertyValue);
++	ExitOnFailure(hr, "Failed to get JAVAVERSION property value");
++	dbstrs << "CA_GetJavaHome: Read JAVAVERSION (" << pwzJVPropertyValue << ")" << std::endl;
++	Log_Str(dbstrs);
++
++	verbuf.assign(L"Software\\JavaSoft\\Java Runtime Environment\\");
++	verbuf.append(pwzJVPropertyValue);
++	sJavaVersion.insert(verbuf);
++	fetchjavaHomePaths(sJavaHomes,sJavaVersion);
++	dbstrs << "Javahome:" << std::endl;
++	for(TUNIQUESET::iterator it=sJavaHomes.begin(); it!=sJavaHomes.end();++it)
++	{
++		dbstrs << (*it).c_str() << std::endl;
++	}
++	Log_Str(dbstrs);
++
++	if(!sJavaHomes.empty())
++	{
++		hr = WcaSetProperty(L"JAVAHOME", (*(sJavaHomes.begin())).c_str());
++		dbstrs << "MSI SETUP CA_GetJavaHome: SetProperty JAVAHOME (" << (*(sJavaHomes.begin())).c_str() << ") Result:" << hr << std::endl;
++		Log_Str(dbstrs);
++		ExitOnFailure(hr, "Failed to set CA_MutuallyExclusive property value");
++	}
++LExit:
++	ReleaseStr(pwzJVPropertyValue);
++
++	
+ 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index 245b3a71..034185db 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -10,3 +10,6 @@ EXPORTS
+ 	CA_ProcessFeatureTable
+ 	CA_ProcessPropTable
+ 	CA_WriteCfg
++	CA_ProcessSetCfgTableTable
++	CA_GetJavaHome
++	CA_ClearTmpCfgfiles
+-- 
+2.41.0.windows.1
+

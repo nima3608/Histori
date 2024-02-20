@@ -1,0 +1,419 @@
+From 5c62de8daacc6f5f5237742bd22ef8e081cc19da Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 19 Oct 2012 16:11:27 +0000
+Subject: [PATCH 0355/1077] Mantis 24733 - tracesToTrc using getTraceLevel()
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@421 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/src/tracesToTrc.cpp      | 345 ++----------------
+ 1 file changed, 22 insertions(+), 323 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+index f04b1b7d..c57d9854 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+@@ -7,31 +7,30 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2011 MATERNA Information & Communications
++ * Copyright (c) 2011-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
++
++// Exported
+ #include "Tools/tracesToTrc.hpp"
+ 
++// From SelfServiceCommon
+ #include "systools/mAutoMutex.hpp"
+-#include "cfgclnt/nConfigCache.hpp"
+-#include "cfgclnt/nConfigNumber.hpp"
+-#include "cfgclnt/nConfigSelection.hpp"
+-#include "cfgclnt/nConfigText.hpp"
++// For "MASSAI::trace::TraceHandle"
++#include "Tools/TraceHandle.h"
++#include "trc/TrcHdlClt.h"
++#include "trc/TrcHdlLevel.h"
+ 
+ // For SYSTEMTIME
+ #include <windows.h>
+ 
+-#include "Tools/tracesMac.hpp"
+-#include "trc/TrcHdlClt.h"
+-#include "Tools/TraceHandle.h"
+-
++// Compiler lib
+ #include <iostream>
+ #include <string>
+ 
+ 
+ 
+-
+ namespace
+ {
+ 
+@@ -39,293 +38,6 @@ namespace
+    MASSAI::trace::TraceHandle * L_TraceHandle = 0;
+ 
+ 
+-   /**
+-    *
+-    * List of possible trace level selections.
+-    *
+-   **/
+-   nConfig::selection const CfgTraceLevelValues[] =
+-   {
+-      nConfig::selection( 0, "Level 0", "No traces (lowest level)" ),
+-      nConfig::selection( 1, "Level 1", "Major error" ),
+-      nConfig::selection( 2, "Level 2", "Minor error" ),
+-      nConfig::selection( 3, "Level 3", "Major warning" ),
+-      nConfig::selection( 4, "Level 4", "Minor warning" ),
+-      nConfig::selection( 5, "Level 5", "Basic runtime" ),
+-      nConfig::selection( 6, "Level 6", "Basic process" ),
+-      nConfig::selection( 7, "Level 7", "Secondary runtime" ),
+-      nConfig::selection( 8, "Level 8",
+-         "Secondary frequent (highest level, show all)" )
+-   };
+-
+-
+-   /**
+-    *
+-    * Tracelevel configuration class.
+-    *
+-   **/
+-   class cfgTraceLevel :
+-      public nConfig::cache<traces::level,nConfig::gclSelection>
+-   {
+-
+-      traces::level uncached()
+-      {
+-         switch( getIndex() )
+-         {
+-         default:
+-         case 0: return traces::Lvl_None;
+-         case 1: return traces::Lvl_MajorError;
+-         case 2: return traces::Lvl_MinorError;
+-         case 3: return  traces::Lvl_MajorWarning;
+-         case 4: return  traces::Lvl_MinorWarning;
+-         case 5: return  traces::Lvl_BasicRuntime;
+-         case 6: return  traces::Lvl_BasicProcess;
+-         case 7: return  traces::Lvl_SecondaryRuntime;
+-         case 8: return  traces::Lvl_SecondaryFrequent;
+-         }
+-      }
+-
+-   protected:
+-
+-     /**
+-      *
+-      * This method is called, when the configuration subsystem needs
+-      * to create a new configuration item.
+-      *
+-     **/
+-      void create
+-           (
+-              char const * &               Rights,
+-              char const * &               Explanation,
+-              long &                       DefaultNdx,
+-              nConfig::selection const * & Begin,
+-              nConfig::selection const * & End
+-           )
+-      {
+-         Rights = 0;         // Use the default
+-         Explanation = "Select the amount of trace entries to be written.";
+-         DefaultNdx = 5; // Basic runtime
+-         Begin = CfgTraceLevelValues;
+-         End = CfgTraceLevelValues
+-             + sizeof(CfgTraceLevelValues)/sizeof(nConfig::selection);
+-      }
+-
+-   public:
+-
+-      cfgTraceLevel
+-         (
+-            std::string const & L_ConfigClientName,
+-            std::string const & Item
+-         ) :
+-         nConfig::cache<traces::level,nConfig::gclSelection>
+-         (
+-            Item.c_str(),
+-            L_ConfigClientName.c_str()
+-         )
+-      {
+-      }
+-
+-   private:
+-
+-      cfgTraceLevel();
+-
+-   };
+-
+-
+-   /**
+-    *
+-    * Trace file maximum size configuration class.
+-    *
+-   **/
+-   class cfgTraceMaxFilesize :
+-      public nConfig::cache<unsigned int,nConfig::gclNumber>
+-   {
+-
+-      //! Called by nConfig::cache template to get the value.
+-      unsigned int uncached()
+-      {
+-         return static_cast<unsigned int>( get() );
+-      }
+-
+-   protected:
+-
+-      //! Called by the configuration client library to create the item.
+-      void create
+-         (
+-            char const * & Rights,
+-            char const * & Explanation,
+-            long &         Def,
+-            long &         Min,
+-            long &         Max
+-         )
+-      {
+-         Rights = "rwl";
+-         Explanation = "Enter the maximum size in bytes, to which a trace"
+-                       " file may grow before it is closed and a new trace"
+-                       " file is used. Please note: Values below 1000 will"
+-                       " not be accepted.";
+-         Def = 10000000;        // Default to 10MB.
+-         Min = 1000;            // A ridiculous minimum.
+-         Max = LONG_MAX;
+-      }
+-
+-   public:
+-
+-      //! Constructor.
+-      cfgTraceMaxFilesize
+-         (
+-            std::string const & L_ConfigClientName,
+-            std::string const & Item
+-         ) :
+-         nConfig::cache<unsigned int,nConfig::gclNumber>
+-         (
+-            Item.c_str(),
+-            L_ConfigClientName.c_str()
+-         )
+-      {
+-      }
+-
+-   private:
+-
+-      //! Default constructor - intentionally not implemented.
+-      cfgTraceMaxFilesize();
+-
+-   };
+-
+-
+-   /**
+-    *
+-    * Trace path configuration class.
+-    *
+-   **/
+-   class cfgTracePath :
+-      public nConfig::cache<std::string,nConfig::gclText>
+-   {
+-
+-      //! Called by nConfig::cache template to get the value.
+-      std::string uncached()
+-      {
+-         return get();
+-      }
+-
+-   protected:
+-
+-      //! Called by the configuration client library to create the item.
+-      void create
+-         (
+-            char const * & Rights,
+-            char const * & Explanation,
+-            char const * & Def
+-         )
+-      {
+-         Rights = "rwl";
+-         Explanation = "Enter the root path for traces. Trace files will"
+-                       " be created here or in subdirectories.";
+-         Def = "trc";
+-      }
+-
+-   public:
+-
+-      //! Constructor.
+-      cfgTracePath
+-         (
+-            std::string const & L_ConfigClientName,
+-            std::string const & Item
+-         ) :
+-         nConfig::cache<std::string,nConfig::gclText>
+-         (
+-            Item.c_str(),
+-            L_ConfigClientName.c_str()
+-         )
+-      {
+-      }
+-
+-   private:
+-
+-      //! Default constructor - intentionally not implemented.
+-      cfgTracePath();
+-
+-   };
+-
+-
+-   /**
+-    *
+-    * List of possible trace level selections.
+-    *
+-   **/
+-   nConfig::selection const CfgTraceToConsole[] =
+-   {
+-      nConfig::selection( 0, "No", "Quiescent console" ),
+-      nConfig::selection( 1, "Yes", "Duplicate trace output to console" )
+-   };
+-
+-
+-   /**
+-    *
+-    * Tracelevel configuration class.
+-    *
+-   **/
+-   class cfgTraceToConsole :
+-      public nConfig::cache<bool,nConfig::gclSelection>
+-   {
+-
+-      bool uncached()
+-      {
+-         switch( getIndex() )
+-         {
+-         default:
+-         case 0: return false;
+-         case 1: return true;
+-         }
+-      }
+-
+-   protected:
+-
+-     /**
+-      *
+-      * This method is called, when the configuration subsystem needs
+-      * to create a new configuration item.
+-      *
+-     **/
+-      void create
+-           (
+-              char const * &               Rights,
+-              char const * &               Explanation,
+-              long &                       DefaultNdx,
+-              nConfig::selection const * & Begin,
+-              nConfig::selection const * & End
+-           )
+-      {
+-         Rights = 0;         // Use the default
+-         Explanation = "Shall traces be written to the console too?";
+-         DefaultNdx = 0; // No
+-         Begin = CfgTraceToConsole;
+-         End = CfgTraceToConsole
+-             + sizeof(CfgTraceToConsole)/sizeof(nConfig::selection);
+-      }
+-
+-   public:
+-
+-      cfgTraceToConsole
+-         (
+-            std::string const & L_ConfigClientName,
+-            std::string const & Item
+-         ) :
+-         nConfig::cache<bool,nConfig::gclSelection>
+-         (
+-            Item.c_str(),
+-            L_ConfigClientName.c_str()
+-         )
+-      {
+-      }
+-
+-   private:
+-
+-      cfgTraceToConsole();
+-
+-   };
+-
+-
+ }
+ 
+ 
+@@ -348,20 +60,6 @@ class tracesToTrc::writer::impl
+    //! Holds the complete configuration path prefix.
+    std::string const                    M_APrefix;
+ 
+-   Materna::MSSD::mutexSemaphore        M_Mutex;
+-
+-   //! Trace level configuration object.
+-   cfgTraceLevel                        M_TraceLevel;
+-
+-   //! Trace file size maximum configuration object.
+-   cfgTraceMaxFilesize                  M_TraceMaxFilesize;
+-
+-   //! Trace path configuration object.
+-   cfgTracePath                         M_TracePath;
+-
+-   //! Trace to console configuration object.
+-   cfgTraceToConsole                    M_TraceToConsole;
+-
+    trcHandle                            M_TrcHdl;
+ 
+ public:
+@@ -372,11 +70,6 @@ public:
+          (
+             std::string( Name ) + ".Trace control."
+          ),
+-      M_Mutex(),
+-      M_TraceLevel( Name, M_APrefix + "Tracelevel" ),
+-      M_TraceMaxFilesize( Name, M_APrefix + "File size maximum" ),
+-      M_TracePath( Name, M_APrefix + "File path" ),
+-      M_TraceToConsole( Name, M_APrefix + "To console" ),
+       M_TrcHdl( openTraceHandle( Name ) )
+    {
+       if( !L_TraceHandle )
+@@ -401,7 +94,19 @@ public:
+    //! Implementation class method - like interface class method.
+    traces::level currentLevel()
+    {
+-      return M_TraceLevel.cached();
++      long const lev = getTraceLevel( M_TrcHdl );
++      switch( lev )
++      {
++      case 0: return traces::Lvl_None;
++      case 1: return traces::Lvl_MajorError;
++      case 2: return traces::Lvl_MinorError;
++      case 3: return traces::Lvl_MajorWarning;
++      case 4: return traces::Lvl_MinorWarning;
++      case 5: return traces::Lvl_BasicRuntime;
++      case 6: return traces::Lvl_BasicProcess;
++      case 7: return traces::Lvl_SecondaryRuntime;
++      default: return traces::Lvl_SecondaryFrequent;
++      }
+    }
+ 
+    //! Implementation class method - like interface class method.
+@@ -423,12 +128,6 @@ public:
+          std::string AllEntry = Timestamp;
+          AllEntry += Entry;
+          //
+-         if( M_TraceToConsole.cached() )
+-         {
+-            // Do not re-enter.
+-            Materna::MSSD::autoMutex AutoMutex( M_Mutex );
+-            std::cout << AllEntry << std::endl;
+-         }
+          writeTraceCooked( M_TrcHdl, AllEntry.c_str() );
+       }
+       catch( ... )
+-- 
+2.41.0.windows.1
+

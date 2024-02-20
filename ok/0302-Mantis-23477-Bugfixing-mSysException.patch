@@ -1,0 +1,1036 @@
+From 42b21d1a543d73209015690b36a4cdcfe9a168bd Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 2 Aug 2012 13:37:58 +0000
+Subject: [PATCH 0302/1077] Mantis 23477 - Bugfixing mSysException
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@367 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysException.hpp | 127 ++++-
+ .../Massai/cpp/Systools/makefile.mak          |  18 +-
+ .../cpp/Systools/src/mSysExceptionW32.cpp     | 521 +++++++++++++++++-
+ .../Massai/cpp/Systools/src/mSysMain.cpp      | 100 +++-
+ .../Massai/cpp/Systools/src/mSysMainTrace.cpp |  14 +-
+ .../Massai/cpp/Systools/src/mSysThreadW32.cpp |   8 +-
+ 6 files changed, 715 insertions(+), 73 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
+index 1e6f3912..1ab08d6c 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysException.hpp
+@@ -103,6 +103,62 @@ namespace mSysException
+    };
+ 
+ 
++   /**
++    *
++    * Objects of this class will be thrown representing non-C++ exceptions.
++    *
++   **/
++   class exception : public std::exception
++   {
++
++   public:
++
++      //! Implementation class forward.
++      class impl;
++
++      //! Implementation object reference.
++      impl * M_Impl;
++
++      /**
++       *
++       * Default constructor.
++       *
++      **/
++      exception();
++
++      /**
++       *
++       * Copy constructor.
++       *
++       * @param src:            Where to copy from.
++       *
++      **/
++      exception( exception const & src );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~exception() throw();
++
++      /**
++       *
++       * Return exception explanation.
++       *
++       * @return:               C-String.
++       *
++      **/
++      virtual char const * what() const;
++
++   private:
++
++      //! Assignment - intentionally not implemented.
++      exception & operator=( exception const & src );
++
++   };
++
++
+    /**
+     *
+     * Translate a Microsoft Structured Exception to a std::exception. This
+@@ -111,49 +167,68 @@ namespace mSysException
+     * Example use:
+     *
+     * ---------------------------------------------------------------------
++    *
++    *   void function_1st_level_catch_std()
++    *   {
+     *      try
+     *      {
+-    *         __try
+-    *         {
+-    *            something_dangerous();
+-    *         }
+-    *         __except
+-    *            (
+-    *               mSysException::filter_throw_std_exception
+-    *                  (
+-    *                     GetExceptionInformation()
+-    *                  )
+-    *            )
+-    *         {
+-    *         }
++    *         // ... and call the SE-catching method.
++    *         function_2nd_level_catchSE();
+     *      }
+     *      catch( std::exception & x )
+     *      {
+-    *          cout << x.what();
++    *         // Exception occured, handle the translated
++    *         // std::exception
++    *         cout << x.what();
++    *      }
++    *   }
++    *
++    *
++    *   void function_2nd_level_catchSE()
++    *   {
++    *      mSysException::exception * sysex = 0;
++    *      __try
++    *      {
++    *         // Do something daring ...
++    *         ...
++    *      }
++    *      __except
++    *         (
++    *            mSysException::filter_create
++    *               (
++    *                  sysex,
++    *                  GetExceptionInformation()
++    *               )
++    *         )
++    *      {
++    *         if( sysex )
++    *         {
++    *            // Here we throw the SEH exception as a std::exception
++    *            throw( *sysex );
++    *         }
+     *      }
++    *   }
++    *
+     * ---------------------------------------------------------------------
+     *
++    *
++    * @param dst:       Where to store the generated exception.
++    *                   Please note: We need to store it somewhere safe,
++    *                   because we cannot throw a c++ exception from
++    *                   within the __except stetement.
++    *
+     * @param pointers:  As given by the GetExceptionInformation().
+     *
+     * @return:          EXCEPTION_EXECUTE_HANDLER
+     *
+    **/
+-   int filter_throw_std_exception
++   int filter_create
+       (
+-         EXCEPTION_POINTERS *   pointers
++         exception * &                  dst,
++         EXCEPTION_POINTERS *           pointers
+       );
+ 
+ 
+-   /**
+-    *
+-    * Objects of this class will be thrown representing non-C++ exceptions.
+-    *
+-   **/
+-   class exception : public std::exception
+-   {
+-   };
+-
+-
+ } // namespace mSysException
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index ab751849..04b5f7a3 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -45,19 +45,27 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+ 
+ ######################################################################
+ 
+-MY_BIN1 =               $(_BIN)\TestSysProcess.exe
++MY_BIN1 =               $(_BIN)\TestSysMain.exe
+ 
+ MY_BIN1_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN1_OBJS =          $(_OBJ)\TestSysProcess.obj
++MY_BIN1_OBJS =          $(_OBJ)\TestSysMain.obj
+ 
+ ######################################################################
+ 
+-MY_BIN2 =               $(_BIN)\TestSysThread.exe
++MY_BIN2 =               $(_BIN)\TestSysProcess.exe
+ 
+-MY_BIN2_USER_LIBS =     $(LIB_SYSTOOLS)
++MY_BIN2_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN2_OBJS =          $(_OBJ)\TestSysThread.obj
++MY_BIN2_OBJS =          $(_OBJ)\TestSysProcess.obj
++
++######################################################################
++
++MY_BIN3 =               $(_BIN)\TestSysThread.exe
++
++MY_BIN3_USER_LIBS =     $(LIB_SYSTOOLS)
++
++MY_BIN3_OBJS =          $(_OBJ)\TestSysThread.obj
+ 
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
+index 9530b5c1..1f2670cb 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysExceptionW32.cpp
+@@ -24,20 +24,27 @@
+ #include "mSysDebug.hpp"
+ 
+ // Compiler lib
++#include <excpt.h>
+ #include <iomanip>
+ #include <sstream>
+ 
++#include <iostream>
++using namespace std;
++
++
++
++#if 0
++
+ 
+ 
+ #define MSYSEXCEPTION_DEFAULT( name ) class name : public sex \
+       { \
+          friend class localImpl; \
+-      protected: \
++      public: \
+          explicit name( EXCEPTION_POINTERS const * ExPtrs ) : \
+             sex(ExPtrs) \
+          { \
+          } \
+-      public: \
+          name( name const & Src ) : \
+             sex( Src ) \
+          { \
+@@ -99,7 +106,7 @@ public:
+       }
+ 
+       sex( sex const & Src ) :
+-         mSysException::exception( Src ),
++         mSysException::exception(),
+          M_ExceptionPtrs( Src.M_ExceptionPtrs )
+       {
+       }
+@@ -324,15 +331,13 @@ public:
+ 
+       friend class localImpl;
+ 
+-   protected:
++   public:
+ 
+       explicit no_memory (EXCEPTION_POINTERS const * ExPtrs) :
+          sex( ExPtrs )
+       {
+       }
+ 
+-   public:
+-
+       no_memory( no_memory const & Src ) :
+          sex( Src )
+       {
+@@ -509,12 +514,514 @@ int mSysException::filter_throw_std_exception
+       EXCEPTION_POINTERS *   pointers
+    )
+ {
+-   localImpl::translateSE( 0, pointers );
++   static int Count = 0;
++   if( !Count )
++   {
++      Count += 1;
++      puts("mSysException::filter_throw_std_exception ...");
++      localImpl::translateSE( 0, pointers );
++   }
+    return EXCEPTION_EXECUTE_HANDLER;
+ }
+ 
+ 
+ 
++#endif // #if 0
++
++
++
++namespace
++{
++
++
++   EXCEPTION_RECORD * create( EXCEPTION_RECORD const * src )
++   {
++      EXCEPTION_RECORD * dst = 0;
++      if( src )
++      {
++         dst = new EXCEPTION_RECORD;
++         dst->ExceptionCode = src->ExceptionCode;
++         dst->ExceptionFlags = src->ExceptionFlags;
++         dst->ExceptionRecord = create( src->ExceptionRecord );
++         dst->ExceptionAddress = src->ExceptionAddress;
++         DWORD const nx = src->NumberParameters;
++         for( DWORD ix = 0; ix < nx; ++ix )
++         {
++            dst->ExceptionInformation[ix] = src->ExceptionInformation[ix];
++         }
++         dst->NumberParameters = nx;
++      }
++      return dst;
++   }
++
++
++   CONTEXT * create( CONTEXT const * src )
++   {
++      CONTEXT * dst = 0;
++      if( src )
++      {
++         dst = new CONTEXT;
++         memcpy( dst, src, sizeof(CONTEXT) );
++      }
++      return dst;
++   }
++
++
++   EXCEPTION_POINTERS copy( EXCEPTION_POINTERS const & src )
++   {
++      EXCEPTION_POINTERS dst;
++      dst.ExceptionRecord = create( src.ExceptionRecord );
++      dst.ContextRecord = create( src.ContextRecord );
++      return dst;
++   }
++
++
++} // namespace
++
++
++
++namespace mSysException
++{
++
++
++   /**
++    *
++    * Base class for the here generated exceptions.
++    *
++   **/
++   class exception::impl
++   {
++
++      EXCEPTION_POINTERS const M_ExceptionPtrs;
++
++   protected:
++
++      impl( impl const & Src ) :
++         M_ExceptionPtrs( copy( Src.M_ExceptionPtrs ) )
++      {
++      }
++
++   public:
++
++      explicit impl( EXCEPTION_POINTERS const * ExPtrs ) :
++         M_ExceptionPtrs( copy( *ExPtrs ) )
++      {
++      }
++
++      virtual ~impl()
++      {
++      }
++
++      unsigned code() const
++      {
++         return M_ExceptionPtrs.ExceptionRecord->ExceptionCode;
++      }
++
++      void * address() const
++      {
++         return M_ExceptionPtrs.ExceptionRecord->ExceptionAddress;
++      }
++
++      EXCEPTION_POINTERS const * info() const
++      {
++         return &M_ExceptionPtrs;
++      }
++
++      char const * name() const
++      {
++         unsigned const Code = code();
++         switch( Code )
++         {
++         case STATUS_NO_MEMORY:
++            return "No Memory";
++         case STATUS_ACCESS_VIOLATION:
++            return "Access Violation";
++         case STATUS_DATATYPE_MISALIGNMENT:
++            return "Datatype Misalignment";
++         case STATUS_BREAKPOINT:
++            return "Breakpoint";
++         case STATUS_SINGLE_STEP:
++            return "Single Step";
++         case STATUS_ARRAY_BOUNDS_EXCEEDED:
++            return "Array Bounds Exceeded";
++         case STATUS_FLOAT_DENORMAL_OPERAND:
++            return "Float Denormal Operand";
++         case STATUS_FLOAT_DIVIDE_BY_ZERO:
++            return "Float Divide by Zero";
++         case STATUS_FLOAT_INEXACT_RESULT:
++            return "Float Inexact Result";
++         case STATUS_FLOAT_INVALID_OPERATION:
++            return "Float Invalid Operation";
++         case STATUS_FLOAT_OVERFLOW:
++            return "Float Overflow";
++         case STATUS_FLOAT_STACK_CHECK:
++            return "Float Stack Check";
++         case STATUS_FLOAT_UNDERFLOW:
++            return "Float Underflow";
++         case STATUS_INTEGER_DIVIDE_BY_ZERO:
++            return "Integer Divide by Zero";
++         case STATUS_INTEGER_OVERFLOW:
++            return "Integer Overflow";
++         case STATUS_PRIVILEGED_INSTRUCTION:
++            return "Privileged Instruction";
++         case STATUS_IN_PAGE_ERROR:
++            return "In Page Error";
++         case STATUS_ILLEGAL_INSTRUCTION:
++            return "Illegal Instruction";
++         case STATUS_NONCONTINUABLE_EXCEPTION:
++            return "Noncontinuable Exception";
++         case STATUS_STACK_OVERFLOW:
++            return "Stack Overflow";
++         case STATUS_INVALID_DISPOSITION:
++            return "Invalid Disposition";
++         case STATUS_GUARD_PAGE_VIOLATION:
++            return "Guard Page";
++         case STATUS_INVALID_HANDLE:
++            return "Invalid Handle";
++         case 0xE06D7363:
++            return "Microsoft C++ Exception";
++         default:
++            {
++               static char buf [11] =
++                  {
++                     '0', 'x',
++                     '0', '0', '0', '0', '0', '0', '0', '0', '0'
++                  };
++               return _itoa( Code, &buf[2], 16 );
++            }
++         }
++      }
++
++      virtual std::string const whatElse() const
++      {
++         return "";
++      }
++
++      char const * what() const
++      {
++         //TODO: Memory leak!
++         std::string * Expl = new std::string( name() );
++         std::ostringstream  Oss;
++         mSysDebug::callStack CallStack( info()->ContextRecord );
++         mSysDebug::callStackItem const * Item = CallStack.itemFirst();
++         *Expl += whatElse();
++         if( Item )
++         {
++            while( Item )
++            {
++               Oss
++                  << "   " << std::hex << std::setfill('0') << std::setw(8)
++                  << Item->getAddress() << std::dec
++                  << "   " << Item->getModule()
++                  << "   " << Item->getSymbol();
++               if( Item->srcAvailable() )
++               {
++                  Oss
++                     << " " << Item->getSrcFile()
++                     << "(" << Item->getSrcLine() << ")";
++               }
++               Oss << std::endl;
++               Item = CallStack.itemNext();
++            }
++            *Expl += ", Stack=\n";
++            *Expl += Oss.str();
++         }
++         else
++         {
++            *Expl += ", Stack corrupted!";
++         }
++         return Expl->c_str();
++      }
++
++   private:
++
++      impl();
++
++      impl & operator=( impl const & Src );
++
++   };
++
++
++   /**
++    *
++    * Exceptions generated due to "access-violation" events.
++    *
++   **/
++   class access_violation : public exception::impl
++   {
++
++   public:
++
++      explicit access_violation( EXCEPTION_POINTERS const * ExPtrs ) :
++         exception::impl( ExPtrs )
++      {
++      }
++
++      std::string const whatElse() const
++      {
++         /*
++          * From MSDN:
++          *
++          * The first element of the array contains a read-write flag that
++          * indicates the type of operation that caused the access
++          * violation. If this value is zero, the thread attempted to read
++          * the inaccessible data. If this value is 1, the thread attempted
++          * to write to an inaccessible address. If this value is 8, the
++          * thread causes a user-mode data execution prevention (DEP)
++          * violation.
++          *
++          * The second array element specifies the virtual address of the
++          * inaccessible data.
++          */
++         std::ostringstream Oss;
++         Oss << ", ";
++         int const Access =
++            info()->ExceptionRecord->ExceptionInformation[0];
++         switch( Access )
++         {
++         case 0:
++            // Read data attempt.
++            Oss << "reading from 0x";
++            break;
++         case 1:
++            // Write data attempt.
++            Oss << "writing to 0x";
++            break;
++         case 8:
++            // Execute attempt.
++            Oss << "user mode data execution prevented at 0x";
++            break;
++         default:
++            Oss << "unknown access type (" << Access << ") at 0x";
++         }
++         Oss << std::hex << inaccessible_address();
++         return Oss.str();
++      }
++
++      unsigned long inaccessible_address() const
++      {
++         return info()->ExceptionRecord->ExceptionInformation[1];
++      }
++
++   private:
++
++      access_violation();
++
++      access_violation & operator=( access_violation const & Src );
++
++   };
++
++
++   /**
++    *
++    * Exceptions generated due to "no memory" conditions.
++    *
++   **/
++   class no_memory : public exception::impl
++   {
++
++   public:
++
++      explicit no_memory (EXCEPTION_POINTERS const * ExPtrs) :
++         mSysException::exception::impl( ExPtrs )
++      {
++      }
++
++      no_memory( no_memory const & Src ) :
++         mSysException::exception::impl( Src )
++      {
++      }
++
++      size_t mem_size() const
++      {
++         return info()->ExceptionRecord->ExceptionInformation[0];
++      }
++
++      std::string const whatElse() const
++      {
++         std::ostringstream Oss;
++         Oss << ", could not get " << mem_size() << " bytes";
++         return Oss.str();
++      }
++
++   private:
++
++      no_memory();
++
++      no_memory & operator=( no_memory const & Src );
++
++   };
++
++
++#define EXCEPTION_DEFAULT( name ) class name : public exception::impl \
++      { \
++      public: \
++         explicit name( EXCEPTION_POINTERS const * ExPtrs ) : \
++            mSysException::exception::impl( ExPtrs ) \
++         { \
++         } \
++         name( name const & Src ) : \
++            mSysException::exception::impl( Src ) \
++         { \
++         } \
++      private: \
++         name(); \
++         name & operator=( name const & Src ); \
++      };
++
++
++   EXCEPTION_DEFAULT( datatype_misalignment )
++   EXCEPTION_DEFAULT( breakpoint )
++   EXCEPTION_DEFAULT( single_step )
++   EXCEPTION_DEFAULT( array_bounds_exceeded )
++   EXCEPTION_DEFAULT( flt_denormal_operand )
++   EXCEPTION_DEFAULT( flt_divide_by_zero )
++   EXCEPTION_DEFAULT( flt_inexact_result )
++   EXCEPTION_DEFAULT( flt_invalid_operation )
++   EXCEPTION_DEFAULT( flt_overflow )
++   EXCEPTION_DEFAULT( flt_stack_check )
++   EXCEPTION_DEFAULT( flt_underflow )
++   EXCEPTION_DEFAULT( int_divide_by_zero )
++   EXCEPTION_DEFAULT( int_overflow )
++   EXCEPTION_DEFAULT( priv_instruction )
++   EXCEPTION_DEFAULT( in_page_error )
++   EXCEPTION_DEFAULT( illegal_instruction )
++   EXCEPTION_DEFAULT( noncontinuable_exception )
++   EXCEPTION_DEFAULT( stack_overflow )
++   EXCEPTION_DEFAULT( invalid_disposition )
++   EXCEPTION_DEFAULT( guard_page )
++   EXCEPTION_DEFAULT( invalid_handle )
++   EXCEPTION_DEFAULT( microsoft_cpp )
++
++
++
++
++   int filter_create
++      (
++         mSysException::exception * &      dst,
++         EXCEPTION_POINTERS *              ExPtrs
++      )
++   {
++      dst = new mSysException::exception;
++      switch( ExPtrs->ExceptionRecord->ExceptionCode )
++      {
++      case STATUS_NO_MEMORY:
++         dst->M_Impl = new no_memory(ExPtrs);
++         break;
++      case STATUS_ACCESS_VIOLATION:
++         dst->M_Impl = new access_violation( ExPtrs);
++         break;
++      case STATUS_DATATYPE_MISALIGNMENT:
++         dst->M_Impl = new datatype_misalignment(ExPtrs);
++         break;
++      case STATUS_BREAKPOINT:
++         dst->M_Impl = new breakpoint(ExPtrs);
++         break;
++      case STATUS_SINGLE_STEP:
++         dst->M_Impl = new single_step(ExPtrs);
++         break;
++      case STATUS_ARRAY_BOUNDS_EXCEEDED:
++         dst->M_Impl = new array_bounds_exceeded(ExPtrs);
++         break;
++      case STATUS_FLOAT_DENORMAL_OPERAND:
++         dst->M_Impl = new flt_denormal_operand(ExPtrs);
++         break;
++      case STATUS_FLOAT_DIVIDE_BY_ZERO:
++         dst->M_Impl = new flt_divide_by_zero(ExPtrs);
++         break;
++      case STATUS_FLOAT_INEXACT_RESULT:
++         dst->M_Impl = new flt_inexact_result(ExPtrs);
++         break;
++      case STATUS_FLOAT_INVALID_OPERATION:
++         dst->M_Impl = new flt_invalid_operation(ExPtrs);
++         break;
++      case STATUS_FLOAT_OVERFLOW:
++         dst->M_Impl = new flt_overflow(ExPtrs);
++         break;
++      case STATUS_FLOAT_STACK_CHECK:
++         dst->M_Impl = new flt_stack_check(ExPtrs);
++         break;
++      case STATUS_FLOAT_UNDERFLOW:
++         dst->M_Impl = new flt_underflow(ExPtrs);
++         break;
++      case STATUS_INTEGER_DIVIDE_BY_ZERO:
++         dst->M_Impl = new int_divide_by_zero(ExPtrs);
++         break;
++      case STATUS_INTEGER_OVERFLOW:
++         dst->M_Impl = new int_overflow(ExPtrs);
++         break;
++      case STATUS_PRIVILEGED_INSTRUCTION:
++         dst->M_Impl = new priv_instruction(ExPtrs);
++         break;
++      case STATUS_IN_PAGE_ERROR:
++         dst->M_Impl = new in_page_error(ExPtrs);
++         break;
++      case STATUS_ILLEGAL_INSTRUCTION:
++         dst->M_Impl = new illegal_instruction(ExPtrs);
++         break;
++      case STATUS_NONCONTINUABLE_EXCEPTION:
++         dst->M_Impl = new noncontinuable_exception(ExPtrs);
++         break;
++      case STATUS_STACK_OVERFLOW:
++         dst->M_Impl = new stack_overflow(ExPtrs);
++         break;
++      case STATUS_INVALID_DISPOSITION:
++         dst->M_Impl = new invalid_disposition(ExPtrs);
++         break;
++      case STATUS_GUARD_PAGE_VIOLATION:
++         dst->M_Impl = new guard_page(ExPtrs);
++         break;
++      case STATUS_INVALID_HANDLE:
++         dst->M_Impl = new invalid_handle(ExPtrs);
++         break;
++      case 0xE06D7363:
++         dst->M_Impl = new microsoft_cpp(ExPtrs);
++         break;
++      default:
++         dst->M_Impl = new exception::impl(ExPtrs);
++      }
++      return EXCEPTION_EXECUTE_HANDLER;
++   }
++
++
++
++   char const * exception::what() const
++   {
++      if( M_Impl )
++         return M_Impl->what();
++      return "mSysException failure!";
++   }
++
++
++
++   exception::exception() :
++      M_Impl( 0 )
++   {
++   }
++
++
++   exception::exception( exception const & src ) :
++      M_Impl( src.M_Impl )
++   {
++   }
++
++
++   exception::~exception()
++   {
++      try
++      {
++         delete M_Impl;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++
++} // namespace mSysException
++
++
++
+ //-------------------------------------------------------------------------
+ //
+ // End of file
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysMain.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMain.cpp
+index beb28a9c..2996817e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysMain.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMain.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,33 +15,33 @@
+ #include "systools/mSysMain.hpp"
+ 
+ #include "systools/mSysException.hpp"
+-#include "systools/threadException.hpp"
+ 
+ #include "systools/mSysSignal.hpp"
+ #include "systools/software_error.h"
+ 
++#include <excpt.h>
+ 
+ 
+-/*
+- *
+- * Public function - see "systools/mSysMain.hpp".
+- *
+- */
+-int mSysMain::run( int argc, char **argv, mSysMain::factory Factory )
++
++namespace
+ {
+-   //
+-   // Register for asynchroneous signals.
+-   //
+-   Materna::MSSD::sysSignal SysSignal;
+-   SysSignal.registerForAll();
+-   //
+-   // Instrument this thread (main thread) to catch system exceptions
+-   // like e.g. access violation and throw a std::exception then.
+-   //
+-   mSysException::standardException Guard;
+-   //
+-   try
++
++
++   // TODO - Hack!
++   threadException const * L_XCeptions = 0;
++
++
++   int main_3rd_level_nocatch
++      (
++         int argc, char **argv,
++         mSysMain::factory Factory
++      )
+    {
++      //
++      // Register for asynchroneous signals.
++      //
++      Materna::MSSD::sysSignal SysSignal;
++      SysSignal.registerForAll();
+       //
+       SOFTWARE_ERROR_THROW_IF_NOT( Factory );
+       //
+@@ -64,9 +64,62 @@ int mSysMain::run( int argc, char **argv, mSysMain::factory Factory )
+          return 2;
+       }
+    }
++
++
++   int main_2nd_level_catchSE
++      (
++         int argc,
++         char **argv,
++         mSysMain::factory Factory
++      )
++   {
++      mSysException::exception * SysException = 0;
++      __try
++      {
++         int R = main_3rd_level_nocatch( argc, argv, Factory );
++         return R;
++      }
++      __except
++         (
++            mSysException::filter_create
++               (
++                  SysException,
++                  GetExceptionInformation()
++               )
++         )
++      {
++         if( SysException )
++         {
++            throw *SysException;
++         }
++      }
++   }
++
++
++} // namespace
++
++
++
++/*
++ *
++ * Public function - see "systools/mSysMain.hpp".
++ *
++ */
++int mSysMain::run( int argc, char **argv, mSysMain::factory Factory )
++{
++   //
++   try
++   {
++      return main_2nd_level_catchSE( argc, argv, Factory );
++   }
+    catch( ... )
+    {
+       // Exception in main(), while calling the factory?.
++      threadException const * XCeptions = L_XCeptions;
++      if( XCeptions )
++      {
++         XCeptions->handle();
++      }
+       return 1;
+    }
+ }
+@@ -75,19 +128,20 @@ int mSysMain::run( int argc, char **argv, mSysMain::factory Factory )
+ 
+ /*
+  *
+- * Class mSysMain::process method implementation - see "systools/mSysMain.hpp".
++ * Class mSysMain::process implementation - see "systools/mSysMain.hpp".
+  *
+  */
+ mSysMain::process::process( threadException const * XCeptions ) :
+    M_XCeptions( XCeptions )
+ {
++   L_XCeptions = XCeptions;
+ }
+ 
+ 
+ 
+ /*
+  *
+- * Class mSysMain::process method implementation - see "systools/mSysMain.hpp".
++ * Class mSysMain::process implementation - see "systools/mSysMain.hpp".
+  *
+  */
+ mSysMain::process::~process() throw()
+@@ -98,7 +152,7 @@ mSysMain::process::~process() throw()
+ 
+ /*
+  *
+- * Class mSysMain::process method implementation - see "systools/mSysMain.hpp".
++ * Class mSysMain::process implementation - see "systools/mSysMain.hpp".
+  *
+  */
+ threadException const * mSysMain::process::exceptionsHandler() const
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysMainTrace.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMainTrace.cpp
+index 1bd2e025..f9626f84 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysMainTrace.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysMainTrace.cpp
+@@ -7,16 +7,13 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+ 
+ #include "systools/mSysMain.hpp"
+ 
+-#include "systools/mSysException.hpp"
+-#include "systools/threadException.hpp"
+-
+ #include "systools/mSysSignal.hpp"
+ #include "systools/software_error.h"
+ #include "trc/TraceClt.h"
+@@ -36,11 +33,6 @@ int mSysMain::runTrace( int argc, char **argv, mSysMain::factory Factory )
+    Materna::MSSD::sysSignal SysSignal;
+    SysSignal.registerForAll();
+    //
+-   // Instrument this thread (main thread) to catch system exceptions
+-   // like e.g. access violation and throw a std::exception then.
+-   //
+-   mSysException::standardException Guard;
+-   //
+    try
+    {
+       //
+@@ -84,7 +76,7 @@ int mSysMain::runTrace( int argc, char **argv, mSysMain::factory Factory )
+ 
+ /*
+  *
+- * Class mSysMain::traceProcess method implementation - see "systools/mSysMain.hpp".
++ * Class mSysMain::traceProcess method - see "systools/mSysMain.hpp".
+  *
+  */
+ mSysMain::traceProcess::traceProcess
+@@ -118,7 +110,7 @@ mSysMain::traceProcess::traceProcess
+ 
+ /*
+  *
+- * Class mSysMain::traceProcess method implementation - see "systools/mSysMain.hpp".
++ * Class mSysMain::traceProcess method - see "systools/mSysMain.hpp".
+  *
+  */
+ mSysMain::traceProcess::~traceProcess() throw()
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+index 16850e24..3d426456 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+@@ -327,18 +327,24 @@ public:
+    **/
+    void function_2nd_level_catchSE()
+    {
++      mSysException::exception * SysException = 0;
+       __try
+       {
+          function_3rd_level_nocatch();
+       }
+       __except
+          (
+-            mSysException::filter_throw_std_exception
++            mSysException::filter_create
+                (
++                  SysException,
+                   GetExceptionInformation()
+                )
+          )
+       {
++         if( SysException )
++         {
++            throw( *SysException );
++         }
+       }
+    }
+ 
+-- 
+2.41.0.windows.1
+

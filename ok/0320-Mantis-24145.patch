@@ -1,0 +1,446 @@
+From af0d486a1ba6aa05372c45bf5341d1b63a3ea957 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 13 Aug 2012 10:24:41 +0000
+Subject: [PATCH 0320/1077] Mantis 24145
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@386 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/serviceMap.hpp  |  22 ++-
+ .../cpp/Controller/src/mstarter_config.cpp    |  60 ++++++-
+ .../Massai/cpp/Controller/src/serviceMap.cpp  | 155 ++++++++++++++----
+ 3 files changed, 199 insertions(+), 38 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp b/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
+index 7447a079..d9420852 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/serviceMap.hpp
+@@ -35,6 +35,13 @@ class serviceMap
+ 
+ public:
+ 
++   /**
++    *
++    * Default constructor.
++    *
++   **/
++   serviceMap();
++
+    /**
+     *
+     * Constructor.
+@@ -54,6 +61,18 @@ public:
+    **/
+    virtual ~serviceMap() throw();
+ 
++   /**
++    *
++    * Add a range of valid portnumbers.
++    *
++    * @param first:             The first portnumber of the usable
++    *                           port range.
++    *
++    * @param last:              The last portnumber of the range.
++    *
++   **/
++   void addPortRange( unsigned first, unsigned last );
++
+    /**
+     *
+     * Replace macros $SERVANTPORT and $SERVANTPORT_LIST in a given
+@@ -71,9 +90,6 @@ public:
+ 
+ private:
+ 
+-   //! Default constructor - intentionally not implemented.
+-   serviceMap();
+-
+    //! Copy constructor - intentionally not implemented.
+    serviceMap( serviceMap const & src );
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+index 3de2473e..6e03681f 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+@@ -233,7 +233,51 @@ namespace
+     }
+     return result;
+   }
+-}
++
++  unsigned portRangeConfig( char const which[], unsigned def )
++  {
++    class cfgtype: public nConfig::gcNumber
++    {
++       std::string *            m_expl;
++       std::string const        m_which;
++       unsigned const           m_def;
++    public:
++      cfgtype( char const which[], unsigned def ) :
++         gcNumber( ( execSection + "port range." + which ).c_str(), configUser.c_str() ),
++         m_expl( 0 ),
++         m_which( which ),
++         m_def( def )
++      {
++      }
++      ~cfgtype() throw()
++      {
++         try
++         {
++            delete m_expl;
++         }
++         catch( ... )
++         {
++         }
++      }
++    private:
++      void create( char const * & rights, char const * & expl, long & def, long & min, long & max )
++         {
++            rights = "rwl";
++            m_expl = new std::string( "Specify the " );
++            *m_expl += m_which;
++            *m_expl += " limit of the range of CORBA service ports";
++            expl = m_expl->c_str();
++            def = m_def;
++            min = 0;
++            max = 0xFFFF;
++         }
++    }; // class cfgtype
++    cfgtype cfg( which, def );
++    return cfg.get();
++  }
++
++} // namespace
++
+ 
+ namespace mStarter
+ {
+@@ -294,8 +338,9 @@ namespace mStarter
+       ConfigExecList();
+       TextList getValue(const std::string& item);
+     private:
+-      ExecMap m_execMap;
+-      CEnvSubst m_substituteEnv;
++      ExecMap       m_execMap;
++      serviceMap    m_service_map;
++      CEnvSubst     m_substituteEnv;
+   };
+   /*
+     config item hardware list
+@@ -410,8 +455,14 @@ namespace mStarter
+   ConfigExecList::ConfigExecList():
+     ConfigItemBase(execSection),
+     m_execMap(),
++    m_service_map(),
+     m_substituteEnv()
+   {
++    m_service_map.addPortRange
++      (
++         portRangeConfig( "lower", 20010 ),
++         portRangeConfig( "upper", 20099 )
++      );
+     m_substituteEnv.SetBaseEnvVars();
+   }
+   TextList ConfigExecList::getValue(const std::string& item)
+@@ -423,9 +474,8 @@ namespace mStarter
+       ptr->setConfig(getConfig());
+       it= m_execMap.insert(ExecMap::value_type(item, ptr)).first;
+     }
+-    serviceMap service_map( 20010, 20099 ); //TODO configurable
+     TextList const subst_temp =
+-        service_map.substPortMacros(it->second->getValue());
++        m_service_map.substPortMacros(it->second->getValue());
+     return m_substituteEnv.substEnvList(subst_temp);
+   }
+   /*
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
+index 2c5bbc46..f69c02db 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serviceMap.cpp
+@@ -22,9 +22,11 @@
+ // Exported
+ #include "serviceMap.hpp"
+ 
++// Common header
+ #ifdef SETUP_CORBA_SERVANTS
+ #include "cfgclnt/nConfigBasicText.hpp"
+ #endif
++#include "systools/software_error.h"
+ 
+ // Compiler lib
+ #include <map>
+@@ -32,23 +34,6 @@
+ 
+ 
+ 
+-namespace
+-{
+-
+-
+-   char const c_servantport[] = "$SERVANTPORT/";
+-
+-
+-   char const c_servantlist[] = "$SERVANTPORT_LIST";
+-
+-
+-} // namespace
+-
+-
+-
+-
+-
+-
+ /**
+  *
+  * Assemble a set of services and assign port numbers from a given range.
+@@ -62,6 +47,8 @@ class serviceMap::impl
+    nConfig::basicText                           m_config;
+ #endif
+ 
++   bool                                         m_empty_range;
++
+ 
+    unsigned                                     m_port_last;
+ 
+@@ -78,10 +65,32 @@ class serviceMap::impl
+ public:
+ 
+ 
++   /**
++    *
++    * Default constructor.
++    *
++   **/
++   impl() :
++#ifdef SETUP_CORBA_SERVANTS
++      m_config( "serviceMap" ),
++#endif
++      m_empty_range( true ),
++      m_port_last( 0 ),
++      m_port_next( 0 ),
++      m_ports()
++   {
++   }
++
++
+    /**
+     *
+     * Constructor.
+     *
++    * @param first:             The first portnumber of the usable
++    *                           port range.
++    *
++    * @param last:              The last portnumber of the range.
++    *
+    **/
+    impl( unsigned first, unsigned last ) :
+ #ifdef SETUP_CORBA_SERVANTS
+@@ -104,6 +113,11 @@ public:
+    }
+ 
+ 
++   /**
++    *
++    * A subst1() sub-procedure.
++    *
++   **/
+    std::string genPort( std::string const & servant )
+    {
+       std::string dst;
+@@ -156,6 +170,11 @@ public:
+    }
+ 
+ 
++   /**
++    *
++    * A subst2() sub-procedure.
++    *
++   **/
+    std::string genPorts()
+    {
+       std::string dst;
+@@ -185,15 +204,27 @@ public:
+    typedef std::string (impl::*substL)( std::string const & );
+ 
+ 
+-   std::string s1( std::string const & src )
++   /**
++    *
++    * Substitute strings like "$SERVANTPORT/<servant>", replacing
++    * $SERVANTPORT by a number. There will be a bijective mapping between
++    * the substituting portnumber and <servant>.
++    *
++    * @param src:               The input string.
++    *
++    * @return:                  The substitution result.
++    *
++   **/
++   std::string subst1( std::string const & src )
+    {
++      char const c_subst1[] = "$SERVANTPORT/";
+       std::string dst;
+       size_t src_offset_from( 0 );
+       bool m = true;
+       do
+       {
+          size_t src_offset_found =
+-            src.find( c_servantport, src_offset_from );
++            src.find( c_subst1, src_offset_from );
+          if( src_offset_found == std::string::npos )
+          {
+             m = false;
+@@ -209,7 +240,7 @@ public:
+             // Generate replacement
+             std::string servant;
+             size_t src_offset_servant_beg =
+-               src_offset_found + sizeof(c_servantport) - 1;
++               src_offset_found + sizeof(c_subst1) - 1;
+             size_t src_offset_servant_end =
+                src.find_first_of( " ;:,", src_offset_servant_beg );
+             if( src_offset_servant_end != std::string::npos )
+@@ -240,15 +271,27 @@ public:
+    }
+ 
+ 
+-   std::string s2( std::string const & src )
++   /**
++    *
++    * Substitute strings like "$SERVANTPORT_LIST" with a comma-separated
++    * list of <portnumber>/<servant>. The list would have been built
++    * with calls to subst1().
++    *
++    * @param src:               The input string.
++    *
++    * @return:                  The substitution result.
++    *
++   **/
++   std::string subst2( std::string const & src )
+    {
++      char const c_subst2[] = "$SERVANTPORT_LIST";
+       std::string dst;
+       size_t src_offset_from( 0 );
+       bool m = true;
+       do
+       {
+          size_t src_offset_found =
+-            src.find( c_servantlist, src_offset_from );
++            src.find( c_subst2, src_offset_from );
+          if( src_offset_found == std::string::npos )
+          {
+             m = false;
+@@ -264,7 +307,7 @@ public:
+             // Generate replacement
+             dst += genPorts();
+             // Offset for next find()
+-            src_offset_from = src_offset_found + sizeof(c_servantlist) - 1;
++            src_offset_from = src_offset_found + sizeof(c_subst2) - 1;
+          }
+       } while( m );
+       if( src_offset_from != std::string::npos )
+@@ -275,6 +318,25 @@ public:
+    }
+ 
+ 
++   /**
++    *
++    * Set the range of valid portnumbers.
++    *
++    * @param first:             The first portnumber of the usable
++    *                           port range.
++    *
++    * @param last:              The last portnumber of the range.
++    *
++   **/
++   void addPortRange( unsigned first, unsigned last )
++   {
++      SOFTWARE_ERROR_THROW_IF_NOT( m_empty_range );
++      m_empty_range = false;
++      m_port_last = last;
++      m_port_next = first;
++   }
++
++
+    /**
+     *
+     * Replace macros $SERVANTPORT and $SERVANTPORT_LIST.
+@@ -303,17 +365,27 @@ public:
+    }
+ 
+ 
+-private:
+-
+-
+-   impl();
++}; // class serviceMap::impl
+ 
+ 
+-}; // class serviceMap::impl
+ 
++/*
++ *
++ * Class serviceMap method implementation. See "serviceMap.hpp".
++ *
++ */
++serviceMap::serviceMap() :
++   m_impl( new serviceMap::impl )
++{
++}
+ 
+ 
+ 
++/*
++ *
++ * Class serviceMap method implementation. See "serviceMap.hpp".
++ *
++ */
+ serviceMap::serviceMap( unsigned first, unsigned last ) :
+    m_impl( new serviceMap::impl( first, last ) )
+ {
+@@ -321,6 +393,11 @@ serviceMap::serviceMap( unsigned first, unsigned last ) :
+ 
+ 
+ 
++/*
++ *
++ * Class serviceMap method implementation. See "serviceMap.hpp".
++ *
++ */
+ serviceMap::~serviceMap() throw()
+ {
+    try
+@@ -334,13 +411,31 @@ serviceMap::~serviceMap() throw()
+ 
+ 
+ 
++/*
++ *
++ * Class serviceMap method implementation. See "serviceMap.hpp".
++ *
++ */
++void serviceMap::addPortRange( unsigned first, unsigned last )
++{
++   m_impl->addPortRange( first, last );
++}
++
++
++
++/*
++ *
++ * Class serviceMap method implementation. See "serviceMap.hpp".
++ *
++ */
+ std::list<std::string> serviceMap::substPortMacros
+    (
+       std::list<std::string> const & in
+    )
+ {
+-   std::list<std::string> tmp = m_impl->sList( in, &serviceMap::impl::s1 );
+-   tmp = m_impl->sList( tmp, &serviceMap::impl::s2 );
++   std::list<std::string> tmp =
++      m_impl->sList( in, &serviceMap::impl::subst1 );
++   tmp = m_impl->sList( tmp, &serviceMap::impl::subst2 );
+    return tmp;
+ }
+ 
+-- 
+2.41.0.windows.1
+

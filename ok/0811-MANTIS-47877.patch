@@ -1,0 +1,1418 @@
+From 88917b2bd84ea33f02bb66ec0a7ed7d9407686c2 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 6 Oct 2017 11:57:03 +0000
+Subject: [PATCH 0811/1000] MANTIS 47877 Mantis 47877: Allow SITA protocol for
+ AEA peripherals - Take etx/ack protocol stack from gates software
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1273 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/serialCon/mIEtxAck.hpp     |  81 ++-
+ .../Interfaces/inc/serialCon/mPEtxAck.hpp     | 466 ++++++++++++++----
+ .../Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp  | 255 ++++++----
+ 3 files changed, 592 insertions(+), 210 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+index 94c70f71..1dee723e 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mIEtxAck.hpp
+@@ -3,11 +3,11 @@
+  *
+  * @file mIEtxAck.hpp
+  *
+- * Interface to an implementation of ETX-ACK protocol handler.
++ * Contains class mIEtxAck.
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2015 MATERNA Information & Communications
++ * Copyright (c) 2001-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,23 +15,25 @@
+ #define MIETXACK_HPP
+ 
+ 
+-#include "atbMessage.hpp"
++#include "serialCon/atbMessage.hpp"
+ #include "systools/threadException.hpp"
++#include "tools/traces.hpp"
+ 
+ 
+-//! Handle class
++//! Handle prototype.
+ class mIEtxAck_Handle;
+ 
++
+ /**
+  *
+- * ETX-ACK protocol handler implementation.
++ * Interface to an implementation of ETX-ACK protocol handler.
+  *
+ **/
+ class mIEtxAck
+ {
+ 
+    //! Implementation-private data
+-   mIEtxAck_Handle * Handle;
++   mIEtxAck_Handle * m_handle;
+ 
+ public:
+ 
+@@ -57,15 +59,48 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param segment_size:      Maximum size of transmit blocks
++    * @param max_segment_size:  Maximum size of transmit blocks
++    *
++   **/
++   mIEtxAck( unsigned max_segment_size );
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param max_segment_size:  Maximum size of transmit blocks
++    *
++    * @param exception_handler: Catch thread exceptions.
++    *
++    * @param traces_writer:     Where to send traces.
++    *
++   **/
++   mIEtxAck
++      (
++         unsigned                       max_segment_size,
++         threadException const *        exception_handler,
++         traces::writer *               traces_writer = 0
++      );
++
++   /**
++    *
++    * Constructor.
++    *
++    * @param max_segment_size:  Maximum size of transmit blocks
++    *
++    * @param ack_time_out:      Maximum time in ms to wait for ACK.
++    *
++    * @param exception_handler: Catch thread exceptions.
+     *
+-    * @param exception_handler: Optional thread exception handler
++    * @param traces_writer:     Where to send traces.
+     *
+    **/
+    mIEtxAck
+       (
+-         unsigned                       segment_size,
+-         threadException const *        exception_handler = 0
++         unsigned                       max_segment_size,
++         unsigned                       ack_time_out,
++         threadException const *        exception_handler,
++         traces::writer *               traces_writer = 0
+       );
+ 
+    /**
+@@ -86,7 +121,7 @@ public:
+     *
+     * Write data.
+     *
+-    * @param src:       The message to write.
++    * @param src:               The message to write.
+     *
+    **/
+    RC write( atbMessage const & src ) throw();
+@@ -95,7 +130,7 @@ public:
+     *
+     * Write data as nonfinal segment.
+     *
+-    * @param src:       The message to write.
++    * @param src:               The message to write.
+     *
+    **/
+    RC writeNonfinal( atbMessage const & src ) throw();
+@@ -104,31 +139,31 @@ public:
+     *
+     * Read data.
+     *
+-    * @param dst:       Upon return the message received.
++    * @param dst:               Upon return the message received.
+     *
+    **/
+    RC read( atbMessage & dst ) throw();
+ 
+    /**
+     *
+-    * Retrieve an attribute.
++    * Retrieve an attribute's value.
+     *
+-    * @param key:       The attribute name.
++    * @param key:               The attribute name.
+     *
+-    * @param buf:       There to write the attribute.
++    * @param buf:               Where to write the attribute?
+     *
+-    * @param len:       The aize of Buf.
++    * @param len:               The size of buf.
+     *
+    **/
+    void get( char const * key, char * buf, long len ) throw();
+ 
+    /**
+     *
+-    * Set an attribute.
++    * Set an attribute's value.
+     *
+-    * @param key:       The attribute name.
++    * @param key:               The attribute name.
+     *
+-    * @param value:     A zero terminated string with the new value.
++    * @param value:             A zero terminated string with the value.
+     *
+    **/
+    void set( char const * key, char const * value ) throw();
+@@ -140,14 +175,14 @@ private:
+     * Copy constructor - intentionally not implemented.
+     *
+    **/
+-   mIEtxAck( mIEtxAck const & );
++   mIEtxAck( mIEtxAck const & src );
+ 
+    /**
+     *
+-    * Assignment operator - intentionally not implemented.
++    * Assignment - intentionally not implemented.
+     *
+    **/
+-   mIEtxAck & operator=( mIEtxAck const & );
++   mIEtxAck & operator=( mIEtxAck const & src );
+ 
+ }; // class mIEtxAck
+ 
+diff --git a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+index 67835ff3..d7a7ece9 100644
+--- a/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
++++ b/SelfServiceCommon/Interfaces/inc/serialCon/mPEtxAck.hpp
+@@ -14,20 +14,49 @@
+ #ifndef METXACK_HPP
+ #define METXACK_HPP
+ 
+-#include "fsm/mfMTQueue.hpp"
+-#include "device/ASCII.h"
+-
+ 
++#include "device/ASCII.h"
++#include "fsm/mfMTQueue.hpp"
++#include "systools/mAutoMutex.hpp"
++#include "systools/mSysThread.hpp"
++#include "tools/tracesMac.hpp"
+ 
+-//! Do not check received checksum
+-#define CHK_RX_CHK 0
+-
+-#define MAX_TX_FRAME_RETRIES    2       // Allow 2 retries (3 tries)
+ 
++#if 1
+ // Mix protocol log entries into low-level trace
+ #include "matKey.h"
+ #define LOGPROTOCOL( x ) m_char_in_out.set( MATKEY_TRACE, x );
++#else
++#ifdef ETXACK_LOG_COUT
++// COUT logging
++#define LOGPROTOCOL( x ) std::cout << x << std::endl;
++#else
++// No protocol logging
++#define LOGPROTOCOL( x ) (void)0;
++#endif
++#endif
++
++
++#define XCHECK_DRC              0x01
++#define XCHECK_RX_CHECK         0x40    //!< Check received checksum
++#define MAX_TX_FRAME_RETRIES    2       //!< Allow 2 retries (3 tries)
++
++
++namespace
++{
++
++   void updateDRC( char & Drc, char C )
++   {
++      bool Carry = ( Drc & 1 ) ? true : false;
++      Drc = Drc >> 1;
++      if( Carry )
++         Drc |= 0x80;
++      else
++         Drc &= 0x7F;
++      Drc ^= C;
++      }
+ 
++}
+ 
+ 
+ /**
+@@ -48,7 +77,7 @@
+  * ETB as end marker, final (and only) segments use the ETX.
+  *
+ **/
+-template< class CIO, class xData >
++template< class CIO, class xData, int xCheck >
+ class mPEtxAck
+ {
+ 
+@@ -76,6 +105,12 @@ public:
+ 
+ private:
+ 
++   //! Time to wait for ACK.
++   unsigned const                       m_cfg_ack_time_out;
++
++   //! Create log entries while waiting for ACK.
++   unsigned const                       m_cfg_ack_wait_log_period;
++
+    //! Which bytes to DLE-escape?
+    bool                                 m_cfg_escape_all_control;
+ 
+@@ -88,15 +123,33 @@ private:
+    //! Is the protocol configured to wait for an LRC?
+    bool                                 m_cfg_rx_lrc;
+ 
++   //! Does the protocol use DRC?
++   bool                                 m_cfg_use_drc;
++
+    //! Refers the low-level character interface to use.
+    CIO &                                m_char_in_out;
+ 
+    //! Queues the ACKs received.
+    Materna::MSSD::fmtQueue<char>        m_rx_ack_queue;
+ 
+-   //! Queues the messages received.
++   //! The currently received DRC.
++   char                                 m_rx_chr_drc;
++
++   // ... is good?
++   bool                                 m_rx_chr_drc_good;
++
++   //! The currently received LRC.
++   char                                 m_rx_chr_lrc;
++
++   // ... is good?
++   bool                                 m_rx_chr_lrc_good;
++
++   //! Queues the message segments received.
+    Materna::MSSD::fmtQueue<xData>       m_rx_msg_queue;
+ 
++   //! The currently received segment.
++   xData                                m_rx_msg_segment;
++
+    /**
+     *
+     * Receiver state.
+@@ -113,15 +166,19 @@ private:
+       //! Receiving a segment, last was DLE
+       STA_DATA_DLE,
+ 
+-      //! Receiving the checksum.
+-      STA_CHK
++      //! Receiving the LRC checksum.
++      STA_CHK_LRC,
++
++      //! Receiving the LRC checksum.
++      STA_CHK_DRC
++
+    }                                    m_rx_state;
+ 
+-   //! The currently received segment.
+-   xData                                m_rx_segment;
++   //! Traces writer
++   traces::writer * const               m_traces_writer;
+ 
+-   //! The currently received LRC.
+-   char                                 m_rx_lrc;
++   //! Protext transmission.
++   Materna::MSSD::mutexSemaphore        m_tx_any_mutex;
+ 
+    /**
+     *
+@@ -136,37 +193,37 @@ private:
+    )
+       throw()
+    {
+-      int tries_left = MAX_TX_FRAME_RETRIES + 1;
+-      while( tries_left-- )
++      int Tries = MAX_TX_FRAME_RETRIES + 1;
++      while( Tries-- )
+       {
+-         if( tries_left == MAX_TX_FRAME_RETRIES )
+-         {
+-            // First (perhaps only) try.
+-            LOGPROTOCOL( "--- write ..." );
+-         }
+-         else
++         char rcvd_ack = 0;
+          {
+-            LOGPROTOCOL( "--- write - retry ..." );
+-         }
+-         m_char_in_out.write( ASCII_STX );
+-         char TxLRC = 0;
+-         char RxAck = 0;
+-         xData::const_iterator Iter( SrcFrom );
+-         while( Iter != SrcTo )
+-         {
+-            char C = *Iter;
+-            TxLRC ^= C;
+-            if( m_cfg_escape_all_control )
++            // Prevent transmit data block to mix with e.g. ACK tx.
++            Materna::MSSD::autoMutex AutoMutex( m_tx_any_mutex );
++            if( m_traces_writer )
+             {
+-               // DLE-Escape all characters below space
+-               if( ( C >= 0 ) && ( C < ' ' ) )
++               traces::writer & Trc = *m_traces_writer;
++               if( Tries == MAX_TX_FRAME_RETRIES )
+                {
+-                  m_char_in_out.write( ASCII_DLE );
++                  // First (perhaps only) try.
++                  LOGPROTOCOL( "------ write ..." );
++                  TRC_SECND_RUN( "LL: send frame" );
++               }
++               else
++               {
++                  LOGPROTOCOL( "------ write - retry ..." );
++                  TRC_SECND_RUN( "LL: send frame - retry" );
+                }
+             }
+-            else
++            m_char_in_out.write( ASCII_STX );
++            char TxLRC = 0;
++            char TxDRC = 0;
++            typename xData::const_iterator Iter( SrcFrom );
++            while( Iter != SrcTo )
+             {
+-               // DLE-Escape just the protocol-relevant control chars
++               char C = *Iter;
++               TxLRC ^= C;
++               updateDRC( TxDRC, C );
+                switch( C )
+                {
+                case ASCII_STX:
+@@ -180,33 +237,105 @@ private:
+                default:
+                   break;
+                }
++               m_char_in_out.write( static_cast<unsigned char>( C ) );
++               ++Iter;
++            }
++            TxLRC ^= SrcETX;
++            updateDRC( TxDRC, SrcETX );
++            m_char_in_out.write( static_cast<unsigned char>( SrcETX ) );
++            m_rx_ack_queue.clear();
++            m_char_in_out.write( static_cast<unsigned char>( TxLRC ) );
++            if( m_cfg_use_drc )
++            {
++               m_char_in_out.write( static_cast<unsigned char>( TxDRC ) );
+             }
+-            m_char_in_out.write( static_cast<unsigned char>( C ) );
+-            ++Iter;
+          }
+-         TxLRC ^= SrcETX;
+-         m_char_in_out.write( static_cast<unsigned char>( SrcETX ) );
+-         m_rx_ack_queue.clear();
+-         if( m_cfg_rx_lrc )
++         unsigned ack_time_waiting = 0;
++         bool ack_received = false;
++         while
++            (
++               !ack_received &&
++               (
++                  ack_time_waiting + m_cfg_ack_wait_log_period
++                  < m_cfg_ack_time_out
++               )
++            )
+          {
+-            m_char_in_out.write( static_cast<unsigned char>( TxLRC ) );
++            ack_time_waiting += m_cfg_ack_wait_log_period;
++            if (
++                  m_rx_ack_queue.read
++                     (
++                        rcvd_ack,
++                        m_cfg_ack_wait_log_period
++                     ) == Materna::MSSD::FMTQ_OK
++               )
++            {
++               ack_received = true;
++            }
++            else
++            {
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: wait for ACK " << ack_time_waiting );
++               }
++            }
+          }
+-         if( m_cfg_rx_ack )
++         if( !ack_received )
+          {
+-            m_rx_ack_queue.read( RxAck, 500 );
+-            if( RxAck == ASCII_ACK )
++            if (
++                  m_rx_ack_queue.read
++                     (
++                        rcvd_ack,
++                        m_cfg_ack_time_out - ack_time_waiting
++                     )
++                  == Materna::MSSD::FMTQ_OK
++               )
+             {
+-               LOGPROTOCOL( "--- write." );
+-               return RC_OK;
++               ack_received = true;
++            }
++            else
++            {
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: wait for ACK time-out" );
++               }
+             }
+          }
+-         else
++         if( ack_received )
+          {
+-            LOGPROTOCOL( "--- write." );
+-            return RC_OK;
++            // Read successfully
++            if( rcvd_ack == ASCII_ACK )
++            {
++               // ACK received
++               LOGPROTOCOL( "------ write." );
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: rcvd ACK" );
++               }
++               return RC_OK;
++            }
++            else if( rcvd_ack == ASCII_NAK )
++            {
++               // NAK received
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: rcvd NAK" );
++               }
++            }
++            // Received something different than ACK - wait
++            mSysThread::sleep( m_cfg_ack_time_out );
+          }
+       }
+-      LOGPROTOCOL( "--- write - failed." );
++      LOGPROTOCOL( "------ write - failed." );
++      if( m_traces_writer )
++      {
++         traces::writer & Trc = *m_traces_writer;
++         TRC_SECND_RUN( "LL: send failed" );
++      }
+       return RC_ERROR;
+    }
+ 
+@@ -220,19 +349,37 @@ public:
+     *
+     * @param max_segment_size:  The maximum size allowed for a segment.
+     *
++    * @param ack_time_out:      How long to wait for an ACK received.
++    *
++    * @param traces_writer:     Traces target.
++    *
+    **/
+-   explicit mPEtxAck( CIO & char_in_out, unsigned max_segment_size = 2000 )
++   mPEtxAck
++         (
++            CIO &               char_in_out,
++            unsigned            max_segment_size,
++            unsigned            ack_time_out,
++            traces::writer *    traces_writer
++         )
+       throw():
++      m_cfg_ack_time_out( ack_time_out ),
++      m_cfg_ack_wait_log_period( ack_time_out / 4 ),
+       m_cfg_escape_all_control( true ),
+       m_cfg_max_segment( max_segment_size ),
+       m_cfg_rx_ack( true ),
+       m_cfg_rx_lrc( true ),
++      m_cfg_use_drc( false ),
+       m_char_in_out( char_in_out ),
+       m_rx_ack_queue( 1 ),
++      m_rx_chr_drc( 0 ),
++      m_rx_chr_lrc( 0 ),
++      m_rx_chr_drc_good( true ),
++      m_rx_chr_lrc_good( true ),
++      m_rx_msg_segment(),
+       m_rx_msg_queue( 10 ),
+       m_rx_state( STA_INI ),
+-      m_rx_segment(),
+-      m_rx_lrc( 0 )
++      m_traces_writer( traces_writer ),
++      m_tx_any_mutex()
+    {
+    }
+ 
+@@ -249,6 +396,18 @@ public:
+       m_cfg_rx_ack = false;
+    }
+ 
++   /**
++    *
++    * Calling this method will set the protocol handler to not wait for
++    * an LRC following an ETX/ETB to be received.
++    *
++    */
++   void setUseDRC()
++      throw()
++   {
++      m_cfg_use_drc = true;
++   }
++
+    /**
+     *
+     * Calling this method will set the protocol handler to DLE-Escape
+@@ -279,45 +438,61 @@ public:
+     * then will feed it into its state machine, eventually letting
+     * a pending read() return.
+     *
+-    * @param RxC:       The received character.
++    * @param rx_char:           The received character.
+     *
+     */
+-   void event( char RxC )
++   void event( char rx_char )
+       throw( mPEtxAck_Fatal )
+    {
+       switch( m_rx_state )
+       {
+ 
+       case STA_INI:
+-         if( RxC == ASCII_STX )
++         if( rx_char == ASCII_STX )
+          {
+-            LOGPROTOCOL( "        --- rcvd STX" );
+-            m_rx_segment.clear();
++            LOGPROTOCOL( "------ rcvd STX" );
++            m_rx_msg_segment.clear();
+             m_rx_state = STA_DATA;
+-            m_rx_lrc = 0;
++            m_rx_chr_lrc = 0;
++            m_rx_chr_drc = 0;
+          }
+          else
+          {
+-            m_rx_ack_queue.write( RxC );
++            switch( rx_char )
++            {
++            case ASCII_ACK:
++            case ASCII_NAK:
++               m_rx_ack_queue.write( rx_char );
++               break;
++            default:
++               (void)0;
++            }
+          }
+          break;
+ 
+       case STA_DATA:
+-         switch( RxC )
++         switch( rx_char )
+          {
+          case ASCII_STX:
+-            LOGPROTOCOL( "        --- rcvd unexpected STX" );
+-            m_rx_segment.clear();
+-            m_rx_lrc = 0;
++            LOGPROTOCOL( "------ rcvd unexpected STX" );
++            if( m_traces_writer )
++            {
++               traces::writer & Trc = *m_traces_writer;
++               TRC_SECND_RUN( "LL: rcvd unexpected STX" );
++            }
++            m_rx_msg_segment.clear();
++            m_rx_chr_lrc = 0;
++            m_rx_chr_drc = 0;
+             break;
+-         case ASCII_ETB:
++         // case ASCII_ETB:
+          case ASCII_ETX:
+             LOGPROTOCOL( "        --- rcvd ETX" );
++            m_rx_chr_lrc ^= rx_char;
++            updateDRC( m_rx_chr_drc, rx_char );
+             if( m_cfg_rx_lrc )
+             {
+                // Next byte received should be LRC
+-               m_rx_state = STA_CHK;
+-               m_rx_lrc ^= RxC;
++               m_rx_state = STA_CHK_LRC;
+             }
+             else
+             {
+@@ -325,41 +500,135 @@ public:
+                m_rx_state = STA_INI;
+                // Do not send an ACK
+                // m_char_in_out.write( ASCII_ACK );
+-               m_rx_msg_queue.write( m_rx_segment );
++               m_rx_msg_queue.write( m_rx_msg_segment );
+             }
+             break;
+          case ASCII_DLE:
+             m_rx_state = STA_DATA_DLE;
+             break;
+          default:
+-            m_rx_segment.push_back( RxC );
+-            m_rx_lrc ^= RxC;
++            m_rx_msg_segment.push_back( rx_char );
++            m_rx_chr_lrc ^= rx_char;
++            updateDRC( m_rx_chr_drc, rx_char );
+          }
+          break;
+ 
+       case STA_DATA_DLE:
+-         m_rx_segment.push_back( RxC );
+-         m_rx_lrc ^= RxC;
++         m_rx_msg_segment.push_back( rx_char );
++         m_rx_chr_lrc ^= rx_char;
++         updateDRC( m_rx_chr_drc, rx_char );
+          m_rx_state = STA_DATA;
+          break;
+-      case STA_CHK:
+-         // End of frame received
+-#if CHK_RX_CHK
+-         if( RxC == m_rx_lrc  )
++
++      case STA_CHK_LRC:
++         LOGPROTOCOL( "------ check LRC" );
++         if( xCheck & XCHECK_RX_CHECK )
+          {
+-#endif
+-            LOGPROTOCOL( "        --- rcvd OK" );
+-            m_char_in_out.write( ASCII_ACK );
+-            m_rx_msg_queue.write( m_rx_segment );
+-#if CHK_RX_CHK
++            // Check received LRC
++            if( rx_char == m_rx_chr_lrc  )
++            {
++               m_rx_chr_lrc_good = true;
++            }
++            else
++            {
++               m_rx_chr_lrc_good = false;
++            }
+          }
+          else
+          {
+-            LOGPROTOCOL( "        --- rcvd wrong LRC" );
+-            m_char_in_out.write( ASCII_NAK );
++            // Do not check received LRC
++            m_rx_chr_lrc_good = true;
++         }
++         if( m_cfg_use_drc && ( xCheck & XCHECK_DRC ) )
++         {
++            m_rx_state = STA_CHK_DRC;
++         }
++         else
++         {
++            // End of frame received
++            Materna::MSSD::autoMutex AutoMutex( m_tx_any_mutex );
++            if( m_rx_chr_lrc_good )
++            {
++               LOGPROTOCOL( "------ rcvd OK" );
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: rcvd frame" );
++               }
++               m_char_in_out.write( ASCII_ACK );
++               m_rx_msg_queue.write( m_rx_msg_segment );
++            }
++            else
++            {
++               LOGPROTOCOL( "------ rcvd wrong LRC" );
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: rcvd wrong LRC" );
++               }
++               m_char_in_out.write( ASCII_NAK );
++            }
++            m_rx_state = STA_INI;
++         }
++         break;
++
++      case STA_CHK_DRC:
++         LOGPROTOCOL( "------ check DRC" );
++         if( xCheck & XCHECK_RX_CHECK )
++         {
++            // Check received LRC
++            if( rx_char == m_rx_chr_drc  )
++            {
++               m_rx_chr_drc_good = true;
++            }
++            else
++            {
++               m_rx_chr_drc_good = false;
++            }
++         }
++         else
++         {
++            // Do not check received LRC
++            m_rx_chr_drc_good = true;
++         }
++         // End of frame received
++         {
++            Materna::MSSD::autoMutex AutoMutex( m_tx_any_mutex );
++            if( m_rx_chr_lrc_good && m_rx_chr_drc_good )
++            {
++               LOGPROTOCOL( "------ rcvd OK" );
++               if( m_traces_writer )
++               {
++                  traces::writer & Trc = *m_traces_writer;
++                  TRC_SECND_RUN( "LL: rcvd frame" );
++               }
++               m_char_in_out.write( ASCII_ACK );
++               m_rx_msg_queue.write( m_rx_msg_segment );
++            }
++            else
++            {
++               if( !m_rx_chr_lrc_good  )
++               {
++                  LOGPROTOCOL( "------ rcvd wrong LRC" );
++                  if( m_traces_writer )
++                  {
++                     traces::writer & Trc = *m_traces_writer;
++                     TRC_SECND_RUN( "LL: rcvd wrong LRC" );
++                  }
++               }
++               if( !m_rx_chr_drc_good  )
++               {
++                  LOGPROTOCOL( "------ rcvd wrong DRC" );
++                  if( m_traces_writer )
++                  {
++                     traces::writer & Trc = *m_traces_writer;
++                     TRC_SECND_RUN( "LL: rcvd wrong DRC" );
++                  }
++               }
++               m_char_in_out.write( ASCII_NAK );
++            }
++            m_rx_state = STA_INI;
+          }
+-#endif
+-         m_rx_state = STA_INI;
+          break;
+ 
+       default:
+@@ -373,13 +642,13 @@ public:
+     *
+     * Read a message from the interface.
+     *
+-    * @param Dst:       Where to write the segment received.
++    * @param dst:       Where to write the segment received.
+     *
+    **/
+-   RC read( xData & Dst )
++   RC read( xData & dst )
+       throw()
+    {
+-      if( m_rx_msg_queue.read( Dst ) == Materna::MSSD::FMTQ_OK )
++      if( m_rx_msg_queue.read( dst ) == Materna::MSSD::FMTQ_OK )
+          return RC_OK;
+       else
+          return RC_ERROR;
+@@ -396,10 +665,10 @@ public:
+       throw()
+    {
+       unsigned Remaining = src.size();
+-      xData::const_iterator From( src.begin() );
++      typename xData::const_iterator From( src.begin() );
+       while( Remaining > m_cfg_max_segment )
+       {
+-         xData::const_iterator To( From + m_cfg_max_segment );
++         typename xData::const_iterator To( From + m_cfg_max_segment );
+          RC PartRC = write( From, To, ASCII_ETB );
+          if( PartRC != RC_OK )
+             return PartRC;
+@@ -420,7 +689,6 @@ public:
+       return write( src.begin(), src.end(), ASCII_ETB );
+    }
+ 
+-
+ private:
+ 
+    /**
+@@ -435,19 +703,19 @@ private:
+     * Copy constructor - intentionally not implemented.
+     *
+    **/
+-   mPEtxAck( mPEtxAck const & );
++   mPEtxAck( mPEtxAck const & src );
+ 
+    /**
+     *
+     * Assignment - intentionally not implemented.
+     *
+    **/
+-   mPEtxAck & operator=( mPEtxAck const & );
++   mPEtxAck & operator=( mPEtxAck const & src );
+ 
+ };
+ 
+ 
+-#endif
++#endif // #ifndef METXACK_HPP
+ /**
+  **************************************************************************
+  *
+diff --git a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+index 8efa2c92..440e62fa 100644
+--- a/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
++++ b/SelfServiceCommon/Massai/cpp/SerialCon/src/mIEtxAckAsy.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include "serialCon/mPEtxack.hpp"
+ 
++//#define USE_TRACE_CLIENT
+ #ifdef USE_TRACE_CLIENT
+ #include "serialCon/mPTrace.hpp"
+ #endif
+@@ -33,39 +34,51 @@
+ 
+ 
+ //! Protocol type
+-typedef mPEtxAck<matAsync,atbMessage>      xProtocol;
++typedef mPEtxAck
++            <
++               matAsync,
++               atbMessage,
++               XCHECK_RX_CHECK | XCHECK_DRC
++            >           xProtocol;
++
++
+ 
+ #ifdef USE_TRACE_CLIENT
+ //! Returncode type
+-typedef mPEtxAck<matAsync,atbMessage>::RC  xRC;
++typedef mPEtxAck
++            <
++               matAsync,
++               atbMessage,
++               XCHECK_RX_CHECK | XCHECK_DRC
++            >::RC       xRC;
+ #endif
+ 
+ 
+ 
+ /**
+  *
+- * Implementation class.
++ * m_handle class.
+  *
+ **/
+ class mIEtxAck_Handle : public mSysThread::thread
+ {
+ 
+    //! The COM-port handler.
+-   matAsync                      M_Asy;
++   matAsync                             m_asy;
+ 
+    //! The protocol handler.
+-   xProtocol                     M_Proto;
++   xProtocol                            m_proto;
+ 
+ #ifdef USE_TRACE_CLIENT
+    //! The protocol trace handler.
+-   mPTrace<xProtocol,xRC,atbMessage>  M_Trace;
++   mPTrace<xProtocol,xRC,atbMessage>    m_trace;
+ #endif
+ 
+    //! Thread function will loop while true.
+-   bool                          M_More;
++   bool                                 m_more;
+ 
+    //! Determines, if we use LH protocol
+-   bool                          M_LH;
++   bool                                 m_special_lh;
+ 
+    /**
+     *
+@@ -76,14 +89,14 @@ class mIEtxAck_Handle : public mSysThread::thread
+    {
+       unsigned char RxB = 0;
+       // Read the first byte from the COM-port
+-      MATRC RR = M_Asy.read( RxB );
+-      while( M_More )
++      MATRC RR = m_asy.read( RxB );
++      while( m_more )
+       {
+          switch( RR )
+          {
+          case MATRC_OK:
+             // Feed it to the protocol handler.
+-            M_Proto.event( static_cast<signed char>( RxB ) );
++            m_proto.event( static_cast<signed char>( RxB ) );
+             break;
+          case MATRC_NO_DATA:
+             // Nothinng to do.
+@@ -95,8 +108,7 @@ class mIEtxAck_Handle : public mSysThread::thread
+             mSysThread::sleep( 1000 );
+          }
+          // Read the next byte from the COM-port
+-         RR = M_Asy.read( RxB );
+-
++         RR = m_asy.read( RxB );
+       }
+    }
+ 
+@@ -109,17 +121,19 @@ public:
+    **/
+    mIEtxAck_Handle
+       (
+-         unsigned                       segment_size,
+-         threadException const *        exception_handler
++         unsigned                       max_segment_size,
++         unsigned                       ack_time_out,
++         threadException const *        exception_handler,
++         traces::writer *               traces_writer
+       ) :
+       thread( exception_handler ),
+-      M_Asy(),
+-      M_Proto( M_Asy, segment_size ),
++      m_asy(),
++      m_proto( m_asy, max_segment_size, ack_time_out, traces_writer ),
+ #ifdef USE_TRACE_CLIENT
+-      M_Trace( "mIEtxAckAsy", M_Proto ),
++      m_trace( "mIEtxAckAsy", m_proto ),
+ #endif
+-      M_More( true ),
+-      M_LH( false )
++      m_more( true ),
++      m_special_lh( false )
+    {
+    }
+ 
+@@ -130,7 +144,7 @@ public:
+    **/
+    ~mIEtxAck_Handle()
+    {
+-      M_More = false;
++      m_more = false;
+    }
+ 
+    /**
+@@ -141,7 +155,7 @@ public:
+    matAsync & asy()
+       throw()
+    {
+-      return M_Asy;
++      return m_asy;
+    }
+ 
+    /**
+@@ -153,13 +167,13 @@ public:
+    mPTrace<xProtocol,xRC,atbMessage> & proto()
+       throw()
+    {
+-      return M_Trace;
++      return m_trace;
+    }
+ #else
+    xProtocol & proto()
+       throw()
+    {
+-      return M_Proto;
++      return m_proto;
+    }
+ #endif
+ 
+@@ -171,7 +185,7 @@ public:
+    void setChkNone()
+       throw()
+    {
+-      M_Proto.setChkNone();
++      m_proto.setChkNone();
+    }
+ 
+    /**
+@@ -182,11 +196,11 @@ public:
+    void setLH()
+       throw()
+    {
+-      M_LH = true;
++      m_special_lh = true;
+       // Do not expect ACK
+-      M_Proto.setNoRxAck();
++      m_proto.setNoRxAck();
+       // DLE-Escape only the protocol-relevant bytes
+-      M_Proto.setEscapeMinControl();
++      m_proto.setEscapeMinControl();
+    }
+ 
+    /**
+@@ -197,9 +211,20 @@ public:
+    void setLH_RxAck()
+       throw()
+    {
+-      M_LH = true;
++      m_special_lh = true;
+       // DLE-Escape only the protocol-relevant bytes
+-      M_Proto.setEscapeMinControl();
++      m_proto.setEscapeMinControl();
++   }
++
++   /**
++    *
++    * Checksum is with DRC.
++    *
++   **/
++   void setUseDRC()
++      throw()
++   {
++      m_proto.setUseDRC();
+    }
+ 
+    /**
+@@ -210,7 +235,7 @@ public:
+    bool getLH()
+       throw()
+    {
+-      return M_LH;
++      return m_special_lh;
+    }
+ 
+ private:
+@@ -227,70 +252,119 @@ private:
+     * Copy constructor - intentionally not implemented.
+     *
+    **/
+-   mIEtxAck_Handle( mIEtxAck_Handle const & );
++   mIEtxAck_Handle( mIEtxAck_Handle const & src );
+ 
+    /**
+     *
+     * Assignment - intentionally not implemented.
+     *
+    **/
+-   mIEtxAck_Handle & operator=( mIEtxAck_Handle const & );
++   mIEtxAck_Handle & operator=( mIEtxAck_Handle const & src );
+ 
+ };
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
++**/
+ mIEtxAck::mIEtxAck() :
+-   Handle( new mIEtxAck_Handle( 2048, 0 ) )
++   m_handle( new mIEtxAck_Handle( 2048, 400, 0, 0 ) )
+ {
+ }
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
++**/
++mIEtxAck::mIEtxAck( unsigned max_segment_size ) :
++   m_handle( new mIEtxAck_Handle( max_segment_size, 400, 0, 0 ) )
++{
++}
++
++
++
++/**
++ *
++ * (see mIEtxAck.hpp)
++ *
++**/
+ mIEtxAck::mIEtxAck
+    (
+-      unsigned                  segment_size,
+-      threadException const *   exception_handler
++      unsigned                  max_segment_size,
++      threadException const *   exception_handler,
++      traces::writer *          traces_writer
+    ) :
+-   Handle( new mIEtxAck_Handle( segment_size, exception_handler ) )
++   m_handle
++      (
++         new mIEtxAck_Handle
++            (
++               max_segment_size,
++               500,
++               exception_handler,
++               traces_writer
++            )
++      )
+ {
+ }
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
++**/
++mIEtxAck::mIEtxAck
++   (
++      unsigned                  max_segment_size,
++      unsigned                  ack_time_out,
++      threadException const *   exception_handler,
++      traces::writer *          traces_writer
++   ) :
++   m_handle
++      (
++         new mIEtxAck_Handle
++            (
++               max_segment_size,
++               ack_time_out,
++               exception_handler,
++               traces_writer
++            )
++      )
++{
++}
++
++
++
++/**
++ *
++ * (see mIEtxAck.hpp)
++ *
++**/
+ mIEtxAck::~mIEtxAck()
+ {
+-   delete Handle;
++   delete m_handle;
+ }
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
+-mIEtxAck::RC mIEtxAck::write( atbMessage const & Src )
++**/
++mIEtxAck::RC mIEtxAck::write( atbMessage const & src )
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      if( Handle->getLH() )
++      if( m_handle->getLH() )
+       {
+          atbMessage SrcLH;
+          SrcLH.push_back( 's' );
+@@ -299,15 +373,15 @@ mIEtxAck::RC mIEtxAck::write( atbMessage const & Src )
+          SrcLH.push_back( ' ' );
+          SrcLH.push_back( ' ' );
+          SrcLH.push_back( ASCII_SI );
+-         SrcLH.insert( SrcLH.end(), Src.begin(), Src.end() );
++         SrcLH.insert( SrcLH.end(), src.begin(), src.end() );
+          SrcLH.push_back( ASCII_ESC );
+          SrcLH.push_back( ASCII_DC2 );
+-         if( Handle->proto().write( SrcLH ) == xProtocol::RC_OK )
++         if( m_handle->proto().write( SrcLH ) == xProtocol::RC_OK )
+             return RC_OK;
+       }
+       else
+       {
+-         if( Handle->proto().write( Src ) == xProtocol::RC_OK )
++         if( m_handle->proto().write( src ) == xProtocol::RC_OK )
+             return RC_OK;
+       }
+    }
+@@ -316,17 +390,17 @@ mIEtxAck::RC mIEtxAck::write( atbMessage const & Src )
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
+-mIEtxAck::RC mIEtxAck::writeNonfinal( atbMessage const & Src )
++**/
++mIEtxAck::RC mIEtxAck::writeNonfinal( atbMessage const & src )
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      if( Handle->proto().writeNonfinal( Src ) == xProtocol::RC_OK )
++      if( m_handle->proto().writeNonfinal( src ) == xProtocol::RC_OK )
+          return RC_OK;
+    }
+    return RC_ERROR;
+@@ -334,20 +408,20 @@ mIEtxAck::RC mIEtxAck::writeNonfinal( atbMessage const & Src )
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
+-mIEtxAck::RC mIEtxAck::read( atbMessage & Dst )
++**/
++mIEtxAck::RC mIEtxAck::read( atbMessage & dst )
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      if( Handle->getLH() )
++      if( m_handle->getLH() )
+       {
+          atbMessage DstLH;
+-         if( Handle->proto().read( DstLH ) == xProtocol::RC_OK )
++         if( m_handle->proto().read( DstLH ) == xProtocol::RC_OK )
+          {
+             if
+             (
+@@ -356,14 +430,14 @@ mIEtxAck::RC mIEtxAck::read( atbMessage & Dst )
+                ( *( DstLH.begin() + 1 ) == ASCII_VT )
+             )
+             {
+-               Dst.assign( DstLH.begin() + 6, DstLH.end() );
++               dst.assign( DstLH.begin() + 6, DstLH.end() );
+                return RC_OK;
+             }
+          }
+       }
+       else
+       {
+-         if( Handle->proto().read( Dst ) == xProtocol::RC_OK )
++         if( m_handle->proto().read( dst ) == xProtocol::RC_OK )
+             return RC_OK;
+       }
+    }
+@@ -372,19 +446,19 @@ mIEtxAck::RC mIEtxAck::read( atbMessage & Dst )
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
++**/
+ mIEtxAck::RC mIEtxAck::open()
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      if( Handle->asy().open() == MATRC_OK )
++      if( m_handle->asy().open() == MATRC_OK )
+       {
+-         Handle->start( mSysThread::PRIORITY_HIGH );
++         m_handle->start( mSysThread::PRIORITY_HIGH );
+          return RC_OK;
+       }
+    }
+@@ -393,56 +467,61 @@ mIEtxAck::RC mIEtxAck::open()
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
+-void mIEtxAck::get( char const * Key, char * Buf, long Len )
++**/
++void mIEtxAck::get( char const * key, char * Buf, long Len )
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      Handle->asy().get( Key, Buf, Len );
++      m_handle->asy().get( key, Buf, Len );
+    }
+ }
+ 
+ 
+ 
+-/*
++/**
+  *
+  * (see mIEtxAck.hpp)
+  *
+- */
+-void mIEtxAck::set( char const * Key, char const * Value )
++**/
++void mIEtxAck::set( char const * key, char const * value )
+    throw()
+ {
+-   if( Handle )
++   if( m_handle )
+    {
+-      if( !strcmp( Key, MATKEY_PROTOCOL_TYPE ) )
++      if( !strcmp( key, MATKEY_PROTOCOL_TYPE ) )
+       {
+-         if( !Value )
++         if( !value )
++         {
++            return;
++         }
++         if( !strcmp( value, "CHKNONE" ) )
+          {
++            m_handle->setChkNone();
+             return;
+          }
+-         if( !strcmp( Value, "LH" ) )
++         if( !strcmp( value, "LH" ) )
+          {
+-            Handle->setLH();
++            m_handle->setLH();
+             return;
+          }
+-         if( !strcmp( Value, "LH_RX_ACK" ) )
++         if( !strcmp( value, "LH_RX_ACK" ) )
+          {
+-            Handle->setLH_RxAck();
++            m_handle->setLH_RxAck();
+             return;
+          }
+-         if( !strcmp( Value, "CHKNONE" ) )
++         if( !strcmp( value, "USE_DRC" ) )
+          {
+-            Handle->setChkNone();
++            m_handle->setUseDRC();
+             return;
+          }
+          return;
+       }
+-      Handle->asy().set( Key, Value );
++      m_handle->asy().set( key, value );
+    }
+ }
+ 
+-- 
+2.41.0.windows.1
+

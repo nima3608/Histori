@@ -1,0 +1,1543 @@
+From 4a80db4f92219565ed0b93bd605d5ce11794ec6f Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 11 Sep 2014 18:19:09 +0000
+Subject: [PATCH 0498/1000] MANTIS 0033581 extension: Desko-Penta: support RFID
+
+massai_systools.lib
+V1.0.0.21
+
+- added mSysSmartCardReader.h/mSysSmartCardReader.h to access smart cards using the "Smart Card Resource Manager API"
+- see
+  - http://msdn.microsoft.com/en-us/library/windows/desktop/aa380149%28v=vs.85%29.aspx
+  - WinSCard.h
+- supports RFID cards only; eject is not supported
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@724 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/systools/mSysSmartCardReader.h        |   65 +
+ .../Massai/cpp/Systools/makefile.mak          |   13 +-
+ .../Systools/src/TestSysSmartCardReader.cpp   |  159 +++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   13 +-
+ .../Systools/src/mSysSmartCardReaderW32.cpp   | 1197 +++++++++++++++++
+ 5 files changed, 1444 insertions(+), 3 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysSmartCardReader.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h b/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
+new file mode 100644
+index 00000000..9354166b
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysSmartCardReader.h
+@@ -0,0 +1,65 @@
++// access smart cards
++#ifndef SYSSMARTCARDREADER_H_INCLUDED
++#define SYSSMARTCARDREADER_H_INCLUDED
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include "tools/TraceInterface.h"
++#include <string>
++#include <iostream>
++
++namespace mSysSmartCardReader
++{
++  enum CardType
++  {
++    SCT_ERROR,
++    SCT_ISO7816,
++    SCT_MIFARE,
++    SCT_OTHER,
++  };
++
++  enum ResultCode
++  {
++    SC_RC_SUCCESS,
++    SC_RC_FAILED,
++  };
++
++  class Listener
++  {
++    public:
++      Listener();
++      virtual ~Listener();
++      virtual void available();
++      virtual void unavailable();
++      virtual void absent();
++      virtual void present(CardType type, const std::string& atr);
++      virtual bool useReader(const std::string& readerName);
++  };
++
++  class CardReader
++  {
++    public:
++      virtual ~CardReader();
++
++      virtual void process() = 0;
++      virtual void stopProcessing() = 0;
++
++      virtual void setListener(Listener* pListener) = 0;
++
++      virtual ResultCode enable() = 0;
++      virtual ResultCode disable() = 0;
++
++      virtual ResultCode sendCmd(const std::string& commandAPDU, std::string& responseAPDU) = 0;
++  };
++
++  CardReader* createCardReader(MASSAI::trace::TraceInterface& trc);
++
++  std::ostream& operator<<(std::ostream& out, const CardType& data);
++  std::ostream& operator<<(std::ostream& out, const ResultCode& data);
++
++  std::string getCardTypeText(CardType data);
++  std::string getResultCodeText(ResultCode data);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index ac8a782c..b511c055 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -8,7 +8,7 @@
+ 
+ ######################################################################
+ 
+-MY_CFLAGS =             -D_WIN32_WINNT=0x0500 $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_BOOST) $(INC_PSAPI) -DIGNORE_DEPRECATED_MASSAI_HEADER
++MY_CFLAGS =             $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_BOOST) $(INC_PSAPI) -DIGNORE_DEPRECATED_MASSAI_HEADER
+ 
+ MY_LIB1 =               $(LIB_DST_SYSTOOLS)
+ 
+@@ -52,6 +52,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mSysUSBHIDW32.obj \
+                         $(_OBJ)\mSysThreadPoolW32.obj \
+                         $(_OBJ)\mSysFindComPortW32.obj \
++                        $(_OBJ)\mSysSmartCardReaderW32.obj \
+ 
+ 
+ ######################################################################
+@@ -155,5 +156,15 @@ MY_BIN11_LINKLIBS =     User32.lib setupapi.lib
+ 
+ MY_BIN11_OBJS =         $(_OBJ)\TestSysCOMPort.obj
+ 
++######################################################################
++
++MY_BIN12 =              $(_BIN)\TestSysSmartCardReader.exe
++
++MY_BIN12_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++
++MY_BIN12_LINKLIBS =     winscard.lib
++
++MY_BIN12_OBJS =         $(_OBJ)\TestSysSmartCardReader.obj
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysSmartCardReader.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysSmartCardReader.cpp
+new file mode 100644
+index 00000000..bdf0d061
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysSmartCardReader.cpp
+@@ -0,0 +1,159 @@
++// Test mSysSmartCardReader
++
++#include "systools/mSysSmartCardReader.h"
++#include "mSysErrorW32.h"
++#include "tools/TraceLocal.h"
++#include "tools/TraceInterface.h"
++#include "systools/Console.h"
++#include "systools/mSysThread.hpp"
++#include <iostream>
++#include <boost/shared_ptr.hpp>
++
++using namespace mSysSmartCardReader;
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceInterface;
++using boost::shared_ptr;
++typedef shared_ptr<CardReader> CardReaderPtr;
++
++namespace
++{
++  enum Command
++  {
++    SC_ENABLE,
++    SC_DISABLE,
++    SC_COMMAND,
++  };
++
++  class ExecuteCommand: public Console::SelectionCommandBase
++  {
++    public:
++      ExecuteCommand(CardReader& dev, TraceInterface& trc):
++        dev(dev),
++        trc(trc)
++      {}
++
++      Console::ResultCode execute(char selector, int parameter, const Console::Strings& parameterList)
++      {
++        switch(parameter)
++        {
++          case SC_ENABLE:
++          {
++            trc.writeTrace(BasicRuntime_HERE, "enable: %s", getResultCodeText(dev.enable()).c_str());
++            break;
++          }
++          case SC_DISABLE:
++          {
++            trc.writeTrace(BasicRuntime_HERE, "disable: %s", getResultCodeText(dev.disable()).c_str());
++            break;
++          }
++          case SC_COMMAND:
++          {
++            std::string response;
++            trc.writeTrace(BasicRuntime_HERE, "sendCmd: %s", getResultCodeText(dev.sendCmd(parameterList[0], response)).c_str());
++            trc.dumpTrace(BasicRuntime_HERE, response.size(), response.data());
++            break;
++          }
++        }
++        return Console::RC_SUCCESS;
++      }
++
++    private:
++      CardReader& dev;
++      TraceInterface& trc;
++  };
++
++  class TestListener: public Listener
++  {
++    public:
++      TestListener(const std::string& readerName, TraceInterface& trc):
++        readerName(readerName),
++        trc(trc)
++      {}
++
++      virtual ~TestListener()
++      {}
++
++      virtual void available()
++      {
++        trc.writeTrace(BasicRuntime_HERE, "available");
++      }
++
++      virtual void unavailable()
++      {
++        trc.writeTrace(BasicRuntime_HERE, "unavailable");
++      }
++
++      virtual void absent()
++      {
++        trc.writeTrace(BasicRuntime_HERE, "absent");
++      }
++
++      virtual void present(CardType type, const std::string& atr)
++      {
++        trc.writeTrace(BasicRuntime_HERE, "present(%d)(%s)", type, getCardTypeText(type).c_str());
++        trc.dumpTrace(BasicRuntime_HERE, atr.size(), atr.data());
++      }
++
++      virtual bool useReader(const std::string& readerName)
++      {
++        trc.writeTrace(BasicRuntime_HERE, "use(%s)", readerName.c_str());
++        return readerName == this->readerName;
++      }
++
++    private:
++      TraceInterface& trc;
++      std::string readerName;
++  };
++
++  class Thread: public mSysThread::thread
++  {
++    public:
++      Thread(CardReader& dev):
++        thread(0),
++        dev(dev)
++      {}
++
++    private:
++      virtual void function()
++      {
++        dev.process();
++      }
++
++      CardReader& dev;
++  };
++
++}
++
++int main(int argc, char** argv)
++{
++  TraceLocal trc("TestSysSmartCardReader");
++  if(argc == 2)
++  {
++    TestListener listener(argv[1], trc);
++    CardReaderPtr reader = CardReaderPtr(createCardReader(trc));
++    reader->setListener(&listener);
++
++    Console::ConsoleSelection selection;
++    ExecuteCommand command(*reader.get(), trc);
++
++    selection.addSimple(&selection,     "h", "help",     Console::ConsoleSelection::P_HELP);
++    selection.addSimple(&selection,     "q\x03", "quit", Console::ConsoleSelection::P_QUIT);
++    selection.addSimple(&command,       "e", "enable",   SC_ENABLE);
++    selection.addSimple(&command,       "d", "disable",  SC_DISABLE);
++    Console::Selection cmd = {&command, "c", "command", {Console::IT_HEXINPUT, "enter command APDU(hex)"}, SC_COMMAND};
++    selection.add(cmd);
++
++    Thread process(*reader.get());
++    process.start();
++
++    selection.loop();
++
++    reader->stopProcessing();
++    process.waitTerminated();
++  }
++  else
++  {
++    std::cout << "Usage: TestSysSmardCardReader.exe <reader name>" << std::endl;
++  }
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 5c2f4724..5e02b333 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 20);
++VERSION_ID_DT(systools, 1, 0, 0, 21);
+ 
+ /*!
+ \file
+@@ -8,12 +8,21 @@ VERSION_ID_DT(systools, 1, 0, 0, 20);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.20
++@version 1.0.0.21
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.21
++\li 11.09.2014
++\li bugfix - SteT Mantis 0033581: Desko-Penta: support RFID
++- added mSysSmartCardReader.h/mSysSmartCardReader.h to access smart cards using the "Smart Card Resource Manager API"
++- see
++  - http://msdn.microsoft.com/en-us/library/windows/desktop/aa380149%28v=vs.85%29.aspx
++  - WinSCard.h
++- supports RFID cards only; eject is not supported
++
+ \version 1.0.0.20
+ \li 25.07.2014
+ \li bugfix - SteT Mantis 0032748: SEL extension for Conrad USB 4 channel relay
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+new file mode 100644
+index 00000000..1ca17dd4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysSmartCardReaderW32.cpp
+@@ -0,0 +1,1197 @@
++// access smart cards
++#include "systools/mSysSmartCardReader.h"
++#include "systools/mMutexCS.h"
++#include "systools/mMutexSem.hpp"
++#include "systools/mAutoMutexCS.h"
++#include "systools/mAutoMutex.hpp"
++#include "systools/mSysWait.h"
++#include "systools/mSysSynchronize.h"
++#include "systools/mEventSem.hpp"
++#include "mSysSynchronizeW32.h"
++#include "mSysErrorW32.h"
++#include <Winscard.h>
++#include <sstream>
++
++using namespace mSysSmartCardReader;
++using MASSAI::trace::TraceInterface;
++using Materna::MSSD::Mutex;
++using Materna::MSSD::AutoMutexCS;
++using Materna::MSSD::mutexSemaphore;
++using Materna::MSSD::autoMutex;
++using Materna::MSSD::eventSemaphore;
++using mSysSynchronize::WaitObject;
++using mSysSynchronize::Internal;
++using mSysSynchronize::SimpleSynchronize;
++
++namespace
++{
++  enum Consts
++  {
++    WAIT_TIMEOUT_MS = 60000,
++    MAX_RESPONSE_SIZE = 1024,
++  };
++
++  const char* CARD_READER_NOTIFICATION = "\\\\?PnP?\\Notification";
++
++  enum State
++  {
++    CR_LS_ERROR,
++    CR_LS_NO_SERVICE,
++    CR_LS_INIT,
++    CR_LS_FIND_READER,
++    CR_LS_NO_READER,
++    CR_LS_UNAVAILABLE,
++    CR_LS_DISABLED,
++    CR_LS_DISABLED_TEST,
++    CR_LS_ABSENT,
++    CR_LS_MUTE,
++    CR_LS_PRESENT,
++    CR_LS_STOPPED,
++    CR_LS_UNDEFINED,
++  };
++
++  bool isAvailable(State state);
++  bool isEnabled(State state);
++  bool isInitialized(State state);
++  bool isCardPresent(State state);
++  std::string getStateText(State state);
++  std::string getErrorCodeText(LONG errorCode);
++  std::string getCardStatusText(DWORD status);
++  std::string getProtocolText(DWORD protocol);
++
++
++  class CardServiceStart: public WaitObject
++  {
++    public:
++      CardServiceStart(TraceInterface& trc);
++      virtual ~CardServiceStart();
++
++      bool isStarted();
++      virtual const Internal& getInternal() const;
++
++    private:
++      Internal handle;
++  };
++
++  class CardReaderListener
++  {
++    public:
++      CardReaderListener();
++      virtual ~CardReaderListener();
++      virtual bool useReader(const char* buffer) = 0;
++  };
++
++  class CardReaderAccess
++  {
++    public:
++      CardReaderAccess(TraceInterface& trc);
++      ~CardReaderAccess();
++
++      void setListener(CardReaderListener* pListener);
++
++      LONG initContext();
++      void releaseContext();
++      LONG contextIsValid();
++
++      LONG findReader();
++
++      LONG waitForCardReaderStatus();
++      LONG waitForCardStatus();
++      void cancelWait();
++
++      LONG connectCard();
++      LONG disconnectCard();
++      LONG sendCmd(const std::string& commandAPDU, std::string& responseAPDU);
++      LONG control(unsigned int command, const std::string& data, std::string& response);
++
++      DWORD cardReaderStatus;
++      DWORD cardStatus;
++
++      DWORD protocol;
++      std::string atr;
++    private:
++      bool selectReader(const char* buffer, unsigned int size);
++      void freeAutoAllocate(LPTSTR buffer);
++      LONG wait(const std::string& reader, DWORD& status);
++
++      TraceInterface& trc;
++
++      CardReaderListener* pListener;
++
++      SCARDCONTEXT context;
++      std::string readerName;
++
++      SCARDHANDLE card;
++
++      mutexSemaphore waitAccess;
++      bool waitCanceled;
++  };
++
++  class CardReaderImpl: public CardReader, private CardReaderListener
++  {
++    public:
++      CardReaderImpl(TraceInterface& trc);
++      ~CardReaderImpl();
++
++      // CardReader
++      virtual void process();
++      virtual void stopProcessing();
++      virtual void setListener(Listener* pListener);
++      virtual ResultCode enable();
++      virtual ResultCode disable();
++      virtual ResultCode sendCmd(const std::string& commandAPDU, std::string& responseAPDU);
++      virtual ResultCode control(unsigned int command, const std::string& data, std::string& response);
++
++    private:
++      // CardReaderListener
++      virtual bool useReader(const char* buffer);
++
++      void processing(State state);
++
++      void waitInError();
++      void waitForService();
++      void initContext();
++      void findReader();
++      void waitForReader();
++      void waitForAvailable();
++      void waitForUnavailable();
++      void waitForCardChange();
++      void checkForAvailable();
++
++      void postProcessing(State oldState);
++      void checkInitialize(State oldState, State newState);
++      void checkAvailable(State oldState, State newState);
++      void checkUnavailable(State oldState, State newState);
++      void checkEnable(State oldState, State newState);
++      void checkDisable(State oldState, State newState);
++      void checkPresent(State oldState, State newState);
++
++      bool contextIsValid();
++      LONG waitForCardStatus();
++      LONG waitForCardReaderStatus();
++
++      void checkCardStatus();
++
++      State onContextTest(LONG errorCode);
++      State onInitContextDone(LONG errorCode);
++      State onFindReaderDone(LONG errorCode);
++      State onWaitDone(LONG errorCode);
++
++      ResultCode enable(bool enable);
++
++      State getState();
++      void setState(State newState);
++
++      TraceInterface& trc;
++
++      Listener ignoreEvents;
++      Listener* pListener;
++
++      CardReaderAccess reader;
++      CardServiceStart serviceStart;
++      Mutex access;
++      State state;
++      std::string atr;
++      bool present;
++
++      eventSemaphore notifyStop;
++      bool stop;
++      bool enabled;
++  };
++}
++
++namespace
++{
++  CardServiceStart::CardServiceStart(TraceInterface& trc)
++  {
++    handle.handle= SCardAccessStartedEvent();
++    if(handle.handle == 0)
++    {
++      mSysError::SystemErrorCode result = mSysError::getErrorCode();
++      trc.writeTrace(MajorError_HERE, "SCardAccessStartedEvent(%d)(%s)",
++        result, mSysError::getErrorText(result).c_str());
++    }
++  }
++
++  CardServiceStart::~CardServiceStart()
++  {
++    SCardReleaseStartedEvent();
++  }
++
++  bool CardServiceStart::isStarted()
++  {
++    return WaitForSingleObject(handle.handle, 0) == WAIT_OBJECT_0;
++  }
++
++  const Internal& CardServiceStart::getInternal() const
++  {
++    return handle;
++  }
++
++  CardReaderListener::CardReaderListener()
++  {}
++
++  CardReaderListener::~CardReaderListener()
++  {}
++
++  CardReaderAccess::CardReaderAccess(TraceInterface& trc):
++    cardReaderStatus(SCARD_STATE_UNAWARE),
++    cardStatus(SCARD_STATE_UNAWARE),
++    protocol(SCARD_PROTOCOL_UNDEFINED),
++    atr(),
++    trc(trc),
++    pListener(0),
++    context(0),
++    readerName(),
++    card(0),
++    waitAccess(),
++    waitCanceled(false)
++  {}
++
++  CardReaderAccess::~CardReaderAccess()
++  {}
++
++  void CardReaderAccess::setListener(CardReaderListener* pListener)
++  {
++    this->pListener = pListener;
++  }
++
++  LONG CardReaderAccess::initContext()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardEstablishContext");
++    LONG errorCode = SCardEstablishContext(SCARD_SCOPE_USER, NULL, NULL, &context);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardEstablishContext:(0x%x)(%s)",
++      errorCode, getErrorCodeText(errorCode).c_str());
++    return errorCode;
++  }
++
++  void CardReaderAccess::releaseContext()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardReleaseContext");
++    LONG errorCode = SCardReleaseContext(context);
++    context = 0;
++    trc.writeTrace(BasicRuntime_HERE, "<SCardReleaseContext:(0x%x)(%s)",
++      errorCode, getErrorCodeText(errorCode).c_str());
++  }
++
++  LONG CardReaderAccess::contextIsValid()
++  {
++    LONG errorCode = SCardIsValidContext(context);
++    if(errorCode != SCARD_S_SUCCESS)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "SCardIsValidContext:(0x%x)(%s)",
++        errorCode, getErrorCodeText(errorCode).c_str());
++    }
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::findReader()
++  {
++    LPTSTR buffer = 0;
++    DWORD size = SCARD_AUTOALLOCATE;
++    trc.writeTrace(BasicRuntime_HERE, ">SCardListReaders");
++    LONG errorCode = SCardListReaders(context, 0, (LPTSTR)&buffer, &size);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardListReaders(%d):(0x%x)(%s)",
++      size, errorCode, getErrorCodeText(errorCode).c_str());
++    if(errorCode == SCARD_S_SUCCESS)
++    {
++      if(!(buffer && size && size != SCARD_AUTOALLOCATE && selectReader(buffer, size)))
++      {
++        errorCode = SCARD_E_NO_READERS_AVAILABLE;
++      }
++    }
++    freeAutoAllocate(buffer);
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::connectCard()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardConnect");
++    protocol = SCARD_PROTOCOL_Tx;
++    LONG errorCode = SCardConnect(context, readerName.c_str(), SCARD_SHARE_SHARED, protocol, &card, &protocol);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardConnect(0x%x)(%s):(0x%x)(%s)",
++      protocol, getProtocolText(protocol).c_str(), errorCode, getErrorCodeText(errorCode).c_str());
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::disconnectCard()
++  {
++    trc.writeTrace(BasicRuntime_HERE, ">SCardDisconnect");
++    protocol = SCARD_PROTOCOL_UNDEFINED;
++    LONG errorCode = SCardDisconnect(card, SCARD_EJECT_CARD);
++    card = 0;
++    protocol = SCARD_PROTOCOL_UNDEFINED;
++    trc.writeTrace(BasicRuntime_HERE, "<SCardDisconnect:(0x%x)(%s)",
++      errorCode, getErrorCodeText(errorCode).c_str());
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::sendCmd(const std::string& commandAPDU, std::string& responseAPDU)
++  {
++    SCARD_IO_REQUEST requestInfo = {protocol, sizeof(SCARD_IO_REQUEST)};
++    BYTE buffer[MAX_RESPONSE_SIZE] = "";
++    DWORD length = MAX_RESPONSE_SIZE;
++    trc.writeTrace(BasicRuntime_HERE, ">SCardTransmit(%d)", commandAPDU.size());
++    LONG errorCode = SCardTransmit(card, &requestInfo, reinterpret_cast<const unsigned char*>(commandAPDU.data()), commandAPDU.size(), 0, buffer, &length);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardTransmit(%d):(0x%x)(%s)",
++      length, errorCode, getErrorCodeText(errorCode).c_str());
++    if(errorCode == SCARD_S_SUCCESS)
++    {
++      if(length >= 0)
++      {
++        responseAPDU = std::string(reinterpret_cast<const char*>(buffer), length);
++      }
++    }
++    return errorCode;
++  }
++
++  LONG CardReaderAccess::control(unsigned int command, const std::string& data, std::string& response)
++  {
++    BYTE buffer[MAX_RESPONSE_SIZE] = "";
++    DWORD length = MAX_RESPONSE_SIZE;    trc.writeTrace(BasicRuntime_HERE, ">SCardControl(%d)(%d)", command, data.size());
++    LONG errorCode = SCardControl(card, command, data.data(), data.size(), buffer, length, &length);
++    trc.writeTrace(BasicRuntime_HERE, "<SCardTransmit(%d):(0x%x)(%s)",
++      length, errorCode, getErrorCodeText(errorCode).c_str());
++    if(errorCode == SCARD_S_SUCCESS)
++    {
++      if(length >= 0)
++      {
++        response = std::string(reinterpret_cast<const char*>(buffer), length);
++      }
++    }
++    return errorCode;
++  }
++
++  bool CardReaderAccess::selectReader(const char* buffer, unsigned int size)
++  {
++    bool result = false;
++    for(const char* it = buffer; it < buffer + size; it+= strlen(it) + 1)
++    {
++      if(*it)
++      {
++        if(pListener->useReader(it))
++        {
++          trc.writeTrace(BasicRuntime_HERE, "select(%s)", it);
++          readerName = it;
++          result = true;
++        }
++        else
++        {
++          trc.writeTrace(BasicRuntime_HERE, "ignore(%s)", it);
++        }
++      }
++    }
++    return result;
++  }
++
++  void CardReaderAccess::freeAutoAllocate(LPTSTR buffer)
++  {
++    LONG errorCode = SCardFreeMemory(context, buffer);
++    if(errorCode != SCARD_S_SUCCESS)
++    {
++      trc.writeTrace(MinorWarning_HERE, "SCardFreeMemory:(0x%x)(%s)",
++        errorCode, getErrorCodeText(errorCode).c_str());
++    }
++  }
++
++  LONG CardReaderAccess::waitForCardReaderStatus()
++  {
++    return wait(CARD_READER_NOTIFICATION, cardReaderStatus);
++  }
++
++  LONG CardReaderAccess::waitForCardStatus()
++  {
++    return wait(readerName, cardStatus);
++  }
++
++  void CardReaderAccess::cancelWait()
++  {
++    waitCanceled = true;
++    if(waitAccess.request(0) == 0)
++    {
++      waitAccess.release();
++    }
++    else
++    {
++      trc.writeTrace(BasicRuntime_HERE, ">SCardCancel");
++      LONG errorCode = SCardCancel(context);
++      trc.writeTrace(BasicRuntime_HERE, "<SCardCancel:(0x%x)(%s)",
++        errorCode, getErrorCodeText(errorCode).c_str());
++    }
++  }
++
++  LONG CardReaderAccess::wait(const std::string& reader, DWORD& status)
++  {
++    autoMutex mx(waitAccess);
++    LONG result = SCARD_E_CANCELLED;
++    if(!waitCanceled)
++    {
++      SCARD_READERSTATE cardState[1];
++      memset(cardState, 0, sizeof(cardState));
++      SCARD_READERSTATE& it = cardState[0];
++      it.dwCurrentState = status & ~SCARD_STATE_CHANGED;
++      it.szReader = reader.c_str();
++      trc.writeTrace(BasicRuntime_HERE, ">SCardGetStatusChange(0x%x)(%s)",
++        it.dwCurrentState, getCardStatusText(it.dwCurrentState).c_str());
++      result = SCardGetStatusChange(context, WAIT_TIMEOUT_MS, cardState, sizeof(cardState)/sizeof(*cardState));
++      trc.writeTrace(BasicRuntime_HERE, "<SCardGetStatusChange:(0x%x)(%s)",
++        result, getErrorCodeText(result).c_str());
++      if(result == SCARD_S_SUCCESS)
++      {
++        status = it.dwEventState;
++        trc.writeTrace(BasicRuntime_HERE, "SCardGetStatusChange:(0x%x)(%s)",
++          status, getCardStatusText(status).c_str());
++        atr = std::string(reinterpret_cast<const char*>(it.rgbAtr), it.cbAtr);
++        if(it.cbAtr > 0)
++        {
++          trc.dumpTrace(BasicRuntime_HERE, it.cbAtr, reinterpret_cast<char*>(it.rgbAtr));
++        }
++      }
++    }
++    waitCanceled = false;
++    return result;
++  }
++
++  CardReaderImpl::CardReaderImpl(TraceInterface& trc):
++    trc(trc),
++    ignoreEvents(),
++    pListener(&ignoreEvents),
++    reader(trc),
++    serviceStart(trc),
++    access(),
++    state(CR_LS_INIT),
++    atr(),
++    notifyStop(),
++    stop(false),
++    enabled(false),
++    present(false)
++  {
++    reader.setListener(this);
++  }
++
++  CardReaderImpl::~CardReaderImpl()
++  {}
++
++  void CardReaderImpl::setListener(Listener* pListener)
++  {
++    if(pListener)
++    {
++      this->pListener = pListener;
++    }
++    else
++    {
++      this->pListener = &ignoreEvents;
++    }
++  }
++
++  State CardReaderImpl::getState()
++  {
++    return state;
++  }
++
++  void CardReaderImpl::setState(State newState)
++  {
++    if(newState != CR_LS_UNDEFINED)
++    {
++      AutoMutexCS mx(access);
++      if(state != CR_LS_STOPPED)
++      {
++        trc.writeTrace(BasicRuntime_HERE, "state(%s)->(%s)",
++          getStateText(state).c_str(), getStateText(newState).c_str());
++        state = newState;
++      }
++      else
++      {
++        trc.writeTrace(BasicRuntime_HERE, "ignore(%s)in(%s)",
++          getStateText(newState).c_str(), getStateText(state).c_str());
++      }
++    }
++  }
++
++  void CardReaderImpl::stopProcessing()
++  {
++    stop = true;
++    notifyStop.post();
++    reader.cancelWait();
++  }
++
++  ResultCode CardReaderImpl::enable(bool enable)
++  {
++    AutoMutexCS mx(access);
++    ResultCode result = SC_RC_FAILED;
++    if(isAvailable(getState()))
++    {
++      enabled = enable;
++      reader.cancelWait();
++      result = SC_RC_SUCCESS;
++    }
++    return result;
++  }
++
++  ResultCode CardReaderImpl::enable()
++  {
++    return enable(true);
++  }
++
++  ResultCode CardReaderImpl::disable()
++  {
++    return enable(false);
++  }
++
++  ResultCode CardReaderImpl::sendCmd(const std::string& commandAPDU, std::string& responseAPDU)
++  {
++    ResultCode result = SC_RC_FAILED;
++    if(reader.sendCmd(commandAPDU, responseAPDU) == SCARD_S_SUCCESS)
++    {
++      result = SC_RC_SUCCESS;
++    }
++    return result;
++  }
++
++  ResultCode CardReaderImpl::control(unsigned int command, const std::string& data, std::string& response)
++  {
++    ResultCode result = SC_RC_FAILED;
++    if(reader.control(command, data, response) == SCARD_S_SUCCESS)
++    {
++      result = SC_RC_SUCCESS;
++    }
++    return result;
++  }
++
++  void CardReaderImpl::process()
++  {
++    State state = getState();
++    pListener->unavailable();
++    while(state != CR_LS_STOPPED)
++    {
++      if(stop)
++      {
++        setState(CR_LS_STOPPED);
++        break;
++      }
++      processing(state);
++      if(stop)
++      {
++        setState(CR_LS_STOPPED);
++        break;
++      }
++      postProcessing(state);
++      state = getState();
++    }
++  }
++
++
++  void CardReaderImpl::checkInitialize(State oldState, State newState)
++  {
++    if(!isInitialized(newState) && isInitialized(oldState))
++    {
++      reader.releaseContext();
++    }
++  }
++
++  void CardReaderImpl::checkAvailable(State oldState, State newState)
++  {
++    if(isAvailable(newState) && !isAvailable(oldState))
++    {
++      pListener->available();
++    }
++  }
++
++  void CardReaderImpl::checkUnavailable(State oldState, State newState)
++  {
++    if(!isAvailable(newState) && isAvailable(oldState))
++    {
++      enabled = false;
++      if(present)
++      {
++        present = false;
++        reader.disconnectCard();
++      }
++      pListener->unavailable();
++    }
++  }
++
++  void CardReaderImpl::checkEnable(State oldState, State newState)
++  {
++    if(enabled && !isEnabled(newState))
++    {
++      reader.cardStatus = SCARD_STATE_UNAWARE;
++      setState(CR_LS_ABSENT);
++    }
++  }
++
++  void CardReaderImpl::checkDisable(State oldState, State newState)
++  {
++    if(!enabled && isEnabled(newState))
++    {
++      setState(CR_LS_DISABLED);
++      if(present)
++      {
++        present = false;
++        reader.disconnectCard();
++        pListener->absent();
++      }
++    }
++  }
++
++  void CardReaderImpl::checkPresent(State oldState, State newState)
++  {
++    if(isCardPresent(newState))
++    {
++      if(!present || atr != reader.atr)
++      {
++        atr = reader.atr;
++        present = true;
++        if(reader.connectCard() != SCARD_S_SUCCESS)
++        {
++          pListener->present(SCT_ERROR, atr);
++        }
++        else if(reader.protocol && SCARD_PROTOCOL_Tx)
++        {
++          pListener->present(SCT_ISO7816, atr);
++        }
++        else
++        {
++          pListener->present(SCT_OTHER, atr);
++        }
++      }
++    }
++    else
++    {
++      if(present)
++      {
++        present = false;
++        reader.disconnectCard();
++        pListener->absent();
++      }
++    }
++  }
++
++  void CardReaderImpl::postProcessing(State oldState)
++  {
++    State newState = getState();
++    checkInitialize(oldState, newState);
++    checkAvailable(oldState, newState);
++    checkUnavailable(oldState, newState);
++    if(isAvailable(newState))
++    {
++      checkEnable(oldState, newState);
++      checkDisable(oldState, newState);
++      if(enabled)
++      {
++        checkPresent(oldState, newState);
++      }
++    }
++  }
++
++  void CardReaderImpl::processing(State state)
++  {
++    switch(state)
++    {
++      case CR_LS_ERROR:         return waitInError();
++      case CR_LS_NO_SERVICE:    return waitForService();
++      case CR_LS_INIT:          return initContext();
++      case CR_LS_FIND_READER:   return findReader();
++      case CR_LS_NO_READER:     return waitForReader();
++      case CR_LS_UNAVAILABLE:   return waitForAvailable();
++      case CR_LS_DISABLED:      return waitForUnavailable();
++      case CR_LS_DISABLED_TEST: return checkForAvailable();
++      case CR_LS_ABSENT:
++      case CR_LS_MUTE:
++      case CR_LS_PRESENT:       return waitForCardChange();
++    }
++  }
++
++  State CardReaderImpl::onContextTest(LONG errorCode)
++  {
++    switch(errorCode)
++    {
++      case SCARD_S_SUCCESS:          return CR_LS_UNDEFINED;
++      case SCARD_E_NO_SERVICE:
++      case SCARD_E_SERVICE_STOPPED:  return CR_LS_NO_SERVICE;
++      default:                       return CR_LS_ERROR;
++    }
++  }
++
++  State CardReaderImpl::onInitContextDone(LONG errorCode)
++  {
++    switch(errorCode)
++    {
++      case SCARD_S_SUCCESS:          return CR_LS_FIND_READER;
++      case SCARD_E_NO_SERVICE:
++      case SCARD_E_SERVICE_STOPPED:  return CR_LS_NO_SERVICE;
++      default:                       return CR_LS_ERROR;
++    }
++  }
++
++  State CardReaderImpl::onFindReaderDone(LONG errorCode)
++  {
++    switch(errorCode)
++    {
++      case SCARD_S_SUCCESS:               return CR_LS_UNAVAILABLE;
++      case SCARD_E_UNKNOWN_READER:
++      case SCARD_E_READER_UNAVAILABLE:
++      case SCARD_E_NO_READERS_AVAILABLE:  return CR_LS_NO_READER;
++      case SCARD_E_NO_SERVICE:
++      case SCARD_E_SERVICE_STOPPED:       return CR_LS_NO_SERVICE;
++      default:                            return CR_LS_ERROR;
++    }
++  }
++
++  State CardReaderImpl::onWaitDone(LONG errorCode)
++  {
++    switch(errorCode)
++    {
++      case SCARD_S_SUCCESS:
++      case SCARD_E_CANCELLED:
++      case SCARD_E_TIMEOUT:               return CR_LS_UNDEFINED;
++      case SCARD_E_UNKNOWN_READER:
++      case SCARD_E_READER_UNAVAILABLE:
++      case SCARD_E_NO_READERS_AVAILABLE:  return CR_LS_FIND_READER;
++      case SCARD_E_NO_SERVICE:
++      case SCARD_E_SERVICE_STOPPED:       return CR_LS_NO_SERVICE;
++      default:                            return CR_LS_ERROR;
++    }
++  }
++
++  void CardReaderImpl::waitForService()
++  {
++    SimpleSynchronize wait(trc);
++    wait.add(&notifyStop);
++    wait.add(&serviceStart);
++    wait.wait(WAIT_TIMEOUT_MS);
++    if(serviceStart.isStarted())
++    {
++      setState(CR_LS_INIT);
++    }
++  }
++
++  void CardReaderImpl::waitInError()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitInError");
++    SimpleSynchronize wait(trc);
++    wait.add(&notifyStop);
++    wait.wait(WAIT_TIMEOUT_MS);
++    setState(CR_LS_NO_SERVICE);
++  }
++
++  void CardReaderImpl::initContext()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitInError");
++    setState(onInitContextDone(reader.initContext()));
++  }
++
++  bool CardReaderImpl::contextIsValid()
++  {
++    bool result = false;
++    LONG errorCode = reader.contextIsValid();
++    if(errorCode == SCARD_S_SUCCESS)
++    {
++      result = true;
++    }
++    else
++    {
++      setState(onContextTest(errorCode));
++    }
++    return result;
++  }
++
++  void CardReaderImpl::findReader()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "findReader");
++    if(contextIsValid())
++    {
++      setState(onFindReaderDone(reader.findReader()));
++    }
++  }
++
++  bool CardReaderImpl::useReader(const char* buffer)
++  {
++    return pListener->useReader(buffer);
++  }
++
++  LONG CardReaderImpl::waitForCardStatus()
++  {
++    LONG result = SCARD_E_NO_SERVICE;
++    if(contextIsValid())
++    {
++      result = reader.waitForCardStatus();
++      setState(onWaitDone(result));
++    }
++    return result;
++  }
++
++  LONG CardReaderImpl::waitForCardReaderStatus()
++  {
++    LONG result = SCARD_E_NO_SERVICE;
++    if(contextIsValid())
++    {
++      result = reader.waitForCardReaderStatus();
++      setState(onWaitDone(result));
++    }
++    return result;
++  }
++
++  void CardReaderImpl::checkCardStatus()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitInError");
++    if(waitForCardStatus() == SCARD_S_SUCCESS)
++    {
++      if(reader.cardStatus & SCARD_STATE_IGNORE)
++      {
++        setState(CR_LS_FIND_READER);
++      }
++      else if(reader.cardStatus & SCARD_STATE_UNAVAILABLE)
++      {
++        setState(CR_LS_UNAVAILABLE);
++      }
++      else if(reader.cardStatus & SCARD_STATE_CHANGED)
++      {
++        setState(CR_LS_DISABLED);
++      }
++    }
++  }
++
++  void CardReaderImpl::waitForCardChange()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitForCardChange");
++    if(waitForCardStatus() == SCARD_S_SUCCESS)
++    {
++      if(reader.cardStatus & SCARD_STATE_IGNORE)
++      {
++        setState(CR_LS_FIND_READER);
++      }
++      else if(reader.cardStatus & SCARD_STATE_UNAVAILABLE)
++      {
++        setState(CR_LS_UNAVAILABLE);
++      }
++      else if(reader.cardStatus & SCARD_STATE_EMPTY)
++      {
++        setState(CR_LS_ABSENT);
++      }
++      else if(reader.cardStatus & SCARD_STATE_MUTE)
++      {
++        setState(CR_LS_MUTE);
++      }
++      else if(reader.cardStatus & SCARD_STATE_PRESENT)
++      {
++        setState(CR_LS_PRESENT);
++      }
++    }
++  }
++
++  void CardReaderImpl::waitForReader()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitForReader");
++    if(waitForCardReaderStatus() == SCARD_S_SUCCESS
++      && reader.cardReaderStatus & SCARD_STATE_CHANGED)
++    {
++      setState(CR_LS_FIND_READER);
++    }
++  }
++
++  void CardReaderImpl::waitForUnavailable()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitForUnavailable");
++    if(waitForCardReaderStatus() == SCARD_S_SUCCESS
++      && reader.cardReaderStatus & SCARD_STATE_CHANGED)
++    {
++      setState(CR_LS_DISABLED_TEST);
++    }
++  }
++
++  void CardReaderImpl::checkForAvailable()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "checkForAvailable");
++    reader.cardStatus = SCARD_STATE_UNAWARE;
++    checkCardStatus();
++  }
++
++  void CardReaderImpl::waitForAvailable()
++  {
++    trc.writeTrace(BasicRuntime_HERE, "waitForAvailable");
++    reader.cardStatus = SCARD_STATE_UNAVAILABLE;
++    checkCardStatus();
++  }
++
++  bool isCardPresent(State state)
++  {
++    bool result = false;
++    switch(state)
++    {
++      case CR_LS_MUTE:
++      case CR_LS_PRESENT:
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
++  bool isInitialized(State state)
++  {
++    bool result = true;
++    switch(state)
++    {
++      case CR_LS_ERROR:
++      case CR_LS_NO_SERVICE:
++      case CR_LS_INIT:
++      case CR_LS_STOPPED:
++      {
++        result = false;
++        break;
++      }
++    }
++    return result;
++  }
++
++  bool isAvailable(State state)
++  {
++    bool result = false;
++    switch(state)
++    {
++      case CR_LS_DISABLED:
++      case CR_LS_DISABLED_TEST:
++      case CR_LS_ABSENT:
++      case CR_LS_MUTE:
++      case CR_LS_PRESENT:
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
++  bool isEnabled(State state)
++  {
++    bool result = false;
++    switch(state)
++    {
++      case CR_LS_ABSENT:
++      case CR_LS_MUTE:
++      case CR_LS_PRESENT:
++      {
++        result = true;
++        break;
++      }
++    }
++    return result;
++  }
++
++  std::string getStateText(State state)
++  {
++    switch(state)
++    {
++      case CR_LS_ERROR:         return "ERROR";
++      case CR_LS_NO_SERVICE:    return "NO_SERVICE";
++      case CR_LS_INIT:          return "INIT";
++      case CR_LS_FIND_READER:   return "FIND_READER";
++      case CR_LS_NO_READER:     return "NO_READER";
++      case CR_LS_UNAVAILABLE:   return "UNAVAILABLE";
++      case CR_LS_DISABLED:      return "DISABLED";
++      case CR_LS_DISABLED_TEST: return "DISABLED_TEST";
++      case CR_LS_ABSENT:        return "ABSENT";
++      case CR_LS_MUTE:          return "MUTE";
++      case CR_LS_PRESENT:       return "PRESENT";
++      case CR_LS_STOPPED:       return "STOPPED";
++      case CR_LS_UNDEFINED:     return "UNDEFINED";
++      default:                  return "unknown";
++    }
++  }
++
++  std::string getErrorCodeText(LONG errorCode)
++  {
++    switch(errorCode)
++    {
++      case SCARD_S_SUCCESS:                 return "SCARD_S_SUCCESS";
++      case SCARD_F_INTERNAL_ERROR:          return "SCARD_F_INTERNAL_ERROR";          // An internal consistency check failed.
++      case SCARD_E_CANCELLED:               return "SCARD_E_CANCELLED";               // The action was canceled by an SCardCancel request.
++      case SCARD_E_INVALID_HANDLE:          return "SCARD_E_INVALID_HANDLE";          // The supplied handle was not valid.
++      case SCARD_E_INVALID_PARAMETER:       return "SCARD_E_INVALID_PARAMETER";       // One or more of the supplied parameters could not be properly interpreted.
++      case SCARD_E_INVALID_TARGET:          return "SCARD_E_INVALID_TARGET";          // Registry startup information is missing or not valid.
++      case SCARD_E_NO_MEMORY:               return "SCARD_E_NO_MEMORY";               // Not enough memory available to complete this command.
++      case SCARD_F_WAITED_TOO_LONG:         return "SCARD_F_WAITED_TOO_LONG";         // An internal consistency timer has expired.
++      case SCARD_E_INSUFFICIENT_BUFFER:     return "SCARD_E_INSUFFICIENT_BUFFER";     // The data buffer for returned data is too small for the returned data.
++      case SCARD_E_UNKNOWN_READER:          return "SCARD_E_UNKNOWN_READER";          // The specified reader name is not recognized.
++      case SCARD_E_TIMEOUT:                 return "SCARD_E_TIMEOUT";                 // The user-specified time-out value has expired.
++      case SCARD_E_SHARING_VIOLATION:       return "SCARD_E_SHARING_VIOLATION";       // The smart card cannot be accessed because of other outstanding connections.
++      case SCARD_E_NO_SMARTCARD:            return "SCARD_E_NO_SMARTCARD";            // The operation requires a smart card, but no smart card is currently in the device.
++      case SCARD_E_UNKNOWN_CARD:            return "SCARD_E_UNKNOWN_CARD";            // The specified smart card name is not recognized.
++      case SCARD_E_CANT_DISPOSE:            return "SCARD_E_CANT_DISPOSE";            // The system could not dispose of the media in the requested manner.
++      case SCARD_E_PROTO_MISMATCH:          return "SCARD_E_PROTO_MISMATCH";          // The requested protocols are incompatible with the protocol currently in use with the card.
++      case SCARD_E_NOT_READY:               return "SCARD_E_NOT_READY";               // The reader or card is not ready to accept commands.
++      case SCARD_E_INVALID_VALUE:           return "SCARD_E_INVALID_VALUE";           // One or more of the supplied parameter values could not be properly interpreted.
++      case SCARD_E_SYSTEM_CANCELLED:        return "SCARD_E_SYSTEM_CANCELLED";        // The action was canceled by the system, presumably to log off or shut down.
++      case SCARD_F_COMM_ERROR:              return "SCARD_F_COMM_ERROR";              // An internal communications error has been detected.
++      case SCARD_F_UNKNOWN_ERROR:           return "SCARD_F_UNKNOWN_ERROR";           // An internal error has been detected, but the source is unknown.
++      case SCARD_E_INVALID_ATR:             return "SCARD_E_INVALID_ATR";             // An ATR string obtained from the registry is not a valid ATR string.
++      case SCARD_E_NOT_TRANSACTED:          return "SCARD_E_NOT_TRANSACTED";          // An attempt was made to end a nonexistent transaction.
++      case SCARD_E_READER_UNAVAILABLE:      return "SCARD_E_READER_UNAVAILABLE";      // The specified reader is not currently available for use.
++      case SCARD_P_SHUTDOWN:                return "SCARD_P_SHUTDOWN";                // The operation has been aborted to allow the server application to exit.
++      case SCARD_E_PCI_TOO_SMALL:           return "SCARD_E_PCI_TOO_SMALL";           // The PCI receive buffer was too small.
++      case SCARD_E_READER_UNSUPPORTED:      return "SCARD_E_READER_UNSUPPORTED";      // The reader driver does not meet minimal requirements for support.
++      case SCARD_E_DUPLICATE_READER:        return "SCARD_E_DUPLICATE_READER";        // The reader driver did not produce a unique reader name.
++      case SCARD_E_CARD_UNSUPPORTED:        return "SCARD_E_CARD_UNSUPPORTED";        // The smart card does not meet minimal requirements for support.
++      case SCARD_E_NO_SERVICE:              return "SCARD_E_NO_SERVICE";              // The smart card resource manager is not running.
++      case SCARD_E_SERVICE_STOPPED:         return "SCARD_E_SERVICE_STOPPED";         // The smart card resource manager has shut down.
++      case SCARD_E_UNEXPECTED:              return "SCARD_E_UNEXPECTED";              // An unexpected card error has occurred.
++      case SCARD_E_ICC_INSTALLATION:        return "SCARD_E_ICC_INSTALLATION";        // No primary provider can be found for the smart card.
++      case SCARD_E_ICC_CREATEORDER:         return "SCARD_E_ICC_CREATEORDER";         // The requested order of object creation is not supported.
++      case SCARD_E_UNSUPPORTED_FEATURE:     return "SCARD_E_UNSUPPORTED_FEATURE";     // This smart card does not support the requested feature.
++      case SCARD_E_DIR_NOT_FOUND:           return "SCARD_E_DIR_NOT_FOUND";           // The specified directory does not exist in the smart card.
++      case SCARD_E_FILE_NOT_FOUND:          return "SCARD_E_FILE_NOT_FOUND";          // The specified file does not exist in the smart card.
++      case SCARD_E_NO_DIR:                  return "SCARD_E_NO_DIR";                  // The supplied path does not represent a smart card directory.
++      case SCARD_E_NO_FILE:                 return "SCARD_E_NO_FILE";                 // The supplied path does not represent a smart card file.
++      case SCARD_E_NO_ACCESS:               return "SCARD_E_NO_ACCESS";               // Access is denied to the file.
++      case SCARD_E_WRITE_TOO_MANY:          return "SCARD_E_WRITE_TOO_MANY";          // An attempt was made to write more data than would fit in the target object.
++      case SCARD_E_BAD_SEEK:                return "SCARD_E_BAD_SEEK";                // An error occurred in setting the smart card file object pointer.
++      case SCARD_E_INVALID_CHV:             return "SCARD_E_INVALID_CHV";             // The supplied PIN is incorrect.
++      case SCARD_E_UNKNOWN_RES_MNG:         return "SCARD_E_UNKNOWN_RES_MNG";         // An unrecognized error code was returned.
++      case SCARD_E_NO_SUCH_CERTIFICATE:     return "SCARD_E_NO_SUCH_CERTIFICATE";     // The requested certificate does not exist.
++      case SCARD_E_CERTIFICATE_UNAVAILABLE: return "SCARD_E_CERTIFICATE_UNAVAILABLE"; // The requested certificate could not be obtained.
++      case SCARD_E_NO_READERS_AVAILABLE:    return "SCARD_E_NO_READERS_AVAILABLE";    // No smart card reader is available.
++      case SCARD_E_COMM_DATA_LOST:          return "SCARD_E_COMM_DATA_LOST";          // A communications error with the smart card has been detected.
++      case SCARD_E_NO_KEY_CONTAINER:        return "SCARD_E_NO_KEY_CONTAINER";        // The requested key container does not exist on the smart card.
++      case SCARD_E_SERVER_TOO_BUSY:         return "SCARD_E_SERVER_TOO_BUSY";         // The smart card resource manager is too busy to complete this operation.
++      case SCARD_E_PIN_CACHE_EXPIRED:       return "SCARD_E_PIN_CACHE_EXPIRED";       // The smart card PIN cache has expired.
++      case SCARD_E_NO_PIN_CACHE:            return "SCARD_E_NO_PIN_CACHE";            // The smart card PIN cannot be cached.
++      case SCARD_E_READ_ONLY_CARD:          return "SCARD_E_READ_ONLY_CARD";          // The smart card is read-only and cannot be written to.
++      case SCARD_W_UNSUPPORTED_CARD:        return "SCARD_W_UNSUPPORTED_CARD";        // The reader cannot communicate with the card, due to ATR string configuration conflicts.
++      case SCARD_W_UNRESPONSIVE_CARD:       return "SCARD_W_UNRESPONSIVE_CARD";       // The smart card is not responding to a reset.
++      case SCARD_W_UNPOWERED_CARD:          return "SCARD_W_UNPOWERED_CARD";          // Power has been removed from the smart card, so that further communication is not possible.
++      case SCARD_W_RESET_CARD:              return "SCARD_W_RESET_CARD";              // The smart card was reset.
++      case SCARD_W_REMOVED_CARD:            return "SCARD_W_REMOVED_CARD";            // The smart card has been removed, so further communication is not possible.
++      case SCARD_W_SECURITY_VIOLATION:      return "SCARD_W_SECURITY_VIOLATION";      // Access was denied because of a security violation.
++      case SCARD_W_WRONG_CHV:               return "SCARD_W_WRONG_CHV";               // The card cannot be accessed because the wrong PIN was presented.
++      case SCARD_W_CHV_BLOCKED:             return "SCARD_W_CHV_BLOCKED";             // The card cannot be accessed because the maximum number of PIN entry attempts has been reached.
++      case SCARD_W_EOF:                     return "SCARD_W_EOF";                     // The end of the smart card file has been reached.
++      case SCARD_W_CANCELLED_BY_USER:       return "SCARD_W_CANCELLED_BY_USER";       // The action was canceled by the user.
++      case SCARD_W_CARD_NOT_AUTHENTICATED:  return "SCARD_W_CARD_NOT_AUTHENTICATED";  // No PIN was presented to the smart card.
++      case SCARD_W_CACHE_ITEM_NOT_FOUND:    return "SCARD_W_CACHE_ITEM_NOT_FOUND";    // The requested item could not be found in the cache.
++      case SCARD_W_CACHE_ITEM_STALE:        return "SCARD_W_CACHE_ITEM_STALE";        // The requested cache item is too old and was deleted from the cache.
++      case SCARD_W_CACHE_ITEM_TOO_BIG:      return "SCARD_W_CACHE_ITEM_TOO_BIG";      // The new cache item exceeds the maximum per-item size defined for the cache.
++      default:                              return mSysError::getErrorText(errorCode);
++    }
++  }
++
++  std::string getProtocolText(DWORD protocol)
++  {
++    std::ostringstream out;
++    if(protocol == SCARD_PROTOCOL_UNDEFINED)
++    {
++      out << "undefined";
++    }
++    else
++    {
++      out << ((protocol & SCARD_PROTOCOL_T0)      ? "T0 "     : "");
++      out << ((protocol & SCARD_PROTOCOL_T1)      ? "T1 "     : "");
++      out << ((protocol & SCARD_PROTOCOL_RAW)     ? "raw "    : "");
++      out << ((protocol & SCARD_PROTOCOL_DEFAULT) ? "default ": "");
++    }
++    return out.str();
++  }
++
++  std::string getCardStatusText(DWORD status)
++  {
++    std::ostringstream out;
++    if(status == SCARD_STATE_UNAWARE)
++    {
++      out << "unaware";
++    }
++    else
++    {
++      out << ((status & SCARD_STATE_IGNORE)      ? "ignore "     : "");
++      out << ((status & SCARD_STATE_CHANGED)     ? "changed "    : "");
++      out << ((status & SCARD_STATE_UNKNOWN)     ? "unknown "    : "");
++      out << ((status & SCARD_STATE_UNAVAILABLE) ? "unavailable ": "");
++      out << ((status & SCARD_STATE_EMPTY)       ? "empty "      : "");
++      out << ((status & SCARD_STATE_PRESENT)     ? "present "    : "");
++      out << ((status & SCARD_STATE_ATRMATCH)    ? "atrmatch "   : "");
++      out << ((status & SCARD_STATE_EXCLUSIVE)   ? "exclusive "  : "");
++      out << ((status & SCARD_STATE_INUSE)       ? "inuse "      : "");
++      out << ((status & SCARD_STATE_MUTE)        ? "mute "       : "");
++      out << ((status & SCARD_STATE_UNPOWERED)   ? "unpowered "  : "");
++    }
++    return out.str();
++  }
++}
++
++namespace mSysSmartCardReader
++{
++  Listener::Listener()
++  {}
++
++  Listener::~Listener()
++  {}
++
++  void Listener::available()
++  {}
++
++  void Listener::unavailable()
++  {}
++
++  void Listener::absent()
++  {}
++
++  void Listener::present(CardType type, const std::string& atr)
++  {}
++
++  bool Listener::useReader(const std::string& readerName)
++  {
++    return false;
++  }
++
++  CardReader::~CardReader()
++  {}
++
++  std::ostream& operator<<(std::ostream& out, const CardType& data)
++  {
++    out << getCardTypeText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ResultCode& data)
++  {
++    out << getResultCodeText(data);
++    return out;
++  }
++
++  std::string getCardTypeText(CardType data)
++  {
++    switch(data)
++    {
++      case SCT_ERROR:   return "error";
++      case SCT_ISO7816: return "iso7816";
++      case SCT_MIFARE:  return "mifare";
++      case SCT_OTHER:   return "other";
++      default:          return "unknown";
++    }
++  }
++
++  std::string getResultCodeText(ResultCode data)
++  {
++    switch(data)
++    {
++      case SC_RC_SUCCESS: return "success";
++      case SC_RC_FAILED:  return "failed";
++      default:            return "unknown";
++    }
++  }
++
++  CardReader* createCardReader(TraceInterface& trc)
++  {
++    return new CardReaderImpl(trc);
++  }
++}
++
++/*
++SCARDHANDLE hCard = NULL;
++SCARD_IO_REQUEST RequestInfo, ReplyInfo;
++SCARD_PROTOCOL_T0 |
++SCARD_PROTOCOL_T1;
++SCARD_SHARE_EXCLUSIVE, dwProtocol, &hCard, &dwProtocol);
++SCardConnect(hRFIDContext, sReaderName.c_str(),
++SCardTransmit(hCard, &RequestInfo, CommandBuf, 2, &ReplyInfo, ReceiveBuf, &ReturnedLen);
++*/
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

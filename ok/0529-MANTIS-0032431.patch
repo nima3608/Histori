@@ -1,0 +1,1611 @@
+From 94c30112961102442103add3fdae3f4562fe7781 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 12 Nov 2014 15:45:31 +0000
+Subject: [PATCH 0529/1000] MANTIS 0032431 -implement correct handle of VK_F12
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@761 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |  20 +-
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  18 -
+ .../cpp/mControl/inc/mControl_process.h       | 181 ++---
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  14 -
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  16 +-
+ .../cpp/mControl/src/mControl_config.cpp      | 161 ++++-
+ .../cpp/mControl/src/mControl_dialog.cpp      | 113 ---
+ .../Massai/cpp/mControl/src/mControl_main.cpp |   6 +-
+ .../cpp/mControl/src/mControl_process.cpp     | 649 ++++++++++--------
+ .../cpp/mControl/src/mControl_tools.cpp       |  41 --
+ .../cpp/mControl/src/mControl_worker.cpp      | 102 ++-
+ 11 files changed, 687 insertions(+), 634 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 44537f51..369b461f 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -28,7 +28,7 @@
+ #include "logging/alertDef.h"
+ 
+ #include "systools/mEventSem.hpp"
+-
++#include "massaidll\BASE_OS.h"
+ #include "trc/trace.h"
+ 
+ //Poco includes
+@@ -177,6 +177,24 @@ namespace mControl
+         void showWindow(int cmd);
+         
+ 
++        /**
++        *   initialize SNMP traps
++        */
++        void createAlert();
++
++
++        /**
++        *   Sends SNMP traps
++        */
++        void sendAlert(char *s);
++
++
++        /**
++        *   at the first call watch for loggingservice semaphore
++        */
++        void waitInitialForLoggingService();
++
++
+         //Constructor
+         WindowConfig(HINSTANCE hInst, GlobalConfig& config);
+         
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index 75dd2bca..b3c51dcc 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -54,24 +54,6 @@ namespace mControl
+         void run();
+ 	  
+ 
+-        /**
+-        *   initialize SNMP traps
+-        */
+-        void createAlert();
+-
+-
+-        /**
+-        *   at the first call watch for loggingservice semaphore
+-        */
+-        void waitInitialForLoggingService();
+-
+-
+-        /**
+-        *   Sends SNMP traps
+-        */
+-        void sendAlert(char *s);
+-
+-
+         //TODO: implement with new process configuration
+         /**
+         * Waits until starter has terminated
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
+index 4a17a8c2..ce6a0d57 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_process.h
+@@ -1,108 +1,133 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mControl_process.h
+-//
+-//  purpose:    class definition: ProcessCallback
+-//
+-//  date:       06.11.2014
+-//
+-//  author:     Materna Information & Communications (MOt)
+-//
+-//---------------------------------------------------------------------------
+-
+-#ifndef CALLBACK_H
+-#define CALLBACK_H
+-
+-//Project includes
+-#include "mControl_config.h"
+-
+-//Materna includes
+-#include "systools/mSysProcess.hpp"
++/**
++ **************************************************************************
++ *
++ * @file mcProcess.hpp
++ *
++ * Contains mControl-specific adaptations for process control
++ * with classes:
++ * - mcProcessCallback
++ * - mcProcessControl
++ * - mcProcessListMonitor
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MCPROCESS_HPP
++#define MCPROCESS_HPP
+ 
+-//Compiler includes
+-#include <string.h>
++#include "systools/mSysProcess.hpp"
+ 
++#include <list>
+ 
+-using namespace std;
+ 
+-namespace mControl
++/**
++ *
++ * This is the mControl-specific sink for data events
++ * form the child processes.
++ *
++**/
++class mcProcessCallback :
++    public mSysProcess::callBack
+ {
+-    class ProcessCallback :
+-       public mSysProcess::callBack
+-    {
+-    private:
+-       string const         m_appName;
+-       string const         m_streamName;
+-       GlobalConfig&        m_globalConfig;
+-       
+ 
+-    public:
+-        /**
+-        *   Constructor.
+-        *   @param AppName:         calling Application
+-        *   @param m_streamName:    which callback is created. Example STDERR
+-        **/
+-        ProcessCallback( char const * App, char const * m_streamName, GlobalConfig& config );
++   std::string const                    m_application_name;
++
++   std::string const                    m_stream_name;
++
++public:
++
++   mcProcessCallback
++      (
++         char const * application_name,
++         char const * stream_name
++      );
++
++   void lineOut( char const * line ) const;
++
++private:
+ 
+-        ~ProcessCallback();
++   mcProcessCallback();
+ 
+-        /**
+-        *   Traces the given Line
+-        *   @param Line:    the Line to Trace
+-        **/
+-        void lineOut( char const * Line ) const;
+-    };
++   mcProcessCallback & operator=( mcProcessCallback const & src );
+ 
++};
+ 
+-    
+-    class ProcessControl
+-    {
+-        class impl;
+ 
+-    private:
+-       impl *                               m_impl;
++/**
++ *
++ * Control a child process.
++ *
++**/
++class mcProcessControl
++{
++
++   class impl;
++
++   impl *                               m_impl;
++
++public:
+ 
++   mcProcessControl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name
++      );
+ 
+-    public:
++   mcProcessControl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name,
++         char const * stop_semaphore
++      );
+ 
+-       ProcessControl
+-          (
+-             mSysProcess::parent & parent,
+-             char const * application_name,
+-             GlobalConfig& config
+-          );
++   ~mcProcessControl() throw();
+ 
+-       ~ProcessControl() throw();
++   char const * getName() const;
+ 
+-       char const * getName() const;
++   mSysProcess::status getStatus() const;
+ 
+-       mSysProcess::status getStatus() const;
++   void kill();
+ 
+-       void kill();
++   void signalStop();
+ 
+-       void signalStop();
++private:
+ 
+-       mSysProcess::child * getProcess();
++    mcProcessControl();
+ 
+-    };
++};
++
++
++/**
++ *
++ * Monitor a list of processes.
++ *
++**/
++class mcProcessListMonitor
++{
+ 
++   std::list<mcProcessControl *>        m_list;
+ 
+-    class ProcessListMonitor
+-    {
+-    private:
+-       std::list<ProcessControl *>        m_list;
++public:
+ 
+-    public:
++   mcProcessListMonitor();
+ 
+-       ProcessListMonitor();
++   ~mcProcessListMonitor() throw();
+ 
+-       ~ProcessListMonitor() throw();
++   void add( mcProcessControl * processcontrol );
+ 
+-       void add( ProcessControl * processcontrol );
++   void check();
+ 
+-       void check();
++};
+ 
+-    };
+ 
+-} //end namespace mControl
+-#endif //endif CALLBACK_H
+\ No newline at end of file
++#endif // #ifndef MCPROCESS_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 9e1a78f9..1cc4ba69 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -48,8 +48,6 @@ namespace mControl
+     class Tools
+     {
+     private:
+-        cfgListSysCommands*     m_shutDownCommands;
+-        cfgListSysCommands*     m_startUpCommands;
+         GlobalConfig&           m_globalConfig;
+         //ProcessList         m_processList;
+         //list<long>          m_prList;
+@@ -145,18 +143,6 @@ namespace mControl
+         static long mSystem( char const * cmd, char const * purpose );
+ 
+ 
+-        /**
+-        *   execute configured commands on platform shutdown
+-        */
+-        void execSysCmdsShutdown();
+-
+-
+-        /**
+-        *   execute configured commands on platform startup
+-        */
+-        void execSysCmdsStartup();
+-
+-
+         //TODO: new implementation with Boost or Poco
+         /**
+         *   load a hosts file from HTTP server (if configured)
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index fdf4907e..26c54ffb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -34,7 +34,9 @@ namespace mControl
+         NotificationQueue &         m_notificationQueue; 
+         GlobalConfig&               m_globalConfig;
+         Dialog&                     m_dialog;
+-        Tools                       m_tools;
++        cfgListSysCommands*         m_shutDownCommands;
++        cfgListSysCommands*         m_startUpCommands;
++
+ 
+     public:
+         Worker(NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+@@ -46,6 +48,18 @@ namespace mControl
+         * Here the kiosk is rebooted once per day
+         */
+         void run();
++
++
++        /**
++        *   execute configured commands on platform shutdown
++        */
++        void execSysCmdsShutdown();
++
++
++        /**
++        *   execute configured commands on platform startup
++        */
++        void execSysCmdsStartup();
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 47513358..bf9f8e42 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -26,6 +26,8 @@
+ #include "massaiCorba/corbaclnt.h"
+ #include "tao/SystemException.h"
+ 
++#include "systools/matDaemon.h"
++
+ 
+ namespace mControl
+ {
+@@ -184,6 +186,120 @@ namespace mControl
+     }
+ 
+ 
++    void WindowConfig::createAlert()
++    {
++        try
++        {
++            m_globalConfig.setAlert( new alert(ALERT_M_PLATFORM) );
++        }
++        catch( alertException & e )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException: %s",e.toString().c_str());
++        }
++        catch( ... )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException (unknown)");
++        }
++
++    } 
++
++
++    void WindowConfig::sendAlert(char *s)
++    {
++        
++        if(m_globalConfig.noLogActive())
++        {
++           TRACE(HERE,"sendAlert [%s], noLOG.",s);
++           return;
++        }
++        TRACE(HERE,"sendAlert [%s], noSNMP=%s, started=%s.",
++                   s,
++                   m_globalConfig.noSNMPActive() ?"true":"false",
++                   m_globalConfig.isStarted() ?"true":"false");
++        if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
++        {
++          TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
++                     s,
++                     m_globalConfig.noSNMPActive()?"true":"false",
++                     m_globalConfig.isStarted()?"true":"false");
++          return;
++        }
++
++        static bool initial = true;
++        waitInitialForLoggingService();
++
++        int repetitions = 1;
++
++        if(initial && !m_globalConfig.serverMode())
++        {
++          initial = false;
++          repetitions = 10;
++        }
++
++        while(repetitions--)
++        {
++          if(s && *s)
++          {
++            if(m_globalConfig.getAlert())
++            {
++              alert::eventData e(s);
++
++              try
++              {
++                 m_globalConfig.getAlert()->send(e);
++                 return;
++              }
++              catch( alertException & ex )
++              {
++                TRACE(HERE,"alertException: %s",ex.toString().c_str());
++                delete m_globalConfig.getAlert();
++                createAlert();
++              }
++              catch( ... )
++              {
++                TRACE(HERE,"unknown exception in SendAlert()");
++              }
++            }
++            else
++              TRACE(HERE,"Alert [%s] not sent.");
++          }
++          if(repetitions)
++            OS_Sleep(3000);
++        }
++    }
++
++
++    void WindowConfig::waitInitialForLoggingService()
++    {
++        static bool init= false;
++        if(!init)
++        {
++            TRACE(HERE,"waitInitialForLoggingService...");
++            Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
++            try
++            {
++                //TODO: check if wait is needed
++                long rc= loggingSemaphore.wait(600);
++                long error= GetLastError();
++                TRACE(HERE,"waitInitialForLoggingService %d %d", rc, error);
++            }
++            catch( const std::exception& ex )
++            {
++                TRACE(HERE, ex.what());
++            }
++            catch( ... )
++            {
++                TRACE(HERE,"waitInitialForLoggingService failed: unknown exception");
++            }
++            TRACE(HERE,"waitInitialForLoggingService done.");
++            createAlert();
++        }
++        init= true;
++    }
++
++
+     LRESULT CALLBACK WindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+     { 
+         WindowConfig* pWnd;
+@@ -613,7 +729,6 @@ namespace mControl
+             */
+ 
+             //original as in the old mControl
+-            //TODO: implement case VK_F12
+             case WM_KEYUP:
+                 TRACE(SecondaryRuntime_HERE,"WM_KEYUP");
+ 
+@@ -700,63 +815,49 @@ namespace mControl
+ 
+                break;
+ 
+-        //TODO: implement correct functionality
+         case VK_F12: 
+-                m_globalConfig.getQueue().enqueueNotification( new MControlNotification( "", CONFIG_ID,  WM_EXEC_SYS_CMD_SHUTDOWN) );
+-                
+-
+-                if(MessageBox(hWnd,
+-                                TEXT("Do you really want to shut down the platform?"),
+-                                TEXT("Massai"),
+-                                MB_ICONQUESTION | MB_YESNO) == IDYES)
+-                {
+-                    m_globalConfig.setTerminated(true);
+-                    m_globalConfig.getThreadPool().stopAll();
+-                    PostQuitMessage(0);
+-                }         
+-                
+-
+-                /* normal implementation
+                 if(mDaemon_isService())
+                 {
+-                    MessageBox(hwnd,
++                    MessageBox(hWnd,
+                                 TEXT("Please use the service control to stop the platform."),
+-                                TEXT("Massai"),
++                                TEXT("Massai - isService"),
+                                 MB_ICONEXCLAMATION | MB_OK);
+                 }
+-                else if(!serverMode() && (GetKeyState(VK_CONTROL) & 0xffff0000) && (GetKeyState(VK_SHIFT) & 0xffff0000))
++                else if(!m_globalConfig.serverMode() && (GetKeyState(VK_CONTROL) & 0xffff0000) && (GetKeyState(VK_SHIFT) & 0xffff0000))
+                 {
+-                    if(MessageBox(hwnd,
++                    if(MessageBox(hWnd,
+                                 TEXT("Do you really want to reboot the kiosk?"),
+-                                TEXT("Massai"),
++                                TEXT("Massai - reboot Kiosk"),
+                                 MB_ICONQUESTION | MB_YESNO) == IDYES)
+                     {
+                     sendAlert(ALERT_E_REBOOT_LOCAL);
+ 
+                     // execute system commands before shutting down
+-                    execSysCmdsShutdown();
++                    //TODO: check if a sleep is needed
++                    //TODO: implement correct handle for WM_EXEC_SYS_CMD_SHUTDOWN
++                    m_globalConfig.getQueue().enqueueNotification( new MControlNotification( "", CONFIG_ID,  WM_EXEC_SYS_CMD_SHUTDOWN) );
+ 
+-                    rc = shutdownOS_Now(true);
++                    rc = Tools::shutdownOS_Now(true);
+ 
+                     TRACE(HERE,"kiosk reboot, rc = %d",rc);
+                     }
+                 }
+                 else
+                 {
+-                    if(MessageBox(hwnd,
++                    if(MessageBox(hWnd,
+                                 TEXT("Do you really want to shut down the platform?"),
+-                                TEXT("Massai"),
++                                TEXT("Massai - shutdown Platform"),
+                                 MB_ICONQUESTION | MB_YESNO) == IDYES)
+                     {
+                     sendAlert(ALERT_E_SHUTDOWN_LOCAL);
+-                    if(isRunningAsUserShell())
++                    if(m_globalConfig.isRunningAsUserShell())
+                     {
+-                        startExplorer();
++                        Tools::startExplorer();
+                     }
+-                    PostMessage(hwnd,WM_CLOSE,0,0);
++                    PostMessage(hWnd,WM_CLOSE,0,0);
+                     }
+                 }
+-                */
++                
+                 break;
+             }
+             break;
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 395af6a7..87001944 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -54,119 +54,6 @@ namespace mControl
+     }
+ 
+ 
+-    void Dialog::createAlert()
+-    {
+-        try
+-        {
+-            m_globalConfig.setAlert( new alert(ALERT_M_PLATFORM) );
+-        }
+-        catch( alertException & e )
+-        {
+-            m_globalConfig.setAlert( NULL );
+-            TRACE(HERE,"(create)alertException: %s",e.toString().c_str());
+-        }
+-        catch( ... )
+-        {
+-            m_globalConfig.setAlert( NULL );
+-            TRACE(HERE,"(create)alertException (unknown)");
+-        }
+-
+-    }
+-
+-
+-    void Dialog::waitInitialForLoggingService()
+-    {
+-        static bool init= false;
+-        if(!init)
+-        {
+-            TRACE(HERE,"waitInitialForLoggingService...");
+-            Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
+-            try
+-            {
+-                long rc= loggingSemaphore.wait(60000);
+-                long error= GetLastError();
+-                TRACE(HERE,"waitInitialForLoggingService %d %d", rc, error);
+-            }
+-            catch( const std::exception& ex )
+-            {
+-                TRACE(HERE, ex.what());
+-            }
+-            catch( ... )
+-            {
+-                TRACE(HERE,"waitInitialForLoggingService failed: unknown exception");
+-            }
+-            TRACE(HERE,"waitInitialForLoggingService done.");
+-            createAlert();
+-        }
+-        init= true;
+-    }
+-
+-
+-    void Dialog::sendAlert(char *s)
+-    {
+-        
+-        if(m_globalConfig.noLogActive())
+-        {
+-           TRACE(HERE,"sendAlert [%s], noLOG.",s);
+-           return;
+-        }
+-        TRACE(HERE,"sendAlert [%s], noSNMP=%s, started=%s.",
+-                   s,
+-                   m_globalConfig.noSNMPActive() ?"true":"false",
+-                   m_globalConfig.isStarted() ?"true":"false");
+-        if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
+-        {
+-          TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
+-                     s,
+-                     m_globalConfig.noSNMPActive()?"true":"false",
+-                     m_globalConfig.isStarted()?"true":"false");
+-          return;
+-        }
+-
+-        static bool initial = true;
+-        waitInitialForLoggingService();
+-
+-        int repetitions = 1;
+-
+-        if(initial && !m_globalConfig.serverMode())
+-        {
+-          initial = false;
+-          repetitions = 10;
+-        }
+-
+-        while(repetitions--)
+-        {
+-          if(s && *s)
+-          {
+-            if(m_globalConfig.getAlert())
+-            {
+-              alert::eventData e(s);
+-
+-              try
+-              {
+-                 m_globalConfig.getAlert()->send(e);
+-                 return;
+-              }
+-              catch( alertException & ex )
+-              {
+-                TRACE(HERE,"alertException: %s",ex.toString().c_str());
+-                delete m_globalConfig.getAlert();
+-                createAlert();
+-              }
+-              catch( ... )
+-              {
+-                TRACE(HERE,"unknown exception in SendAlert()");
+-              }
+-            }
+-            else
+-              TRACE(HERE,"Alert [%s] not sent.");
+-          }
+-          if(repetitions)
+-            OS_Sleep(3000);
+-        }
+-    }
+-
+-
+     void Dialog::waitForStarterTermination()
+     {
+         /*
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 8bb0470a..6629afb5 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -442,11 +442,7 @@ int mDaemon_main( int argc, char const * const * argv )
+             rebooter.cancel();
+         */
+ 
+-        //globalConfig.getThreadPool().stopAll();
+-        
+-        //TRACE(HERE,"size of globalMsgQueue, after stopAll(): size[ %d ]", globalConfig.getQueue().size());
+-        
+-        OS_Sleep(50);
++        globalConfig.getThreadPool().stopAll();
+     }
+     catch( std::exception & X )
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_process.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_process.cpp
+index 711fff15..9d86a79b 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_process.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_process.cpp
+@@ -1,295 +1,386 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mControl_Process.cpp
+-//
+-//  purpose:    Callback class implementation
+-//
+-//  date:       06.11.2014
+-//
+-//  author:     Materna Information & Communications (MOt)
+-//
+-//---------------------------------------------------------------------------
+-
+-//Project includes
++/**
++ **************************************************************************
++ *
++ * @file mcProcess.cpp
++ *
++ * Implements class mcProcessCallback.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
+ #include "..\inc\mControl_process.h"
+ 
+-//MATERNA includes
++// Common header
+ #include "trc/trace.h"
+ 
++// For STILL_ACTIVE
++#include <windows.h>
++
++
++
++#define MCPLM   "mcProcessListMonitor::"
++
+ 
+-namespace mControl
++
++/*
++ *
++ * Class mcProcessCallback method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessCallback::mcProcessCallback
++   (
++      char const * application_name,
++      char const * stream_name
++   ) :
++   m_application_name( application_name ),
++   m_stream_name( stream_name )
+ {
+-/*********************************************************************************************
+-*
+-* Class ProcessCallback Method implementation.
+-*
+-**/
+-    ProcessCallback::ProcessCallback( char const * App, char const * Which, GlobalConfig& config ) :
+-          m_appName( App ),
+-          m_streamName( Which ),
+-          m_globalConfig( config )
+-       {
+-       }
+-    
+-
+-    ProcessCallback::~ProcessCallback()
+-    {
+-    }
+-
+-
+-    void ProcessCallback::lineOut( char const * Line ) const
+-    {
+-        /*
+-        m_globalConfig.getCallbackMutex().request();
+-        cout << m_appName << ":" << m_streamName << "[" << Line << "]" << endl;
+-        m_globalConfig.getCallbackMutex().release();
+-        */
+-    }
+-
+-/*********************************************************************************************
+-*
+-* Class ProcessControl::impl Method implementation.
+-*
+-**/
+-    class ProcessControl::impl
+-    {
+-    private:
+-        std::string const               m_application_name;
++}
++
++
++
++/*
++ *
++ * Class mcProcessCallback method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessCallback::lineOut( char const * line ) const
++{
++   TRACE
++      (
++         HERE, "%s:%s[%s]",
++         m_application_name.c_str(),
++         m_stream_name.c_str(),
++         line
++      );
++}
++
++
++
++class mcProcessControl::impl
++{
++
++   std::string const                    m_application_name;
+ 
+-        mSysProcess::child *            m_child;
++   mSysProcess::child *                 m_child;
+ 
+-        ProcessCallback const           m_logging;
++   mcProcessCallback const              m_logging;
+ 
+-        ProcessCallback const           m_stderr;
++   mcProcessCallback const              m_stderr;
+ 
+-        ProcessCallback const           m_stdout;
++   mcProcessCallback const              m_stdout;
+    
+-        bool                            m_started;
++   bool                                 m_started;
++
++   HANDLE                               m_stop_sem_handle;
++
++public:
++
++   impl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name,
++         char const * stop_semaphore
++      ) :
++      m_application_name( application_name ),
++      m_child( 0 ),
++      m_logging( application_name, "mSysProcess" ),
++      m_started( false ),
++      m_stderr( application_name, "STDERR" ),
++      m_stdout( application_name, "STDOUT" ),
++      m_stop_sem_handle( NULL )
++   {
++      if( stop_semaphore )
++      {
++         m_stop_sem_handle =
++            CreateEvent
++               (
++                  NULL,                 // lpEventAttributes
++                  true,                 // bManualReset
++                  false,                // bInitialState
++                  stop_semaphore        // lpName
++               );
++         if( !m_stop_sem_handle )
++         {
++            return;
++         }
++         ResetEvent( m_stop_sem_handle );
++      }
++      parent
++#ifdef DO_MCPROCESS_LOGGING
++         .setLogging( m_logging )
++#endif
++         .setHide()
++         .setStdErr( m_stderr ).setStdOut( m_stdout );
++      m_child = parent.newChild();
++      m_started = true;
++   }
++
++   ~impl() throw()
++   {
++      try
++      {
++         delete m_child;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++   char const * getName() const
++   {
++      return m_application_name.c_str();
++   }
++
++   mSysProcess::status getStatus() const
++   {
++      if( m_started )
++         return m_child->getStatus();
++      else
++         return mSysProcess::STATUS_FAILED;
++   }
++
++   void kill()
++   {
++      m_child->kill();
++   }
++
++   void signalStop()
++   {
++      if( m_stop_sem_handle )
++      {
++         SetEvent( m_stop_sem_handle );
++         CloseHandle( m_stop_sem_handle );
++         m_stop_sem_handle = NULL;
++      }
++   }
++
++}; // class mcProcessControl::impl
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::mcProcessControl
++   (
++      mSysProcess::parent &     parent,
++      char const *              application_name
++   ) :
++   m_impl( new mcProcessControl::impl( parent, application_name, 0 ) )
++{
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::mcProcessControl
++   (
++      mSysProcess::parent &     parent,
++      char const *              application_name,
++      char const *              stop_semaphore
++   ) :
++   m_impl
++      (
++         new mcProcessControl::impl
++            (
++               parent,
++               application_name,
++               stop_semaphore
++            )
++      )
++{
++}
+ 
+-        HANDLE                          m_stop_sem_handle;
+ 
+-    public:
+ 
+-        impl
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::~mcProcessControl() throw()
++{
++   try
++   {
++      delete m_impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++char const * mcProcessControl::getName() const
++{
++   return m_impl->getName();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mSysProcess::status mcProcessControl::getStatus() const
++{
++   return m_impl->getStatus();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessControl::kill()
++{
++   m_impl->kill();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessControl::signalStop()
++{
++   m_impl->signalStop();
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessListMonitor::mcProcessListMonitor() :
++   m_list()
++{
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessListMonitor::~mcProcessListMonitor() throw()
++{
++   try
++   {
++      // Remove already stopped processes ...
++      check();
++      // ... and stop the rest.
++      for(
++            std::list<mcProcessControl *>::const_iterator it =
++               m_list.begin();
++            it != m_list.end();
++            ++it
++         )
++      {
++         mcProcessControl * p = *it;
++         TRACE
+             (
+-                mSysProcess::parent & parent,
+-                char const * application_name,
+-                char const * stop_semaphore,
+-                GlobalConfig& config
+-            ) :
+-            m_application_name( application_name ),
+-            m_child( 0 ),
+-            m_logging( application_name, "mSysProcess", config ),
+-            m_stderr( application_name, "STDERR", config ),
+-            m_stdout( application_name, "STDOUT", config ),
+-            m_started( false ),
+-            m_stop_sem_handle( NULL )
+-        {
+-            parent
+-        #ifdef DO_MCPROCESS_LOGGING
+-                .setLogging( m_logging )
+-        #endif
+-                .setHide()
+-                .setStdErr( m_stderr ).setStdOut( m_stdout );
+-            m_child = parent.newChild();
+-
+-            TRACE(HERE, "newChild:  ProcessID[ %d ], Program[ %s ] ", m_child->getProcessId(), m_child->getProgram() );
+-
+-            m_started = true;
+-        }
+-
+-        ~impl() throw()
+-        {
+-            try
+-            {
+-                delete m_child;
+-            }
+-            catch( ... )
+-            {
+-            }
+-        }
+-
+-        char const * getName() const
+-        {
+-            return m_application_name.c_str();
+-        }
+-
+-        mSysProcess::status getStatus() const
+-        {
+-            if( m_started )
+-                return m_child->getStatus();
+-            else
+-                return mSysProcess::STATUS_FAILED;
+-        }
+-
+-        void kill()
+-        {
+-            m_child->kill();
+-        }
+-
+-        void signalStop()
+-        {
+-            if( m_stop_sem_handle )
+-            {
+-                SetEvent( m_stop_sem_handle );
+-                CloseHandle( m_stop_sem_handle );
+-                m_stop_sem_handle = NULL;
+-            }
+-        }
+-
+-        mSysProcess::child * getChild()
+-        {
+-            return m_child;
+-        }
+-
+-}; // class ProcessControl::impl
+-
+-
+-
+-/*********************************************************************************************
+-*
+-* Class ProcessControl Method implementation.
+-*
+-**/
+-    ProcessControl::ProcessControl
+-    (
+-        mSysProcess::parent &       parent,
+-        char const *                application_name,
+-        GlobalConfig&               config
+-    ) :
+-        m_impl( new ProcessControl::impl( parent, application_name, 0 , config) )
+-    {
+-    }
+-
+-        
+-    ProcessControl::~ProcessControl() throw()
+-    {
+-       try
+-       {
+-          delete m_impl;
+-       }
+-       catch( ... )
+-       {
+-       }
+-    }
+-
+-
+-    char const * ProcessControl::getName() const
+-    {
+-       return m_impl->getName();
+-    }
+-
+-
+-    mSysProcess::status ProcessControl::getStatus() const
+-    {
+-       return m_impl->getStatus();
+-    }
+-
+-
+-    void ProcessControl::kill()
+-    {
+-       m_impl->kill();
+-    }
+-
+-
+-    void ProcessControl::signalStop()
+-    {
+-       m_impl->signalStop();
+-    }
+-
+-
+-    mSysProcess::child * ProcessControl::getProcess()
+-    {
+-        return m_impl->getChild();
+-    }
+-
+-
+-/*********************************************************************************************
+-*
+-* Class ProcessControl Method implementation.
+-*
++               HERE, MCPLM "~mcProcessListMonitor - kill [%s]",
++               p->getName()
++            );
++         p->kill();
++         delete p;
++      }
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessListMonitor::add( mcProcessControl * processcontrol )
++{
++   if( processcontrol )
++   {
++      // Scan existing processes
++      check();
++      //
++      m_list.push_back( processcontrol );
++      TRACE
++         (
++            HERE, MCPLM "add(%s) -> processes controlled = %d.",
++            processcontrol->getName(),
++            m_list.size()
++         );
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessListMonitor::check()
++{
++   std::list<mcProcessControl *>::iterator it = m_list.begin();
++   while( it != m_list.end() )
++   {
++      if( (*it)->getStatus() != mSysProcess::STATUS_RUNNING )
++      {
++         TRACE
++            (
++               HERE, MCPLM "check - remove control of [%s]",
++               (*it)->getName()
++            );
++         delete *it;
++         it = m_list.erase( it );
++      }
++      else
++      {
++         ++it;
++      }
++   }
++   TRACE
++      (
++         HERE, MCPLM "check -> processes controlled = %d.",
++         m_list.size()
++      );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
+ **/
+-    ProcessListMonitor::ProcessListMonitor() :
+-       m_list()
+-    {
+-        TRACE(HERE,"constructor ProcessListMonitor");
+-    }
+-
+-
+-    ProcessListMonitor::~ProcessListMonitor() throw()
+-    {
+-        TRACE(HERE,"deconstructor ProcessListMonitor");
+-        try
+-        {
+-            // Remove already stopped processes ...
+-            check();
+-            // ... and stop the rest.
+-            for(
+-                std::list<ProcessControl *>::const_iterator it =
+-                    m_list.begin();
+-                it != m_list.end();
+-                ++it
+-                )
+-            {
+-                ProcessControl * p = *it;
+-                TRACE
+-                (
+-                    HERE, "~ProcessListMonitor - kill [%s]",
+-                    p->getName()
+-                );
+-                p->kill();
+-                delete p;
+-            }
+-        }
+-        catch( ... )
+-        {
+-        }
+-    }
+-
+-
+-    void ProcessListMonitor::add( ProcessControl * processcontrol )
+-    {
+-       if( processcontrol )
+-       {
+-          // Scan existing processes
+-          check();
+-          //
+-          m_list.push_back( processcontrol );
+-          TRACE
+-             (
+-                HERE, "add(%s) -> processes controlled = %d.",
+-                processcontrol->getName(),
+-                m_list.size()
+-             );
+-       }
+-    }
+-
+-
+-    void ProcessListMonitor::check()
+-    {
+-       std::list<ProcessControl *>::iterator it = m_list.begin();
+-       while( it != m_list.end() )
+-       {
+-          if( (*it)->getStatus() != mSysProcess::STATUS_RUNNING )
+-          {
+-             TRACE
+-                (
+-                   HERE, "check - remove control of [%s]",
+-                   (*it)->getName()
+-                );
+-             delete *it;
+-             it = m_list.erase( it );
+-          }
+-          else
+-          {
+-             ++it;
+-          }
+-       }
+-       TRACE
+-          (
+-             HERE, "check -> processes controlled = %d.",
+-             m_list.size()
+-          );
+-    }
+-
+-} //end namespace mControl
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index 81b5214f..fa3d6ef9 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -22,7 +22,6 @@
+ #include <list>
+ #include <time.h>
+ #include <sys/timeb.h>
+-#include <sstream>
+ #include "Commctrl.h"
+ 
+ 
+@@ -32,8 +31,6 @@ using namespace std;
+ namespace mControl
+ {
+     Tools::Tools(GlobalConfig& config) :
+-        m_shutDownCommands(NULL),
+-        m_startUpCommands(NULL),
+         m_globalConfig(config)
+     {
+     }
+@@ -570,44 +567,6 @@ namespace mControl
+        return 0;
+     }
+ 
+-        
+-    void Tools::execSysCmdsShutdown()
+-    {
+-        TRACE( HERE, "execSysCmdsShutdown ..." );
+-
+-        if (m_shutDownCommands == NULL)
+-            m_shutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
+-        list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_shutDownCommands->get());
+-        int index( 1 );
+-        for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+-        {
+-            std::ostringstream oss;
+-            oss << "execSysCmdsShutdown#" << index++;
+-            long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
+-            TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+-        }
+-        TRACE( HERE, "execSysCmdsShutdown." );
+-    }
+-    
+-
+-    void Tools::execSysCmdsStartup()
+-    {
+-       TRACE( HERE, "execSysCmdsStartup ..." );
+-       if (m_startUpCommands==NULL)
+-          m_startUpCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
+-       
+-       list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_startUpCommands->get());
+-       int index( 1 );
+-       for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+-       {
+-          std::ostringstream oss;
+-          oss << "execSysCmdsStartup#" << index++;
+-          long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
+-          TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+-       }
+-       TRACE( HERE, "execSysCmdsStartup." );
+-    }
+-
+ 
+     long Tools::loadHostsFile()
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 5533a8d9..fa593afa 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -17,6 +17,7 @@
+ //Windows includes
+ #include <Commctrl.h>
+ #include <string.h>
++#include <sstream>
+ 
+ //MATERNA includes
+ #include "trc/trace.h"
+@@ -32,7 +33,8 @@ namespace mControl
+         m_notificationQueue(queue),
+         m_globalConfig(config),
+         m_dialog(dialog),
+-        m_tools(config)
++        m_shutDownCommands(NULL),
++        m_startUpCommands(NULL)
+     {
+     }
+ 
+@@ -65,59 +67,6 @@ namespace mControl
+                             break;
+                     case WM_MASSAISTART_REMOTE:
+                             TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_REMOTE");
+-
+-                            /*
+-                            long rc;
+-                            // request from remote !!
+-
+-                            if(!m_globalConfig.isStarted())
+-                            {
+-                                SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
+-
+-                                m_tools.sendAlert(ALERT_E_START_REMOTE);
+-
+-                                m_globalConfig.setStarted( true );
+-
+-                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
+-
+-                                // start update service previous to all other tasks ...
+-
+-                                rc = Tools::startUpdate();
+-
+-                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
+-                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
+-
+-                                if(rc == REBOOT_KIOSK)
+-                                {
+-                                    TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
+-
+-                                    rc = Tools::shutdownOS_Now(true);
+-
+-                                    TRACE(HERE,"kiosk reboot, rc = %d",rc);
+-
+-                                    PostQuitMessage(0);
+-                                    break;
+-                                }
+-
+-                                // execute system commands before starting platform
+-                                m_tools.execSysCmdsStartup();
+-
+-                                rc = startAll();
+-
+-                                if(!rc)
+-                                {
+-                                    Sleep(1000);
+-
+-                                    SetActiveWindow(hwnd);
+-                                    SetFocus(hwnd);
+-                                }
+-                            }
+-                            else
+-                                rc = -1;
+-                            return rc;
+-                            */
+                             break;
+ 
+                     case WM_MASSAIREBOOT_REMOTE:
+@@ -137,6 +86,7 @@ namespace mControl
+                             break;
+                     case WM_EXEC_SYS_CMD_SHUTDOWN:
+                             TRACE(HERE,"WM_EXEC_SYS_CMD_SHUTDOWN command dequeued");
++                            execSysCmdsShutdown();
+                             break;
+                     default:
+                             TRACE(HERE,"default command dequeued");
+@@ -146,4 +96,48 @@ namespace mControl
+             }
+         }
+     }
++
++
++    void Worker::execSysCmdsShutdown()
++    {
++        TRACE( HERE, "execSysCmdsShutdown ..." );
++
++        if (m_shutDownCommands == NULL)
++            m_shutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
++        list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_shutDownCommands->get());
++        int index( 1 );
++        for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
++        {
++            std::ostringstream oss;
++            oss << "execSysCmdsShutdown#" << index++;
++            
++            //TODO: process implemnentation
++            long const rc = 0;//newProcess( (*i).c_str(), oss.str().c_str() );
++
++            TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
++        }
++        TRACE( HERE, "execSysCmdsShutdown." );
++    }
++
++
++    void Worker::execSysCmdsStartup()
++    {
++        TRACE( HERE, "execSysCmdsStartup ..." );
++        if (m_startUpCommands==NULL)
++            m_startUpCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
++       
++        list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_startUpCommands->get());
++        int index( 1 );
++        for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
++        {
++            std::ostringstream oss;
++            oss << "execSysCmdsStartup#" << index++;
++
++            //TODO: process implemnentation
++            long const rc = 0;//newProcess( (*i).c_str(), oss.str().c_str() );
++
++            TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
++        }
++        TRACE( HERE, "execSysCmdsStartup." );
++    }
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

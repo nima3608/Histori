@@ -1,0 +1,1727 @@
+From 5562a6e40ab8febbd632a73a7c697f0cc0811700 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 29 Aug 2012 10:33:26 +0000
+Subject: [PATCH 0260/1000] Mantis 22014 - Rework for operation as "service"
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@403 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/mMainCommandLine.hpp  |  18 +-
+ .../Massai/cpp/Controller/inc/serverwin.h     |  10 +-
+ .../Massai/cpp/Controller/src/main.cpp        | 192 ++++----
+ .../Massai/cpp/Controller/src/serverwin.cpp   | 413 +++++++++---------
+ .../Massai/cpp/LogService/makefile.mak        |   9 +
+ .../Massai/cpp/Systools/src/matDaemonW32.cpp  |  52 ++-
+ .../Massai/cpp/Text/src/ShowPectab.cpp        |  69 ++-
+ .../Massai/cpp/Text/src/mMainCommandLine.cpp  | 274 ++++++------
+ .../Massai/cpp/Tools/src/mInFile.cpp          |   7 +-
+ .../Massai/idl/Massai/makefile.mak            |   1 +
+ 10 files changed, 588 insertions(+), 457 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp b/SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp
+index 0892d6f1..a23f1735 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp
+@@ -36,11 +36,27 @@ public:
+     *
+     * Constructor.
+     *
+-    * @param Line:      The command-line as single string.
++    * @param Line:              The command-line as single string.
+     *
+    **/
+    explicit mMainCommandLine( char const * Line );
+ 
++   /**
++    *
++    * Constructor.
++    *
++    * @param Program:           The first verb (program name).
++    *
++    * @param Parameters:        The commandline parameters.
++    *
++    * @note:    This constructor is useful, when used with the "lpCmdLine"
++    *           as given by a call to the WinMain function. The "Program"
++    *           parameter could be set to the program's name (statically),
++    *           the "parameters" to "lpCmdLine".
++    *
++   **/
++   mMainCommandLine( char const * Program, char const * Parameters );
++
+    /**
+     *
+     * Destructor.
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+index c04c1ced..8d1692ba 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/serverwin.h
+@@ -18,8 +18,14 @@
+ 
+ // exports ------------------------------------------------------------------
+ 
+-LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+-void prot(char *pszFormat, ...);
++LRESULT CALLBACK serverwinWindowProc
++   (
++      HWND hwnd,
++      UINT message,
++      WPARAM wParam,
++      LPARAM lParam
++   );
++
+ 
+ #define WM_MASSAISTART            (WM_USER + 1)
+ #define WM_MASSAISTOP_REMOTE      (WM_USER + 2)
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index 2faf3a89..5eed5fdc 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -48,7 +48,6 @@ static bool      fServerMode = false;
+ static bool      fNoLOG      = false;
+ static bool      fNoSNMP     = false;
+ static bool      bPortableMCC= false;
+-static HINSTANCE hInstance;
+ static HWND      hwnd= 0;
+ 
+ 
+@@ -57,9 +56,20 @@ namespace
+ {
+ 
+ 
++   HINSTANCE    l_instance;
++
+    mcData *     l_mcdata = 0;
+ 
+ 
++   char const * c_str( bool in )
++   {
++      if( in )
++         return "true";
++      else
++         return "false";
++   }
++
++
+ } // namespace
+ 
+ 
+@@ -73,7 +83,7 @@ mcData * getMcData()
+ 
+ CEnvSubst EnvS;
+ 
+-extern long setLevel(long level);
++
+ 
+ //---------------------------------------------------------------------------
+ //
+@@ -124,7 +134,7 @@ void exitHandler(int iSignal)
+ 
+ HINSTANCE getInstance()
+ {
+-    return(hInstance);
++    return(l_instance);
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -198,35 +208,52 @@ bool noSNMP()
+ 
+ 
+ 
++//---------------------------------------------------------------------------
++//
++//  function:   int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPreInst, char *szCmdLine, int iCmdShow)
++//
++//  purpose:    Standard windows program entry
++//
++//  date:       04.05.2001, 09:33
++//
++//  author:     Materna Information & Communications (AGe)
++//
++//---------------------------------------------------------------------------
++
++int WINAPI WinMain( HINSTANCE hInst, HINSTANCE, char * cmdline, int )
++{
++   l_instance = hInst;
++   mMainCommandLine cmdline_parser( "mControl", cmdline );
++   // Ask the deamon control for an "interactive" service session.
++   return mDaemon_execute_interactive
++            (
++               cmdline_parser.argc(),
++               const_cast<char **>( cmdline_parser.argv() )
++            );
++}
++
++
++
+ /**
+  *
+- * My main.
++ * Service process implementation.
+  *
+ **/
+-int WINAPI commonMain
+-   (
+-      bool              daemon_called,  // Called as Windows-Service
+-      HINSTANCE         hInst,          // Parent
+-      char const *      cmdline         // Commandline
+-   )
++int mDaemon_main( int argc, char const * const * argv )
+ {
+ 
+-    mMainCommandLine     cmdline_parser( cmdline );
+-    argScan              args( cmdline_parser.argc(), cmdline_parser.argv() );
++    argScan args( argc, argv );
+ 
+     MSG          msg ;
+     WNDCLASS     wndclass;
+ 
+     int          x,cx,
+                  y,cy;
+-    long         rc;
++    long         rc = 0;
+     long         lWait = 60000;
+     long         lDelay = -1;
+     FILE        *fp;
+ 
+-    //setLevel(9);
+-
+-
+     HANDLE isRunning;
+ 
+     // needed! otherwise a ctrl-break leeds to exit(0)!!!
+@@ -238,8 +265,7 @@ int WINAPI commonMain
+     signal(SIGILL,  exitHandler);
+     signal(SIGFPE,  exitHandler);
+ 
+-    if( daemon_called )
+-      mDaemon_indInitializing(60000);
++    mDaemon_indInitializing(60000);
+ 
+     // try create within the global name space, so that this program also
+     // on terminal server services runs only once 08.01.2004 (AGe)
+@@ -272,7 +298,14 @@ int WINAPI commonMain
+ 
+     if(fp)
+     {
+-      fprintf(fp,"%s cmdLine = %s\n",timeStamp(),cmdline);
++
++      std::string CommandLine = argv[0];
++      for( int A = 1; A < argc; ++A )
++      {
++         CommandLine += " ";
++         CommandLine += argv[A];
++      }
++      fprintf(fp,"%s cmdLine = %s\n",timeStamp(),CommandLine.c_str());
+       fflush(fp);
+     }
+ 
+@@ -327,9 +360,13 @@ int WINAPI commonMain
+           NULL,
+           TEXT
+             (
+-               "USAGE:\tmControl [-delaybeforestart:seconds]"
+-               " [-wait[:timeout]]\n\t[-service:servicename]"
+-               " [-server] [-nolog|-nosnmp]\n\n"
++               "USAGE:\tmControl "
++               "{ -help |\n\t\t-normal <params> |\n"
++               "\t\t-install [-param:\"<params>\"] |\n"
++               "\t\t-deinstall }\n\n"
++               "<params>: [-delaybeforestart:seconds]"
++               " [-wait[:timeout]]\n\t[-service:<servicename>]"
++               " [-server]\n\t[-nolog] [-nosnmp]\n\n"
+                "-delaybeforestart\n\tSet delay in seconds to wait"
+                " before startup\n"
+                "-wait\tSet timeout in ms for initial waiting for"
+@@ -378,7 +415,7 @@ int WINAPI commonMain
+     try
+     {
+ 
+-      if( args.option( "SERVER" ) || ( daemon_called && mDaemon_isService() ) )
++      if( args.option( "SERVER" ) || mDaemon_isService() )
+         fServerMode = true;
+ 
+       if( args.option( "NOLOG" ) )
+@@ -390,20 +427,28 @@ int WINAPI commonMain
+       if(noLOG())
+       {
+          // A noSNMP parameter is ignored.
+-         TRACE(HERE,"%s started (server mode = %d, as service = %d, noLOG = %d) ...",
+-                     szAppName,
+-                     fServerMode,
+-                     daemon_called && mDaemon_isService(),
+-                     noLOG());
++         TRACE
++            (
++               HERE,
++               "%s started (server mode = %s, as service = %s, noLOG = %s) ...",
++               szAppName,
++               c_str( fServerMode ),
++               c_str( mDaemon_isService() != 0 ),
++               c_str( noLOG() )
++            );
+       }
+       else
+       {
+-         TRACE(HERE,"%s started (server mode = %d, as service = %d, noLOG = %d noNSMP = %d) ...",
+-                     szAppName,
+-                     fServerMode,
+-                     daemon_called && mDaemon_isService(),
+-                     noLOG(),
+-                     noSNMP());
++         TRACE
++            (
++               HERE,
++               "%s started (server mode = %s, as service = %s, noLOG = %s noNSMP = %s) ...",
++               szAppName,
++               c_str( fServerMode ),
++               c_str( mDaemon_isService() != 0 ),
++               c_str( noLOG() ),
++               c_str( noSNMP() )
++            );
+       }
+ 
+       TRACE(HERE,"FileVersion of '.DLL' Files") ;
+@@ -432,11 +477,11 @@ int WINAPI commonMain
+         TRACE(HERE,"Failed to set working directory, rc = %d",rc);
+ 
+       wndclass.style         = CS_HREDRAW | CS_VREDRAW ;
+-      wndclass.lpfnWndProc   = WndProc ;
++      wndclass.lpfnWndProc   = serverwinWindowProc ;
+       wndclass.cbClsExtra    = 0 ;
+       wndclass.cbWndExtra    = 0 ;
+-      wndclass.hInstance     = hInst ;
+-      wndclass.hIcon         = LoadIcon (hInst, MAKEINTRESOURCE(IDI_ICON1)) ;
++      wndclass.hInstance     = l_instance ;
++      wndclass.hIcon         = LoadIcon (l_instance, MAKEINTRESOURCE(IDI_ICON1)) ;
+       wndclass.hCursor       = LoadCursor (NULL, IDC_ARROW) ;
+       wndclass.hbrBackground = (HBRUSH) GetStockObject (WHITE_BRUSH) ;
+       wndclass.lpszMenuName  = NULL ;
+@@ -450,7 +495,7 @@ int WINAPI commonMain
+                      MB_ICONERROR) ;
+ 
+           CloseHandle(isRunning);
+-          return(0);
++          return 0;
+       }
+ 
+       if(!serverMode())
+@@ -501,21 +546,18 @@ int WINAPI commonMain
+                           cy,                   // initial y size
+                           NULL,                 // parent window handle
+                           NULL,                 // window menu handle
+-                          hInst,                // program instance handle
++                          l_instance,                // program instance handle
+                           NULL) ;               // creation parameters
+ 
+       ShowWindow(hwnd,SW_SHOW);
+ 
+-      if( daemon_called && mDaemon_isService() )
++      if( mDaemon_isService() )
+       {
+         //PostMessage(hwnd,WM_PAINT,0,0);
+         RedrawWindow(hwnd,NULL,NULL,RDW_INTERNALPAINT);
+       }
+ 
+-      if( daemon_called )
+-      {
+-         mDaemon_indReady(0);
+-      }
++      mDaemon_indReady(0);
+ 
+       // delay the start of the platform
+       PostMessage(hwnd,WM_START_DELAY_TIMER, lDelay, 0);
+@@ -553,7 +595,7 @@ int WINAPI commonMain
+       {
+           //Configuration not started
+           TRACE(HERE,"ERROR: Configuration not started");
+-          return (-1);
++          return -1;
+       }
+ 
+       // add scheduler tasks
+@@ -593,63 +635,8 @@ int WINAPI commonMain
+     TRACE(HERE,"%s terminated.", szAppName);
+     CloseHandle(isRunning);
+ 
+-    return(msg.wParam);
+-}
+-
+-
+-
+-//---------------------------------------------------------------------------
+-//
+-//  function:   int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPreInst, char *szCmdLine, int iCmdShow)
+-//
+-//  purpose:    Standard windows program entry
+-//
+-//  date:       04.05.2001, 09:33
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+-
+-int WINAPI WinMain( HINSTANCE hInst, HINSTANCE, char * CmdLine, int )
+-{
+-   return commonMain( false, hInst, CmdLine );
+-}
+-
+-
++    return 0;
+ 
+-/**
+- *
+- * Service process implementation.
+- *
+-**/
+-int mDaemon_main( int argc, char const * const * argv )
+-{
+-   std::string CommandLine = argv[0];
+-   for( int A = 1; A < argc; ++A )
+-   {
+-      CommandLine += " ";
+-      CommandLine += argv[A];
+-   }
+-   int const R = commonMain
+-                  (
+-                     true,
+-                     GetModuleHandle( 0 ),
+-                     CommandLine.c_str()
+-                  );
+-   return R;
+-}
+-
+-
+-
+-/**
+- *
+- * The "main" function.
+- *
+-**/
+-int main( int argc, char ** argv )
+-{
+-   // Ask the deamon control for an "interactive" service session.
+-   return mDaemon_execute_interactive( argc, argv );
+ }
+ 
+ 
+@@ -662,7 +649,8 @@ int main( int argc, char ** argv )
+ **/
+ char const * mDaemon_dependencies()
+ {
+-   return "massaiConfig\0\0";
++   // return "massaiConfig\0\0";
++   return 0;
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index aa3293f4..81b4f07d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -14,13 +14,8 @@
+ #include "mcProcess.hpp"
+ 
+ #include <stdlib.h>
+-#include <stdarg.h>
+ #include <string.h>
+ #include <cstring>
+-#include <time.h>
+-#include <sys/types.h>
+-#include <sys/timeb.h>
+-//#include <sys/stat.h>
+ 
+ #include "massaidll/massai.hpp"
+ #include "mctools.h"
+@@ -54,9 +49,7 @@
+ //#define DO_MCPROCESS_LOGGING
+ 
+ #define START_DELAY_TIMER      1
+-#define OVERLAY_INFO_OFF 0
+-#define OVERLAY_INFO_1 1
+-#define OVERLAY_INFO_2 2
++
+ 
+ 
+ using namespace mControl;
+@@ -65,7 +58,6 @@ using namespace mControl;
+ static mcProcessControl * hStarter = NULL;
+ 
+ 
+-static HWND    hwndFocus;
+ static HBITMAP hBitmap;
+ static HBITMAP hBitmap_info_1,hBitmap_info_2;
+ 
+@@ -571,9 +563,8 @@ bool FileExists(string strFilename)
+   author:     Dr. Materna GmbH (EgF)
+ 
+ ---------------------------------------------------------------------------*/
+-BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
++BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM)
+ {
+-    long rc = 0;
+     DWORD dwProcessId;
+     HANDLE hProcess = NULL;
+     char String[255];
+@@ -582,8 +573,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
+     // get title
+     if(!SendMessage(hWnd, WM_GETTEXT, sizeof(String), (LPARAM)String))
+     {
+-        // No window title
+-        rc = GetLastError();
++        //rc = GetLastError();
+         //printf("   !!Could not read the title!!, rc = %d\t", rc);
+         syserror("BOOL CALLBACK EnumWindowsProc:SendMessage");
+     }
+@@ -598,7 +588,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
+             // try to terminate the process
+             if(TerminateProcess(hProcess,1) == 0)
+             {
+-                rc = GetLastError();
++                //rc = GetLastError();
+                 //printf(" : !!Failed to terminate the process!!, rc = %d\n", rc);
+                 syserror("BOOL CALLBACK EnumWindowsProc:TerminateProcess");
+             }
+@@ -611,10 +601,13 @@ BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
+ 
+ //---------------------------------------------------------------------------
+ //
+-//  function:   LRESULT CALLBACK WndProc(HWND hwnd,
+-//                                       UINT message,
+-//                                       WPARAM wParam,
+-//                                       LPARAM lParam)
++//  function:   LRESULT CALLBACK serverwinWindowProc
++//                              (
++//                                      HWND hwnd,
++//                                      UINT message,
++//                                      WPARAM wParam,
++//                                      LPARAM lParam
++//                              )
+ //
+ //  purpose:    Client windown function
+ //
+@@ -624,30 +617,44 @@ BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
+ //
+ //---------------------------------------------------------------------------
+ 
+-LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
++LRESULT CALLBACK serverwinWindowProc
++   (
++      HWND hwnd,
++      UINT message,
++      WPARAM wParam,
++      LPARAM lParam
++   )
+ {
+-static int    fInitialStart     = -1;
+ 
+-static int     x,cx,
+-               y,cy,
+-               cxLoad,
+-               cyLoad;
+-static int     cxClient,
+-               cyClient;
+-PAINTSTRUCT    ps;
+-RECT           rect;
+-BITMAP         bitmap;
+-HDC            hdc,
+-               hdcMem;
+-long           rc;
++     static enum
++         {
++            INISTATUS_INITIAL,
++            INISTATUS_WAIT,
++            INISTATUS_STARTED
++         }                      fInitialStart = INISTATUS_INITIAL;
++
++     static int                 x,cx,
++                                y,cy,
++                                cxLoad,
++                                cyLoad;
++
++     PAINTSTRUCT                ps;
++
++     RECT                       rect;
+ 
+-INITCOMMONCONTROLSEX iccex;
++     BITMAP                     bitmap;
+ 
++     HDC                        hdc,
++                                hdcMem;
++
++     long                       rc;
++
++     INITCOMMONCONTROLSEX       iccex;
+ 
+      switch(message)
+      {
+      case WM_CREATE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_CREATE");
++          TRACE(SecondaryRuntime_HERE,"WM_CREATE");
+ 
+           createAlert();
+ 
+@@ -808,12 +815,10 @@ INITCOMMONCONTROLSEX iccex;
+ 
+           ShowWindow(hwndInfo1,SW_HIDE);
+           ShowWindow(hwndInfo2,SW_HIDE);
+-
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_USER:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_USER");
++          TRACE(SecondaryRuntime_HERE,"WM_USER");
+ 
+           if(wParam)
+           {
+@@ -846,12 +851,10 @@ INITCOMMONCONTROLSEX iccex;
+             if(serverMode() && lParam >= 0 && lCurrLoadPercent >= 100)
+               ShowWindow(hwnd,SW_MINIMIZE);
+           }
+-
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_MCONTROL_PROGRESS:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MCONTROL_PROGRESS");
++          TRACE(SecondaryRuntime_HERE,"WM_MCONTROL_PROGRESS");
+           if(wParam)
+           {
+             lAllProcesses = wParam;
+@@ -867,67 +870,69 @@ INITCOMMONCONTROLSEX iccex;
+             if(serverMode() && lParam >= 0 && lCurrLoadPercent >= 100)
+               ShowWindow(hwnd,SW_MINIMIZE);
+           }
+-          return(0);
++          return 0;
+ 
+      case WM_START_DELAY_TIMER:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_START_DELAY_TIMER");
+-          if(fInitialStart!=-1)
++          TRACE(SecondaryRuntime_HERE,"WM_START_DELAY_TIMER");
++          if( fInitialStart != INISTATUS_INITIAL )
+           {
+-            return(0);
++            return 0;
+           }
+           if((int)wParam<=0)
+           {
+             TRACE(HERE,"No start delay timer set - normal startup");
+-            fInitialStart=1;
+             InvalidateRect (hwnd, NULL, TRUE);
+             UpdateWindow (hwnd);
+-            //createAlert();
+-          } else
++            fInitialStart = INISTATUS_STARTED;
++            PostMessage(hwnd,WM_MASSAISTART,0,0);
++          }
++          else
+           {
+             TRACE(HERE,"Start delay timer seconds:%d",wParam);
+-            fInitialStart=0;
++            fInitialStart = INISTATUS_WAIT;
+             SetTimer( hwnd, START_DELAY_TIMER, wParam*1000, NULL );
+ 
+             ShowWindow(hwndInfo1,SW_SHOW);
+             UpdateWindow(hwndInfo1);
+           }
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_TIMER:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_TIMER");
++          TRACE(SecondaryRuntime_HERE,"WM_TIMER");
+           if(wParam==START_DELAY_TIMER)
+           {
+             TRACE(HERE,"Delay finished");
+             KillTimer( hwnd, START_DELAY_TIMER);
+-            if(fInitialStart==0)
++            if( fInitialStart == INISTATUS_WAIT )
+             {
+               TRACE(HERE,"Delay finished - Start massai");
+-              fInitialStart=1;
+               ShowWindow(hwndInfo1,SW_HIDE);
+               InvalidateRect (hwnd, NULL, TRUE);
+               UpdateWindow (hwnd);
+-              //createAlert();
++              fInitialStart = INISTATUS_STARTED;
++              PostMessage(hwnd,WM_MASSAISTART,0,0);
+             }
+-            return(0);
++            return 0;
+           }
+           break;
+ 
+      case WM_SYSKEYUP:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_SYSKEYUP");
++          TRACE(SecondaryRuntime_HERE,"WM_SYSKEYUP");
+           // don't let windows process these messages
+-          return(0);
++          return 0;
++
+      case WM_SYSKEYDOWN:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_SYSKEYDOWN");
++          TRACE(SecondaryRuntime_HERE,"WM_SYSKEYDOWN");
+           // don't let windows process these messages
+-          return(0);
++          return 0;
++
+      case WM_SYSCHAR:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_SYSCHAR");
++          TRACE(SecondaryRuntime_HERE,"WM_SYSCHAR");
+           // don't let windows process these messages
+-          return(0);
++          return 0;
+ 
+      case WM_KEYUP:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_KEYUP");
++          TRACE(SecondaryRuntime_HERE,"WM_KEYUP");
+ 
+           //TRACE(HERE,"GetKeyState(VK_CONTROL) = 0x%08x",GetKeyState(VK_CONTROL));
+ 
+@@ -1038,23 +1043,21 @@ INITCOMMONCONTROLSEX iccex;
+                }
+                break;
+           }
+-
+-          return(0);
++          return 0;
+ 
+      case WM_MASSAIREBOOT_REMOTE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAIREBOOT_REMOTE");
+-
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAIREBOOT_REMOTE");
+           sendAlert(ALERT_E_REBOOT_REMOTE);
+-          return(0);
++          return 0;
+ 
+      case WM_MASSAISHUTDOWN_REMOTE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISHUTDOWN_REMOTE");
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAISHUTDOWN_REMOTE");
+ 
+           sendAlert(ALERT_E_SHUTDOWN_REMOTE);
+-          return(0);
++          return 0;
+ 
+      case WM_MASSAISTART_REMOTE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISTART_REMOTE");
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_REMOTE");
+ 
+           // request from remote !!
+ 
+@@ -1086,7 +1089,7 @@ INITCOMMONCONTROLSEX iccex;
+               TRACE(HERE,"kiosk reboot, rc = %d",rc);
+ 
+               PostQuitMessage(0);
+-              return(0);
++              return 0;
+             }
+ 
+             // execute system commands before starting platform
+@@ -1104,11 +1107,10 @@ INITCOMMONCONTROLSEX iccex;
+           }
+           else
+             rc = -1;
+-
+-          return(rc);
++          return rc;
+ 
+      case WM_MASSAISTOP_REMOTE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISTOP_REMOTE");
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAISTOP_REMOTE");
+ 
+           // request from remote !!
+ 
+@@ -1125,10 +1127,10 @@ INITCOMMONCONTROLSEX iccex;
+             // execute system commands after platform stopped
+             execSysCmdsShutdown();
+           }
+-          return(rc);
++          return rc;
+ 
+      case WM_MASSAISTOP_SCHEDULER:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISTOP_SCHEDULER");
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAISTOP_SCHEDULER");
+ 
+           if(fStarted)
+           {
+@@ -1147,14 +1149,14 @@ INITCOMMONCONTROLSEX iccex;
+ 
+             PostMessage(hwnd,WM_MASSAISTART_SCHEDULER,0,0);
+           }
+-
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_MASSAISTART:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISTART");
++          TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART");
++          //lint -fallthrough
++
+      case WM_MASSAISTART_SCHEDULER:
+-          if(message!=WM_MASSAISTART) TRACE(SecondaryRuntime_HERE,"WndProc WM_MASSAISTART_SCHEDULER");
++          if(message!=WM_MASSAISTART) TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_SCHEDULER");
+ 
+           if(!fStarted)
+           {
+@@ -1196,13 +1198,14 @@ INITCOMMONCONTROLSEX iccex;
+               TRACE(HERE,"kiosk reboot, rc = %d",rc);
+ 
+               PostQuitMessage(0);
+-              return(0);
++              return 0;
+             }
+ 
+             // execute system commands before starting platform
+             execSysCmdsStartup();
+ 
+-            if(rc = startAll())
++            rc = startAll();
++            if( rc )
+             {
+               char szMsg[512];
+ 
+@@ -1222,11 +1225,10 @@ INITCOMMONCONTROLSEX iccex;
+               fStarted           = true;
+             }
+           }
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_CLOSE:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_CLOSE");
++          TRACE(SecondaryRuntime_HERE,"WM_CLOSE");
+ 
+           TRACE(HERE,"shutting down controller...");
+ 
+@@ -1238,25 +1240,24 @@ INITCOMMONCONTROLSEX iccex;
+           if(pAlert) delete pAlert;
+ 
+           PostQuitMessage(0);
+-
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_DESTROY:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_DESTROY");
++          TRACE(SecondaryRuntime_HERE,"WM_DESTROY");
+ 
+           DestroyWindow(hwndLoad);
+           DestroyWindow(hwndInfo1);
+           DestroyWindow(hwndInfo2);
+-
+-          return(0);
+-          break;
++          return 0;
+ 
+      case WM_PAINT:
+-          //TRACE(SecondaryRuntime_HERE,"WndProc WM_PAINT");
++          //TRACE(SecondaryRuntime_HERE,"WM_PAINT");
+ 
++#if 0
++          // What for?
+           if(!serverMode())
+             hwndFocus = GetFocus();
++#endif
+ 
+           hdc = BeginPaint(hwnd, &ps);
+ 
+@@ -1285,22 +1286,15 @@ INITCOMMONCONTROLSEX iccex;
+           }
+ 
+           EndPaint (hwnd, &ps);
++          return 0;
+ 
+-          if(fInitialStart==1)
+-          {
+-            fInitialStart = 2;
+-            PostMessage(hwnd,WM_MASSAISTART,0,0);
+-          }
+-
+-          return(0);
+-          break;
+         /*
+         Restoring the mcontrol from the taskbar results in an automatic trigger of "go into service" rendering
+         the nasty button obsolete.
+         (AkA)
+         */
+         case WM_SYSCOMMAND:
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_SYSCOMMAND");
++          TRACE(SecondaryRuntime_HERE,"WM_SYSCOMMAND");
+             if (wParam != SC_RESTORE || serverMode()) break;    // nothing to do
+ 
+             TRACE(HERE, "Request to go into service");
+@@ -1359,7 +1353,7 @@ INITCOMMONCONTROLSEX iccex;
+         if(portableMCC())
+         {
+           //TRACE(HERE, "[WM_DEVICECHANGE] Hardware configuration changed");
+-          TRACE(SecondaryRuntime_HERE,"WndProc WM_DEVICECHANGE");
++          TRACE(SecondaryRuntime_HERE,"WM_DEVICECHANGE");
+ 
+           switch(wParam)
+           {
+@@ -1370,112 +1364,112 @@ INITCOMMONCONTROLSEX iccex;
+                 TRACE(HERE, "[wParam:DBT_CONFIGCHANGED] Current config has changed");
+                 break;
+             case DBT_DEVICEARRIVAL: // A device or piece of media has been inserted and is now available.
+-              {
+                 TRACE(HERE, "[wParam:DBT_DEVICEARRIVAL] New Device is now available");
+-                PDEV_BROADCAST_HDR lpdb = (PDEV_BROADCAST_HDR)lParam;
+-                if (lpdb->dbch_devicetype == DBT_DEVTYP_VOLUME) // Logisches Laufwerk, Datenträger
+                 {
+-                    TRACE(HERE, "[DBT_DEVTYP_VOLUME] Logical Device / Volume found");
+-                    PDEV_BROADCAST_VOLUME lpdbv = (PDEV_BROADCAST_VOLUME)lParam;
+-                    // Structure "DEV_BROADCAST_VOLUME" has 2 fields:
+-                    // - dbcv_flags:       tells the nature of the volume [Volume/CD (DBTF_MEDIA) or network share (DBTF_NET)]
+-                    // - dbcv_unitmask: tells which drive letters were mounted
+-
+-                    //TRACE(HERE, "WERT: %d", lpdbv->dbcv_flags);
+-                    TRACE(HERE, "Drive %c: Media has arrived", FirstDriveFromMask(lpdbv->dbcv_unitmask));
+-
+-                    ifstream startfile;
+-                    string sTeil = ":\\autostartmcc.inf";
+-                    string sFilename;
+-                    char szLine[160];
+-                    string sHelp;
+-
+-                    sFilename = FirstDriveFromMask(lpdbv->dbcv_unitmask) + sTeil; // e.g.: G:\autostartmcc.inf
+-                    //TRACE(HERE, "File: %s", sFilename.c_str());
+-
+-                    startfile.open(sFilename.c_str(), ios::in);
+-                    if (startfile)
+-                    {
+-                        TRACE(HERE, "Found \"autostartmcc.inf\" in drive %c:",
+-                                    FirstDriveFromMask(lpdbv->dbcv_unitmask));
+-                        if (system(NULL) == 0)
+-                        {
+-                            // commandLine-processor is not available
+-                            TRACE(HERE, "commandLine-processor is not available!");
+-                        }
+-                        else
+-                        {
+-                            startfile.getline(szLine,160); // read line 1
+-                            if ( strcmp(szLine,"[autorun]") == 0 )
+-                            {
+-                                startfile.getline(szLine,160); // read line 2
+-                                sHelp = szLine; // char[] to string
+-                                if (sHelp.substr(0,5) == "open=")
+-                                {
+-                                    //TRACE(HERE, "Line 2: %s", sHelp.c_str());
+-                                    sHelp.erase(0,5); // delete "open="
+-                                    //TRACE(HERE, "HelpNew: %s", sHelp.c_str());
+-
+-                                    string sDirectory;
+-                                    sDirectory.append(1, FirstDriveFromMask(lpdbv->dbcv_unitmask));
+-                                    sDirectory.append(":"); // e.g. "G:"
+-                                    //TRACE(HERE, "MyDrive: %s", sDirectory.c_str());
+-
+-                                    string sExe;
+-                                    sExe.append(sDirectory);
+-                                    sExe.append("\\");
+-                                    sExe.append(sHelp);
+-                                    //TRACE(HERE, "sExe: %s", sExe.c_str());
+-                                    mSysProcess::parent Arrival;
+-#ifdef DO_MCPROCESS_LOGGING
+-                                    mcProcessCallback Logging( sExe.c_str(), "mSysProcess" );
+-#endif
+-                                    mcProcessCallback StdErr( sExe.c_str(), "STDERR" );
+-                                    mcProcessCallback StdOut( sExe.c_str(), "STDOUT" );
+-                                    Arrival
+-#ifdef DO_MCPROCESS_LOGGING
+-                                        .setLogging( Logging )
+-#endif
+-                                        .setCommandline( sExe.c_str() )
+-                                        .setWorkDirectory( sDirectory.c_str() )
+-                                        .setStdErr( StdErr )
+-                                        .setStdOut( StdOut );
+-                                    std::auto_ptr<mSysProcess::child> Child( Arrival.newChild() );
+-                                    if( Child->getStatus() == mSysProcess::STATUS_FAILED )
+-                                    {
+-                                        TRACE(HERE, "Failed to start %s", sExe.c_str());
+-                                        return( GetLastError() );
+-                                    }
+-                                    Child->waitForTermination( 600 );
+-                                       // Something went terrible wrong,
+-                                       // when not done after 600 secs.
+-                                }
+-                                else
+-                                {
+-                                    // Second line doesn't start with: open=
+-                                    TRACE(HERE, "No valid file \"autostartmcc.inf\" in drive %c:",
+-                                        FirstDriveFromMask(lpdbv->dbcv_unitmask));
+-                                }
+-                            }
+-                            else
+-                            {
+-                                // First line in autostartmcc.inf is not: [autorun]
+-                                TRACE(HERE, "No valid file \"autostartmcc.inf\" in drive %c:",
+-                                    FirstDriveFromMask(lpdbv->dbcv_unitmask));
+-                            }
+-                        }
+-
+-                        if (startfile.is_open())
+-                            startfile.close();
+-                    }
+-                    else
+-                    {
+-                        TRACE(HERE, "File \"autostartmcc.inf\" not found");
+-                    }
+-
++                   PDEV_BROADCAST_HDR lpdb = (PDEV_BROADCAST_HDR)lParam;
++                   if (lpdb->dbch_devicetype == DBT_DEVTYP_VOLUME) // Logisches Laufwerk, Datenträger
++                   {
++                       TRACE(HERE, "[DBT_DEVTYP_VOLUME] Logical Device / Volume found");
++                       PDEV_BROADCAST_VOLUME lpdbv = (PDEV_BROADCAST_VOLUME)lParam;
++                       // Structure "DEV_BROADCAST_VOLUME" has 2 fields:
++                       // - dbcv_flags:       tells the nature of the volume [Volume/CD (DBTF_MEDIA) or network share (DBTF_NET)]
++                       // - dbcv_unitmask: tells which drive letters were mounted
++
++                       //TRACE(HERE, "WERT: %d", lpdbv->dbcv_flags);
++                       TRACE(HERE, "Drive %c: Media has arrived", FirstDriveFromMask(lpdbv->dbcv_unitmask));
++
++                       ifstream startfile;
++                       string sTeil = ":\\autostartmcc.inf";
++                       string sFilename;
++                       char szLine[160];
++                       string sHelp;
++
++                       sFilename = FirstDriveFromMask(lpdbv->dbcv_unitmask) + sTeil; // e.g.: G:\autostartmcc.inf
++                       //TRACE(HERE, "File: %s", sFilename.c_str());
++
++                       startfile.open(sFilename.c_str(), ios::in);
++                       if (startfile)
++                       {
++                           TRACE(HERE, "Found \"autostartmcc.inf\" in drive %c:",
++                                       FirstDriveFromMask(lpdbv->dbcv_unitmask));
++                           if (system(NULL) == 0)
++                           {
++                               // commandLine-processor is not available
++                               TRACE(HERE, "commandLine-processor is not available!");
++                           }
++                           else
++                           {
++                               startfile.getline(szLine,160); // read line 1
++                               if ( strcmp(szLine,"[autorun]") == 0 )
++                               {
++                                   startfile.getline(szLine,160); // read line 2
++                                   sHelp = szLine; // char[] to string
++                                   if (sHelp.substr(0,5) == "open=")
++                                   {
++                                       //TRACE(HERE, "Line 2: %s", sHelp.c_str());
++                                       sHelp.erase(0,5); // delete "open="
++                                       //TRACE(HERE, "HelpNew: %s", sHelp.c_str());
++
++                                       string sDirectory;
++                                       sDirectory.append(1, FirstDriveFromMask(lpdbv->dbcv_unitmask));
++                                       sDirectory.append(":"); // e.g. "G:"
++                                       //TRACE(HERE, "MyDrive: %s", sDirectory.c_str());
++
++                                       string sExe;
++                                       sExe.append(sDirectory);
++                                       sExe.append("\\");
++                                       sExe.append(sHelp);
++                                       //TRACE(HERE, "sExe: %s", sExe.c_str());
++                                       mSysProcess::parent Arrival;
++   #ifdef DO_MCPROCESS_LOGGING
++                                       mcProcessCallback Logging( sExe.c_str(), "mSysProcess" );
++   #endif
++                                       mcProcessCallback StdErr( sExe.c_str(), "STDERR" );
++                                       mcProcessCallback StdOut( sExe.c_str(), "STDOUT" );
++                                       Arrival
++   #ifdef DO_MCPROCESS_LOGGING
++                                           .setLogging( Logging )
++   #endif
++                                           .setCommandline( sExe.c_str() )
++                                           .setWorkDirectory( sDirectory.c_str() )
++                                           .setStdErr( StdErr )
++                                           .setStdOut( StdOut );
++                                       std::auto_ptr<mSysProcess::child> Child( Arrival.newChild() );
++                                       if( Child->getStatus() == mSysProcess::STATUS_FAILED )
++                                       {
++                                           TRACE(HERE, "Failed to start %s", sExe.c_str());
++                                           return GetLastError();
++                                       }
++                                       Child->waitForTermination( 600 );
++                                          // Something went terrible wrong,
++                                          // when not done after 600 secs.
++                                   }
++                                   else
++                                   {
++                                       // Second line doesn't start with: open=
++                                       TRACE(HERE, "No valid file \"autostartmcc.inf\" in drive %c:",
++                                           FirstDriveFromMask(lpdbv->dbcv_unitmask));
++                                   }
++                               }
++                               else
++                               {
++                                   // First line in autostartmcc.inf is not: [autorun]
++                                   TRACE(HERE, "No valid file \"autostartmcc.inf\" in drive %c:",
++                                       FirstDriveFromMask(lpdbv->dbcv_unitmask));
++                               }
++                           }
++
++                           if (startfile.is_open())
++                               startfile.close();
++                       }
++                       else
++                       {
++                           TRACE(HERE, "File \"autostartmcc.inf\" not found");
++                       }
++
++                   }
+                 }
+                 break;
+-              };
+             case DBT_DEVICEQUERYREMOVE: // Permission is requested to remove a device or piece of media.
+                                         // Any application can deny this request and cancel the removal.
+                 // it's possible that this param is not supported by the device-driver
+@@ -1622,5 +1616,6 @@ INITCOMMONCONTROLSEX iccex;
+         break;
+      }
+ 
+-     return(DefWindowProc(hwnd,message,wParam,lParam));
++     return DefWindowProc(hwnd,message,wParam,lParam);
+ }
++
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+index cd1244c0..c7956936 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/LogService/makefile.mak
+@@ -311,6 +311,15 @@ MY_BIN8_RES = \
+ 
+ ######################################################################
+ 
++MY_BIN9 = \
++    $(_BIN)\TestStatif.exe
++
++MY_BIN9_OBJS = \
++    $(_OBJ)\mStaMIf.obj \
++    $(_OBJ)\TestStatif.obj
++
++######################################################################
++
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+index 85cf2929..365a9d3d 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+@@ -18,6 +18,8 @@
+ #include "text/mMainCommandLine.hpp"
+ 
+ #include <iostream>
++#include <iostream>
++#include <sstream>
+ 
+ #include <windows.h>
+ 
+@@ -56,7 +58,7 @@ namespace
+     * Are we a console application?
+     *
+    **/
+-   bool                    Console = false;
++   bool                    IsService = false;
+ 
+ 
+ 
+@@ -91,8 +93,15 @@ namespace
+    )
+    {
+       static DWORD dwCheckPoint = 1;
+-      if( !Console )
++      if( IsService )
+       {
++         std::ostringstream oss;
++         oss
++            << "indToSCM( " << (int)dwCurrentState
++            << ", " << (int)dwWin32ExitCode << ", "
++            << (int)dwWaitHint << " )";
++         mDaemon_log( oss.str().c_str() );
++         //
+          if( dwCurrentState == SERVICE_START_PENDING )
+              SState.dwControlsAccepted = SERVICE_ACCEPT_SHUTDOWN;
+          else
+@@ -118,7 +127,10 @@ namespace
+             return 0;
+          else
+          {
+-            mDaemon_log( "SetServiceStatus" );
++            DWORD Err = GetLastError();
++            std::ostringstream osserr;
++            osserr << "SetServiceStatus - error=" << (int)Err;
++            mDaemon_log( osserr.str().c_str() );
+             return 1;
+          }
+       }
+@@ -305,7 +317,7 @@ namespace
+          (
+             NULL,
+             NULL,
+-            SC_MANAGER_ALL_ACCESS
++            SC_MANAGER_CREATE_SERVICE
+          );
+       if( SCManagerHdl )
+       {
+@@ -538,18 +550,24 @@ namespace
+       if( Arg.option( "CONSOLE" ) ||
+           Arg.option( "NORMAL" ) )
+       {
+-         Console = true;
+          SetConsoleCtrlHandler( console_ctrl, TRUE );
+          return mDaemon_main( argc, argv );
+       }
+-
++      //
++      // Neither "normal", nor "install/deinstall"
++      // -> We are a service
++      //
++      IsService = true;
++      //
+       SERVICE_TABLE_ENTRY STE[2];
+       STE[0].lpServiceName = const_cast<char *>( mDaemon_name() );
+       STE[0].lpServiceProc = service_main;
+       STE[1].lpServiceName = 0;
+       STE[1].lpServiceProc = 0;
+       if( !StartServiceCtrlDispatcher( STE ) )
++      {
+          mDaemon_log( "StartServiceCtrlDispatcher failed." );
++      }
+       return 0;
+    }
+ 
+@@ -573,7 +591,14 @@ namespace
+ **/
+ int mDaemon_indInitializing( unsigned long mSec )
+ {
+-   return indToSCM( SERVICE_START_PENDING, NO_ERROR, mSec );
++   if( IsService )
++   {
++      return indToSCM( SERVICE_START_PENDING, NO_ERROR, mSec );
++   }
++   else
++   {
++      return 0;
++   }
+ }
+ 
+ 
+@@ -585,7 +610,14 @@ int mDaemon_indInitializing( unsigned long mSec )
+ **/
+ int mDaemon_indReady( unsigned long mSec )
+ {
+-   return( indToSCM( SERVICE_RUNNING, NO_ERROR, mSec ) );
++   if( IsService )
++   {
++      return( indToSCM( SERVICE_RUNNING, NO_ERROR, mSec ) );
++   }
++   else
++   {
++      return 0;
++   }
+ }
+ 
+ 
+@@ -597,7 +629,7 @@ int mDaemon_indReady( unsigned long mSec )
+ **/
+ void mDaemon_log( char const * Data )
+ {
+-   if( !Console )
++   if( IsService )
+    {
+       //
+       // Write to event log
+@@ -634,7 +666,7 @@ void mDaemon_log( char const * Data )
+ **/
+ int mDaemon_isService()
+ {
+-  return !Console;
++  return IsService;
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp b/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
+index f3b176af..66c61306 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/ShowPectab.cpp
+@@ -26,7 +26,34 @@ using namespace std;
+ 
+ 
+ 
+-char const c_background( '.' );
++char const c_background = '.';
++
++
++
++char const c_pectab_separator = '#';
++
++
++
++char getElementSteering( char const * ptr )
++{
++   while( *ptr )
++   {
++      if( *ptr == c_pectab_separator )
++      {
++         ptr -= 1;
++         if( *ptr >= 'A' )
++         {
++            return *ptr;
++         }
++         else
++         {
++            return 0;
++         }
++      }
++      ptr += 1;
++   }
++   return 0;
++}
+ 
+ 
+ 
+@@ -83,7 +110,7 @@ int main( int argc, char ** argv )
+    char element[3];
+    element[2] = 0;
+ 
+-   int length = 0;
++   int fieldchars = 0;
+    int row = 0;
+    int column = 0;
+    
+@@ -114,7 +141,7 @@ int main( int argc, char ** argv )
+       case sta_len0:
+          if( isDigit( c ) )
+          {
+-            length = c - '0';
++            fieldchars = c - '0';
+             sta = sta_len1;
+          }
+          else
+@@ -125,7 +152,7 @@ int main( int argc, char ** argv )
+       case sta_len1:
+          if( isDigit( c ) )
+          {
+-            length = ( length * 10 ) + c - '0';
++            fieldchars = ( fieldchars * 10 ) + c - '0';
+             sta = sta_posy;
+          }
+          else
+@@ -162,6 +189,19 @@ int main( int argc, char ** argv )
+             column = ( column * 10 ) + c - '0';
+             column -= 1;
+             //
++            char const steering = getElementSteering( ptr );
++            //
++            int length = fieldchars;
++            switch( steering )
++            {
++            case 'L':
++            case 'N':
++            case 'Q':
++               length = fieldchars * 10 / 15;
++               break;
++            case 'R':
++               length = fieldchars * 10 / 5;
++            }
+             switch( length )
+             {
+             case 0:
+@@ -200,7 +240,19 @@ int main( int argc, char ** argv )
+                         }
+                         else
+                         {
+-                           array[row][column + i] = '_';
++                           switch( steering )
++                           {
++                           case 'L':
++                           case 'N':
++                           case 'Q':
++                              array[row][column + i] = '-';
++                              break;
++                           case 'R':
++                              array[row][column + i] = '#';
++                              break;
++                           default:
++                              array[row][column + i] = '=';
++                           }
+                         }
+                      }
+                   }
+@@ -211,7 +263,12 @@ int main( int argc, char ** argv )
+                << "  Element " << element
+                << " row=" << (char)( 'A' + row ) 
+                << " column=" << column 
++               << " fieldchars=" << fieldchars
+                << " length=" << length;
++            if( steering )
++            {
++               cout << " steering=" << steering;
++            }
+             if( collision )
+             {
+                cout << " -> collision!";
+@@ -226,7 +283,7 @@ int main( int argc, char ** argv )
+          }
+          break;
+       default:
+-         if( c == '#' )
++         if( c == c_pectab_separator )
+          {
+             sta = sta_id0;
+          }
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+index b77c17a8..298da25d 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+@@ -44,154 +44,180 @@ namespace
+    }
+ 
+ 
+-} // namespace
+-
+-
+-
+-/*
+- *
+- * Method implementation, see "mMainCommandLine.hpp".
+- *
+- */
+-mMainCommandLine::mMainCommandLine( char const * Line ) :
+-   M_Argv()
+-{
+-   if( Line )
++   void setup( std::vector<char *> & Dst, char const * Line )
+    {
+-      int NumberEscape = 0;
+-      std::string Str;
+-      enum { S_Normal, S_NormalEscape, S_Quote, S_QuoteEscape } S =
+-         S_Normal;
+-      char C = *Line++;
+-      while( C )
++      if( Line )
+       {
+-         switch( S )
++         int NumberEscape = 0;
++         std::string Str;
++         enum { S_Normal, S_NormalEscape, S_Quote, S_QuoteEscape } S =
++            S_Normal;
++         char C = *Line++;
++         while( C )
+          {
+-         case S_Normal:
+-            switch( C )
++            switch( S )
+             {
+-            case ' ':
+-            case '\t':
+-               appendMove( M_Argv, Str );
+-               break;
+-            case '\"':
+-               S = S_Quote;
+-               break;
+-            case '\\':
+-               NumberEscape = 1;
+-               S = S_NormalEscape;
+-               break;
+-            default:
+-               Str += C;
+-            }
+-            break;
+-         case S_NormalEscape:
+-            switch( C )
+-            {
+-            case ' ':
+-            case '\t':
+-               while( NumberEscape-- )
+-               {
+-                  Str += '\\';
+-               }
+-               appendMove( M_Argv, Str );
+-               S = S_Normal;
+-               break;
+-            case '\"':
+-               if( NumberEscape & 1 )
+-               {
+-                  NumberEscape -= 1;
+-                  S = S_Normal;
+-               }
+-               else
++            case S_Normal:
++               switch( C )
+                {
++               case ' ':
++               case '\t':
++                  appendMove( Dst, Str );
++                  break;
++               case '\"':
+                   S = S_Quote;
+-               }
+-               NumberEscape /= 2;
+-               while( NumberEscape-- )
+-               {
+-                  Str += '\\';
+-               }
+-               if( S == S_Normal )
+-               {
++                  break;
++               case '\\':
++                  NumberEscape = 1;
++                  S = S_NormalEscape;
++                  break;
++               default:
+                   Str += C;
+                }
+                break;
+-            case '\\':
+-               NumberEscape += 1;
+-               break;
+-            default:
+-               while( NumberEscape-- )
++            case S_NormalEscape:
++               switch( C )
+                {
+-                  Str += '\\';
++               case ' ':
++               case '\t':
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
++                  appendMove( Dst, Str );
++                  S = S_Normal;
++                  break;
++               case '\"':
++                  if( NumberEscape & 1 )
++                  {
++                     NumberEscape -= 1;
++                     S = S_Normal;
++                  }
++                  else
++                  {
++                     S = S_Quote;
++                  }
++                  NumberEscape /= 2;
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
++                  if( S == S_Normal )
++                  {
++                     Str += C;
++                  }
++                  break;
++               case '\\':
++                  NumberEscape += 1;
++                  break;
++               default:
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
++                  Str += C;
++                  S = S_Normal;
+                }
+-               Str += C;
+-               S = S_Normal;
+-            }
+-            break;
+-         case S_Quote:
+-            switch( C )
+-            {
+-            case '\"':
+-               S = S_Normal;
+                break;
+-            case '\\':
+-               NumberEscape = 1;
+-               S = S_QuoteEscape;
+-               break;
+-            default:
+-               Str += C;
+-            }
+-            break;
+-         case S_QuoteEscape:
+-            switch( C )
+-            {
+-            case ' ':
+-            case '\t':
+-               while( NumberEscape-- )
++            case S_Quote:
++               switch( C )
+                {
+-                  Str += '\\';
++               case '\"':
++                  S = S_Normal;
++                  break;
++               case '\\':
++                  NumberEscape = 1;
++                  S = S_QuoteEscape;
++                  break;
++               default:
++                  Str += C;
+                }
+-               appendMove( M_Argv, Str );
+-               S = S_Quote;
+                break;
+-            case '\"':
+-               if( NumberEscape & 1 )
++            case S_QuoteEscape:
++               switch( C )
+                {
+-                  NumberEscape -= 1;
++               case ' ':
++               case '\t':
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
++                  appendMove( Dst, Str );
+                   S = S_Quote;
+-               }
+-               else
+-               {
+-                  S = S_Normal;
+-               }
+-               NumberEscape /= 2;
+-               while( NumberEscape-- )
+-               {
+-                  Str += '\\';
+-               }
+-               if( S == S_Quote )
+-               {
++                  break;
++               case '\"':
++                  if( NumberEscape & 1 )
++                  {
++                     NumberEscape -= 1;
++                     S = S_Quote;
++                  }
++                  else
++                  {
++                     S = S_Normal;
++                  }
++                  NumberEscape /= 2;
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
++                  if( S == S_Quote )
++                  {
++                     Str += C;
++                  }
++                  break;
++               case '\\':
++                  NumberEscape += 1;
++                  break;
++               default:
++                  while( NumberEscape-- )
++                  {
++                     Str += '\\';
++                  }
+                   Str += C;
++                  S = S_Quote;
+                }
+                break;
+-            case '\\':
+-               NumberEscape += 1;
+-               break;
+-            default:
+-               while( NumberEscape-- )
+-               {
+-                  Str += '\\';
+-               }
+-               Str += C;
+-               S = S_Quote;
+             }
+-            break;
++            C = *Line++;
+          }
+-         C = *Line++;
++         appendMove( Dst, Str );
+       }
+-      appendMove( M_Argv, Str );
+    }
++
++
++} // namespace
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++mMainCommandLine::mMainCommandLine( char const * Line ) :
++   M_Argv()
++{
++   setup( M_Argv, Line );
++}
++
++
++
++/*
++ *
++ * Method implementation, see "mMainCommandLine.hpp".
++ *
++ */
++mMainCommandLine::mMainCommandLine
++   (
++      char const * Program,
++      char const * Parameters
++   ) :
++   M_Argv()
++{
++   std::string Line = Program;
++   Line += " ";
++   Line += Parameters;
++   setup( M_Argv, Line.c_str() );
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/mInFile.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/mInFile.cpp
+index 2d803c7c..aaa22f3f 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/mInFile.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/mInFile.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2009 MATERNA Information & Communications
++ * Copyright (c) 2009-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -33,9 +33,10 @@ mInFile<std::string>::mInFile( char const * Path ) :
+       File.seekg( 0, std::ios::end );
+       std::ifstream::pos_type Size = File.tellg();
+       File.seekg( 0, std::ios::beg );
+-      std::ifstream::char_type *Buffer = new std::ifstream::char_type[Size];
++      std::ifstream::char_type *Buffer =
++         new std::ifstream::char_type[ static_cast<int>( Size ) ];
+       File.read( Buffer, Size );
+-      M_Container.assign( Buffer, Size );
++      M_Container.assign( Buffer, static_cast<unsigned int>( Size ) );
+       delete[] Buffer;
+       M_Success = true;
+    }
+diff --git a/SelfServiceCommon/Massai/idl/Massai/makefile.mak b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+index c8a0d827..8bea71ec 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/makefile.mak
++++ b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+@@ -10,6 +10,7 @@ MY_IDLFLAGS = \
+     $(TAO_DEFINES) -DUSE_TAO_ORB_IDL
+ 
+ MY_GEN_CPPS = \
++    $(_GEN)\mStaMIf.cpp \
+     $(_GEN)\appcontrol.cpp \
+     $(_GEN)\cfgmgr.cpp \
+     $(_GEN)\controller.cpp \
+-- 
+2.41.0.windows.1
+

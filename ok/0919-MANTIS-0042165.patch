@@ -1,0 +1,177 @@
+From 2142d6a51134ed5a56057a3088cf16d1d96c8b6a Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 26 Jul 2018 09:51:31 +0000
+Subject: [PATCH 0919/1076] MANTIS 0042165 mstarter creates configuration
+ entries PLATFORM.EXEC.*!java with wrong description
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1363 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mstarter_def.h  | 10 +-
+ .../cpp/Controller/src/mstarter_config.cpp    | 91 ++++++++++++-------
+ 2 files changed, 66 insertions(+), 35 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+index 8cff473d..bf9f0537 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,1,1,11
+-#define FILE_VER_STR     "FileVersion", "1.1.1.11"
++#define FILE_VER_BIN     1,1,1,12
++#define FILE_VER_STR     "FileVersion", "1.1.1.12"
+ 
+ /*!
+ \file
+@@ -7,12 +7,16 @@
+ 
+ \page mstarter.exe Release Notes - mstarter.exe - process manager
+ 
+-@version 1.1.1.11
++@version 1.1.1.12
+ 
+ \section change1 Change history
+ 
+ mstarter.exe
+ 
++\version 1.1.1.12
++\li 26.07.2018
++\li change - Mantis 0042165: mstarter creates configuration entries PLATFORM.EXEC.*!java with wrong description
++
+ \version 1.1.1.11
+ \li 12.08.2014
+ \li change - SteT  Mantis 0033302: mstarter: use only defined system environment variables for substitution
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+index bc702b8d..607cc742 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter_config.cpp
+@@ -30,15 +30,39 @@ using MASSAI::trace::TraceInterface;
+ 
+ namespace
+ {
+-  const std::string hardwareItem=       "PLATFORM.HARDWARE.Devices";
+-  const std::string softwareItem=       "PLATFORM.SOFTWARE.Services";
+-  const std::string timeoutItem=        "PLATFORM.TIMEOUTS.WaitForProcessTermination";
+-  const std::string execSection=        "PLATFORM.EXEC.";
+-  const std::string listenOnChangeItem= "SERVICES.STARTER.listenOnConfigChange";
+-  const std::string platformItem=       "Platform";
+-  const std::string configUser=         "mstarter";
++  const std::string hardwareItem=         "PLATFORM.HARDWARE.Devices";
++  const std::string softwareItem=         "PLATFORM.SOFTWARE.Services";
++  const std::string timeoutItem=          "PLATFORM.TIMEOUTS.WaitForProcessTermination";
++  const std::string execSection=          "PLATFORM.EXEC.";
++  const std::string listenOnChangeItem=   "SERVICES.STARTER.listenOnConfigChange";
++  const std::string platformItem=         "Platform";
++  const std::string configUser=           "mstarter";
+   const selection boolSelection[]= {selection(0, "no", ""), selection(1, "yes", "")};
+-
++  const std::string configJavaPostfix=    "!java";
++  const std::string configDesktopPostfix= "!desktop";
++  char const * const javaExecItemDesc =
++      "List of executables depending on Hardware Devices and Software Services."
++      "Example: class parameter1 parameter2 ..."
++      "use \\ for escaping"
++      "use \\_ for a space in a parameter";
++  char const * const execItemDesc =
++      "List of executables depending on Hardware Devices and Software Services.\n"
++      "Example: \"C:\\Programme\\Java\\jre1.7\\bin\\java.exe\" -Xrs -jar ..\\lib\\massai-platform.jar; show=yes\n"
++      "  change the delimiter if ; is used in the options\n"
++      "  start the line with new delimiter followed by a space\n"
++      "    Example: $ \"C:\\Programme\\Java\\jre1.7\\bin\\java.exe\" -Xrs -jar ..\\lib\\massai-platform.jar$ show=yes\n"
++      "Options: (please separate all options by blank)\n"
++      "  wnd = \"window name\" - specifies the window name used for process shutdown and activation\n"
++      "  wndclass = \"window class\" - specifies the window class used for process shutdown and activation.\n"
++      "  cwd = \"current working directory\" - sets the current working directory for the created process.\n"
++      "  wait = [milliseconds | terminate] - MILLISECONDS specifies a pause"
++      "     after creating the process, TERMINATE waits until the process terminates.\n"
++      "  show = [yes | no | hide | minimized] - specifies how the process window is shown\n"
++      "  extra_termination_time - double wait time after first termination try\n"
++      "  close_wnd = \"window name\" - specifies the window name used for process shutdown.\n"
++      "  close_wndclass = \"window class\" - specifies the window class used for process shutdown.\n"
++      "The following substitution environment variables are supported: "
++      "$PROGRAMFILES, $SYSTEMROOT, $SYSTEMDRIVE";  
+ 
+   //  base class for config items
+   class ConfigItemBase
+@@ -58,15 +82,18 @@ namespace
+   //  config item exec
+   class ConfigExec: public ConfigItemBase, public gclTextList
+   {
+-    public:
+-      ConfigExec(const std::string& item);
+-      TextList getValue() const;
+-      virtual void valueChanged();
+ 
+     private:
++      std::string m_item_;
+       void create(const char *& rights, const char*& explanation, TextList& defaultValue, long& max);
+-  };
++      const char* specific_description();
+ 
++    public:
++      ConfigExec(const std::string& item);
++      TextList getValue() const;
++      virtual void valueChanged();      
++  };
++  
+   typedef boost::shared_ptr<ConfigExec> ConfigExecPtr;
+   typedef std::map<std::string, ConfigExecPtr> ExecMap;
+ 
+@@ -114,7 +141,7 @@ namespace
+ 
+   // config item exec
+   ConfigExec::ConfigExec(const std::string& item):
+-    ConfigItemBase(item),
++    m_item_(item), ConfigItemBase(item),
+     gclTextList(item.c_str(), configUser.c_str())
+   {}
+ 
+@@ -128,28 +155,28 @@ namespace
+     configChanged();
+   }
+ 
++  const char * ConfigExec::specific_description()
++  {
++    const char * description = execItemDesc;
++    try
++    {
++      if(m_item_.find(configJavaPostfix) == m_item_.length()-configJavaPostfix.length()-1)
++      {
++        description = javaExecItemDesc;      
++      }
++    }
++    catch(...)
++    {
++      std::cout << "mstarter.exe: exception in ConfigExec::specific_description" << std::endl;      
++    }
++    return description;
++  }
++
+   void ConfigExec::create(const char*& rights, const char*& explanation, TextList&, long& max)
+   {
+     rights = "rwl";
+     max= 9000;
+-    explanation =
+-      "List of executables depending on Hardware Devices and Software Services.\n"
+-      "Example: \"C:\\Programme\\Java\\jre1.7\\bin\\java.exe\" -Xrs -jar ..\\lib\\massai-platform.jar; show=yes\n"
+-      "  change the delimiter if ; is used in the options\n"
+-      "  start the line with new delimiter followed by a space\n"
+-      "    Example: $ \"C:\\Programme\\Java\\jre1.7\\bin\\java.exe\" -Xrs -jar ..\\lib\\massai-platform.jar$ show=yes\n"
+-      "Options: (please separate all options by blank)\n"
+-      "  wnd = \"window name\" - specifies the window name used for process shutdown and activation\n"
+-      "  wndclass = \"window class\" - specifies the window class used for process shutdown and activation.\n"
+-      "  cwd = \"current working directory\" - sets the current working directory for the created process.\n"
+-      "  wait = [milliseconds | terminate] - MILLISECONDS specifies a pause"
+-      "     after creating the process, TERMINATE waits until the process terminates.\n"
+-      "  show = [yes | no | hide | minimized] - specifies how the process window is shown\n"
+-      "  extra_termination_time - double wait time after first termination try\n"
+-      "  close_wnd = \"window name\" - specifies the window name used for process shutdown.\n"
+-      "  close_wndclass = \"window class\" - specifies the window class used for process shutdown.\n"
+-      "The following substitution environment variables are supported: "
+-      "$PROGRAMFILES, $SYSTEMROOT, $SYSTEMDRIVE";
++    explanation = specific_description();
+   }
+ 
+   void extractExec(const std::string& input, char delimiter, std::string& commandLine, std::string& options)
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,358 @@
+From c4babb9bae031f0007b47f1aca2ab8dc5b5084f4 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 17 Nov 2011 15:52:45 +0000
+Subject: [PATCH 0195/1077] MANTIS0021563: SelfServiceCommon Controller changes
+ for VC10 compatibilty
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@236 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/psinfo.h        |  4 +-
+ .../Massai/cpp/Controller/inc/server.h        |  3 +-
+ .../Massai/cpp/Controller/makefile.mak        |  3 +-
+ .../Massai/cpp/Controller/res/mcontrol.rc     |  4 +-
+ .../cpp/Controller/res/mcontrolClient.rc      |  4 +-
+ .../Massai/cpp/Controller/res/mstarter.rc     |  4 +-
+ .../cpp/Controller/src/httpDownload.cpp       |  4 +-
+ .../Massai/cpp/Controller/src/server.cpp      | 42 +++++++++----------
+ .../Massai/cpp/Controller/src/starter.cpp     | 20 ++++-----
+ 9 files changed, 45 insertions(+), 43 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/psinfo.h b/SelfServiceCommon/Massai/cpp/Controller/inc/psinfo.h
+index f05ad61f..fc4c4540 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/psinfo.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/psinfo.h
+@@ -138,7 +138,7 @@ typedef PROCESS_BASIC_INFORMATION PBI;
+ // Process I/O Counters
+ //  NtQueryInformationProcess using ProcessIoCounters
+ //
+-
++#if 0
+ typedef struct _IO_COUNTERS {
+     ULONG ReadOperationCount;
+     ULONG WriteOperationCount;
+@@ -148,7 +148,7 @@ typedef struct _IO_COUNTERS {
+     LARGE_INTEGER OtherTransferCount;
+ } IO_COUNTERS;
+ typedef IO_COUNTERS *PIO_COUNTERS;
+-
++#endif
+ //
+ // Process Virtual Memory Counters
+ //  NtQueryInformationProcess using ProcessVmCounters
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/server.h b/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
+index cf3d1d3e..77a29928 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/server.h
+@@ -57,7 +57,8 @@ public:
+ 
+     CORBA::Long reloadHostsFile();
+ 
+-    void kioskBusy(unsigned char busy);
++    //void kioskBusy(unsigned char busy);
++	  virtual void kioskBusy(::CORBA::Boolean);
+ 
+     bool isKioskBusy() { return(fKioskBusy); }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index c126cc73..fac9f83b 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -7,8 +7,9 @@
+ !include $(BUILDROOT)\Build\cpp\makefile.common.mak
+ 
+ MY_CFLAGS = \
+-    -Gi -GR -G5 \
++    $(MY_CFLAGS_2) \
+     $(INC_ACETAO) \
++    $(INC_MFC)    \
+     $(INC_INTERFACES) \
+     $(INC_BOOST) \
+     -DGLOBAL_EVENTSEMAPHORE \
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/res/mcontrol.rc b/SelfServiceCommon/Massai/cpp/Controller/res/mcontrol.rc
+index 1a4a661b..57c8d3e4 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/res/mcontrol.rc
++++ b/SelfServiceCommon/Massai/cpp/Controller/res/mcontrol.rc
+@@ -10,7 +10,7 @@ IDI_ICON2 ICON "res\massai16x16.ico"
+ //
+ // Generated from the TEXTINCLUDE 2 resource.
+ //
+-#include "afxres.h"
++#include "windows.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+ #undef APSTUDIO_READONLY_SYMBOLS
+@@ -80,7 +80,7 @@ END
+ 
+ 2 TEXTINCLUDE DISCARDABLE
+ BEGIN
+-    "#include ""afxres.h""\r\n"
++    "#include ""windows.h""\r\n"
+     "\0"
+ END
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/res/mcontrolClient.rc b/SelfServiceCommon/Massai/cpp/Controller/res/mcontrolClient.rc
+index 6d49abf4..086331f1 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/res/mcontrolClient.rc
++++ b/SelfServiceCommon/Massai/cpp/Controller/res/mcontrolClient.rc
+@@ -10,7 +10,7 @@ IDI_ICON2 ICON "res\massai16x16.ico"
+ //
+ // Generated from the TEXTINCLUDE 2 resource.
+ //
+-#include "afxres.h"
++#include "windows.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+ #undef APSTUDIO_READONLY_SYMBOLS
+@@ -80,7 +80,7 @@ END
+ 
+ 2 TEXTINCLUDE DISCARDABLE
+ BEGIN
+-    "#include ""afxres.h""\r\n"
++    "#include ""windows.h""\r\n"
+     "\0"
+ END
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/res/mstarter.rc b/SelfServiceCommon/Massai/cpp/Controller/res/mstarter.rc
+index 80510fa0..5192dd5a 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/res/mstarter.rc
++++ b/SelfServiceCommon/Massai/cpp/Controller/res/mstarter.rc
+@@ -10,7 +10,7 @@ IDI_ICON2 ICON "res\massai16x16.ico"
+ //
+ // Generated from the TEXTINCLUDE 2 resource.
+ //
+-#include "afxres.h"
++#include "windows.h"
+ 
+ /////////////////////////////////////////////////////////////////////////////
+ #undef APSTUDIO_READONLY_SYMBOLS
+@@ -80,7 +80,7 @@ END
+ 
+ 2 TEXTINCLUDE DISCARDABLE
+ BEGIN
+-    "#include ""afxres.h""\r\n"
++    "#include ""windows.h""\r\n"
+     "\0"
+ END
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/httpDownload.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/httpDownload.cpp
+index ba108715..1a422731 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/httpDownload.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/httpDownload.cpp
+@@ -12,7 +12,7 @@
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <winsock.h>
++#include <winsock2.h>
+ #include <windows.h>
+ 
+ #include "trc/trace.h"
+@@ -111,7 +111,7 @@ char               *pStr;
+     if(!pszHost || !pszPage || !pszFile)
+       return(-1);
+ 
+-    if((pStr = strchr(pszHost,':')) != NULL)
++    if((pStr = const_cast<char*>( strchr(pszHost,':'))) != NULL)
+     {
+        // cut off port number, if any
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+index e51a8c6d..0c67ec3e 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/server.cpp
+@@ -22,7 +22,7 @@
+ 
+ #ifndef _lint
+ #include "boost/regex.hpp"
+-using boost::cmatch;
++//using boost::cmatch;
+ using boost::regex_search;
+ using boost::regex;
+ using boost::regbase;
+@@ -90,7 +90,7 @@ void scanArguments(char *pszInput,
+     options= pStr + 1;
+ 
+ #ifndef _lint
+-    cmatch parsed;
++    boost::smatch parsed;
+     std::string::const_iterator position= options.begin();
+     std::string::const_iterator end= options.end();
+ 
+@@ -100,33 +100,33 @@ void scanArguments(char *pszInput,
+       if(parsed[1].matched)       // WND *= *"([^"]+)"
+       {
+         int length= parsed[1].second - parsed[1].first;
+-        strncpy(pszWndName, parsed[1].first, length);
++        strncpy(pszWndName, &*parsed[1].first, length);
+         pszWndName[length]= 0;
+       }
+       else if(parsed[2].matched)  // CWD *= *"([^"]+)"
+       {
+         int length= parsed[2].second - parsed[2].first;
+-        strncpy(pszWorkingDir, parsed[2].first, length);
++        strncpy(pszWorkingDir, /*parsed[2].first*/&*parsed[2].first, length);
+         pszWorkingDir[length]= 0;
+       }
+       else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+       {
+         int length= parsed[3].second - parsed[3].first;
+-        if(_strnicmp(parsed[3].first,      "YES", length) == 0)       { *piShow = PROCESS_SHOW; }
+-        else if(_strnicmp(parsed[3].first, "NO", length) == 0)        { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(parsed[3].first, "HIDE", length) == 0)      { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(parsed[3].first, "MINIMIZED", length) == 0) { *piShow = PROCESS_MINIMIZED; }
++        if     (_strnicmp(&*parsed[3].first, "YES" , length) == 0)      *piShow = PROCESS_SHOW; 
++        else if(_strnicmp(&*parsed[3].first, "NO"  , length) == 0)      *piShow = PROCESS_HIDE;
++        else if(_strnicmp(&*parsed[3].first, "HIDE", length) == 0)      *piShow = PROCESS_HIDE;
++        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) *piShow = PROCESS_MINIMIZED; 
+       }
+       else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+       {
+         int length= parsed[4].second - parsed[4].first;
+-        if(_strnicmp(parsed[4].first, "terminate", length) == 0)
++        if(_strnicmp(&*parsed[4].first, "terminate", length) == 0)
+         {
+           *plTimeOut = -1;
+         }
+         else
+         {
+-          *plTimeOut = atol(parsed[4].first);
++          *plTimeOut = atol(&*parsed[4].first);
+         }
+       }
+       else if(parsed[5].matched)  // (SHOW)
+@@ -245,7 +245,7 @@ static void scanArgs(
+         options = pStr + 1;
+ 
+ #ifndef _lint
+-        cmatch parsed;
++        boost::smatch parsed;
+         std::string::const_iterator start = options.begin();
+         std::string::const_iterator end   = options.end();
+ 
+@@ -255,33 +255,33 @@ static void scanArgs(
+             if( parsed[1].matched )     // WND *= *"([^"]+)"
+             {
+                 length = parsed[1].second - parsed[1].first;
+-                strWndName = std::string( parsed[1].first, length );
++                strWndName = std::string( &*parsed[1].first, length );
+             }
+             else if(parsed[2].matched)  // CWD *= *"([^"]+)"
+             {
+                 length = parsed[2].second - parsed[2].first;
+-                strWorkingDir = std::string( parsed[2].first, length );
++                strWorkingDir = std::string( &*parsed[2].first, length );
+             }
+             else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+             {
+                 length= parsed[3].second - parsed[3].first;
+-                if( _strnicmp(parsed[3].first,      "YES", length) == 0)
++                if( _strnicmp( &*parsed[3].first,      "YES", length) == 0)
+                     iShow = PROCESS_SHOW;
+-                else if( _strnicmp(parsed[3].first, "NO", length) == 0 )
++                else if( _strnicmp( &*parsed[3].first, "NO", length) == 0 )
+                     iShow = PROCESS_HIDE;
+-                else if( _strnicmp(parsed[3].first, "HIDE", length) == 0 )
++                else if( _strnicmp( &*parsed[3].first, "HIDE", length) == 0 )
+                     iShow = PROCESS_HIDE;
+-                else if( _strnicmp(parsed[3].first, "MINIMIZED", length) == 0)
++                else if( _strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0)
+                     iShow = PROCESS_MINIMIZED;
+             }
+             else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+             {
+                 length = parsed[4].second - parsed[4].first;
+-                if( _strnicmp(parsed[4].first, "terminate", length) == 0 )
++                if( _strnicmp(&*parsed[4].first, "terminate", length) == 0 )
+                 {
+                     lTimeOut = -1;
+                 }
+-                else if( ::sscanf( parsed[4].first, "%ld", &lTimeOut ) < 0 )
++                else if( ::sscanf( &*parsed[4].first, "%ld", &lTimeOut ) < 0 )
+                     lTimeOut = 0;
+             }
+             else if(parsed[5].matched )  // (SHOW)
+@@ -400,7 +400,7 @@ process    *pp;
+ 
+       return(NULL);
+     }
+-    catch(exception& e)
++    catch( std::exception& e)
+     {
+       TRACE(HERE,"Exception: %s",e.what());
+ 
+@@ -620,7 +620,7 @@ long controllerServant::shutdownOS(bool fReboot, bool fForced)
+ //
+ //---------------------------------------------------------------------------
+ 
+-void controllerServant::kioskBusy(unsigned char busy)
++void controllerServant::kioskBusy( ::CORBA::Boolean busy)//(unsigned char busy)
+ {
+     fKioskBusy = (busy == 0)?FALSE:TRUE;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+index bc20922c..746faf64 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/starter.cpp
+@@ -36,7 +36,7 @@
+ 
+ #ifndef _lint
+ #include "boost/regex.hpp"
+-using boost::cmatch;
++using boost::/*smatch;*/smatch;
+ using boost::regex_search;
+ using boost::regex;
+ using boost::regbase;
+@@ -445,7 +445,7 @@ void scanArguments(char *pszInput,
+     options= pStr + 1;
+ 
+ #ifndef _lint
+-    cmatch parsed;
++    /*cmatch */smatch parsed;
+     std::string::const_iterator position= options.begin();
+     std::string::const_iterator end= options.end();
+ 
+@@ -455,33 +455,33 @@ void scanArguments(char *pszInput,
+       if(parsed[1].matched)       // WND *= *"([^"]+)"
+       {
+         int length= parsed[1].second - parsed[1].first;
+-        strncpy(pszWndName, parsed[1].first, length);
++        strncpy(pszWndName, &*parsed[1].first, length);
+         pszWndName[length]= 0;
+       }
+       else if(parsed[2].matched)  // CWD *= *"([^"]+)"
+       {
+         int length= parsed[2].second - parsed[2].first;
+-        strncpy(pszWorkingDir, parsed[2].first, length);
++        strncpy(pszWorkingDir, &*parsed[2].first, length);
+         pszWorkingDir[length]= 0;
+       }
+       else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+       {
+         int length= parsed[3].second - parsed[3].first;
+-        if(_strnicmp(parsed[3].first,      "YES", length) == 0)       { *piShow = PROCESS_SHOW; }
+-        else if(_strnicmp(parsed[3].first, "NO", length) == 0)        { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(parsed[3].first, "HIDE", length) == 0)      { *piShow = PROCESS_HIDE; }
+-        else if(_strnicmp(parsed[3].first, "MINIMIZED", length) == 0) { *piShow = PROCESS_MINIMIZED; }
++        if(_strnicmp(&*parsed[3].first,      "YES", length) == 0)       { *piShow = PROCESS_SHOW; }
++        else if(_strnicmp(&*parsed[3].first, "NO", length) == 0)        { *piShow = PROCESS_HIDE; }
++        else if(_strnicmp(&*parsed[3].first, "HIDE", length) == 0)      { *piShow = PROCESS_HIDE; }
++        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) { *piShow = PROCESS_MINIMIZED; }
+       }
+       else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+       {
+         int length= parsed[4].second - parsed[4].first;
+-        if(_strnicmp(parsed[4].first, "terminate", length) == 0)
++        if(_strnicmp(&*parsed[4].first, "terminate", length) == 0)
+         {
+           *plTimeOut = -1;
+         }
+         else
+         {
+-          *plTimeOut = atol(parsed[4].first);
++          *plTimeOut = atol(&*parsed[4].first);
+         }
+       }
+       else if(parsed[5].matched)  // (SHOW)
+-- 
+2.41.0.windows.1
+

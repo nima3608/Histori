@@ -1,0 +1,2472 @@
+From b53a910b18636c6e612d2b2b86ad66ede6f06349 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 28 Oct 2014 14:04:59 +0000
+Subject: [PATCH 0518/1000] MANTIS 0032431 -added the Basic Switch-cases for
+ the Worker class -added all Methods of mctools in the Tools class -added all
+ Methods of serverwin in the Dialog class -new formatting and comments for the
+ including mechanism
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@746 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/default.h         |  20 +
+ .../Massai/cpp/mControl/inc/mControl_config.h |   7 +-
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  85 ++-
+ .../cpp/mControl/inc/mControl_kioskReboot.h   |  24 +-
+ .../cpp/mControl/inc/mControl_logging.h       |   1 +
+ .../cpp/mControl/inc/mControl_notification.h  |   9 +-
+ .../cpp/mControl/inc/mControl_scheduler.h     |  57 +-
+ .../cpp/mControl/inc/mControl_servant.h       |   9 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |  55 +-
+ .../Massai/cpp/mControl/inc/mControl_worker.h |   4 +-
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |  92 +++-
+ .../Massai/cpp/mControl/makefile.mak          |   1 +
+ .../Massai/cpp/mControl/src/default.cpp       |  11 +
+ .../cpp/mControl/src/mControl_config.cpp      |   6 +-
+ .../cpp/mControl/src/mControl_dialog.cpp      | 405 +++++++++++++-
+ .../cpp/mControl/src/mControl_kioskReboot.cpp |  58 +-
+ .../cpp/mControl/src/mControl_logging.cpp     |   3 +
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 109 ++--
+ .../mControl/src/mControl_notification.cpp    |  17 +-
+ .../cpp/mControl/src/mControl_scheduler.cpp   | 145 +++--
+ .../cpp/mControl/src/mControl_servant.cpp     |   7 +-
+ .../cpp/mControl/src/mControl_tools.cpp       | 500 +++++++-----------
+ .../cpp/mControl/src/mControl_worker.cpp      |   6 +-
+ 23 files changed, 1094 insertions(+), 537 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/default.h b/SelfServiceCommon/Massai/cpp/mControl/inc/default.h
+index e69de29b..7216e4d2 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/default.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/default.h
+@@ -0,0 +1,20 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_default.h
++//
++//  purpose:    class definition: Default
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#ifndef DEFAULT_H
++#define DEFAULT_H
++
++class Default
++{
++};
++
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index b1757726..6f784173 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -13,22 +13,25 @@
+ #ifndef CONFIG_H
+ #define CONFIG_H
+ 
++//Project includes
+ #include "..\inc\mControl_def.h"
+ 
+ //MATERNA includes
+ #include "text/cEnvSubst.hpp"
++
+ #include "cfgclnt/nConfigText.hpp"
+ #include "cfgclnt/nConfigNumber.hpp"
+ #include "cfgclnt/nConfigTextList.hpp"
+ 
+-
+ #include "logging/alert.h"
+ #include "logging/alertDef.h"
+-#include "systools/mEventSem.hpp"
+ 
++#include "systools/mEventSem.hpp"
+ 
++//Poco includes
+ #include "poco\ThreadPool.h"
+ 
++
+ using Poco::ThreadPool;
+ 
+ namespace mControl
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index b3614ce9..75dd2bca 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -13,18 +13,18 @@
+ #ifndef DIALOG_H
+ #define DIALOG_H
+ 
+-#include "Poco/Runnable.h"
+-#include "Poco/NotificationQueue.h"
+-#include "Poco/Notification.h"
+-
++//Project includes
++#include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_config.h"
+ 
+-
+ //Windows includes
+-#include <windows.h>
+-#include <stdlib.h>
+ #include <string.h>
+-#include <tchar.h>
++
++//Poco includes
++#include "Poco/Runnable.h"
++#include "Poco/NotificationQueue.h"
++#include "Poco/Notification.h"
++
+ 
+ using Poco::Runnable;
+ using Poco::NotificationQueue;
+@@ -36,8 +36,8 @@ namespace mControl
+     {
+     private:
+         NotificationQueue &         m_notificationQueue; 
+-        MControlWindowConfig        m_MControlWindowConfig;
+-        MControlProcessConfig &     m_config;
++        WindowConfig                m_windowConfig;
++        GlobalConfig &              m_globalConfig;
+ 
+     public:
+         /**
+@@ -54,17 +54,78 @@ namespace mControl
+         void run();
+ 	  
+ 
++        /**
++        *   initialize SNMP traps
++        */
++        void createAlert();
++
++
++        /**
++        *   at the first call watch for loggingservice semaphore
++        */
++        void waitInitialForLoggingService();
++
++
++        /**
++        *   Sends SNMP traps
++        */
++        void sendAlert(char *s);
++
++
++        //TODO: implement with new process configuration
++        /**
++        * Waits until starter has terminated
++        */
++        void waitForStarterTermination();
++
++
++        //TODO: implement with new process configuration
++        /**
++        *   Starts update service & waits for it's termination
++        */
++        long startUpdate();
++
++
++        //TODO: implement with new process configuration
++        /**
++        *   create a public semaphor and start all progs via MSTART.EXE
++        */
++        long startAll();
++
++
++        /**
++        *   load bitmap from file
++        */
++        static HBITMAP CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName);
++
++
++        /**
++        *   Finds the first valid drive letter from a mask of drive letters.
++        *   The mask must be in the format bit 0 = A, bit 1 = B, bit 3 = C,
++        *   etc. A valid drive letter is defined when the corresponding bit
++        *   is set to 1.
++        *
++        *   Returns the first drive letter that was found.
++        */
++        char FirstDriveFromMask (ULONG unitmask);
++
++
++        /**
++        *   get description of SystemErrorCodes
++        */
++        static void syserror(const std::string &msg);
++
+ 
+         /**
+         * getter Methods
+         */
+         NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-        MControlWindowConfig& getMControlWindowConfig(){ return m_MControlWindowConfig; }
++        WindowConfig& getWindowConfig(){ return m_windowConfig; }
+ 
+ 
+ 
+         //Constructor
+-        Dialog(NotificationQueue& queue, HINSTANCE hInst, MControlProcessConfig& config);
++        Dialog(NotificationQueue& queue, HINSTANCE hInst, GlobalConfig& config);
+         //Destructor
+ 	    ~Dialog();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
+index 47283fd9..7c73af47 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
+@@ -13,15 +13,19 @@
+ #ifndef MCONTROL_KIOSKREBOOT_H
+ #define MCONTROL_KIOSKREBOOT_H
+ 
++//Project includes
++#include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_scheduler.h"
+ #include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_servant.h"
+ 
++//MATERNA includes
+ #include "massaidll/mTime.hpp"
+ #include "massaidll/mDate.hpp"
+ 
+-#include "Poco/Runnable.h"
++//Poco includes
+ #include "Poco/NotificationQueue.h"
++#include "Poco/Runnable.h"
+ 
+ 
+ using Poco::Runnable;
+@@ -34,18 +38,24 @@ namespace mControl
+       private:
+         long                        m_startDelay;
+         NotificationQueue &         m_notificationQueue;  
+-        MControlProcessConfig&      m_config;
+-        //MControlServant*            m_servant;
++        GlobalConfig&               m_globalConfig;
++        MControlServant*            m_servant;
++
++        /**
++        * may needed, when using the Task class of Poco
++        */
++        void doTask();
+ 
+       public:
++        //TODO: implement correct functionality
+         /**
+         * Needs to be implemented from the Runnable interface.
+-        * Here the kiosk is rebooted once per day.
++        * Here the kiosk is rebooted once per day
+         */
+         void run();
+ 
+ 
+-
++        //TODO: implement
+         /**
+         * default implementation
+         *
+@@ -55,7 +65,7 @@ namespace mControl
+         long saveRebootDate();
+ 
+ 
+-
++        //TODO: implement
+         /**
+         *
+         * Reads the last reboot-date of the Kiosk in a file,
+@@ -77,7 +87,7 @@ namespace mControl
+ 
+ 
+         //Constructor
+-	      KioskReboot(long sDelay, NotificationQueue& queue, MControlProcessConfig& config);//, MControlServant* servant);
++	      KioskReboot(long sDelay, NotificationQueue& queue, GlobalConfig& config, MControlServant* servant);
+         //Destructor
+ 	      ~KioskReboot();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+index 52d6ff3c..8f9ed723 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_logging.h
+@@ -13,6 +13,7 @@
+ #ifndef LOGGING_H
+ #define LOGGING_H
+ 
++//MATERNA includes
+ #include "massaiCorba/orbIncDefs.h"
+ #include "systools\mSysProcessTree.h"
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+index a48a21f6..39158ea7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+@@ -13,14 +13,17 @@
+ #ifndef MCONTROL_NOTIFICATIONOBJECT_H
+ #define MCONTROL_NOTIFICATIONOBJECT_H
+ 
++//Windows includes
+ #include <string>
+ 
++//Poco includes
+ #include "Poco/Notification.h"
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/ThreadPool.h"
+ #include "Poco/Runnable.h"
+ #include "Poco/AutoPtr.h"
+ 
++
+ using Poco::Notification;
+ using Poco::NotificationQueue;
+ using Poco::ThreadPool;
+@@ -34,7 +37,8 @@ namespace mControl
+     {
+       private: 
+         string      m_info;
+-        int         m_id;
++        int         m_parentID;
++        int         m_cmd;
+ 
+       public:
+         /**
+@@ -42,12 +46,13 @@ namespace mControl
+         */
+         string data() const;
+         int getId() const;
++        int getCmd() const;
+         void printString();
+ 
+ 
+ 
+         //Constructor
+-	    MControlNotification (string data, int id);
++	    MControlNotification (string data, int id, int cmd);
+         //Destructor
+         ~MControlNotification ();
+     };
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+index 07bb4edc..8ec7c497 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+@@ -13,13 +13,18 @@
+ #ifndef MCONTROL_SCHEDULER_H
+ #define MCONTROL_SCHEDULER_H
+ 
+-#include <list>
+-
+-#include "trc/trace.h"
+-#include "..\inc\mControl_notification.h"
++//Project includes
+ #include "..\inc\mcontrol_def.h"
++#include "..\inc\mControl_notification.h"
+ #include "..\inc\mcontrol_config.h"
+ 
++//MATERNA includes
++#include "trc/trace.h"
++
++//Windows includes
++#include <list>
++
++//Poco includes
+ #include "Poco/Runnable.h"
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Notification.h"
+@@ -29,14 +34,20 @@ using Poco::Runnable;
+ using Poco::NotificationQueue;
+ using Poco::Notification;
+ 
++
++/**
++* For the Date and Time configuration use mTime und mDate
++*/
++
++
+ namespace mControl
+ {
+     class Scheduler : public Runnable
+     {
+       private:
+         NotificationQueue &         m_notificationQueue;      
+-        MControlProcessConfig &     m_config;
+-        std::list<std::string *>    m_cmdList;            //List of configuratoin items/applications
++        GlobalConfig &     m_globalConfig;
++        std::list<int>    m_cmdList;            //List of configuratoin items/applications
+         
+ 
+         /**
+@@ -44,31 +55,39 @@ namespace mControl
+         */
+         void initList();      
+ 
++
+         /**
+         * Deletes all the commands of the scheduled list.
+         */
+         void deleteList();
+ 
++
++        /**
++        * may needed, when using the Task class of Poco
++        */
++        void doTask();
++
+     public:
+-      /**
+-      * Needs to be implemented from the Runnable interface.
+-      * Here the processes for MCC are started.
+-      */
+-      void run();
++        //TODO: implement correct functionality
++        /**
++        * Needs to be implemented from the Runnable interface.
++        * Here the MCC processes are scheduled.
++        */
++        void run();
+ 
+ 
+ 
+-      /**
+-      * getter Methods
+-      */
+-      NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
+-      std::list<std::string *>& getCmdList(){ return m_cmdList; }
++        /**
++        * getter Methods
++        */
++        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        std::list<int>& getCmdList(){ return m_cmdList; }
+ 
+ 
+ 
+-      //Constructor
+-	    Scheduler(NotificationQueue & queue, MControlProcessConfig & config);
+-      //Destructor
++        //Constructor
++	    Scheduler(NotificationQueue & queue, GlobalConfig & config);
++        //Destructor
+ 	    ~Scheduler();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+index 7ebf4649..81f0a4eb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+@@ -13,14 +13,17 @@
+ #ifndef MCONTROL_SERVANT_H
+ #define MCONTROL_SERVANT_H
+ 
+-#include "Poco/NotificationQueue.h"
+-
++//MATERNA includes
+ #include "massaiCorba/orbIncDefs.h"
+ #include "systools\mSysProcessTree.h"
+ 
+ #include "controller.h"
+ #include "controller_skel.h"
+ 
++//Poco includes
++#include "Poco/NotificationQueue.h"
++
++
+ using Poco::NotificationQueue;
+ 
+ namespace mControl
+@@ -114,7 +117,7 @@ namespace mControl
+         /**
+         * Remember if someone is using the kiosk
+         */
+-	    virtual void kioskBusy(::CORBA::Boolean);
++	    void kioskBusy(::CORBA::Boolean);
+     
+ 
+         /**
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 3a3d5557..c3f109ca 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -19,18 +19,22 @@
+ #ifndef TOOLS_H
+ #define TOOLS_H
+ 
++//Project includes
++#include "..\inc\mControl_def.h"
++#include "..\inc\mControl_config.h"
++
++//MATERNA includes
+ #include "systools\mSysProcessList.h"
++#include "systools/mEventSem.hpp"
+ #include "trc/trace.h"
+ 
+-#include "..\inc\mControl_impl.h"
++#include "logging/alert.h"
++#include "logging/alertDef.h"
++#include <sys\stat.h>
+ 
+ //Windows includes
+-#include <windows.h>
+-#include <stdlib.h>
+-#include <tchar.h>
+ #include <string>
+ 
+-#include <sys\stat.h>
+ 
+ //TODO: check if needed
+ #ifndef _lint
+@@ -50,19 +54,16 @@ namespace mControl
+     class Tools
+     {
+     private:
+-        cfgListSysCommands* m_shutDownCommands;
++        cfgListSysCommands*     m_shutDownCommands;
++        cfgListSysCommands*     m_startUpCommands;
++        GlobalConfig&           m_globalConfig;
+         //ProcessList         m_processList;
+         //list<long>          m_prList;
+ 
+-
+     public:
+-        Tools();
+-            
+-        /**
+-        *   load bitmap from file
+-        */
+-        static HBITMAP CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName);
++        Tools(GlobalConfig& config);
+             
++                    
+         /**
+         *   check if file exists
+         */
+@@ -130,7 +131,10 @@ namespace mControl
+         */
+         static long shutdownOS_Now(bool fReboot);
+ 
+-        //TODO: implement
++
++        /**
++        *   scan for program arguments and start options
++        */
+         static void scanArguments( char *pszInput,
+                                    long *plTimeOut,
+                                    int  *piShow,
+@@ -139,14 +143,31 @@ namespace mControl
+                                    char *pszWorkingDir);
+ 
+ 
++        //TODO: implement with new process configuration
++        /**
++        *   replacement for the standard system() command,
++        *   this one doesn't pop up any windows
++        */
++        static long mSystem( char const * cmd, char const * purpose );
++
++
++        /**
++        *   execute configured commands on platform shutdown
++        */
+         void execSysCmdsShutdown();
+ 
+ 
+-        //TODO: 
+         /**
+-        * Waits until starter has terminated
++        *   execute configured commands on platform startup
++        */
++        void execSysCmdsStartup();
++
++
++        //TODO: new implementation with Boost or Poco
++        /**
++        *   load a hosts file from HTTP server (if configured)
+         */
+-        //void waitForStarterTermination();
++        static long loadHostsFile();
+ 
+ 
+         /*TODO:
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index 46259701..fdf4907e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -13,14 +13,16 @@
+ #ifndef WORKER_H
+ #define WORKER_H
+ 
++//Project includes
+ #include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_tools.h"
+ #include "..\inc\mControl_dialog.h"
+ 
+-
++//Poco includes
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/Runnable.h"
+ 
++
+ using Poco::Runnable;
+ using Poco::NotificationQueue;
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 05826f8a..a283493f 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -9,28 +9,86 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,16
+-#define FILE_VER_STR     "FileVersion", "1.0.2.16\0"
++#ifndef DEF_H
++#define DEF_H
+ 
++    #define FILE_VER_BIN     1,0,2,16
++    #define FILE_VER_STR     "FileVersion", "1.0.2.16\0"
+ 
+-#define IDI_ICON1 101
+-#define IDI_ICON2 102
+ 
+-#define FILEDESCRIPTION  "FileDescription"  ,"mcontrol\0"
+-#define INTERNALNAME     "InternalName"     ,"mcontrol\0"
+-#define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
+-#define ORIGINALFILENAME "OriginalFilename" ,"mcontrol.exe\0"
++    #define IDI_ICON1 101
++    #define IDI_ICON2 102
+ 
+-#define REBOOTER_ID 1
+-#define SCHEDULER_ID 0
+ 
+-#define szAppName   "MassaiController"
+-#define szClassName "win32app"
++    #define FILEDESCRIPTION  "FileDescription"  ,"mcontrol\0"
++    #define INTERNALNAME     "InternalName"     ,"mcontrol\0"
++    #define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
++    #define ORIGINALFILENAME "OriginalFilename" ,"mcontrol.exe\0"
+ 
+-#define REBOOT_FILE_NAME "mcontrol.reboot"
++    #define REBOOT_FILE_NAME "mcontrol.reboot"
+ 
+-// The main window class name.
+-//static TCHAR szWindowClass[] = _T("win32app");
+ 
+-// The string that appears in the application's title bar.
+-//static TCHAR szTitle[] = _T("mConrol");
++    //Thread ID's
++    #define REBOOTER_ID     100
++    #define SCHEDULER_ID    101
++    #define DIALOG_ID       102
++    #define WORKER_ID       103
++
++
++    //WIN-Api specific names
++    #define szAppName   "MassaiController"      // The string that appears in the application's title bar.
++    #define szClassName "win32app"              // The main window class name.
++
++
++    //Platform Commands
++    /*
++    #define WM_MASSAISTART              1000
++    #define WM_MASSAISTART_REMOTE       1001
++    #define WM_MASSAIREBOOT_REMOTE      1002
++    #define WM_MASSAISHUTDOWN_REMOTE    1003
++    #define WM_MASSAISTOP_REMOTE        1004
++    #define WM_MASSAISTOP_SCHEDULER     1005
++    #define WM_MASSAISTART_SCHEDULER    1006
++    #define WM_START_DELAY_TIMER        1007
++    */
++
++    #define WM_MASSAISTART            (WM_USER + 1)
++    #define WM_MASSAISTOP_REMOTE      (WM_USER + 2)
++    #define WM_MASSAISTART_REMOTE     (WM_USER + 3)
++    #define WM_MASSAIREBOOT_REMOTE    (WM_USER + 4)
++    #define WM_MASSAISHUTDOWN_REMOTE  (WM_USER + 5)
++
++    #define WM_MASSAISTOP_SCHEDULER   (WM_USER + 6)
++    #define WM_MASSAISTART_SCHEDULER  (WM_USER + 7)
++
++    #define WM_TEST                   (WM_USER + 8)
++
++    #define WM_MCONTROL_PROGRESS      (WM_USER + 10)
++
++    #define WM_START_DELAY_TIMER      (WM_USER + 101)
++
++
++    #define START_DELAY_TIMER           1
++
++    #define SEM_NAME       "mPlatformStartup"
++    #define STARTER_NAME   "mstarter.exe"
++    #define UPDATE_NAME    "mUpdat.exe"
++    #define REBOOT_KIOSK   123
++
++#endif
++
++//WINDOWS includes
++#ifndef WINDOWS_INC
++#define WINDOWS_INC
++
++    #define _WINSOCKAPI_    //Helps to solve the header inclusion problem
++    #include <windows.h>
++    #include <stdlib.h>
++    #include <tchar.h>
++    #include <shlobj.h>
++    #include <Shlwapi.h>
++    #include <signal.h>
++    #include <stdio.h>
++    #include <time.h>
++
++#endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+index 4f550cad..478767cd 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+@@ -51,6 +51,7 @@ MY_BIN1_OBJS = \
+ 	$(_OBJ)\mControl_servant.obj \
+ 	$(_OBJ)\mControl_tools.obj \
+ 	$(_OBJ)\mControl_config.obj \
++	$(_OBJ)\mControl_worker.obj \
+ 	$(_OBJ)\mControl_logging.obj
+ 	
+ 	
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/default.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/default.cpp
+index e69de29b..923df4aa 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/default.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/default.cpp
+@@ -0,0 +1,11 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_default.cpp
++//
++//  purpose:    default classes implementation
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 3b08dbea..8616dfe2 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -10,20 +10,22 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++#include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_tools.h"
+-
+ #include "..\inc\mControl_dialog.h"
+ 
++//Windows includes
+ #include <Commctrl.h>
+ #include <iostream>
+ 
++//MATERNA includes (AkA: go in service trigger)
+ #include "trc/trace.h"
+ 
+-// AkA: go in service trigger
+ #include "controller.h"
+ #include "massaiCorba/corbaclnt.h"
+ #include "tao/SystemException.h"
+ 
++
+ namespace mControl
+ {
+ /*******************************************************************************************************
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index c34e4c45..71d08d45 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -10,28 +10,36 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#include <iostream>
+-#include <exception>
+-
++//Project includes
+ #include "..\inc\mControl_dialog.h"
+ #include "..\inc\mControl_notification.h"
+ 
+-#include "..\inc\mControl_tools.h"
+-
++//MATERNA includes
+ #include "trc/trace.h"
+ 
++#include "massaidll\BASE_OS.h"
++
++//Windows includes
++#include <time.h>
++#include <sys/timeb.h>
++#include <stdio.h>
++#include <iostream>
++#include <exception>
++
++//Poco includes
+ #include "Poco/AutoPtr.h"
+ 
++
+ using Poco::AutoPtr;
+ using namespace std;
+ 
+ 
+ namespace mControl
+ {
+-    Dialog::Dialog(NotificationQueue& queue, HINSTANCE hInst, MControlProcessConfig& config) :
+-        m_config(config),
++    Dialog::Dialog(NotificationQueue& queue, HINSTANCE hInst, GlobalConfig& config) :
++        m_globalConfig(config),
+         m_notificationQueue(queue),
+-        m_MControlWindowConfig(hInst, config)    
++        m_windowConfig(hInst, config)    
+     {
+     }
+ 
+@@ -42,26 +50,371 @@ namespace mControl
+     //TODO: handle the incomming Messages 
+     void Dialog::run()
+     {
+-        TRACE(HERE,"Dialog-Thread run() started...");
+-        TRACE(HERE,"Size of NotificationQueue in Dialog: [%d] ", m_notificationQueue.size());
+-
+-        //dequeue a Notification out of the Queue
+-        AutoPtr<Notification> pNf;
+-        MControlNotification* pWorkNf;
+-
+-        //work as long as there are Notifications
+-        while(!m_notificationQueue.empty())
+-        {    
+-            //get next Notification
+-            pNf = m_notificationQueue.waitDequeueNotification();
+-            pWorkNf = dynamic_cast<MControlNotification*>(pNf.get());
+-      
+-            if (pWorkNf)
++        TRACE(HERE,"Dialog-Thread runTask() started...");
++    }
++
++
++    void Dialog::createAlert()
++    {
++        try
++        {
++            m_globalConfig.setAlert( new alert(ALERT_M_PLATFORM) );
++        }
++        catch( alertException & e )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException: %s",e.toString().c_str());
++        }
++        catch( ... )
++        {
++            m_globalConfig.setAlert( NULL );
++            TRACE(HERE,"(create)alertException (unknown)");
++        }
++
++    }
++
++
++    void Dialog::waitInitialForLoggingService()
++    {
++        static bool init= false;
++        if(!init)
++        {
++            TRACE(HERE,"waitInitialForLoggingService...");
++            Materna::MSSD::eventSemaphore loggingSemaphore(true, "MassaiLoggingService");
++            try
++            {
++                long rc= loggingSemaphore.wait(60000);
++                long error= GetLastError();
++                TRACE(HERE,"waitInitialForLoggingService %d %d", rc, error);
++            }
++            catch( const std::exception& ex )
++            {
++                TRACE(HERE, ex.what());
++            }
++            catch( ... )
++            {
++                TRACE(HERE,"waitInitialForLoggingService failed: unknown exception");
++            }
++            TRACE(HERE,"waitInitialForLoggingService done.");
++            createAlert();
++        }
++        init= true;
++    }
++
++
++    void Dialog::sendAlert(char *s)
++    {
++        
++        if(m_globalConfig.noLogActive())
++        {
++           TRACE(HERE,"sendAlert [%s], noLOG.",s);
++           return;
++        }
++        TRACE(HERE,"sendAlert [%s], noSNMP=%s, started=%s.",
++                   s,
++                   m_globalConfig.noSNMPActive() ?"true":"false",
++                   m_globalConfig.isStarted() ?"true":"false");
++        if(m_globalConfig.noSNMPActive() && !m_globalConfig.isStarted())
++        {
++          TRACE(HERE,"Alert [%s] not sent, noSNMP=%s, started=%s.",
++                     s,
++                     m_globalConfig.noSNMPActive()?"true":"false",
++                     m_globalConfig.isStarted()?"true":"false");
++          return;
++        }
++
++        static bool initial = true;
++        waitInitialForLoggingService();
++
++        int repetitions = 1;
++
++        if(initial && !m_globalConfig.serverMode())
++        {
++          initial = false;
++          repetitions = 10;
++        }
++
++        while(repetitions--)
++        {
++          if(s && *s)
++          {
++            if(m_globalConfig.getAlert())
+             {
+-            string data = pWorkNf->data();
+-            TRACE(HERE,"MControlNotification dequeued");
+-            pWorkNf->printString();
++              alert::eventData e(s);
++
++              try
++              {
++                 m_globalConfig.getAlert()->send(e);
++                 return;
++              }
++              catch( alertException & ex )
++              {
++                TRACE(HERE,"alertException: %s",ex.toString().c_str());
++                delete m_globalConfig.getAlert();
++                createAlert();
++              }
++              catch( ... )
++              {
++                TRACE(HERE,"unknown exception in SendAlert()");
++              }
+             }
++            else
++              TRACE(HERE,"Alert [%s] not sent.");
++          }
++          if(repetitions)
++            OS_Sleep(3000);
+         }
+     }
++
++
++    void Dialog::waitForStarterTermination()
++    {
++        /*
++        long   lExitCode;
++        MSG    msg;
++        HANDLE hProcess;
++        list<long>::iterator prI;
++        list<long>::iterator tmpI;
++
++            SendMessage(m_impl.getDialog().getWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
++
++            try
++            {
++              if(m_processList)
++              {
++                TRACE(HERE,"waiting for starter termination ...");
++                hStarter->signalStop();
++                while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
++                {
++                  for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
++                  {
++                     try
++                     {
++                       TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),prList.size());
++
++                       hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
++
++                       if(hProcess)
++                       {
++                         if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
++                         {
++                           lCurrentProcesses--;
++
++                           flTmp = (float)lCurrentProcesses/(float)lAllProcesses;
++
++                           lCurrLoadPercent = (long)(flTmp *100);
++
++                           SendMessage(hwndLoad,PBM_SETPOS,lCurrLoadPercent,0);
++
++                           UpdateWindow(hwndLoad);
++
++                           if(prList.size() > 0)
++                             prList.erase(tmpI);
++                         }
++
++                         // close this handle always !!
++
++                         CloseHandle(hProcess);
++                       }
++                     }
++                     catch( ... ) {};
++                  }
++
++                  while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
++                    DispatchMessage(&msg);
++
++                  OS_Sleep(500);
++                }
++
++                SendMessage(hwndLoad,PBM_SETPOS,0,0);
++                UpdateWindow(hwndLoad);
++
++                TRACE(HERE,"waiting for starter termination, done.");
++
++                delete hStarter;
++
++                hStarter = NULL;
++              }
++            }
++            catch( ... ) {};
++            */
++    }
++
++
++    long Dialog::startUpdate()
++    {
++        /*
++        char                szProg[256];
++        char                szPath[512];
++        char               *pStr;
++        GetModuleFileName(0,szPath,sizeof(szPath));
++
++        if((pStr = strrchr(szPath,'\\')) != NULL)
++          *pStr = '\0';
++
++        if(serverMode())
++          sprintf(szProg,"%s\\%s -server",szPath,UPDATE_NAME);
++        else
++          sprintf(szProg,"%s\\%s",szPath,UPDATE_NAME);
++        mSysProcess::parent Update;
++    #ifdef DO_MCPROCESS_LOGGING
++        mcProcessCallback Logging( UPDATE_NAME, "mSysProcess" );
++    #endif
++        mcProcessCallback StdErr( UPDATE_NAME, "STDERR" );
++        mcProcessCallback StdOut( UPDATE_NAME, "STDOUT" );
++        Update
++    #ifdef DO_MCPROCESS_LOGGING
++            .setLogging( Logging )
++    #endif
++            .setMinimized()
++            .setStdErr( StdErr )
++            .setStdOut( StdOut )
++            .setCommandline( szProg );
++        std::auto_ptr<mSysProcess::child> Child( Update.newChild() );
++        return Child
++                ->waitForTermination( 600 ) // Something went terrible wrong,
++                                            // when not done after 600 secs.
++                .getExitCode();
++        */
++        return 0;
++    }
++
++
++    long Dialog::startAll()
++    {
++        /*
++    STARTUPINFO         si;
++    char                szProg[256];
++    char                szPath[512];
++    char               *pStr;
++
++        hStarter = NULL;
++
++        memset(&si,0,sizeof(STARTUPINFO));
++
++        si.cb      = sizeof(STARTUPINFO);
++        si.dwFlags = STARTF_USESHOWWINDOW;
++
++        si.wShowWindow = SW_SHOWMINIMIZED;
++        //si.wShowWindow = SW_HIDE;
++
++        GetModuleFileName(0,szPath,sizeof(szPath));
++
++        if((pStr = strrchr(szPath,'\\')) != NULL)
++          *pStr = '\0';
++
++        if(serverMode() && mDaemon_isService())
++          sprintf(szProg,"%s\\%s %s -server -service",szPath,STARTER_NAME,SEM_NAME);
++        else if(serverMode())
++          sprintf(szProg,"%s\\%s %s -server",szPath,STARTER_NAME,SEM_NAME);
++        else
++          sprintf(szProg,"%s\\%s %s",szPath,STARTER_NAME,SEM_NAME);
++
++        mSysProcess::parent Parent;
++        Parent.setCommandline( szProg );
++        hStarter = new mcProcessControl( Parent, STARTER_NAME, SEM_NAME );
++        if( hStarter->getStatus() != mSysProcess::STATUS_FAILED )
++            return 0;
++        else
++            return 1;
++            */
++        return 0;
++    }
++
++
++    HBITMAP Dialog::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
++    {
++        BITMAPFILEHEADER * pbmfh;
++        BOOL               bSuccess;
++        DWORD              dwFileSize, dwHighSize, dwBytesRead;
++        HANDLE             hFile;
++        HBITMAP            hBitmap;
++
++        // Open the file: read access, prohibit write access
++        // TODO: check if "A" is right
++         hFile = CreateFileA(szFileName,
++                            GENERIC_READ,
++                            FILE_SHARE_READ,
++                            NULL,
++                            OPEN_EXISTING,
++                            FILE_FLAG_SEQUENTIAL_SCAN,
++                            NULL);
++
++         if(hFile == INVALID_HANDLE_VALUE)
++           return(NULL);
++
++        // Read in the whole file
++
++         dwFileSize = GetFileSize (hFile, &dwHighSize);
++
++         if(dwHighSize)
++         {
++           CloseHandle(hFile);
++           return(NULL);
++         }
++
++         pbmfh = (struct tagBITMAPFILEHEADER *)malloc (dwFileSize);
++
++         if(!pbmfh)
++         {
++           CloseHandle (hFile);
++           return(NULL);
++         }
++
++         bSuccess = ReadFile(hFile, pbmfh, dwFileSize, &dwBytesRead, NULL);
++         CloseHandle (hFile);
++
++         // Verify the file
++
++         if(!bSuccess || (dwBytesRead != dwFileSize)
++                      || (pbmfh->bfType != * (WORD *) "BM")
++                      || (pbmfh->bfSize != dwFileSize))
++         {
++           free (pbmfh);
++           return(NULL);
++         }
++              // Create the DDB
++
++         hBitmap = CreateDIBitmap(hdc,
++                                  (BITMAPINFOHEADER *) (pbmfh + 1),
++                                  CBM_INIT,
++                                  (BYTE *) pbmfh + pbmfh->bfOffBits,
++                                  (BITMAPINFO *) (pbmfh + 1),
++                                  DIB_RGB_COLORS);
++         free (pbmfh);
++
++         return(hBitmap);
++    }
++
++
++
++    char Dialog::FirstDriveFromMask (ULONG unitmask)
++    {
++       char i;
++
++       for (i = 0; i < 26; ++i)
++       {
++          if (unitmask & 0x1)
++             break;
++          unitmask = unitmask >> 1;
++       }
++
++       return (i + 'A');
++    }
++
++
++    void Dialog::syserror(const string &msg)
++    {
++        char errbuf[256];
++        //TODO: check if "A" is right
++        int len = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM,
++                                NULL,
++                                GetLastError(),
++                                0,
++                                errbuf,
++                                sizeof(errbuf),
++                                NULL);
++        errbuf[len] = '\0';
++        TRACE(HERE, "[serverwin] %s: %s", msg.c_str(), errbuf);
++    }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+index 00362bc6..2c04a081 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+@@ -10,27 +10,30 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//Project includes
+ #include "..\inc\mControl_kioskReboot.h"
+ #include "..\inc\mControl_notification.h";
+-#include "..\inc\mcontrol_def.h"
+ 
++//MATERNA includes
+ #include "trc/trace.h"
+ 
++
+ namespace mControl
+ {
+-    KioskReboot::KioskReboot(long sDelay, NotificationQueue& queue, MControlProcessConfig& config)://, MControlServant* servant) : 
++    KioskReboot::KioskReboot(long sDelay, NotificationQueue& queue, GlobalConfig& config, MControlServant* servant) : 
+         m_startDelay(),
+         m_notificationQueue(queue),
+-        m_config(config)
+-        //m_servant(servant)
++        m_globalConfig(config)
+     {
++        m_servant = servant;
+     }
+ 
++
+     KioskReboot::~KioskReboot()
+     {
+     }
+ 
+-    
++
+     long KioskReboot::saveRebootDate()
+     {
+         /*
+@@ -58,7 +61,7 @@ namespace mControl
+         return 1;
+     }
+ 
+-    
++
+     long KioskReboot::getRebootDate(mDate *pDate)
+     {
+         /*
+@@ -83,23 +86,40 @@ namespace mControl
+         return 1;
+     }
+ 
+-  //TODO: implement correct functionality
+-  void KioskReboot::run()
+-  {
+-    TRACE(HERE,"KioskReboot-Thread run() started...");
++                                                                                                    
++    void KioskReboot::run()
++    {
++        TRACE(HERE,"KioskReboot-Thread run() started...");
+ 
+-    mDate lastRebootDate = mDate();
+-    long correctDate = this->getRebootDate( &lastRebootDate );
++        mDate lastRebootDate = mDate();
++        long correctDate = this->getRebootDate( &lastRebootDate );
+ 
+-    //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate.dayOfMonth(), lastRebootDate.monthOfYear(), lastRebootDate.year() );
++        //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate.dayOfMonth(), lastRebootDate.monthOfYear(), lastRebootDate.year() );
+ 
+-    if(correctDate)
+-    {
+-      getNotificationQueue().enqueueNotification( new MControlNotification("cmd_REBOOTKIOSK", REBOOTER_ID) );
++        if(correctDate)
++        {
++            getNotificationQueue().enqueueNotification( new MControlNotification("WM_MASSAIREBOOT_REMOTE", REBOOTER_ID, WM_MASSAIREBOOT_REMOTE) );
++        }
++        else
++        {
++            TRACE(HERE,"incorrect Date");
++        }
++        
+     }
+-    else
++
++    //TODO: implement correct functionality
++    void KioskReboot::doTask()
+     {
+-      TRACE(HERE,"incorrect Date");
++        /*
++        TRACE(HERE,"starting %s...", name() );
++        
++        while (! isCancelled()) {
++            // Do some work. Cannot block indefinitely, otherwise it
++            // will never test the isCancelled() condition.
++            doTask();
++        }
++        doTask();
++        TRACE(HERE,"canceling %s...", name() );
++        */
+     }
+-  }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_logging.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_logging.cpp
+index d09d3c61..351db1eb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_logging.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_logging.cpp
+@@ -9,8 +9,11 @@
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
++
++//Project includes
+ #include "..\inc\mControl_logging.h"
+ 
++
+ Logging::Logging(MASSAI::trace::TraceInterface& trc) :
+     m_trc(trc)
+ {}
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 0592a159..63850c54 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -11,48 +11,44 @@
+ //---------------------------------------------------------------------------
+ 
+ //Project includes
+-#include "..\inc\mControl_impl.h"
++#include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_notification.h"
+ #include "..\inc\mControl_dialog.h"
+-#include "..\inc\mControl_def.h"
+ #include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_tools.h"
++#include "..\inc\mControl_worker.h"
++#include "..\inc\mControl_scheduler.h"
++#include "..\inc\mControl_kioskReboot.h"
+ 
+-
+-
++//MATERNA includes
++#include "massaiCorba/corbasrvr.h"
+ #include "massaidll/massai.hpp"
++
+ #include "text/mArgScan.hpp"
+ #include "text/mMainCommandLine.hpp"
+-#include "trc/trace.h"
+-
+-#include "Windows.h"
+-#include "shlobj.h"
+-#include "Shlwapi.h"
+-
+-#include "systools/matDaemon.h"
+-
+ #include "text/cEnvSubst.hpp"
+ 
+-#include <signal.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <time.h>
++#include "trc/trace.h"
+ 
++#include "systools/matDaemon.h"
+ 
++//Poco includes
++#include "Poco/TaskManager.h"
+ 
+ 
+ using namespace mControl;
+ using namespace std;
+ 
+-using Poco::ThreadPool;
++using Poco::Runnable;
+ using Poco::AutoPtr;
+ using Poco::NotificationQueue;
+ 
+ 
+ 
++
+ //Global vars 
+ HINSTANCE globalHInstance;
+-MControlProcessConfig globalConfig;
++GlobalConfig globalConfig;
+ 
+ 
+ 
+@@ -126,29 +122,28 @@ int mDaemon_main( int argc, char const * const * argv )
+ {
+     TRACE(HERE,"entering mDaemon_main...");
+   
+-
+     NotificationQueue mainMsgQueue = NotificationQueue();   
+ 
+-    Scheduler   scheduler = Scheduler(mainMsgQueue, globalConfig);
+-    KioskReboot rebooter = KioskReboot(100, mainMsgQueue, globalConfig);
+-    Dialog      mainDialog(mainMsgQueue, globalHInstance, globalConfig);
++    Scheduler   scheduler   = Scheduler(mainMsgQueue, globalConfig);
+     
++    Dialog      mainDialog  = Dialog(mainMsgQueue, globalHInstance, globalConfig);
+     
+-    argScan args( argc, argv );
++    
++    argScan     args( argc, argv );
+    
+-    long         rc = 0;
+-    long         lWait = 60000;
+-    long         lDelay = -1;
++    long        rc = 0;
++    long        lWait = 60000;
++    long        lDelay = -1;
+ 
+-    bool useGlobalNamespace = false;
++    bool        useGlobalNamespace = false;
+ 
+-    HANDLE isRunning;
++    HANDLE      isRunning;
+ 
+     OSVERSIONINFO version;
+ 
+     std::string userDir;
+ 
+-    DWORD myStyle = WS_POPUP;
++    DWORD       myStyle = WS_POPUP;
+     
+     
+     
+@@ -361,19 +356,19 @@ int mDaemon_main( int argc, char const * const * argv )
+         
+ 
+         //******************************************************************************************
+-        //  initialize the main components 
++        //  initialize the main components and delay start
+         //******************************************************************************************
+         TRACE(HERE,"initialize the main components...");
+ 
+     
+-        mainDialog.getMControlWindowConfig().registerWindow();
+-        mainDialog.getMControlWindowConfig().createWindow();
+-        mainDialog.getMControlWindowConfig().showWindow(SW_SHOW);
++        mainDialog.getWindowConfig().registerWindow();
++        mainDialog.getWindowConfig().createWindow();
++        mainDialog.getWindowConfig().showWindow(SW_SHOW);
+ 
+         if( mDaemon_isService() )
+         {
+             //PostMessage(hwnd,WM_PAINT,0,0);
+-            RedrawWindow(mainDialog.getMControlWindowConfig().getHwnd(),NULL,NULL,RDW_INTERNALPAINT);
++            RedrawWindow(mainDialog.getWindowConfig().getHwnd(),NULL,NULL,RDW_INTERNALPAINT);
+         }
+ 
+         mDaemon_indReady(0);
+@@ -391,10 +386,40 @@ int mDaemon_main( int argc, char const * const * argv )
+         //******************************************************************************************
+         //  initialize and starting servatn, scheduler and rebooter 
+         //******************************************************************************************
++        Poco::TaskManager tm;
+         
++        MControlServant servant     = MControlServant(mainMsgQueue);
+ 
++        KioskReboot     rebooter    = KioskReboot(100, mainMsgQueue, globalConfig, &servant);
+ 
++        corbaServantEx <MControlServant> corbaServant (1, servant, "massaiKioskControl",19998);
+ 
++        rebooter.saveRebootDate();
++        
++        
++        // but start only if not in server mode !!!
++        if(!globalConfig.serverMode())
++        {
++            globalConfig.getThreadPool().start( rebooter );
++        }
++
++        
++        // load host file from configured server => mcTools
++        if(Tools::loadHostsFile() == -99)
++        {
++            //Configuration not started
++            TRACE(HERE,"ERROR: Configuration not started");
++            return -1;
++        }
++
++        globalConfig.getThreadPool().start( scheduler );
++
++        OS_Sleep(100);
++
++        Worker worker(mainMsgQueue, globalConfig, mainDialog);
++
++        globalConfig.getThreadPool().start( worker );
++        
+ 
+         //handle all incomming Messages in the Windows-Queue
+         while (GetMessage(&msg, NULL, 0, 0))
+@@ -403,26 +428,34 @@ int mDaemon_main( int argc, char const * const * argv )
+             DispatchMessage(&msg);
+         }
+ 
++        
++        //Shutdhown Rebooter and Scheduler
++        /*
++        if(!globalConfig.serverMode())
++            rebooter.cancel();
++        */
++
++        globalConfig.getThreadPool().stopAll();
++        
+         OS_Sleep(500);
+     }
+     catch( std::exception & X )
+     {
+         char const * se = X.what();
+         TRACE( HERE, "%s", se );
+-        //SendMessage(globalConfig.getHwnd(),WM_CLOSE,0,0);
+-        SendMessage(mainDialog.getMControlWindowConfig().getHwnd(),WM_CLOSE,0,0);
++        SendMessage(mainDialog.getWindowConfig().getHwnd(),WM_CLOSE,0,0);
+         
+     }
+     catch( char * se )
+     {
+         TRACE( HERE, "%s", se );
+-        SendMessage(mainDialog.getMControlWindowConfig().getHwnd(),WM_CLOSE,0,0);
++        SendMessage(mainDialog.getWindowConfig().getHwnd(),WM_CLOSE,0,0);
+     }
+     catch(...)
+     {
+         char const * se = "unknown exception";
+         TRACE( HERE, "%s", se );
+-        SendMessage(mainDialog.getMControlWindowConfig().getHwnd(),WM_CLOSE,0,0);
++        SendMessage(mainDialog.getWindowConfig().getHwnd(),WM_CLOSE,0,0);
+     }   
+ 
+     TRACE(HERE,"%s terminated.", szClassName);
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+index 583cacc8..687a5e4a 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+@@ -10,16 +10,22 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//Project includes
+ #include "..\inc\mControl_notification.h"
++
++//Windows includes
+ #include <iostream>
+ 
++
+ using namespace std;
+ 
++
+ namespace mControl
+ {
+-    MControlNotification ::MControlNotification (string data, int id) :
++    MControlNotification ::MControlNotification (string data, int id, int cmd) :
+       m_info(data),
+-      m_id(id)
++      m_parentID(id),
++      m_cmd(cmd)
+     {
+     }
+ 
+@@ -30,7 +36,12 @@ namespace mControl
+ 
+     int MControlNotification ::getId() const
+     {
+-      return m_id;
++      return m_parentID;
++    }
++
++    int MControlNotification ::getCmd() const
++    {
++      return m_cmd;
+     }
+ 
+     void MControlNotification::printString()
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index a7b069c1..d2f709d4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -9,83 +9,118 @@
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
+-#include <string>
+ 
++//Project includes
+ #include "..\inc\mControl_scheduler.h"
+ #include "..\inc\test_pocoNotificationQueue.h"
+ #include "..\inc\mControl_notification.h"
+-#include "..\inc\mcontrol_def.h"
+ 
++//MATERNA includes
+ #include "trc/trace.h"
+ 
++//Windows includes
++#include <string>
++
++
++using Poco::Runnable;
++
++
+ namespace mControl
+ {
+-  /**
+-  * simple init method, just for testing the class
+-  */
+-  void Scheduler::initList()
+-  {
+-    getCmdList().push_back(new std::string( "cmd_RESTARTSCHEDULER") );
+-    for(int i=1; i < 10; i++)
++    Scheduler::Scheduler(NotificationQueue& queue, GlobalConfig & config) :
++        m_notificationQueue(queue),
++        m_globalConfig(config)
+     {
+-      getCmdList().push_back(new std::string( "cmd_" + std::to_string(static_cast<long long>(i)) ));
++        m_cmdList.clear();
++        this->initList();
+     }
+-  }
+ 
+ 
+-  void Scheduler::deleteList()
+-  {
+-    std::string * actualCmd;
+-    std::list<std::string *>::iterator  cmdIterator;
++    Scheduler::~Scheduler()
++    {
++    }
++
+ 
+-    while(!getCmdList().empty())
++    void Scheduler::initList()
+     {
+-      cmdIterator = getCmdList().begin();
++        for(int index = WM_USER ; index <= WM_USER + 7; index++)
++        {
++            switch ( index )
++            {
++            case WM_MASSAISTART:
++                    TRACE(HERE,"WM_MASSAISTART command enqueued");
++                    break;
++            case WM_MASSAISTART_REMOTE:
++                    TRACE(HERE,"WM_MASSAISTART_REMOTE command enqueued");
++                    break;
++            case WM_MASSAIREBOOT_REMOTE:
++                    TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command enqueued");
++                    break;
++            case WM_MASSAISHUTDOWN_REMOTE:
++                    TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command enqueued");
++                    break;
++            case WM_MASSAISTOP_REMOTE:
++                    TRACE(HERE,"WM_MASSAISTOP_REMOTE command enqueued");
++                    break;
++            case WM_MASSAISTOP_SCHEDULER:
++                    TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command enqueued");
++                    break;
++            case WM_MASSAISTART_SCHEDULER:
++                    TRACE(HERE,"WM_MASSAISTART_SCHEDULER command enqueued");
++                    break;
++            default:
++                    TRACE(HERE,"default command enqueued");
++                    break;
++            }  
++
++            m_cmdList.push_back( index );
++        }
++    }
+ 
+-      actualCmd = *cmdIterator;
+ 
+-      delete actualCmd;
+-      getCmdList().erase(cmdIterator);
++    void Scheduler::deleteList()
++    {
++        m_cmdList.clear();
+     }
+ 
+-  }
+ 
+-  //TODO: implement correct functionality
+-  void Scheduler::run()
+-  {
+-    TRACE(HERE,"Scheduler-Thread run() started...");
+-    TRACE(HERE,"Size of NotificationQueue in Scheduler: [%d] ",m_notificationQueue.size());
++    void Scheduler::run()
++    {
++        TRACE(HERE,"Scheduler-Thread run() started...");
++
++        std::list<int>::iterator  cmdIterator;
++        int i=0;
++
++        
++
++        for(cmdIterator = getCmdList().begin(); cmdIterator != getCmdList().end(); cmdIterator++)
++        {
++            if( (*cmdIterator) == WM_MASSAISTART_SCHEDULER )
++            {
++                //scheduled restart, here the scheduler is restarted by adding a Notification to the Queue
++                //TODO: restarting scheduler
++                getNotificationQueue().enqueueNotification( new MControlNotification( "", SCHEDULER_ID, (*cmdIterator) ));
++            }
++            else
++            {
++                //scheduled exec, here the cmd are started in mSysProcess's 
++                //TODO: Replace the WorkNotification by cmd exec 
++                getNotificationQueue().enqueueNotification( new MControlNotification( "", SCHEDULER_ID, (*cmdIterator)) );
++            }
++        }
++    }
+ 
+-    std::list<std::string *>::iterator  cmdIterator;
+-    int i=0;
+ 
+-    for(cmdIterator = getCmdList().begin(); cmdIterator != getCmdList().end(); cmdIterator++, i++)
++    void Scheduler::doTask()
+     {
+-      if( stricmp( (*cmdIterator)->c_str(),"cmd_RESTARTSCHEDULER") == 0 )
+-      {
+-        //scheduled restart, here the scheduler is restarted by adding a Notification to the Queue
+-        //TODO: restarting scheduler
+-        getNotificationQueue().enqueueNotification( new MControlNotification( (*cmdIterator)->data(), SCHEDULER_ID) );
+-      }
+-      else
+-      {
+-        //scheduled exec, here the cmd are started in mSysProcess's 
+-        //TODO: Replace the WorkNotification by cmd exec 
+-        getNotificationQueue().enqueueNotification( new MControlNotification( (*cmdIterator)->data(), SCHEDULER_ID) );
+-      }
++        /*
++        TRACE(HERE,"starting %s...", name() );
++        while (! isCancelled()) {
++            // Do some work. Cannot block indefinitely, otherwise it
++            // will never test the isCancelled() condition.
++            doTask();
++        }
++        TRACE(HERE,"canceling %s...", name() );
++        */
+     }
+-  }
+-
+-  Scheduler::Scheduler(NotificationQueue& queue, MControlProcessConfig & config) :
+-    m_notificationQueue(queue),
+-    m_config(config)
+-  {
+-    m_cmdList.clear();
+-    this->initList();
+-  }
+-  
+-
+-  Scheduler::~Scheduler()
+-  {
+-  }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+index 18db8071..f40ac5d7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+@@ -14,7 +14,6 @@
+ #include "..\inc\mControl_servant.h"
+ #include "..\inc\mControl_logging.h"
+ #include "..\inc\mControl_tools.h"
+-#include "..\inc\mControl_def.h"
+ 
+ //MATERNA includes
+ #include "systools\mSysProcessTree.h"
+@@ -25,14 +24,14 @@
+ #include "massaidll/mDate.hpp"
+ 
+ //Windows includes
+-#include "Windows.h"
+ #include <iostream>
+-#include "shlobj.h"
+-#include "Shlwapi.h"
+ 
++
++using namespace mControl;
+ using namespace mSysProcess;
+ using MASSAI::trace::TraceLocal;
+ 
++
+ namespace mControl
+ {
+     MControlServant::MControlServant(NotificationQueue& queue) : 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index d1df6315..422e1ed7 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -10,105 +10,39 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//Project includes
+ #include "..\inc\mControl_tools.h"
+-#include "massaidll/mDate.hpp"
+ 
++//MATERNA includes
++#include "massaidll/mDate.hpp"
+ #include "massaidll/mTime.hpp"
+ 
++//Windows includes
+ #include <string>
+ #include <list>
+ #include <time.h>
+ #include <sys/timeb.h>
+-
++#include <sstream>
+ #include "Commctrl.h"
+ 
+ 
+-
+-
+ using namespace std;
+ 
+ 
+ namespace mControl
+ {
+-    Tools::Tools() :
+-        m_shutDownCommands(NULL)
++    Tools::Tools(GlobalConfig& config) :
++        m_shutDownCommands(NULL),
++        m_globalConfig(config)
+     {
+     }
+ 
+-    HBITMAP Tools::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
+-    {
+-        BITMAPFILEHEADER * pbmfh;
+-        BOOL               bSuccess;
+-        DWORD              dwFileSize, dwHighSize, dwBytesRead;
+-        HANDLE             hFile;
+-        HBITMAP            hBitmap;
+-
+-        // Open the file: read access, prohibit write access
+-        // TODO: check if "A" is right
+-         hFile = CreateFileA(szFileName,
+-                            GENERIC_READ,
+-                            FILE_SHARE_READ,
+-                            NULL,
+-                            OPEN_EXISTING,
+-                            FILE_FLAG_SEQUENTIAL_SCAN,
+-                            NULL);
+-
+-         if(hFile == INVALID_HANDLE_VALUE)
+-           return(NULL);
+-
+-        // Read in the whole file
+-
+-         dwFileSize = GetFileSize (hFile, &dwHighSize);
+-
+-         if(dwHighSize)
+-         {
+-           CloseHandle(hFile);
+-           return(NULL);
+-         }
+-
+-         pbmfh = (struct tagBITMAPFILEHEADER *)malloc (dwFileSize);
+-
+-         if(!pbmfh)
+-         {
+-           CloseHandle (hFile);
+-           return(NULL);
+-         }
+-
+-         bSuccess = ReadFile(hFile, pbmfh, dwFileSize, &dwBytesRead, NULL);
+-         CloseHandle (hFile);
+-
+-         // Verify the file
+-
+-         if(!bSuccess || (dwBytesRead != dwFileSize)
+-                      || (pbmfh->bfType != * (WORD *) "BM")
+-                      || (pbmfh->bfSize != dwFileSize))
+-         {
+-           free (pbmfh);
+-           return(NULL);
+-         }
+-              // Create the DDB
+-
+-         hBitmap = CreateDIBitmap(hdc,
+-                                  (BITMAPINFOHEADER *) (pbmfh + 1),
+-                                  CBM_INIT,
+-                                  (BYTE *) pbmfh + pbmfh->bfOffBits,
+-                                  (BITMAPINFO *) (pbmfh + 1),
+-                                  DIB_RGB_COLORS);
+-         free (pbmfh);
+-
+-         return(hBitmap);
+-    }
+-
+-
+-
+ 
+     bool Tools::fileExists (const string& name) {
+         struct stat buffer;   
+         return (stat (name.c_str(), &buffer) == 0); 
+     }
+-
+-
+-
++    
+ 
+     long Tools::startExplorer()
+     {
+@@ -116,39 +50,37 @@ namespace mControl
+         PROCESS_INFORMATION pi;
+         BOOL                rc;
+ 
+-            memset(&si,0,sizeof(STARTUPINFO));
+-
+-            si.cb          = sizeof(STARTUPINFO);
+-            si.dwFlags     = STARTF_USESHOWWINDOW;
+-            si.wShowWindow = SW_SHOWMINIMIZED;
++        memset(&si,0,sizeof(STARTUPINFO));
+ 
+-            TRACE(HERE,"starting Explorer.exe ...");
++        si.cb          = sizeof(STARTUPINFO);
++        si.dwFlags     = STARTF_USESHOWWINDOW;
++        si.wShowWindow = SW_SHOWMINIMIZED;
+ 
+-            // TODO: check if "A" is right
+-            rc = CreateProcessA(NULL,                    // application name
+-                               "explorer.exe",          // command line with args
+-                               NULL,                    // use default
+-                               NULL,                    // use default
+-                               FALSE,                   // don`t inherit handles
+-                               0,                       // creation flags
+-                               NULL,                    // use parents env.
+-                               Tools::getWorkingDir(),  // current directory name
+-                               &si,                     // startup information
+-                               &pi);                    // returned process information
++        TRACE(HERE,"starting Explorer.exe ...");
+ 
+-            if(!rc)
+-            {
+-              TRACE(HERE,"error = %d",GetLastError());
++        // TODO: check if "A" is right
++        rc = CreateProcessA(NULL,                    // application name
++                            "explorer.exe",          // command line with args
++                            NULL,                    // use default
++                            NULL,                    // use default
++                            FALSE,                   // don`t inherit handles
++                            0,                       // creation flags
++                            NULL,                    // use parents env.
++                            Tools::getWorkingDir(),  // current directory name
++                            &si,                     // startup information
++                            &pi);                    // returned process information
++
++        if(!rc)
++        {
++            TRACE(HERE,"error = %d",GetLastError());
+ 
+-              return(GetLastError());
+-            }
+-            else
+-              return(0);
++            return(GetLastError());
++        }
++        else
++            return(0);
+     }
+ 
+ 
+-
+-
+     char* Tools::getWorkingDir()
+     {
+         static char szPath[1024];
+@@ -167,8 +99,6 @@ namespace mControl
+     }
+ 
+ 
+-
+-
+     long Tools::setWorkingDir()
+     {
+         char szPath[1024];
+@@ -196,14 +126,13 @@ namespace mControl
+     }
+ 
+ 
+-
+     char* Tools::timeStamp()
+     {
+-    static char szTmp[256];
++        static char szTmp[256];
+ 
+-    time_t          ltime;
+-    struct  tm     *today;
+-    struct _timeb   tstruct;
++        time_t          ltime;
++        struct  tm     *today;
++        struct _timeb   tstruct;
+ 
+         time(&ltime);
+         _ftime(&tstruct);
+@@ -223,12 +152,11 @@ namespace mControl
+     }
+ 
+ 
+-
+     long Tools::waitForService( char const * serviceName, long lTimeout)
+     {
+-    long lTo  = 1000;
+-    long lCnt = 0;
+-    long rc   = 0;
++        long lTo  = 1000;
++        long lCnt = 0;
++        long rc   = 0;
+ 
+         if(!serviceName || !*serviceName)
+           return(-1);
+@@ -308,7 +236,6 @@ namespace mControl
+     }
+ 
+ 
+-
+     char const * Tools::boolToChar( bool in )
+     {
+         return in ? "true" : "false";
+@@ -428,7 +355,6 @@ namespace mControl
+     }
+ 
+ 
+-
+     long Tools::shutdownOS_Now(bool fReboot)
+     {
+        TRACE(HERE,"shutdownOS_Now(fReboot = %s) ...", Tools::noYes(fReboot));
+@@ -521,7 +447,6 @@ namespace mControl
+     }
+ 
+ 
+-
+     void Tools::scanArguments(char *pszInput,
+                    long *plTimeOut,
+                    int  *piShow,
+@@ -529,233 +454,129 @@ namespace mControl
+                    char *pszWndName,
+                    char *pszWorkingDir)
+     {
+-      char *pStr;
+-      char  cDelimiter = ';';
+-      std::string options;
+-
+-      // reset this in all cases !!!
+-      *plTimeOut     = 0;
+-      *pszArgs       = '\0';
+-      *pszWndName    = '\0';
+-      *pszWorkingDir = '\0';
+-      *piShow        = PROCESS_HIDE;
+-
+-      if(pszInput[0] > ' ' && pszInput[1] == ' ')
+-      {
+-        // save specified delimter
+-        cDelimiter = pszInput[0];
+-        // skip delimiter specification
+-        strcpy(pszInput, pszInput + 2);
+-      }
+-      else
+-      {
+-        // use ';' as the standard delimiter
+-        cDelimiter = ';';
+-      }
+-
+-      pStr = strrchr(pszInput, cDelimiter);
+-      if(pStr != NULL)
+-      {
+-        *pStr = '\0';
+-        options= pStr + 1;
+-
+-                                                                                                                                                                                            /* TODO: check if needed
+-#ifndef _lint
+-    boost::smatch parsed;
+-    std::string::const_iterator position= options.begin();
+-    std::string::const_iterator end= options.end();
+-
+-
+-    while(regex_search(position, end, parsed, option_pattern))
+-    {
+-      if(parsed[1].matched)       // WND *= *"([^"]+)"
+-      {
+-        int length= parsed[1].second - parsed[1].first;
+-        strncpy(pszWndName, &*parsed[1].first, length);
+-        pszWndName[length]= 0;
+-      }
+-      else if(parsed[2].matched)  // CWD *= *"([^"]+)"
+-      {
+-        int length= parsed[2].second - parsed[2].first;
+-        strncpy(pszWorkingDir, /*parsed[2].first*//*&*parsed[2].first, length);
+-        pszWorkingDir[length]= 0;
+-      }
+-      else if(parsed[3].matched)  // SHOW *= *([A-Z]+)
+-      {
+-        int length= parsed[3].second - parsed[3].first;
+-        if     (_strnicmp(&*parsed[3].first, "YES" , length) == 0)      *piShow = PROCESS_SHOW;
+-        else if(_strnicmp(&*parsed[3].first, "NO"  , length) == 0)      *piShow = PROCESS_HIDE;
+-        else if(_strnicmp(&*parsed[3].first, "HIDE", length) == 0)      *piShow = PROCESS_HIDE;
+-        else if(_strnicmp(&*parsed[3].first, "MINIMIZED", length) == 0) *piShow = PROCESS_MINIMIZED;
+-      }
+-      else if(parsed[4].matched)  // WAIT *= *([0-9]+|terminate)
+-      {
+-        int length= parsed[4].second - parsed[4].first;
+-        if(_strnicmp(&*parsed[4].first, "terminate", length) == 0)
++        char *pStr;
++        char  cDelimiter = ';';
++        std::string options;
++
++        // reset this in all cases !!!
++        *plTimeOut     = 0;
++        *pszArgs       = '\0';
++        *pszWndName    = '\0';
++        *pszWorkingDir = '\0';
++        *piShow        = PROCESS_HIDE;
++
++        if(pszInput[0] > ' ' && pszInput[1] == ' ')
+         {
+-          *plTimeOut = -1;
++            // save specified delimter
++            cDelimiter = pszInput[0];
++            // skip delimiter specification
++            strcpy(pszInput, pszInput + 2);
+         }
+         else
+         {
+-          *plTimeOut = atol(&*parsed[4].first);
++            // use ';' as the standard delimiter
++            cDelimiter = ';';
+         }
+-      }
+-      else if(parsed[5].matched)  // (SHOW)
+-      {
+-        *piShow = PROCESS_SHOW;
+-      }
+-      position= parsed[0].second;
+-    }
+-#endif // #ifndef _lint
+-*/
+-
+-      }
+ 
+-      // scan for program arguments
+-
+-      //TRACE(HERE,"pszInput = %s",pszInput);
+-
+-      if((pStr = strchr(pszInput,'"')) != NULL)
+-      {
+-        *pStr= 0;
+-        pStr++;
+-        const char* pEnd= strrchr(pStr, '"');
+-        if(pEnd != NULL)
+-        {
+-          while(pStr != pEnd)
+-          {
+-            *pszArgs++ = *pStr++;
+-          }
+-        }
+-        else
++        pStr = strrchr(pszInput, cDelimiter);
++        if(pStr != NULL)
+         {
+-          while(*pStr && *pStr != '"')
+-          {
+-            *pszArgs++ = *pStr++;
+-          }
++            *pStr = '\0';
++            options= pStr + 1;
+         }
+ 
+-        *pszArgs = '\0';
+-
+-    //      TRACE(HERE,"pszArgs = %s",pszArgs);
+-      }
+-      else
+-      {
+-        if((pStr = strrchr(pszInput,'\\')) != NULL)
+-        {
+-          while(*pStr && *pStr != ' ')
+-            pStr++;
++        // scan for program arguments
+ 
+-          // cut off arguments from program name
+-
+-          //@@MaK 7-25-97, 4:20 PM
+-
+-          if(*pStr)
+-          {
+-            *pStr = '\0';
++        //TRACE(HERE,"pszInput = %s",pszInput);
+ 
++        if((pStr = strchr(pszInput,'"')) != NULL)
++        {
++            *pStr= 0;
+             pStr++;
+-
+-            if(*pStr)
++            const char* pEnd= strrchr(pStr, '"');
++            if(pEnd != NULL)
+             {
+-              // save program arguments
+-
+-              strcpy(pszArgs,pStr);
+-
+-              pStr = pszArgs + strlen(pszArgs) -1;
+-
+-              while(*pStr <= ' ')
+-              {
+-                *pStr = '\0';
+-                pStr--;
+-              }
++                while(pStr != pEnd)
++                {
++                    *pszArgs++ = *pStr++;
++                }
+             }
+-          }
+-        }
+-      }
+-    }
+-
+-    /*
+-    void Tools::waitForStarterTermination()
+-    {
+-        long   lExitCode;
+-        MSG    msg;
+-        HANDLE hProcess;
+-        list<long>::iterator prI;
+-        list<long>::iterator tmpI;
+-
+-            SendMessage(m_impl.getDialog().getMControlWindowConfig().getHwndLoad(), PBM_SETBARCOLOR, 0, 0x00000080);
+-
+-            try
++            else
+             {
+-              if(m_processList)
+-              {
+-                TRACE(HERE,"waiting for starter termination ...");
+-                hStarter->signalStop();
+-                while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
++                while(*pStr && *pStr != '"')
+                 {
+-                  for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
+-                  {
+-                     try
+-                     {
+-                       TRACE(HERE,"MSTARTER: check process: %d, n = %d",(*prI),prList.size());
+-
+-                       hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,FALSE,(*prI));
++                *pszArgs++ = *pStr++;
++                }
++            }
+ 
+-                       if(hProcess)
+-                       {
+-                         if((GetExitCodeProcess(hProcess,(unsigned long *) &lExitCode)) && lExitCode != STILL_ACTIVE)
+-                         {
+-                           lCurrentProcesses--;
++            *pszArgs = '\0';
+ 
+-                           flTmp = (float)lCurrentProcesses/(float)lAllProcesses;
++            //      TRACE(HERE,"pszArgs = %s",pszArgs);
++        }
++        else
++        {
++            if((pStr = strrchr(pszInput,'\\')) != NULL)
++            {
++                while(*pStr && *pStr != ' ')
++                    pStr++;
+ 
+-                           lCurrLoadPercent = (long)(flTmp *100);
++                // cut off arguments from program name
+ 
+-                           SendMessage(hwndLoad,PBM_SETPOS,lCurrLoadPercent,0);
++                //@@MaK 7-25-97, 4:20 PM
+ 
+-                           UpdateWindow(hwndLoad);
++                if(*pStr)
++                {
++                    *pStr = '\0';
+ 
+-                           if(prList.size() > 0)
+-                             prList.erase(tmpI);
+-                         }
++                    pStr++;
+ 
+-                         // close this handle always !!
++                    if(*pStr)
++                    {
++                        // save program arguments
+ 
+-                         CloseHandle(hProcess);
+-                       }
+-                     }
+-                     catch( ... ) {};
+-                  }
++                        strcpy(pszArgs,pStr);
+ 
+-                  while(PeekMessage(&msg,NULL,0,0,PM_REMOVE))
+-                    DispatchMessage(&msg);
++                        pStr = pszArgs + strlen(pszArgs) -1;
+ 
+-                  OS_Sleep(500);
++                        while(*pStr <= ' ')
++                        {
++                            *pStr = '\0';
++                            pStr--;
++                        }
++                    }
+                 }
+-
+-                SendMessage(hwndLoad,PBM_SETPOS,0,0);
+-                UpdateWindow(hwndLoad);
+-
+-                TRACE(HERE,"waiting for starter termination, done.");
+-
+-                delete hStarter;
+-
+-                hStarter = NULL;
+-              }
+             }
+-            catch( ... ) {};
++        }
+     }
+ 
+-    */
+ 
+-    /*
++    long Tools::mSystem( char const * cmd, char const * purpose )
++    {
++        /*
++       std::string task( "cmd.exe /X /C \"" );
++       task += cmd;
++       task += "\"";
++       TRACE( HERE, "mSystem(%s)", task.c_str() );
++       mSysProcess::parent par;
++       par.setCommandline( task.c_str() );
++       mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
++       mcData * mcdata = getMcData();
++       if( mcdata )
++       {
++          mcdata->m_processlistmonitor.add( ctrl );
++       }
++       */
++       return 0;
++    }
++
++        
+     void Tools::execSysCmdsShutdown()
+     {
+         TRACE( HERE, "execSysCmdsShutdown ..." );
+-        if (m_shutDownCommands;==NULL)
+-            m_shutDownCommands; = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
+-        list<string> cmdlist = EnvS.substEnvList(m_shutDownCommands;->get());
++
++        if (m_shutDownCommands == NULL)
++            m_shutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
++        list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_shutDownCommands->get());
+         int index( 1 );
+         for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+         {
+@@ -766,5 +587,66 @@ namespace mControl
+         }
+         TRACE( HERE, "execSysCmdsShutdown." );
+     }
+-    */
++    
++
++    void Tools::execSysCmdsStartup()
++    {
++       TRACE( HERE, "execSysCmdsStartup ..." );
++       if (m_startUpCommands==NULL)
++          m_startUpCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
++       
++       list<string> cmdlist = m_globalConfig.getEnvS().substEnvList(m_startUpCommands->get());
++       int index( 1 );
++       for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
++       {
++          std::ostringstream oss;
++          oss << "execSysCmdsStartup#" << index++;
++          long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
++          TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
++       }
++       TRACE( HERE, "execSysCmdsStartup." );
++    }
++
++
++    long Tools::loadHostsFile()
++    {
++        /*
++        long rc = 0;
++
++        if (pHostFileLoadFrom==NULL)
++          pHostFileLoadFrom = new cfgStr("PLATFORM.STARTUP.HostsFileServer",
++                                         "Specifies from which HTTP server to load the "
++                                         "hosts file for host name resolving.",
++                                         "");
++
++        if (pHostFileSaveTo==NULL)
++          pHostFileSaveTo = new cfgStr("PLATFORM.STARTUP.LocalHostsFile",
++                                       "Specifies where to save the hosts file for host name resolving.",
++                                       "c:\\winnt\\system32\\drivers\\etc\\hosts");
++
++        try
++        {
++            if(*pHostFileLoadFrom->get())
++            {
++              rc = downloadToFile(pHostFileLoadFrom->get(),HOSTS_FILE,pHostFileSaveTo->get());
++
++              if(rc < 0)
++                TRACE(HERE,"failed to load [%s] from [%s], rc = %d (no hosts file written)",HOSTS_FILE,pHostFileLoadFrom->get(),rc);
++              else
++                TRACE(HERE,"[%s] loaded from [%s], %d bytes",HOSTS_FILE,pHostFileLoadFrom->get(),rc);
++            }
++        }
++        catch( nConfig::exception const & )
++        {
++           TRACE(HERE,"Config Exception: config service not yet ready, started ??");
++           rc = -99;
++        }
++
++        return(rc);
++        */
++        return 0;
++    }
++
++
++    
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 959d615e..ed583378 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -10,18 +10,22 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++//Project includes
+ #include "..\inc\mControl_worker.h"
+ #include "..\inc\mControl_notification.h"
+ 
++//Windows includes
+ #include <Commctrl.h>
++#include <string.h>
+ 
++//MATERNA includes
+ #include "trc/trace.h"
+ 
+-#include <string.h>
+ 
+ using Poco::NotificationQueue;
+ using namespace std;
+ 
++
+ namespace mControl
+ {
+     Worker::Worker(NotificationQueue& queue, GlobalConfig& config, Dialog& dialog) :
+-- 
+2.41.0.windows.1
+

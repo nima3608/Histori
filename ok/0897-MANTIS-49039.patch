@@ -1,0 +1,274 @@
+From 550d1ae3355927d1ef7351075493dd6cae8f239b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 18 Jan 2018 15:37:06 +0000
+Subject: [PATCH 0897/1077] MANTIS 49039 Mantis 49039: mdscConveyorSBD traces
+ Write to file "CON" is slightly different from writing to stdout. Implement
+ tracesToConsole::writer to achieve the writing to stdout.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1308 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/tracesToConsole.hpp  | 103 ++++++++++++++
+ .../Massai/cpp/Tools/makefile.mak             |   1 +
+ .../Massai/cpp/Tools/src/TracesToConsole.cpp  | 128 ++++++++++++++++++
+ 3 files changed, 232 insertions(+)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/tracesToConsole.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TracesToConsole.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/tracesToConsole.hpp b/SelfServiceCommon/Interfaces/inc/Tools/tracesToConsole.hpp
+new file mode 100644
+index 00000000..913cc396
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/tracesToConsole.hpp
+@@ -0,0 +1,103 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToConsole.hpp
++ *
++ * Contains class tracesToConsole::writer.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2018 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACESTOCONSOLE_HPP
++#define TRACESTOCONSOLE_HPP
++
++
++#include "tools/traces.hpp"
++
++
++namespace tracesToConsole
++{
++
++   /**
++    *
++    * Trace writer implementation to write to the console.
++    * By overloading the "writer" interface class it defines
++    * and implements the write() and currentLevel() methods.
++    *
++   **/
++   class writer : public traces::writer
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation object reference.
++      impl * const      m_impl;
++
++   public:
++
++      /**
++       *
++       * Default constructor.
++       *
++      **/
++      writer();
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param trace_level:    Trace entry threshold.
++       *
++      **/
++      explicit writer( traces::level trace_level );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~writer() throw();
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      traces::level currentLevel() const;
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      void write
++         (
++            traces::meta const &        Meta,
++            char const *                Text
++         );
++
++   private:
++
++      //! Copy constructor - intentionally not implemented.
++      writer( writer const & Src );
++
++      //! Assignment - intentionally not implemented.
++      writer& operator=( writer const & Src );
++
++   };
++
++} // namespace tracesToConsole
++
++
++#endif // #ifndef TRACESTOCONSOLE_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index a6978dcc..59684e6f 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -36,6 +36,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\tracesFiler.obj \
+                         $(_OBJ)\tracesMetaLFL.obj \
+                         $(_OBJ)\tracesToFile.obj \
++                        $(_OBJ)\tracesToConsole.obj \
+                         $(_OBJ)\tracesToFileParts.obj \
+                         $(_OBJ)\tracesToLocal.obj \
+                         $(_OBJ)\tracesToTraceClt.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TracesToConsole.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TracesToConsole.cpp
+new file mode 100644
+index 00000000..dd38332e
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TracesToConsole.cpp
+@@ -0,0 +1,128 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToConsole.cpp
++ *
++ * Implements class tracesToTrc::writer.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2018 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "Tools/tracesToConsole.hpp"
++
++#include "systools/mMutexSem.hpp"
++
++#include <boost/format.hpp>
++
++#include <iostream>
++#include <windows.h>
++
++
++
++class tracesToConsole::writer::impl
++{
++
++   Materna::MSSD::mutexSemaphore        M_Mutex;
++
++   //! Trace level setting.
++   traces::level const                  M_TraceLevel;
++
++public:
++
++   explicit impl( traces::level trace_level ) :
++      M_Mutex(),
++      M_TraceLevel( trace_level )
++   {
++   }
++
++   traces::level currentLevel()
++   {
++      return M_TraceLevel;
++   }
++
++   void write( traces::meta const & Meta, char const * Text )
++   {
++      SYSTEMTIME stim;
++      GetLocalTime( &stim );
++      std::string const time_now =
++         (
++            boost::format( "%02d:%02d:%02d.%1d " )
++            % stim.wHour % stim.wMinute % stim.wSecond
++            % ( stim.wMilliseconds / 100 )
++         ).str();
++      M_Mutex.request();
++      std::cout
++         << "L" << (int)Meta.getLevel() << " " << time_now << ": "
++         << Text << std::endl;
++      M_Mutex.release();
++   }
++
++};
++
++
++
++tracesToConsole::writer::writer() :
++   traces::writer(),
++   m_impl
++      (
++         new tracesToConsole::writer::impl
++            (
++               traces::Lvl_SecondaryFrequent
++            )
++      )
++{
++}
++
++
++
++tracesToConsole::writer::writer( traces::level trace_level ) :
++   traces::writer(),
++   m_impl( new tracesToConsole::writer::impl( trace_level ) )
++{
++}
++
++
++
++tracesToConsole::writer::~writer() throw()
++{
++   try
++   {
++      delete m_impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++// Method implementation - see "tracesToConsole.hpp"
++traces::level tracesToConsole::writer::currentLevel() const
++{
++   return m_impl->currentLevel();
++}
++
++
++
++void tracesToConsole::writer::write
++   (
++      traces::meta const & Meta,
++      char const * Text
++   )
++{
++   m_impl->write( Meta, Text );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,365 @@
+From 73d974d653966314c973915dd205ae294245ab61 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 14 Feb 2013 11:58:46 +0000
+Subject: [PATCH 0323/1000] Mantis 25989
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@484 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 ++++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp  |  4 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 ++++-
+ .../Massai/cpp/CfgXMgrB/inc/xmlForbidden.hpp  | 37 ++++++++++++++
+ .../Massai/cpp/CfgXMgrB/makefile.mak          |  3 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   |  6 +--
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp |  4 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp   | 12 ++++-
+ .../cpp/CfgXMgrB/src/cfgMetaTextlist.cpp      | 13 ++++-
+ .../Massai/cpp/CfgXMgrB/src/cfgValueText.cpp  |  4 +-
+ .../Massai/cpp/CfgXMgrB/src/xmlForbidden.cpp  | 51 +++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/static/makefile.mak   |  3 +-
+ 12 files changed, 146 insertions(+), 17 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/xmlForbidden.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgXMgrB/src/xmlForbidden.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 55781500..0d2288e6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -344,8 +344,17 @@
+ //! @author  JK
+ //! @par     Change:
+ //! - MANTIS 24296, allow characters 0x80 - 0xFF (Umlaute) in item names.
+-#define FILE_VER_BIN 1,2,6,0
+-#define FILE_VER_DTS "1.2.6.0"
++// #define FILE_VER_BIN 1,2,6,0
++// #define FILE_VER_DTS "1.2.6.0"
++//
++//! @version 1.2.7
++//! @date    14.Feb.2013
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 25989, binary in string values cannot be read.
++//!   Disallow to enter characters 0x00 .. 0x1F except 0x09, 0x0A, 0x0D.
++#define FILE_VER_BIN 1,2,7,0
++#define FILE_VER_DTS "1.2.7.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+index e10e1aaa..ac7688c6 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueText.hpp
+@@ -90,12 +90,12 @@ public:
+ 
+    /**
+     *
+-    * Return the value as zero-terminated string.
++    * Return the value.
+     *
+     * @return The value.
+     *
+    **/
+-   char const * c_str() const;
++   std::string str() const;
+ 
+    /**
+     *
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 0f247886..1ae1d145 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -335,8 +335,17 @@
+ //! @author  JK
+ //! @par     Change:
+ //! - MANTIS 24296, allow characters 0x80 - 0xFF (Umlaute) in item names.
+-#define FILE_VER_BIN 1,2,6,0
+-#define FILE_VER_DTS "1.2.6.0"
++// #define FILE_VER_BIN 1,2,6,0
++// #define FILE_VER_DTS "1.2.6.0"
++//
++//! @version 1.2.7
++//! @date    14.Feb.2013
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 25989, binary in string values cannot be read.
++//!   Disallow to enter characters 0x00 .. 0x1F except 0x09, 0x0A, 0x0D.
++#define FILE_VER_BIN 1,2,7,0
++#define FILE_VER_DTS "1.2.7.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/xmlForbidden.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/xmlForbidden.hpp
+new file mode 100644
+index 00000000..6edc8eb3
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/xmlForbidden.hpp
+@@ -0,0 +1,37 @@
++/**
++ **************************************************************************
++ *
++ * @file xmlForbidden.hpp
++ *
++ * COntains function xmlForbidden().
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2013 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef XMLFORBIDDEN_HPP
++#define XMLFORBIDDEN_HPP
++
++#include <string>
++
++/**
++ *
++ * Check an input string for invalid characters in XML.
++ *
++ * @param input:                The string to check.
++ *
++ * @return:                     Is there a forbidden character?
++ *
++**/
++bool xmlForbidden( std::string const & input );
++
++#endif // #ifndef XMLFORBIDDEN_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+index 495c1741..9587c319 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/makefile.mak
+@@ -49,7 +49,8 @@ CORE_OBJS = \
+     $(_OBJ)\cfgValueSelection.obj \
+     $(_OBJ)\cfgValueText.obj \
+     $(_OBJ)\cfgValueTextlist.obj \
+-    $(_OBJ)\traceLocal.obj
++    $(_OBJ)\traceLocal.obj \
++    $(_OBJ)\xmlForbidden.obj
+ 
+ STDUSERLIBS = \
+     $(LIB_XERCES) \
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index 71652b2e..f43038d9 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2013 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -357,7 +357,7 @@ public:
+                      pItem->Type = Config::Directory::CFG_TEXT;
+                      pItem->Value.textValue
+                      (
+-                        CORBA::string_dup( Text->c_str() )
++                        CORBA::string_dup( Text->str().c_str() )
+                      );
+                   }
+                }
+@@ -390,7 +390,7 @@ public:
+                         ::const_iterator Iter( Src.begin() );
+                      while( Iter != Src.end() )
+                      {
+-/*					 
++/*
+                         // Introduce an explicit temporary "Tmp"
+                         // to avoid Lint warning
+                         TAO_SeqElem_String_Manager Tmp = SList[Idx];
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index cceaf901..ec3817d2 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2013 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -154,7 +154,7 @@ class serviceCfgText :
+             );
+          if( Value )
+          {
+-            char const * const Val = Value->c_str();
++            char const * const Val = Value->str().c_str();
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCT "get = [%s].",
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+index e518e08a..35160c1f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaText.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2013 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -17,6 +17,7 @@
+ #include "cfgMetaText.hpp"
+ #include "cfgValueText.hpp"
+ #include "trc/TraceClt.h"
++#include "xmlForbidden.hpp"
+ 
+ #include <iostream>
+ 
+@@ -186,6 +187,15 @@ bool cfgMetaText::valueAllowed( cfgValue const & Value ) const
+          );
+       return false;
+    }
++   if( xmlForbidden( Val->str() ) )
++   {
++      writeTrace
++         (
++            MajorWarning_HERE,
++            "cfgMetaText::valueAllowed=false forbidden character(s)"
++         );
++      return false;
++   }
+    unsigned const Len = Val->length();
+    if( Len > M_MaxLength )
+    {
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index d6075296..d6e4a3ee 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2013 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -21,6 +21,8 @@
+ #include "cfgToken.h"
+ #include "cfgMetaTextlist.hpp"
+ #include "cfgValueTextlist.hpp"
++#include "xmlForbidden.hpp"
++
+ #include "trc/TraceClt.h"
+ 
+ #include <iostream>
+@@ -206,6 +208,15 @@ bool cfgMetaTextlist::valueAllowed( cfgValue const & Value ) const
+    unsigned Longest = 0;
+    while( It != List.end() )
+    {
++      if( xmlForbidden( *It ) )
++      {
++         writeTrace
++            (
++               MajorWarning_HERE,
++               "cfgMetaTextlist::valueAllowed=false forbidden character(s)"
++            );
++         return false;
++      }
+       if( Longest < It->size() )
+          Longest = It->size();
+       ++It;
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+index 4bb8fd5b..306a1156 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueText.cpp
+@@ -92,9 +92,9 @@ bool cfgValueText::save
+  * Method implementation - see cfgValueText.hpp.
+  *
+ **/
+-char const * cfgValueText::c_str() const
++std::string cfgValueText::str() const
+ {
+-   return M_Value.c_str();
++   return M_Value;
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/xmlForbidden.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/xmlForbidden.cpp
+new file mode 100644
+index 00000000..79dddbd0
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/xmlForbidden.cpp
+@@ -0,0 +1,51 @@
++/**
++ **************************************************************************
++ *
++ * @file xmlForbidden.cpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2013 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "xmlForbidden.hpp"
++
++
++
++bool xmlForbidden( std::string const & input )
++{
++   unsigned const length = input.size();
++   for(
++         unsigned off = 0;
++         off <= length;
++         ++off
++      )
++   {
++      char const c = input[off];
++      if( ( c >= 0x00 ) && ( c < 0x20 ) )
++      {
++         switch( c )
++         {
++         case 0x09:
++         case 0x0A:
++         case 0x0D:
++            break;
++         default:
++            return true;
++         }
++      }
++   }
++   return false;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+index 96d906bb..42de809a 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/static/makefile.mak
+@@ -55,7 +55,8 @@ CORE_OBJS = \
+     $(_OBJ)\cfgValueSelection.obj \
+     $(_OBJ)\cfgValueText.obj \
+     $(_OBJ)\cfgValueTextlist.obj \
+-    $(_OBJ)\traceLocal.obj
++    $(_OBJ)\traceLocal.obj \
++    $(_OBJ)\xmlForbidden.obj
+ 
+ 
+ STDUSERLIBS = \
+-- 
+2.41.0.windows.1
+

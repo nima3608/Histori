@@ -1,0 +1,70 @@
+From 48c51aa31f468fd631c6479d85e8b2ebc7ef632a Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Tue, 30 Jun 2020 09:39:42 +0000
+Subject: [PATCH 378/462] Build: show MANTIS numbers in showPlfLastCommits.pl
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@694 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/showPlfLastCommits.pl       | 21 +++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+index f38654e..b586738 100644
+--- a/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
++++ b/SelfServiceBuild/Build/scripts/showPlfLastCommits.pl
+@@ -5,7 +5,7 @@ use Getopt::Long;
+ use DateTime;
+ 
+ # ----------------------------------------------------------
+-#  showPlfLastCommit.pl                 kkluge 26.06.2020
++#  showPlfLastCommit.pl                 kkluge 30.06.2020
+ #
+ #  Show the last commit of the configured list of PLF
+ #  branches, if it was within 7 days.
+@@ -114,6 +114,16 @@ sub getRevision
+ 
+ # ----------------------------------------------------------
+ 
++sub getMantis
++{
++  my ($log) = @_;
++  my (@mantis) = ($log =~ /MANTIS 0*([0-9]*)/gi);
++  (@mantis) = ("none") if $#mantis < 0;
++  uniq(@mantis);
++}
++
++# ----------------------------------------------------------
++
+ sub showRevs
+ {
+   my ($branch,$url,$revs) = @_;
+@@ -122,20 +132,23 @@ sub showRevs
+   foreach my $rev (@revs2) {
+     my $result = `svn log $url -r $rev | perl -l40pe 's/^-+/\\n/'`;
+     my ($user) = getUser($result);
++    my (@mantis) = getMantis($result);
++    my $mantis = "@mantis";
++    $mantis = ($mantis eq "none") ? "" : " ($mantis)";
++    
+     my ($date) = getDateTime($result);
+     my ($dtDate) = newDateTime($date);
+     my ($dur) = $dtToday - $dtDate;
+     if (($dur->delta_days < 8) || $optAll) {
+-      printf("%-20s $date $rev $user\n", $branch);
++      printf("%-20s $date $rev %-8s$mantis\n", $branch, $user);
+     }
+   }
+ }
+ 
+ # ----------------------------------------------------------
+ 
+-
+ my ($today) = $dtToday->ymd('-');
+-print "-- PLF BRANCHES ---- $today ----- LAST COMMIT ---\n";
++print "-- PLF BRANCHES ---- $today ----- LAST COMMIT     (MANTIS) ---\n";
+ foreach my $url (@allURLs) {
+   my ($repo) = ($url =~ /svn-repos\/([^\/]*)/);
+   my ($branch) = ($url =~ /([^\/]*)$/);
+-- 
+2.41.0.windows.1
+

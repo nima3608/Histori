@@ -1,0 +1,2115 @@
+From a16b08ee822ab30a9dba33eebd37685c946eecfc Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Sat, 6 Aug 2016 09:28:50 +0000
+Subject: [PATCH 0700/1000] MANTIS 0041253 [SetKioskData]:  - Add domain and
+ conveyor configuration  - Update INI file usage, make it more dynamic  - Fix
+ some bugs with network interfaces
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1060 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.ini |  167 ++-
+ .../Build/setup/SetKioskData/SetKioskData.iss | 1125 ++++++++++-------
+ .../setup/SetKioskData/SetKioskData_def.h     |    4 +
+ .../setup/SetKioskData/configApplication.cmd  |   62 -
+ .../setup/SetKioskData/configAutologon.cmd    |   47 +
+ .../setup/SetKioskData/configConveyor.cmd     |  117 --
+ .../setup/SetKioskData/configEnvironment.cmd  |   66 -
+ .../setup/SetKioskData/configPlatform.cmd     |   92 ++
+ .../Build/setup/SetKioskData/joinDom.cmd      |   36 +-
+ 9 files changed, 927 insertions(+), 789 deletions(-)
+ delete mode 100644 SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
+ create mode 100644 SelfServiceCommon/Build/setup/SetKioskData/configAutologon.cmd
+ delete mode 100644 SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+ delete mode 100644 SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
+ create mode 100644 SelfServiceCommon/Build/setup/SetKioskData/configPlatform.cmd
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+index 777ddcbc..9ac8bfa0 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.ini
+@@ -1,7 +1,39 @@
+-; Kiosk data configuration section.
++; --------------------------------------------------------------------------------------------------
++; 
++; SetKioskData INI File
++;
++; SetKisokData is an image customisation/finalisation tool. You can set the image hostname or 
++; IP Address with this tool, or you can join a domain. You can also customize the MIPS/Gate Platform
++; Configuration and environment.
++; 
++; $Id$
++; 
++; --------------------------------------------------------------------------------------------------
++
++; --------------------------------------------------------------------------------------------------
++; SetKioskData default configuration section
++; 
++[DEFAULT]
++
++; Show screens
++; The show screens option is the essential configuration item for SetKioskData.
++; You can customize the tool to your needs. In the INI file, every screen has it's own section.
++; Available screens are:
++;   KIOSKDATA:     Set Kiosk environment and host name
++;   ADD2DOMAIN:    You can add the system to your domain with this screen
++;   AUTOLOGON:     In this screen you can customize your auto configuration
++;   IPV4:          This is for your IP configuration
++;   CONFIGURATION: Enables the platform configuration wizard pages
++; Default: KIOSKDATA
++ShowScreens=
++
++
++; --------------------------------------------------------------------------------------------------
++; Kiosk data configuration section
++; 
+ [KIOSKDATA]
+ ; Kiosk environment KIOSK_NAME Default. 
+-; The KIOSK_NAME will also be used for the new windows hostname. 
++; The KIOSK_NAME will also be used for the new windows host name. 
+ KioskName=CUSS-TEMP
+ ; Kiosk environment AIRPORT Default
+ Airport=DTM
+@@ -9,70 +41,121 @@ Airport=DTM
+ Area=CheckIn
+ ; Kiosk environment TERMINAL Default
+ Terminal=A
+-; The application to configure. NOTE: This is a comma seperated list of application names, 
+-; configured in plattform.
+-; If you don't want to change any application, you can comment out the following line.
+-;Applications=MAT_CKI
+ 
+-; Host data configuration section.
+-[HOSTDATA]
+-
+-; Enable add domain functionality
+-AddToDomain=false
+ 
++; --------------------------------------------------------------------------------------------------
++; Domain section
++; 
++[ADD2DOMAIN]
+ ; The default domain name (FQDN) to join
+ DomainName=
+-
+-; The Domainuser, that has the rights to add the computer to a domain.
++; The domain user, that has the rights to add the computer to a domain.
+ ; Please set it in <NETBIOSNAME>\<USERNAME> format
+ DomainUser=
+-
+ ; The Operation Unit for the new domain computer
+ ; You have to set it in windows default OU-Query format:
+ ; e.g: OU=Computers,DC=excample,DC=local 
+-; If you want to set the domain's default operation unit, you can leave this empty
++; If you want to set domain's default operation unit, you can leave this empty
+ AccountOU=
+ 
+-; The domain (NETBIOS) name for the logon user
+-LogonDomain=DAVID
+ 
++; --------------------------------------------------------------------------------------------------
++; Autologon section
++; 
++[AUTOLOGON]
++; The domain (NETBIOS) name for the logon user, if any
++LogonDomain=
+ ; Windows logon User. This user will be added to local administrator group and 
+ ; set as the auto logon user.
+-LogonUser=dbowell
++LogonUser=
++; Add logon user to local admin group. Nice feature for domain user.
++; Default: false
++AddToLocalAdmin=false
++
+ 
++; --------------------------------------------------------------------------------------------------
++; IP configuration section
++; 
++[IPV4]
+ ; IPv4 Interface configuration
+-; The IPv4 Interfaces to edit. You can shoose either the interface display name 
++; The IPv4 Interfaces to edit. You can choose either the interface display name 
+ ; or the interface Device name.
+-; If you want to configure multiple devices, please seperate them with a comma like:
++; If you want to configure multiple devices, please separate them with a comma like:
+ ; IPv4Interfaces=Local Area Connection,Local Area Connection 2
+ ; Default: Local Area Connection
+ IPv4Interfaces=Local Area Connection
+ 
+-[IPv4_Local Area Connection]
++
++; Please copy this section for every IPv4 interface, you want to configure and edit the
++; section name
++[IPV4_Local Area Connection]
+ ; Default IPv4 address for the GUI
+ IPv4Address=139.2.249.21
+ ; Default IPv4 subnet for the GUI
+ IPv4Subnet=255.255.240.0
+ ; Default IPv4 Gateway for the GUI
+ IPv4Gateway=139.2.240.1
+-; DNS Server. if you want to set no dns server, please set "none" or let this item empty
+-IPv4DNS1=
+-
+-[CONVEYOR]
+-; Set this to true, if you want to change the conveyor BHS configuration
+-; NOTE: At this time, only the LGW conveyor is supported!
+-ChangeBHSConfig=true
+-; You can set the BHS default configuration here
+-ConvBHSHost=192.168.2.3
+-ConvBHSPort=5021
+-
+-; Set this to true, if you want to change the conveyor SICK configuration
+-ChangeSICKConfig=true
+-; You can set the SICK default configuration here
+-ConvSICKHost=192.168.2.4
+-ConvSICKPort=2112
+-
+-; Configuration section for the Kioskapplication MAT_CKI
+-[APPDATA_MAT_CKI]
+-; The application command line string.
+-CMD=""C:\Program Files\Internet Explorer\iexplore.exe" -K http://localhost/Applications/IPS_CKI/index.html; wndclass="IEFrame" close_wndclass="CicLoaderWndClass""
++; DNS Server. if you want to set no DNS server, please set "none" or let this item empty
++; If you want to set multiple DNS servers, please add them comma separated.
++IPv4DNS=
++
++; --------------------------------------------------------------------------------------------------
++; MIPS Platform configuration section
++; 
++[CONFIGURATION]
++
++; Configuration Item group
++; You can create configuration item groups for your items.
++; For multiple group names, please separate them with a comma.
++; A group is a wizard page for the configuration items. Be aware: You can only have max. five 
++; items on one page. If you configure more items, a new Page will be created.
++; A configuration group name will result in a new section with prefix CONFIG_GROUP_
++; e.g. DEFAULT will be [CONFIG_GROUP_DEFAULT].
++; Default: DEFAULT
++ConfigGroups=DEFAULT
++
++
++; Default configuration group
++[CONFIG_GROUP_DEFAULT]
++; Group caption
++; Configuration group display name. It's the name of the wizard page.
++ConfigGroupCaption=Configuration
++; Group description
++; Configuration group description. You will see it at the bottom of the name.
++ConfigGroupDescription=Edit platform configuration
++; Group Sub caption
++; Configuration group sub caption. You can use it for further instructions.
++ConfigGroupSubCaton=Please edit the item values here.
++
++; Configuration Item names
++; You can add the configuration item's, you want to configure here.
++; For multiple Item names, please separate them with a comma.
++; The Item names here must not be the Platform config item name, it is only an alias
++; to address the correct INI section.
++; Every Item name will result in an extra section with prefix CONFIG_ITEM_
++; e.g. BPP will result in [CONFIG_ITEM_BPP]
++; Every section has the same construct. Please see the example section for more information.
++ConfigItemNames=
++
++
++; Example config item section
++[CONFIG_ITEM_EXAMPLE]
++; Item display
++; Configuration item display name for the wizard page
++ItemDisplay=Conveyor BHS Port
++; Item name
++; Please add the configuration item name, you want to configure here.
++ItemName=DEVICES.CONVDEV.BHS host
++; Item type
++; You can configure the item type here
++ItemType=TEXT
++; Item default value
++; If you want to show a default value of the item in the SetKioskData wizard, you can add it here
++ItemValue=
++; Setup registry key
++; If there is a setup registry key for this item and you want to update it, you can set it here.
++RegKey=
++; CfgValues flags
++; If you want, you can add command line parameter for CfgValues here.
++; Following flags are supported: [-setinitial|-autoinitial] [-addtolist|-addtolistunique]
++CfgValuesFlags=
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 3a5e9db7..c270e3b7 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -5,7 +5,7 @@ FlatComponentsList=False
+ AlwaysShowComponentsList=False
+ ShowComponentSizes=False
+ AppName=Set Kiosk Data
+-AppVersion=2.1.1
++AppVersion=3.0.0.0
+ AppCopyright=© 2012 MATERNA GmbH Information & Communications
+ ChangesEnvironment=True
+ CreateAppDir=False
+@@ -18,14 +18,14 @@ AppPublisherURL=http://www.materna-ips.com
+ AppSupportURL=http://www.materna-ips.com
+ AppUpdatesURL=http://www.materna-ips.com
+ Uninstallable=no
+-VersionInfoVersion=2.1.1
++VersionInfoVersion=3.0.0.0
+ VersionInfoCompany=MATERNA GmbH Information & Communications
+ VersionInfoDescription=Set Kiosk Data
+-VersionInfoTextVersion=2.1.1
++VersionInfoTextVersion=2.2.0
+ VersionInfoCopyright=© 2012 MATERNA GmbH Information & Communications
+ VersionInfoProductName=SetKioskData
+-VersionInfoProductVersion=2.1.1
+-VersionInfoProductTextVersion=2.1.1
++VersionInfoProductVersion=3.0.0.0
++VersionInfoProductTextVersion=3.0.0.0
+ Encryption=False
+ SetupLogging=True
+ OutputBaseFilename=SetKioskData
+@@ -35,24 +35,31 @@ AppId={{B51EE695-1A19-4661-983F-7DFAF386816E}
+ SetupIconFile=massai30.ico
+ AlwaysRestart=True
+ 
++#define REG_KIOSK_PATH 'SOFTWARE\Materna\MIPS'
++#define REG_KIOSK_INSTALL_KEY 'Mips_PLF_Install_Path'
++#define REG_KIOSK_DATA_KEY 'Mips_PLF_Install_Data_Path'
++#define REG_GATE_PATH 'SOFTWARE\Materna\SecureGate\cfg_components'
++#define REG_GATE_INSTALL_KEY 'installDir'
++#define REG_GATE_DATA_KEY 'installDir'
++
+ [Files]
+-Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigNetwork();
+-Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigHostname(); Check: RunSetHostname();
+-Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunJoinDomain(); Check: RunAddDomain();
+-Source: "configEnvironment.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigEnvironment();
+-Source: "configConveyor.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigConveyor(); Check: RunConveyor();
+-Source: "configApplication.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigApplication();
+-Source: "{code:GetMIPSUserDir}\Start MIPS.lnk"; DestDir: "{userstartup}"; Flags: external skipifsourcedoesntexist;
++Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigNetwork(); Check: CheckRunScript('IPV4');
++Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigHostname(); Check: CheckRunHostconfig();
++Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunJoinDomain(); Check: CheckRunScript('ADD2DOMAIN');
++Source: "configAutologon.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigAutologon(); Check: CheckRunScript('AUTOLOGON');
++Source: "configPlatform.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigPlatform(); Check: CheckRunConfigPlatform();
++Source: "{code:GetMIPSUserDir}\Start MIPS.lnk"; DestDir: "{userstartup}"; Flags: external skipifsourcedoesntexist
++Source: "C:\Users\Public\Desktop\START.lnk"; DestDir: "{commonstartup}"; Flags: external skipifsourcedoesntexist
+ 
+ [Messages]
+ ButtonInstall=&Localize
+ WelcomeLabel2=This will localice the identifier and hostname on your kiosk.
+ ReadyLabel1=Setup is now ready to begin localizing the identifier and hostname on your kiosk.
+ ExitSetupMessage=Setup is not complete. If you quit now, the kiosk will not be updated.%n%nYou may run the Setup program again at another time to complete the update.%n%nExit Setup?
+-ReadyLabel2b=Click Update to continue with the update.
++ReadyLabel2b=Click Localize to start the localisation.
+ WizardReady=Ready to update
+ FinishedLabel=Setup has finished updating the identifier and hostname on your computer.%nPlease update the IP address manually and then reboot the kiosk to finish the kiosk localisation.
+-ReadyLabel2a=Click Update to continue with the update, or click Back if you want to review or change any settings.
++ReadyLabel2a=Click Localize to continue with the licalisation, or click Back if you want to review or change any settings.
+ StatusExtractFiles=Localizing image...
+ StatusRollback=Aborting Setup...
+ 
+@@ -60,21 +67,36 @@ StatusRollback=Aborting Setup...
+ Name: {userstartup}\SetKioskData.lnk; Type: files
+ 
+ [Code]
++{ ----------------------------------------------------------------------------------------------- }
++{ Custom type definition }
++type
++    TIniInputField = record
++        Name         : String;
++        Caption      : String;
++        DefaultValue : String;
++        PageValue    : String;
++    end;
++
++    TPageData = record
++        Page   : TInputQueryWizardPage;
++        Fields : Array of TIniInputField;
++    end;
++
++{ ----------------------------------------------------------------------------------------------- }
++{ Global variable definition }
+ var
+     IniFilename   : String;
+     MassaiDir     : String;
+     MIPSUserDir   : String;
+-    ChangeBHS     : String;
+-    ChangeSICK    : String;
+-    AddToDomain   : String;
+-    ConvName      : String;
+-    MIPSPages     : Array of TInputQueryWizardPage;
+-    MIPSIndexes   : Array of Integer;
+-    AppIDs        : Array of String;
++    MIPSPLFType   : String;
++    MIPSPages     : Array of TPageData;
++    ConfigGroups  : Array of String;
+     LANInterfaces : Array of String;
++    Screens       : Array of String;
+     CancelWoP     : Boolean;
++    EnableFSProt  : Boolean;
+ { ----------------------------------------------------------------------------------------------- }
+-{ Function section }
++{ Global function section }
+ 
+ function ExplodeCSList(List: String): Array of String;
+ var
+@@ -86,12 +108,9 @@ begin
+ 	while Pos(',', List)<>0 do
+ 	begin
+ 		SetArrayLength(ArrayList, i + 1);
+-		//LOG('[ExplodeCSList]: Copy from 0 to ' + IntToStr(Pos(',', List) - 1) + ' in list ' + List);
+-        ArrayList[i] := Trim(Copy(List, 0, Pos(',', List) - 1));
+-        //LOG('[ExplodeCSList]: Create New list from ' + IntToStr(Pos(',', List)) + ' to ' + IntToStr(Length(List) - Pos(',', List)) + ' in list ' + List);
++		ArrayList[i] := Trim(Copy(List, 0, Pos(',', List) - 1));
+         List := Copy(List, Pos(',', List) + 1, Length(List) - Pos(',', List));
+-        //LOG('[ExplodeCSList]: Process array list item: ' + ArrayList[i] + '; remaining: ' + List);
+-		i := i + 1;
++        i := i + 1;
+ 	end;
+     
+     SetArrayLength(ArrayList, i + 1);
+@@ -107,90 +126,199 @@ begin
+     StringChangeEx(Name, ')', '_', False);
+     StringChangeEx(Name, '/', '_', False);
+     StringChangeEx(Name, '\', '_', False);
++    StringChangeEx(Name, '-', '_', False);
+     Result := Trim(Name);
+ end;
+ 
+-function GetPageIndex(Name: String): Integer;
++function HasPage(Name: String): Boolean;
+ var
+-    i: Integer;
+-    l: Integer;
++    i : Integer;
++    l : Integer;
+ begin
+-    Result := -1;
+-    Name := NormalizePageName(Name);
+-    l := GetArrayLength(MIPSPages) - 1;
+-    for i := 0 to l do
++    Result := False;
++    l := GetArrayLength(MIPSPages);
++    if l > 0 then
+     begin
+-        //LOG('Compare "' + Name + '" with "' + MIPSPages[i].Name + '"');
+-        if (Pos(Name, MIPSPages[i].Name) = 1) then
++        Name := NormalizePageName(Name);
++        for i := 0 to l - 1 do
+         begin
+-            //LOG('Set Result to ' +  IntToStr(i));
+-            Result := i;
+-            break;
++            if Pos(Name, MIPSPages[i].Page.Name) = 1 then
++            begin
++                Result := True;
++                break;
++            end;
+         end;
+     end;
+-    
+-    //LOG('Return ' + IntToStr(Result));
+ end;
+ 
+-function GetDataIndex(PageID: Integer; Prompt: String): Integer;
++function GetPage(Name: String): TPageData;
+ var
+-    i: Integer;
++    i : Integer;
++    l : Integer;
+ begin
+-    Result := -1;
+-    for i := 0 to MIPSIndexes[PageID] do
++    //LOG('[GetPage]: Try to find page for "' + Name + '".');
++    l := GetArrayLength(MIPSPages);
++    if l > 0 then
+     begin
+-        if (Pos(Prompt, MIPSPages[PageID].PromptLabels[i].Caption) = 1) then
++        // logout pages (for debug)
++        //for i := 0 to l - 1 do
++        //begin
++        //    LOG('[GetPage]: ' + IntToStr(i) + ': ' + MIPSPages[i].Page.Name);
++        //end;
++        
++        Name := NormalizePageName(Name);
++        for i := 0 to l - 1 do
+         begin
+-            Result := i;
+-            break;
++            if Pos(Name, MIPSPages[i].Page.Name) = 1 then
++            begin
++                Result := MIPSPages[i];
++                //LOG('[GetPage]: Found page for "' + MIPSPages[i].Page.Name + '".');
++                break;
++            end;
+         end;
++    end
++    else
++    begin
++        LOG('[GetPage]: There are no available pages.');
+     end;
+ end;
+ 
+-
+-function GetPageData(Name: String; Prompt: String): String;
++function GetPageData(PageName: String; FieldName: String): String;
+ var
+-    ppos: Integer;
+-    dpos: Integer;
++    i    : Integer;
++    Len  : Integer;
++    Page : TPageData;
+ begin
+-    //LOG('Try to find page data for "' + Name + '" with prompt "' + Prompt + '"');
+-    ppos := GetPageIndex(Name);
+-    if ppos <> -1 then
++    //LOG('[GetPageData]: Try to find pagedata for "' + PageName + '": "' + FieldName + '"');
++    
++    if HasPage(PageName) then
+     begin
+-        dpos := GetDataIndex(ppos, Prompt);
+-
+-        if dpos <> -1 then
++        Page := GetPage(PageName);
++        //LOG('[GetPageData]: Found page for "' + Page.Page.Name + '". Get data.');
++        Len := GetArrayLength(Page.Fields);
++        for i := 0 to Len - 1 do
+         begin
+-            Result := MIPSPages[ppos].Values[dpos];
+-            LOG('Return data for "' + Name + '" with prompt "' + Prompt + '": ' + Result);
+-        end;
++            if Pos(FieldName, Page.Fields[i].Name) = 1 then
++            begin
++                Page.Fields[i].PageValue := Page.Page.Values[i];
++                Result := Page.Fields[i].PageValue;
++                LOG('Return data for "' + PageName + '" with Field "' + FieldName + '": ' + Result);
++                break;
++            end;
++        end;        
++    end
++    else
++    begin
++        LOG('[GetPageData]: Fail to find page for name ' + PageName);
+     end;
+ end;
+ 
+-function GetKioskName() : String;
++procedure DebugPagedata();
++var
++    i  : Integer;
++    j  : Integer;
++    pl : Integer;
++    fl : Integer;
+ begin
+-    Result := GetPageData('KIOSK_DATA', 'Kiosk Name:');
+-    LOG('GetKioskName: ' + Result);
++    LOG('[DebugPagedata]: Debug output for global page data:');
++    
++    pl := GetArrayLength(MIPSPages);
++    if pl > 0 then
++    begin
++        for i := 0 to pl - 1 do
++        begin
++            LOG('[DebugPagedata]: Found page "' + MIPSPages[i].Page.Name + '" with:');
++            fl := GetArrayLength(MIPSPages[i].Fields);
++            for j := 0 to fl - 1 do
++            begin
++                LOG('[DebugPagedata]:     ' + MIPSPages[i].Fields[j].Name + ' => ' + MIPSPages[i].Page.Values[j]);
++            end;
++        end;
++    end
++    else
++    begin
++        LOG('[DebugPagedata]: There are no available pages.');
++    end;
+ end;
+ 
+-function GetAirport() : String;
++procedure RunCommand(cmd: String; params: String; WorkingDir: String);
++var
++    ResultCode : Integer;
++    ExecRun : Boolean;
+ begin
+-    Result := GetPageData('KIOSK_DATA', 'Airport: (3L Code)');
+-    LOG('GetAirport: ' + Result);
++    cmd := ExpandConstant(cmd);
++    WorkingDir := ExpandConstant(WorkingDir);
++    ExecRun := Exec(
++        cmd, 
++        params, 
++        WorkingDir, 
++        SW_HIDE, 
++        ewWaitUntilTerminated, 
++        ResultCode    
++    );
++    LOG('Run command "' + cmd + '" (' + params + ') rc:' + IntToStr(ResultCode));
++    
++    if ExecRun then 
++    begin
++        if not (ResultCode = 0) then
++        begin
++            MsgBox(
++                'Fail to run ' + cmd + '! ResultCode is ' + IntToStr(ResultCode), 
++                mbCriticalError,
++                MB_OK
++            );
++            CancelWoP := true;
++            WizardForm.Close;
++        end;
++    end else
++    begin
++        MsgBox(
++            'Executing command ' + cmd + ' failed! Error : ' + SysErrorMessage(ResultCode), 
++            mbCriticalError,
++            MB_OK
++        );
++        CancelWoP := true;
++        WizardForm.Close;
++    end;
+ end;
+ 
+-function GetArea() : String;
++function SetMIPSDir(Path, InstallKey, DataKey: String): Boolean;
++var
++    ResultStr: String;
+ begin
+-    Result := GetPageData('KIOSK_DATA', 'Area: (Area in Terminal)');
+-    LOG('GetArea: ' + Result);
++    Result := False;
++    if RegQueryStringValue(HKLM, Path, InstallKey, ResultStr) then
++    begin
++        { set global mips data dir }
++        MassaiDir := ResultStr;
++        if RegQueryStringValue(HKLM, Path, DataKey, ResultStr) then
++        begin
++            { set global mips user dir }
++            MIPSUserDir := resultStr;
++            Result := True;
++        end;
++    end;
+ end;
+ 
+-function GetTerminal() : String;
++procedure RunSetConfigItem(ItemName, ItemType, ItemValue, RegKey: String);
++var
++    params : String;
+ begin
+-    Result := GetPageData('KIOSK_DATA', 'Terminal:');
+-    LOG('GetTerminal: ' + Result);
++    params := '';
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + MIPSPLFType + '" ';
++    params := params + '"' + ItemName + '" ';
++    params := params + '"' + ItemType + '" ';
++    params := params + '"' + ItemValue + '" ';
++    params := params + '"' + RegKey + '"';
++    //params := params + '"' + CFGVALUESFLAGS + '"';
++    
++    RunCommand('{tmp}\configPlatform.cmd', params, '{tmp}');
+ end;
+ 
++{ ----------------------------------------------------------------------------------------------- }
++{ Get information section }
++
+ function GetMassaiDir(): String;
+ begin
+     Result := MassaiDir;
+@@ -201,219 +329,165 @@ begin
+     Result := MIPSUserDir;
+ end;
+ 
+-function GetBHSHost(): String;
++function GetKioskName() : String;
+ begin
+-    if (Pos('true', ChangeBHS) = 1) then
+-    begin
+-        Result := GetPageData('CONVEYOR', 'BHS Host:');
+-        LOG('BHS Host: ' + Result);
+-    end;
++    Result := GetPageData('KIOSKDATA', 'KioskName');
+ end;
+ 
+-function GetBHSPort(): String;
++function GetAirport() : String;
+ begin
+-    if (Pos('true', ChangeBHS) = 1) then
+-    begin
+-        Result := GetPageData('CONVEYOR', 'BHS Port:');
+-        LOG('BHS Port: ' + Result);
+-    end;
++    Result := GetPageData('KIOSKDATA', 'Airport');
+ end;
+ 
+-function GetSICKHost(): String;
+-begin
+-    if (Pos('true', ChangeSICK) = 1) then
+-    begin
+-        Result := GetPageData('CONVEYOR', 'SICK Host:');
+-        LOG('SICK Host: ' + Result);
+-    end;
+-end;
+-
+-function GetSICKPort(): String;
++function GetTerminal() : String;
+ begin
+-    if (Pos('true', ChangeSICK) = 1) then
+-    begin
+-        Result := GetPageData('CONVEYOR', 'SICK Port:');
+-        LOG('SICK Port: ' + Result);
+-    end;
++    Result := GetPageData('KIOSKDATA', 'Terminal');
+ end;
+ 
+-function GetConvName(): String;
++function GetArea() : String;
+ begin
+-    Result := ConvName;
+-    LOG('Conveyor Name: ' + Result);
++    Result := GetPageData('KIOSKDATA', 'Area');
+ end;
+ 
+-function RunConveyor(): Boolean;
+-begin
+-    Result := False;
+-    if (Pos('true', ChangeSICK) = 1) or (Pos('true', ChangeBHS) = 1) then
+-    begin
+-        LOG('Run conveyor configuration.');
+-        Result := True;
+-    end;
+-end;
+ 
+ function GetDomainName(): String;
+ begin
+-    if (Pos('true', AddToDomain) = 1) then
+-    begin
+-        Result := GetPageData('DOMAIN', 'Domain Name:');
+-        LOG('Domain Name: ' + Result);
+-    end;
++   Result := GetPageData('ADD2DOMAIN', 'DomainName');
+ end;
+ 
+ function GetDomainUser(): String;
+ begin
+-    if (Pos('true', AddToDomain) = 1) then
+-    begin
+-        Result := GetPageData('DOMAIN', 'Domain Administrator Account:');
+-        LOG('Domain Administrator Account: ' + Result);
+-    end;
++    Result := GetPageData('ADD2DOMAIN', 'DomainUser');
+ end;
+ 
+ function GetOperationUnit(): String;
+ begin
+-    if (Pos('true', AddToDomain) = 1) then
+-    begin
+-        Result := GetPageData('DOMAIN', 'Operation Unit:');
+-        LOG('Operation Unit: ' + Result);
+-    end;
++    Result := GetPageData('ADD2DOMAIN', 'AccountOU');
+ end;
+ 
+ function GetLogonDomain(): String;
+ begin
+-    Result := GetPageData('AUTOLOGON', 'Domain (NETBIOS) Name:');
+-    LOG('Domain (NETBIOS) Name: ' + Result);
++    Result := GetPageData('AUTOLOGON', 'LogonDomain');
+ end;
+ 
+ function GetLogonUser(): String;
+ begin
+-    Result := GetPageData('AUTOLOGON', 'Windows logon User:');
+-    LOG('Windows logon User: ' + Result);
++    Result := GetPageData('AUTOLOGON', 'LogonUser');
+ end;
+ 
+ function GetLogonPassword(): String;
+ begin
+-    Result := GetPageData('AUTOLOGON', 'Logon Password:');
+-    LOG('Logon Password: xxx');
++    Result := GetPageData('AUTOLOGON', 'LogonPassword');
+ end;
+ 
+-function RunAddDomain(): Boolean;
++function GetAddToAdmin(): String;
++var
++    AddToAdmin : String;
++begin
++    AddToAdmin := GetIniString('AUTOLOGON', 'AddToLocalAdmin', 'false', IniFilename);
++    Result := Lowercase(Trim(AddToAdmin));
++end;
++
++{ ----------------------------------------------------------------------------------------------- }
++{ Check run section }
++function CheckRunScript(Screen: String): Boolean;
++var
++    i : Integer;
+ begin
+     Result := False;
+-    if (Pos('true', AddToDomain) = 1) then
++    for i := 0 to GetArrayLength(Screens) - 1 do
+     begin
+-        LOG('Run add domain script.');
+-        Result := True;
++        if Pos(Screen, Screens[i]) = 1 then
++        begin
++            Result := True;
++            break;
++        end;
+     end;
+ end;
+ 
+-function RunSetHostname(): Boolean;
++function CheckRunHostconfig(): Boolean;
+ begin
+-    Result := False;
+-    if not RunAddDomain() then
++    if (not CheckRunScript('KIOSKDATA')) or CheckRunScript('ADD2DOMAIN') then
++    begin
++        Result := False;
++    end
++    else
+     begin
+-        LOG('Run set hostname script.');
+         Result := True;
+     end;
+ end;
+ 
+-procedure RunCommand(cmd: String; params: String; WorkingDir: String);
+-var
+-    ResultCode : Integer;
+-    ExecRun : Boolean;
++function CheckRunConfigPlatform(): Boolean;
+ begin
+-    cmd := ExpandConstant(cmd);
+-    WorkingDir := ExpandConstant(WorkingDir);
+-    ExecRun := Exec(
+-        cmd, 
+-        params, 
+-        WorkingDir, 
+-        SW_HIDE, 
+-        ewWaitUntilTerminated, 
+-        ResultCode    
+-    );
+-    LOG('Run command "' + cmd + '" (' + params + ') rc:' + IntToStr(ResultCode));
+-    
+-    if ExecRun then 
+-    begin
+-        if not (ResultCode = 0) then
+-        begin
+-            MsgBox(
+-                'Fail to run ' + cmd + '! ResultCode is ' + IntToStr(ResultCode), 
+-                mbCriticalError,
+-                MB_OK
+-            );
+-            CancelWoP := true;
+-            WizardForm.Close;
+-        end;
+-    end else
++    Result := False;
++    if CheckRunScript('KIOSKDATA') or CheckRunScript('CONFIGURATION') then
+     begin
+-        MsgBox(
+-            'Executing command ' + cmd + ' failed! Error : ' + SysErrorMessage(ResultCode), 
+-            mbCriticalError,
+-            MB_OK
+-        );
+-        CancelWoP := true;
+-        WizardForm.Close;
++        Result := True;
+     end;
+-    
+ end;
+ 
+-procedure ProcessApplications(cmd: String; WorkingDir: String);
++{ ----------------------------------------------------------------------------------------------- }
++{ Run script section }
++
++procedure ProcessInterfaces(cmd: String; WorkingDir: String);
+ var
+-    AppCMD     : String;
+     i          : Integer;
+     l          : Integer;
+     ResultCode : Integer;
+     params     : String;
+ begin
+-    l := GetArrayLength(AppIDs);
++    l := GetArrayLength(LANInterfaces);
+     if l > 0 then
+     begin
+         l := l - 1;
+         for i := 0 to l do
+         begin
+-            AppCMD := GetPageData('APPLICATION_' + AppIDs[i], AppIDs[i] + ' application CMD:');
+-            StringChangeEx(AppCMD, '"', '/#', False);
+-            
+             params := '';
+             params := params + '"' + ExpandConstant('{log}') + '" ';
+-            params := params + '"' + AppIDs[i] + '" ';
+-            params := params + '"' + AppCMD + '" ';
++            params := params + '"' + LANInterfaces[i] + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4Address') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4Subnet') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4Gateway') + '" ';
++            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4DNS') + '" ';
+             RunCommand(cmd, params, WorkingDir);
+         end;
+     end;
+ end;
+ 
+-procedure ProcessInterfaces(cmd: String; WorkingDir: String);
++procedure ProcessConfiguration();
+ var
+     i          : Integer;
+-    l          : Integer;
+-    ResultCode : Integer;
++    j          : Integer;
++    GroupLen   : Integer;
++    FieldLen   : Integer;
+     params     : String;
++    Page       : TPageData;
+ begin
+-    l := GetArrayLength(LANInterfaces);
+-    if l > 0 then
++    GroupLen := GetArrayLength(ConfigGroups);
++    if GroupLen > 0 then
+     begin
+-        l := l - 1;
+-        for i := 0 to l do
++        for i := 0 to GroupLen - 1 do
+         begin
+-            params := '';
+-            params := params + '"' + ExpandConstant('{log}') + '" ';
+-            params := params + '"' + LANInterfaces[i] + '" ';
+-            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4 Address:') + '" ';
+-            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'Subnet:') + '" ';
+-            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'Gateway:') + '" ';
+-            params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'DNS1:') + '" ';
+-            RunCommand(cmd, params, WorkingDir);
++            LOG('Process config page CONFIG_GROUP_' + ConfigGroups[i]);
++            if HasPage('CONFIG_GROUP_' + ConfigGroups[i]) then
++            begin
++                Page     := GetPage('CONFIG_GROUP_' + ConfigGroups[i]);
++                FieldLen := GetArrayLength(Page.Fields);
++                for j := 0 to FieldLen - 1 do
++                begin
++                    LOG('Process config field CONFIG_GROUP_' + ConfigGroups[i] + ': ' + Page.Fields[j].Name);
++                    RunSetConfigItem(
++                        GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'ItemName', '', IniFilename),
++                        GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'ItemType', 'TEXT', IniFilename),
++                        GetPageData(ConfigGroups[i], Page.Fields[j].Caption),
++                        GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'RegKey', '', IniFilename)
++                    );
++                end;
++            end;
+         end;
+     end;
+ end;
+ 
+-{ ----------------------------------------------------------------------------------------------- }
+-{ Run script section }
+-
+ procedure RunConfigNetwork();
+ begin
+     ProcessInterfaces('{tmp}\configNetwork.cmd', '{tmp}');
+@@ -442,46 +516,69 @@ begin
+     params := params + '"' + GetKioskName() + '" ';
+     params := params + '"' + GetDomainUser() + '" ';
+     params := params + '"' + GetOperationUnit() + '" ';
+-    params := params + '"' + GetLogonDomain() + '" ';
+-    params := params + '"' + GetLogonUser() + '" ';
+-    params := params + '"' + GetLogonPassword() + '"';
+     
+     RunCommand('{tmp}\joinDom.cmd', params, '{tmp}');
+ end;
+ 
+-procedure RunConfigEnvironment();
++procedure RunConfigAutologon();
+ var
+     params : String;
+ begin
+     params := '';
+-    params := params + '"' + ExpandConstant('{log}') + '" ';
+-    params := params + '"' + GetAirport() + '" ';
+-    params := params + '"' + GetArea() + '" ';
+-    params := params + '"' + GetTerminal() + '" ';
+-    params := params + '"' + GetKioskName() + '"';
+     
+-    RunCommand('{tmp}\configEnvironment.cmd', params, '{tmp}');
++    params := params + '"' + ExpandConstant('{log}') + '" ';
++    params := params + '"' + GetLogonDomain() + '" ';
++    params := params + '"' + GetLogonUser() + '" ';
++    params := params + '"' + GetLogonPassword() + '" ';
++    params := params + '"' + GetAddToAdmin() + '"';
++     
++    RunCommand('{tmp}\configAutologon.cmd', params, '{tmp}');
+ end;
+ 
+-procedure RunConfigConveyor();
++procedure RunConfigEnvironment();
+ var
+     params : String;
+ begin
+-    params := '';
++    RunSetConfigItem(
++        'ENVIRONMENT.LEVEL.Airport_Code',
++        'TEXT',
++        GetAirport(),
++        'KIOSKDATA_AIRPORT'
++    );
+     
+-    params := params + '"' + ExpandConstant('{log}') + '" ';
+-    params := params + '"' + GetConvName() + '" ';
+-    params := params + '"' + GetBHSHost() + '" ';
+-    params := params + '"' + GetBHSPort() + '" ';
+-    params := params + '"' + GetSICKHost() + '" ';
+-    params := params + '"' + GetSICKPort() + '" ';
++    RunSetConfigItem(
++        'ENVIRONMENT.LEVEL.Terminal',
++        'TEXT',
++        GetTerminal(),
++        'KIOSKDATA_TERMINAL'
++    );
+     
+-    RunCommand('{tmp}\configConveyor.cmd', params, '{tmp}');
++    RunSetConfigItem(
++        'ENVIRONMENT.LEVEL.Area',
++        'TEXT',
++        GetArea(),
++        'KIOSKDATA_AREA'
++    );
++    
++    RunSetConfigItem(
++        'ENVIRONMENT.LEVEL.Kiosk_Name',
++        'TEXT',
++        GetKioskName(),
++        'KIOSKDATA_KIOSK_NAME'
++    );
+ end;
+ 
+-procedure RunConfigApplication();
++procedure RunConfigPlatform();
+ begin
+-    ProcessApplications('{tmp}\configApplication.cmd', '{tmp}');
++    if  CheckRunScript('KIOSKDATA') then
++    begin 
++        RunConfigEnvironment();
++    end;
++    
++    if CheckRunScript('CONFIGURATION') then
++    begin
++        ProcessConfiguration();
++    end;
+ end;
+ 
+ { ----------------------------------------------------------------------------------------------- }
+@@ -493,13 +590,314 @@ begin
+     Confirm := not CancelWoP;
+ end;
+ 
++function CreateWizardPage(Name, ACaption, ADescription, ASubCaption: String; AfterID: Integer; Fields: Array of TIniInputField): Integer;
++var
++    Page  : TInputQueryWizardPage;
++    PData : TPageData;
++    Index : Integer;
++    i     : Integer;
++    FLen  : Integer;
++begin
++    Page := CreateInputQueryPage(
++        AfterID,
++        ACaption,
++        ADescription,
++        ASubCaption
++    );
++    Page.Name := NormalizePageName(Name);
++    LOG('[CreateWizardPage]: Add page ' + Page.Name);
++    
++    FLen := GetArrayLength(Fields);
++    
++    for i := 0 to FLen - 1 do
++    begin
++        LOG('[CreateWizardPage]: Add input for ' + Fields[i].Name);
++        Index := Page.Add(Fields[i].Caption, False);
++        Page.Values[i] := Fields[i].DefaultValue;
++    end;
++    
++    PData.Page := Page;
++    PData.Fields := Fields;
++	
++    SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
++    MIPSPages[GetArrayLength(MIPSPages) - 1] := PData;
++    Result := Page.ID;
++end;
++
++function CreatePageFromSection(Name, ACaption, ADescription, ASubCaption: String; AfterID: Integer; Fields: Array of TIniInputField): Integer;
++var
++    i    : Integer;
++    FLen : Integer;
++begin
++    
++    FLen := GetArrayLength(Fields);
++    
++    for i := 0 to FLen - 1 do
++    begin
++        Fields[i].DefaultValue := GetIniString(Name, Fields[i].Name, Fields[i].DefaultValue, IniFilename);
++    end;
++    
++    Result := CreateWizardPage(Name, ACaption, ADescription, ASubCaption, AfterID, Fields);
++end;
++
++function CreatePagesFromIniItem(Section, Item, Default, ItemSectionPrefix, ACaption, ADescription, ASubCaption: String; AfterID: Integer; Fields: Array of TIniInputField): Integer;
++var
++    i     : Integer;
++    NLen  : Integer;
++    Value : String;
++    Names : Array of String;
++begin
++    Value := GetIniString(Section, Item, Default, IniFilename);
++    
++    if Length(Trim(Value)) > 0 then
++    begin
++        LOG('[CreatePagesFromIniItem]: Found wizard items: ' + Value);
++        Names := ExplodeCSList(Value);
++        NLen := GetArrayLength(Names);
++        
++        for i := 0 to NLen - 1 do
++        begin
++            AfterID := CreatePageFromSection(
++                ItemSectionPrefix + Names[i],
++                Format(ACaption, [Names[i]]),
++                ADescription,
++                Format(ASubCaption, [Names[i]]),
++                AfterID,
++                Fields
++            );
++        end;
++    end;
++    
++    Result := AfterID;    
++end;
++
++
++function CreateKioskDataPage(AfterID: Integer): Integer;
++var
++    PageFields : Array of TIniInputField;
++begin
++    SetArrayLength(PageFields, 4);
++    PageFields[0].Name         := 'KioskName';
++    PageFields[0].Caption      := 'Kiosk Name:';
++    PageFields[0].DefaultValue := GetComputerNameString();
++    
++    PageFields[1].Name         := 'Airport';
++    PageFields[1].Caption      := 'Airport: (3L Code):';
++    PageFields[1].DefaultValue := 'DTM';
++    
++    PageFields[2].Name         := 'Terminal';
++    PageFields[2].Caption      := 'Terminal:';
++    PageFields[2].DefaultValue := 'A';
++    
++    PageFields[3].Name         := 'Area';
++    PageFields[3].Caption      := 'Area: (Area in Terminal):';
++    PageFields[3].DefaultValue := 'Check-In';
++
++    Result := CreatePageFromSection(
++        'KIOSKDATA',
++        'Kiosk Data',
++        'Needed to identify this Kiosk.',
++        'Please enter the data to identify this Kiosk, then click Next.',
++        AfterID,
++        PageFields
++    );
++end;
++
++function CreateAddToDomainPage(AfterID: Integer): Integer;
++var
++    PageFields : Array of TIniInputField;
++begin
++    SetArrayLength(PageFields, 3);
++    PageFields[0].Name         := 'DomainName';
++    PageFields[0].Caption      := 'Domain Name:';
++    PageFields[0].DefaultValue := '';
++    
++    PageFields[1].Name         := 'DomainUser';
++    PageFields[1].Caption      := 'Domain Administrator Account:';
++    PageFields[1].DefaultValue := '';
++    
++    PageFields[2].Name         := 'AccountOU';
++    PageFields[2].Caption      := 'Operation Unit (e.g. OU=Computers,DC=excample,DC=local):';
++    PageFields[2].DefaultValue := '';
++
++    Result := CreatePageFromSection(
++        'ADD2DOMAIN',
++        'Domain configuration',
++        'Edit Domain configuration.',
++        'Please insert your domain configuration.',
++        AfterID,
++        PageFields
++    );
++end;
++
++function CreateAutoLogonPage(AfterID: Integer): Integer;
++var
++    PageFields : Array of TIniInputField;
++begin
++    SetArrayLength(PageFields, 3);
++    PageFields[0].Name         := 'LogonDomain';
++    PageFields[0].Caption      := 'Domain (NETBIOS) Name:';
++    PageFields[0].DefaultValue := '';
++    
++    PageFields[1].Name         := 'LogonUser';
++    PageFields[1].Caption      := 'Windows logon User:';
++    PageFields[1].DefaultValue := '';
++    
++    PageFields[2].Name         := 'LogonPassword';
++    PageFields[2].Caption      := 'Logon Password:';
++    PageFields[2].DefaultValue := '';
++
++    Result := CreatePageFromSection(
++        'AUTOLOGON',
++        'Autologon configuration',
++        'Edit Autologon configuration.',
++        'Please insert your autologon configuration.',
++        AfterID,
++        PageFields
++    );
++end;
++
++function CreateIPv4Pages(AfterID: Integer): Integer;
++var
++    PageFields : Array of TIniInputField;
++    Interfaces : String;
++begin
++    Interfaces := GetIniString('IPV4', 'IPv4Interfaces', 'Local Area Connection', IniFilename);
++    
++    if Length(Trim(Interfaces)) > 0 then
++    begin
++        LANInterfaces := ExplodeCSList(Interfaces);
++    
++        SetArrayLength(PageFields, 4);
++        PageFields[0].Name         := 'IPv4Address';
++        PageFields[0].Caption      := 'IPv4 Address:';
++        PageFields[0].DefaultValue := '';
++        
++        PageFields[1].Name         := 'IPv4Subnet';
++        PageFields[1].Caption      := 'Subnet:';
++        PageFields[1].DefaultValue := '';
++        
++        PageFields[2].Name         := 'IPv4Gateway';
++        PageFields[2].Caption      := 'Gateway:';
++        PageFields[2].DefaultValue := '';
++        
++        PageFields[3].Name         := 'IPv4DNS';
++        PageFields[3].Caption      := 'DNS Server:';
++        PageFields[3].DefaultValue := '';
++        
++        Result := CreatePagesFromIniItem(
++            'IPV4',
++            'IPv4Interfaces',
++            'Local Area Connection',
++            'IPV4_',
++            'IPv4-Interface configuration for %s',
++            'Edit network interface configuration.',
++            'Please insert the interface configuration for %s.',
++            AfterID,
++            PageFields
++        );
++    end
++    else
++    begin
++        LOG('[CreateIPv4Pages]: ERROR: Fail to create IPv4 interfaces: No interfaces given.');
++    end;
++end;
++
++function CreateConfigurationPages(AfterID: Integer): Integer;
++var
++    i            : Integer;
++    j            : Integer;
++    ConfigGroup  : String;
++    Caption      : String;
++    Description  : String;
++    SubCaton     : String;
++    ItemName     : String;
++    ItemNames    : Array of String;
++    PageFields   : Array of TIniInputField;
++begin
++    ConfigGroup := GetIniString('CONFIGURATION', 'ConfigGroups', 'DEFAULT', IniFilename);
++    
++    if Length(Trim(ConfigGroup)) > 0 then
++    begin
++        ConfigGroups := ExplodeCSList(ConfigGroup);
++        
++        for i := 0 to GetArrayLength(ConfigGroups) - 1 do
++        begin
++            ItemName := GetIniString('CONFIG_GROUP_' + ConfigGroups[i], 'ConfigItemNames', '', IniFilename);
++            if Length(Trim(ItemName)) > 0 then
++            begin
++                // get general page information
++                Caption     := GetIniString('CONFIG_GROUP_' + ConfigGroups[i], 'ConfigGroupCaption',     '', IniFilename);
++                Description := GetIniString('CONFIG_GROUP_' + ConfigGroups[i], 'ConfigGroupDescription', '', IniFilename);
++                SubCaton    := GetIniString('CONFIG_GROUP_' + ConfigGroups[i], 'ConfigGroupSubCaton',    '', IniFilename);
++                
++                // create page fields
++                ItemNames := ExplodeCSList(ItemName);
++                SetArrayLength(PageFields, GetArrayLength(ItemNames));
++                
++                for j := 0 to GetArrayLength(ItemNames) - 1 do
++                begin
++                    PageFields[j].Name         := ItemNames[j];
++                    PageFields[j].Caption      := GetIniString('CONFIG_ITEM_' + ItemNames[j], 'ItemDisplay', ItemNames[j] + ':', IniFilename);
++                    PageFields[j].DefaultValue := GetIniString('CONFIG_ITEM_' + ItemNames[j], 'ItemValue',   '',                 IniFilename);
++                end;
++                
++                // create wizard page
++                AfterID := CreateWizardPage(
++                    'CONFIG_GROUP_' + ConfigGroups[i], 
++                    Caption,
++                    Description,
++                    SubCaton,
++                    AfterID,
++                    PageFields
++                );
++            end
++            else
++            begin
++                LOG('[CreateConfigurationPages]: WARNING: Fail to create config pages: No config item for group ' + ConfigGroups[i] + ' found.');
++            end;
++        end;
++    end
++    else
++    begin
++        LOG('[CreateConfigurationPages]: ERROR: Fail to create config pages: No config group found.');
++    end;
++    
++    Result := AfterID;
++end;
++
++
+ function InitializeSetup(): Boolean;
+ var
+     resultStr : String;
++    enableFSP : String;
+     i         : Integer;
+ begin
+-    IniFilename := ExpandConstant('{src}') + '\SetKioskData.ini';
++    // test if plf exists
++    if SetMIPSDir('{#REG_KIOSK_PATH}', '{#REG_KIOSK_INSTALL_KEY}', '{#REG_KIOSK_DATA_KEY}') then
++    begin
++        LOG('[InitializeSetup]: Found kiosk platform.');
++        { set platform type variable }
++        MIPSPLFType := 'KIOSK';
++        Result := True;
++    end
++    else if SetMIPSDir('{#REG_GATE_PATH}', '{#REG_GATE_INSTALL_KEY}', '{#REG_GATE_DATA_KEY}') then
++    begin
++        LOG('[InitializeSetup]: Found gate platform.');
++        { set platform type variable }
++        MIPSPLFType := 'GATE';
++        Result := True;
++    end
++    else
++    begin
++        LOG('[InitializeSetup]: No platform detected. Abort.');
++        MsgBox('Setup has detected that currently no MIPS nor Gate Platform found! This component is required for setup.' #13#13 'Please restart setup after MIPS/Gate Platform has been installed.', mbError, MB_OK) ;
++        Sleep(100);
++        Result:=False;
++    end;
+     
++    // get ini file
++    IniFilename := ExpandConstant('{src}') + '\SetKioskData.ini';
+     for i:=1 To (ParamCount) do 
+     begin
+ 		if Pos('-ini:', ParamStr(i))=1 then
+@@ -522,266 +920,59 @@ begin
+         LOG('[InitializeSetup]: INI file ' + IniFilename + ' does not exist. Do not use an INI file');
+     end;
+     
+-    if(not RegQueryStringValue(HKLM, 'SOFTWARE\Materna\MIPS', 'Mips_PLF_Install_Path', resultStr)) then
+-	begin
+-        if(not RegQueryStringValue(HKLM, 'SOFTWARE\Materna\SecureGate\cfg_components\0c26b3a8-cd41-4e56-880d-b00d7e5633f7', 'SECUREGATE_BASE_FOLDER', resultStr)) then
+-        begin
+-            MsgBox('Setup has detected that currently no MIPS nor Gate Platform found! This component is required for setup.' #13#13 'Please restart setup after MIPS/Gate Platform has been installed.', mbError, MB_OK) ;
+-            LOG('[InitializeSetup]: No platform detected. Abort.');
+-            Sleep(100);
+-            Result:=False;
+-        end else
+-        begin
+-            LOG('[InitializeSetup]: Found gate platform.');
+-            { set global mips data dir }
+-            MassaiDir := resultStr;
+-            { set global mips user dir }
+-            MIPSUserDir := resultStr;
+-            
+-            Result := True;
+-        end;
+-	end else
+-	begin
+-        LOG('[InitializeSetup]: Found MIPS platform.');
+-        { set global mips data dir }
+-        MassaiDir := resultStr;
+-        { set global mips user dir }
+-        RegQueryStringValue(HKLM, 'SOFTWARE\Materna\MIPS', 'Mips_PLF_Install_Data_Path', MIPSUserDir);
+-        
+-        Result := True;
++    // set enable file system protection flag
++    enableFSP := GetIniString('DEFAULT', 'EnableFSProtection', 'false', IniFilename);
++    if Pos(Lowercase(Trim(enableFSP)), 'true') = 1 then
++    begin
++        EnableFSProt := True;
++    end
++    else
++    begin
++        EnableFSProt := False;
+     end;
+ end;
+ 
+ { Init Wizard }
+ procedure InitializeWizard();
+ var 
+-    Page   : TInputQueryWizardPage;
+-    AppID  : String;
+-    i      : Integer;
+-    Index  : Integer;
+-    IPv4   : String;
++    i           : Integer;
++    AfterID     : Integer;
++    ShowScreens : String;
+ begin
+     { ------------------------------------------------------------------------------------- }
+     { Initialise custom pages }
+     SetArrayLength(MIPSPages, 0);
+-    SetArrayLength(MIPSIndexes, 0);
+-    
+-    { ------------------------------------------------------ }
+-    { Init Kiosk Data page }
+-    Page := CreateInputQueryPage(
+-        wpWelcome,
+-        'Kiosk Data',
+-        'Needed to identify this Kiosk.',
+-        'Please enter the data to identify this Kiosk, then click Next.'
+-    );
+-    Page.Name := 'KIOSK_DATA';
+-    LOG('[InitializeWizard]: Add page ' + Page.Name);
+-			
+-    Index := Page.Add('Kiosk Name:', False);
+-    Index := Page.Add('Airport: (3L Code)', False);
+-    Index := Page.Add('Terminal:', False);
+-    Index := Page.Add('Area: (Area in Terminal)', False);
+-    
+-    Page.Values[0] := GetIniString('KIOSKDATA', 'KioskName', GetComputerNameString(), IniFilename);
+-    Page.Values[1] := GetIniString('KIOSKDATA', 'Airport',   'DTM',                   IniFilename);
+-    Page.Values[2] := GetIniString('KIOSKDATA', 'Terminal',  'A',                     IniFilename);
+-    Page.Values[3] := GetIniString('KIOSKDATA', 'Area',      'Check-In',              IniFilename);
+-    
+-    SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-    SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-    MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-    MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+-    
++    AfterID := wpWelcome;
+     
++    ShowScreens := GetIniString('DEFAULT', 'ShowScreens', 'KIOSKDATA', IniFilename);
+     
+-    { ------------------------------------------------------ }
+-    { Init IP config page }
+-    IPv4 := GetIniString('HOSTDATA', 'IPv4Interfaces', 'Local Area Connection', IniFilename);
+-    
+-    if Length(Trim(IPv4))<>0 then
++    if Length(Trim(ShowScreens)) = 0 then
+     begin
+-        LOG('[InitializeWizard]: IPv4: Found interfaces: ' + IPv4);
+-        LANInterfaces := ExplodeCSList(IPv4);
+-
+-        for i := 0 to GetArrayLength(LANInterfaces) - 1 do
+-        begin
+-            Page := CreateInputQueryPage(
+-                MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
+-                'IPv4-Interface configuration for ' + LANInterfaces[i],
+-                'Edit interface configuration.',
+-                'Please insert the interface configuration for ' + LANInterfaces[i] + '.'
+-            );
+-            LOG('[InitializeWizard]: Process interface ' + LANInterfaces[i]);
+-            
+-            Page.Name := 'IPV4_' + NormalizePageName(LANInterfaces[i]);
+-            LOG('[InitializeWizard]: Add page ' + Page.Name);
+-            
+-            Index := Page.Add('IPv4 Address:', False);
+-            Index := Page.Add('Subnet:', False);
+-            Index := Page.Add('Gateway:', False);
+-            Index := Page.Add('DNS1:', False);
+-    
+-            Page.Values[0] := GetIniString('IPv4_' + LANInterfaces[i], 'IPv4Address', '', IniFilename);
+-            Page.Values[1] := GetIniString('IPv4_' + LANInterfaces[i], 'IPv4Subnet',  '', IniFilename);
+-            Page.Values[2] := GetIniString('IPv4_' + LANInterfaces[i], 'IPv4Gateway', '', IniFilename);
+-            Page.Values[3] := GetIniString('IPv4_' + LANInterfaces[i], 'IPv4DNS1',    '', IniFilename);
+-
+-            LOG('[InitializeWizard]: Set IPv4Address default config for Interface "' + LANInterfaces[i] + '": ' + Page.Values[0]);
+-            LOG('[InitializeWizard]: Set IPv4Subnet default config for Interface "'  + LANInterfaces[i] + '": ' + Page.Values[1]);
+-            LOG('[InitializeWizard]: Set IPv4Gateway default config for Interface "' + LANInterfaces[i] + '": ' + Page.Values[2]);
+-            LOG('[InitializeWizard]: Set IPv4DNS1 default config for Interface "'    + LANInterfaces[i] + '": ' + Page.Values[3]);
+-
+-
+-            SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-            SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-            MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-            MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+-        end;
++        ShowScreens := 'KIOSKDATA';
+     end;
++    Screens := ExplodeCSList(ShowScreens);
+     
+-    { ------------------------------------------------------ }
+-    { Init Conveyor config page }
+-    LOG('[InitializeWizard]: CONVEYOR');
+-    
+-    ChangeBHS  := GetIniString('CONVEYOR', 'ChangeBHSConfig',  'false', IniFilename);
+-    ChangeSICK := GetIniString('CONVEYOR', 'ChangeSICKConfig', 'false', IniFilename);
+-    { normalize strings }
+-    ChangeBHS  := Trim(Lowercase(ChangeBHS));
+-    ChangeSICK := Trim(Lowercase(ChangeSICK));
+-    
+-    if ( (Pos('true', ChangeBHS) = 1) or (Pos('true', ChangeSICK) = 1)) then
++    for i := 0 to GetArrayLength(Screens) - 1 do
+     begin
+-        Page := CreateInputQueryPage(
+-            MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
+-            'Conveyor configuration',
+-            'Edit Conveyor configuration.',
+-            'Please insert your conveyor configuration.'
+-        );
+-        Page.Name := 'CONVEYOR';
+-        LOG('[InitializeWizard]: Add page ' + Page.Name);
+-        
+-        i := 0
+-        if ( (Pos('true', ChangeBHS) = 1)) then
++        if Pos(Screens[i], 'KIOSKDATA') = 1 then
+         begin
+-            LOG('[InitializeWizard]: CONVEYOR: Add BHS Host');
+-            Index := Page.Add('BHS Host:', False);
+-            Index := Page.Add('BHS Port:', False);
+-            
+-            Page.Values[0] := GetIniString('CONVEYOR', 'ConvBHSHost', '192.168.2.3', IniFilename);
+-            Page.Values[1] := GetIniString('CONVEYOR', 'ConvBHSPort', '5021',        IniFilename);
+-            i := i + 2;
+-        end;
+-        
+-        if ( (Pos('true', ChangeSICK) = 1)) then
++            AfterID := CreateKioskDataPage(AfterID);
++        end
++        else if Pos(Screens[i], 'ADD2DOMAIN') = 1 then
+         begin
+-            LOG('[InitializeWizard]: CONVEYOR: Add SICK Host');
+-            Index := Page.Add('SICK Host:', False);
+-            Index := Page.Add('SICK Port:', False);
+-            
+-            Page.Values[i]     := GetIniString('CONVEYOR', 'ConvSICKHost', '192.168.2.2', IniFilename);
+-            Page.Values[i + 1] := GetIniString('CONVEYOR', 'ConvSICKPort', '2112',        IniFilename);
+-        end;
+-        
+-        SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-        SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-        MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-        MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+-    end;
+-    
+-    { ------------------------------------------------------ }
+-    { Init Application config page }
+-	LOG('[InitializeWizard]: APPLICATION');
+-    
+-    AppID := GetIniString('KIOSKDATA', 'Applications', '', IniFilename);
+-    
+-    if Length(Trim(AppID))<>0 then
+-    begin
+-        LOG('[InitializeWizard]: APPLICATION: Found applications: ' + AppID);
+-        AppIDs := ExplodeCSList(AppID);
+-
+-        for i := 0 to GetArrayLength(AppIDs) - 1 do
++            AfterID := CreateAddToDomainPage(AfterID);
++        end
++        else if Pos(Screens[i], 'AUTOLOGON') = 1 then
+         begin
+-            Page := CreateInputQueryPage(
+-                MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
+-                'Application configuration for ' + AppIDs[i],
+-                'Edit Application configuration.',
+-                'Please insert the application configuration for ' + AppIDs[i] + '.'
+-            );
+-            Page.Name := 'APPLICATION_' + AppIDs[i];
+-            LOG('[InitializeWizard]: Add page ' + Page.Name);
+-            
+-            Index := Page.Add(AppIDs[i] + ' application CMD:', False);
+-
+-            Page.Values[0] := GetIniString(
+-                'APPDATA_' + AppIDs[i], 
+-                'CMD', 
+-                '"C:\Programme\Internet Explorer\iexplore.exe" -K ' + 
+-                'http://<server>/Applications/<applicationName>/<applicationName>_App.html$ wnd=<applicationName>_App', 
+-                IniFilename
+-            );
+-            LOG('[InitializeWizard]: Get CommandLine of Application ' + AppIDs[i] + ': ' + Page.Values[0]);
+-
+-            SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-            SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-            MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-            MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
++            AfterID := CreateAutoLogonPage(AfterID);
++        end
++        else if Pos(Screens[i], 'IPV4') = 1 then
++        begin
++            AfterID := CreateIPv4Pages(AfterID);
++        end
++        else if Pos(Screens[i], 'CONFIGURATION') = 1 then
++        begin
++            AfterID := CreateConfigurationPages(AfterID);
+         end;
+     end;
+-    
+-    { ------------------------------------------------------ }
+-    { Init domain config page }
+-    LOG('[InitializeWizard]: DOMAIN');
+-    
+-    AddToDomain := GetIniString('HOSTDATA', 'AddToDomain', 'false', IniFilename);
+-    { normalize string }
+-    AddToDomain := Trim(Lowercase(AddToDomain));
+-    
+-    if (Pos('true', AddToDomain) = 1) then
+-    begin
+-        Page := CreateInputQueryPage(
+-            MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
+-            'Domain configuration',
+-            'Edit Domain configuration.',
+-            'Please insert your domain configuration.'
+-        );
+-        Page.Name := 'DOMAIN';
+-        LOG('[InitializeWizard]: Add page ' + Page.Name);
+-
+-        Index := Page.Add('Domain Name:',                  False);
+-        Index := Page.Add('Domain Administrator Account:', False);
+-        Index := Page.Add('Operation Unit:',               False);
+-        
+-        Page.Values[0] := GetIniString('HOSTDATA', 'DomainName', '', IniFilename);
+-        Page.Values[1] := GetIniString('HOSTDATA', 'DomainUser', '', IniFilename);
+-        Page.Values[2] := GetIniString('HOSTDATA', 'AccountOU',  '', IniFilename);
+-        
+-        SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-        SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-        MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-        MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+-        
+-        { ------------------------------------------------------ }
+-        { Init autologon config page }
+-        Page := CreateInputQueryPage(
+-            MIPSPages[GetArrayLength(MIPSPages) - 1].ID,
+-            'Autologon configuration',
+-            'Edit Autologon configuration.',
+-            'Please insert your autologon configuration.'
+-        );
+-        Page.Name := 'AUTOLOGON';
+-        LOG('[InitializeWizard]: Add page ' + Page.Name);
+-
+-        Index := Page.Add('Domain (NETBIOS) Name:', False);
+-        Index := Page.Add('Windows logon User:',   False);
+-        Index := Page.Add('Logon Password:',       False);
+-        
+-        Page.Values[0] := GetIniString('HOSTDATA', 'LogonDomain', '', IniFilename);
+-        Page.Values[1] := GetIniString('HOSTDATA', 'LogonUser',   '', IniFilename);
+-        
+-        SetArrayLength(MIPSPages, GetArrayLength(MIPSPages) + 1);
+-        SetArrayLength(MIPSIndexes, GetArrayLength(MIPSPages));
+-        MIPSPages[GetArrayLength(MIPSPages) - 1] := Page;
+-        MIPSIndexes[GetArrayLength(MIPSIndexes) - 1] := Index;
+-    end;
+-    
+ end;
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData_def.h b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData_def.h
+index 4c6a41ac..f937d1de 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData_def.h
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData_def.h
+@@ -21,6 +21,10 @@
+ 
+ SetKioskData
+ 
++\date 01.06.2016 \li V3.0.0.0
++                 \li SchyJ: Update INI data usage.
++                 \li SchyJ: BUGFIXIG for MANTIS 0041253: [SetKioskData]: Add domain and conveyor configuration
++
+ \date 01.06.2016 \li V2.1.1.0
+                  \li SchyJ: MANTIS 0041253: [SetKioskData]: Add domain and conveyor configuration
+ 
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
+deleted file mode 100644
+index 45888e86..00000000
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configApplication.cmd
++++ /dev/null
+@@ -1,62 +0,0 @@
+-@echo off
+-
+-setlocal ENABLEDELAYEDEXPANSION
+-
+-set LOG=%~1
+-set AppID=%~2
+-set CommandLine=%~3
+-rem correct quota handling
+-set CommandLine=%CommandLine:/#=/"%
+-
+-if "%LOG%" == "" (
+-    set LOG=nul
+-) else (
+-    set LOG=%LOG%.configApplication.log
+-)
+-
+-echo Configure Kiosk application: %AppID% >> "%LOG%"
+-
+-if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+-	set REG_MIPS=HKLM\SOFTWARE\Wow6432Node\Materna\MIPS
+-) else (
+-	set REG_MIPS=HKLM\SOFTWARE\Materna\MIPS
+-)
+-call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+-call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+-
+-if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! >> "%LOG%"
+-    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+-    exit /b 1
+-)
+-
+-if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+-    exit /b 1
+-)
+-
+-set tmpfile=C:\Temp\app_tmp.cfg
+-
+-if "%AppID%" == "" goto no_apps
+-
+-
+-echo itm="APPLICATIONS.%AppID%.Command_Lines'" typ="TEXTLIST" val="%CommandLine%;" > %tmpfile%
+-
+-"%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+-
+-del /F /Q %tmpfile% > nul 2>&1
+-:no_apps
+-
+-goto :eof
+-rem regquery 
+-rem query given reg_path from registry and set it to given variable
+-:regquery
+-	rem read registry key
+-	set _regquery=
+-	for /f "tokens=2*" %%a in ('reg query %2 /v %3 ^| %WINDIR%\SYSTEM32\find.exe %3') do set _regquery=%%b
+-	rem expand reg_expand_sz
+-	if not "%_regquery%" == "" (
+-		for /f "tokens=1 delims=?" %%a in ('echo !_regquery!') do set %1=%%a
+-	)
+-goto :eof
+-rem regquery END
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configAutologon.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configAutologon.cmd
+new file mode 100644
+index 00000000..587c4663
+--- /dev/null
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configAutologon.cmd
+@@ -0,0 +1,47 @@
++@echo off
++setlocal
++
++set LOG=%~1
++set LOGONDOMAIN=%~2
++set LOGONUSER=%~3
++set LOGONPASS=%~4
++set ADDTOADMIN=%~5
++
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configAutologon.log
++)
++
++echo Run %0 with >> "%LOG%"
++echo LOGONDOMAIN=%LOGONDOMAIN% >> "%LOG%"
++echo LOGONUSER=%LOGONUSER% >> "%LOG%"
++if "%LOGONPASS%" == "" (
++    echo LOGONPASS= >> "%LOG%"
++) else (
++    echo LOGONPASS=xxx >> "%LOG%"
++)
++echo ADDTOADMIN=%ADDTOADMIN% >> "%LOG%"
++
++rem set admin account credentials
++if not "%LOGONDOMAIN%" == "" (
++    set ADMINUSER=%LOGONDOMAIN%\%LOGONUSER%
++) else (
++    set ADMINUSER=%LOGONUSER%
++)
++
++if not "%LOGONUSER%" == "" (
++    if "%ADDTOADMIN%" == "true" (
++        echo Add %ADMINUSER% to local admin group >> "%LOG%"
++        net localgroup Administrators "%ADMINUSER%" /add >> "%LOG%" 2>&1
++    )
++    
++    echo Add %LOGONUSER% as autologon account >> "%LOG%" 
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v AutoAdminLogon /t REG_SZ /d 1
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultUserName /t REG_SZ /d "%LOGONUSER%"
++    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultPassword /t REG_SZ /d "%LOGONPASS%"
++    if not "%LOGONDOMAIN%" == "" (
++        echo Add %LOGONDOMAIN% as autologon domain >> "%LOG%" 
++        reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultDomainName /t REG_SZ /d "%LOGONDOMAIN%"
++    )
++)
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
+deleted file mode 100644
+index bf48a71f..00000000
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configConveyor.cmd
++++ /dev/null
+@@ -1,117 +0,0 @@
+-@echo off
+-
+-setlocal ENABLEDELAYEDEXPANSION
+-
+-set LOG=%~1
+-set NAME=%~2
+-set BHSHost=%~3
+-set BHSPort=%~4
+-set SICKHost=%~5
+-set SICKPort=%~6
+-
+-if "%LOG%" == "" (
+-    set LOG=nul
+-) else (
+-    set LOG=%LOG%.configConveyor.log
+-)   
+-
+-if "%NAME%" == "" set NAME=ConveyorDev
+-
+-echo Configure Kiosk Conveyor %NAME%: >> "%LOG%"
+-echo BHSHost: %BHSHost% >> "%LOG%"
+-echo BHSPort: %BHSPort% >> "%LOG%"
+-echo SICKHost: %SICKHost% >> "%LOG%"
+-echo SICKPort: %SICKPort% >> "%LOG%"
+-
+-
+-if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+-	set REG_MIPS=HKLM\SOFTWARE\Wow6432Node\Materna\MIPS
+-) else (
+-	set REG_MIPS=HKLM\SOFTWARE\Materna\MIPS
+-)
+-call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+-call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+-
+-if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! >> "%LOG%"
+-    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+-    exit /b 1
+-)
+-
+-if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+-    exit /b 1
+-)
+-
+-call :setsetupentries "%NAME%"
+- 
+-set tmpfile=%TEMP%\conv_tmp.cfg
+-
+-if "%BHSHost%" == "" goto :no_bhs
+-
+-echo itm="DEVICES.%NAME%.BHS host" typ="TEXT" val="%BHSHost%" > %tmpfile%
+-echo itm="DEVICES.%NAME%.BHS port" typ="NUMBER" val="%BHSPort%" >> %tmpfile%
+-
+-"%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+-
+-if not "%REG_BHS_HOST%" == "" (
+-    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_BHS_HOST% /t REG_SZ /d "%BHSHost%"
+-)
+-if not "%REG_BHS_PORT%" == "" (
+-    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_BHS_PORT% /t REG_SZ /d "%BHSPort%"
+-)
+-
+-del /F /Q %tmpfile% > nul 2>&1
+-:no_bhs
+-
+-if "%SICKHost%" == "" goto :no_sick
+-
+-echo itm="DEVICES.%NAME%.Sick host" typ="TEXT" val="%SICKHost%" > %tmpfile%
+-echo itm="DEVICES.%NAME%.Sick port" typ="NUMBER" val="%SICKPort%" >> %tmpfile%
+-
+-"%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+-
+-if not "%REG_SICK_HOST%" == "" (
+-    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_SICK_HOST% /t REG_SZ /d "%SICKHost%"
+-)
+-if not "%REG_SICK_PORT%" == "" (
+-    reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REG_SICK_PORT% /t REG_SZ /d "%SICKPort%"
+-)
+-    
+-del /F /Q %tmpfile% > nul 2>&1
+-:no_sick
+-
+-goto :eof
+-rem regquery 
+-rem query given reg_path from registry and set it to given variable
+-:regquery
+-	rem read registry key
+-	set _regquery=
+-	for /f "tokens=2*" %%a in ('reg query %2 /v %3 ^| %WINDIR%\SYSTEM32\find.exe %3') do set _regquery=%%b
+-	rem expand reg_expand_sz
+-	if not "%_regquery%" == "" (
+-		for /f "tokens=1 delims=?" %%a in ('echo !_regquery!') do set %1=%%a
+-	)
+-goto :eof
+-rem regquery END
+-
+-rem setsetupentries
+-rem set setup entries
+-:setsetupentries
+-    set _name=%~1
+-    
+-    if "%_name%" == "CONVSBDLGW" (
+-        set REG_BHS_HOST=BHS_CONVLGW_HOST
+-        set REG_BHS_PORT=BHS_CONVLGW_PORT
+-        set REG_SICK_HOST=SI_CONVLGW_HOST
+-        set REG_SICK_PORT=SI_CONVLGW_PORT
+-        goto :eof
+-    )
+-    if "%_name%" == "ConveyorDev" (
+-        set REG_BHS_HOST=BHS_CONVLGW_HOST
+-        set REG_BHS_PORT=BHS_CONVLGW_PORT
+-        set REG_SICK_HOST=SI_CONVLGW_HOST
+-        set REG_SICK_PORT=SI_CONVLGW_PORT
+-        goto :eof
+-    )
+-goto :eof
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
+deleted file mode 100644
+index 12b938ce..00000000
+--- a/SelfServiceCommon/Build/setup/SetKioskData/configEnvironment.cmd
++++ /dev/null
+@@ -1,66 +0,0 @@
+-@echo off
+-
+-setlocal ENABLEDELAYEDEXPANSION
+-
+-set LOG=%~1
+-set AIRPORT=%~2
+-set AREA=%~3
+-set TERMINAL=%~4
+-set KIOSKNAME=%~5
+-
+-if "%LOG%" == "" (
+-    set LOG=nul
+-) else (
+-    set LOG=%LOG%.configEnvironment.log
+-)
+-
+-echo Configure Kiosk environment: %AIRPORT%.%AREA%.%TERMINAL%.%KIOSKNAME% >> "%LOG%"
+-
+-if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
+-	set REG_MIPS=HKLM\SOFTWARE\Wow6432Node\Materna\MIPS
+-) else (
+-	set REG_MIPS=HKLM\SOFTWARE\Materna\MIPS
+-)
+-call :regquery mips_data_path "%REG_MIPS%" "Mips_PLF_Install_Data_Path"
+-call :regquery mips_path "%REG_MIPS%" "Mips_PLF_Install_Path"
+-
+-if "%mips_path%" == "" (
+-    echo Fail to find MIPS Platform installation path! >> "%LOG%"
+-    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
+-    exit /b 1
+-)
+-
+-if not exist "%mips_path%\bin\cfgvalues.exe" (
+-    echo Fail to find CfgValues application in %mips_path%! Abort. >> "%LOG%"
+-    exit /b 1
+-)
+- 
+-set tmpfile=%TEMP%\env_tmp.cfg
+-
+-echo itm="ENVIRONMENT.LEVEL.Airport_Code" typ="TEXT" val="%AIRPORT%" > %tmpfile%
+-echo itm="ENVIRONMENT.LEVEL.Area" typ="TEXT" val="%AREA%" >> %tmpfile%
+-echo itm="ENVIRONMENT.LEVEL.Terminal" typ="TEXT" val="%TERMINAL%" >> %tmpfile%
+-echo itm="ENVIRONMENT.LEVEL.Kiosk_Name" typ="TEXT" val="%KIOSKNAME%" >> %tmpfile%
+-
+-"%mips_path%\bin\cfgvalues.exe" "-write:%tmpfile%"
+-
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v KIOSKDATA_AIRPORT /t REG_SZ /d "%AIRPORT%"
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v KIOSKDATA_AREA /t REG_SZ /d "%AREA%"
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v KIOSKDATA_TERMINAL /t REG_SZ /d "%TERMINAL%"
+-reg add HKLM\SOFTWARE\Materna\MIPS\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v KIOSKDATA_KIOSK_NAME /t REG_SZ /d "%KIOSKNAME%"
+-
+-del /F /Q %tmpfile% > nul 2>&1
+-
+-goto :eof
+-rem regquery 
+-rem query given reg_path from registry and set it to given variable
+-:regquery
+-	rem read registry key
+-	set _regquery=
+-	for /f "tokens=2*" %%a in ('reg query %2 /v %3 ^| %WINDIR%\SYSTEM32\find.exe %3') do set _regquery=%%b
+-	rem expand reg_expand_sz
+-	if not "%_regquery%" == "" (
+-		for /f "tokens=1 delims=?" %%a in ('echo !_regquery!') do set %1=%%a
+-	)
+-goto :eof
+-rem regquery END
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/configPlatform.cmd b/SelfServiceCommon/Build/setup/SetKioskData/configPlatform.cmd
+new file mode 100644
+index 00000000..b49d5203
+--- /dev/null
++++ b/SelfServiceCommon/Build/setup/SetKioskData/configPlatform.cmd
+@@ -0,0 +1,92 @@
++@echo off
++
++setlocal ENABLEDELAYEDEXPANSION
++
++set LOG=%~1
++set PLFTYPE=%~2
++set ITEMNAME=%~3
++set ITEMTYPE=%~4
++set ITEMVALUE=%~5
++set REGKEY=%~6
++set CFGVALUESFLAGS=%~7
++
++
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.configPlatform.%ITEMNAME%.log
++)
++
++rem get cfgvalues path
++if "%PROCESSOR_ARCHITECTURE%" == "AMD64" (
++	set REG_SOFTWARE=HKLM\SOFTWARE\Wow6432Node\Materna
++) else (
++	set REG_SOFTWARE=HKLM\SOFTWARE\Materna
++)
++
++if "%PLFTYPE%" == "GATE" (
++    set PLF_REG_PATH=%REG_SOFTWARE%\SecureGate\cfg_components
++    set PLF_REG_KEY=installDir
++) else (
++    set PLF_REG_PATH=%REG_SOFTWARE%\MIPS
++    set PLF_REG_KEY=Mips_PLF_Install_Path
++)
++
++call :regquery plf_install_path "%PLF_REG_PATH%" "%PLF_REG_KEY%"
++
++if "%plf_install_path%" == "" (
++    echo Fail to find Platform installation path! >> "%LOG%"
++    echo Maybe the platform is not installed on this system. Abort. >> "%LOG%"
++    exit /b 1
++)
++
++set CFGVALUES=%plf_install_path%\bin\cfgvalues.exe
++
++:has_cfgvalues
++
++rem test if cfgvalues still exists
++if not exist "%CFGVALUES%" (
++    echo Fail to find CfgValues application %CFGVALUES%! Abort. >> "%LOG%"
++    exit /b 1
++)
++
++echo Configure MIPS %PLFTYPE% Platform item "%ITEMNAME%" with >> "%LOG%"
++echo Type:   %ITEMTYPE% >> "%LOG%"
++echo Value:  %ITEMVALUE% >> "%LOG%"
++echo RegKey: %REGKEY% >> "%LOG%"
++
++ 
++set tmpfile=%TEMP%\config_import_%RANDOM%_tmp.cfg
++
++echo itm="%ITEMNAME%" typ="%ITEMTYPE%" val="%ITEMVALUE%" > %tmpfile%
++
++echo Run: "%CFGVALUES%" "-write:%tmpfile%" %CFGVALUESFLAGS% >> "%LOG%"
++"%CFGVALUES%" "-write:%tmpfile%" %CFGVALUESFLAGS% >> "%LOG%" 2>&1
++
++if not "%errorlevel%" == "0" (
++    echo Fail to set item in plf configuration! Abort. >> "%LOG%"
++    exit /b 1
++)
++del /F /Q %tmpfile% > nul 2>&1
++
++rem actually the gate setup does not save it's information to the registry.
++if "%PLFTYPE%" == "KIOSK" (
++    if not "%REGKEY%" == "" (
++        echo Set value also to registry item %REGKEY% >> "%LOG%"
++        reg add %PLF_REG_PATH%\cfg_components\9527AD37-2DFD-4045-A706-F23157992BC8 /f /v %REGKEY% /t REG_SZ /d "%ITEMVALUE%"
++    )
++)
++
++goto :eof
++rem regquery 
++rem query given reg_path from registry and set it to given variable
++:regquery
++	rem read registry key
++	set _regquery=
++	for /f "tokens=2*" %%a in ('reg query %2 /v %3 ^| %WINDIR%\SYSTEM32\find.exe %3') do set _regquery=%%b
++	rem expand reg_expand_sz
++	if not "%_regquery%" == "" (
++		for /f "tokens=1 delims=?" %%a in ('echo !_regquery!') do set %1=%%a
++	)
++goto :eof
++rem regquery END
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+index eb61dd37..33ca0a73 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+@@ -6,9 +6,6 @@ set DOMAIN=%~2
+ set NAME=%~3
+ set USER=%~4
+ set OU=%~5
+-set LOGONDOMAIN=%~6
+-set LOGONUSER=%~7
+-set LOGONPASS=%~8
+ set PS=%SystemRoot%\system32\WINDOWSPOWERSHELL\V1.0\powershell.exe
+ 
+ if "%LOG%" == "" (
+@@ -23,14 +20,6 @@ echo DOMAIN=%DOMAIN% >> "%LOG%"
+ echo NAME=%NAME% >> "%LOG%"
+ echo USER=%USER% >> "%LOG%"
+ echo OU=%OU% >> "%LOG%"
+-echo LOGONDOMAIN=%LOGONDOMAIN% >> "%LOG%"
+-echo LOGONUSER=%LOGONUSER% >> "%LOG%"
+-if "%LOGONPASS%" == "" (
+-    echo LOGONPASS= >> "%LOG%"
+-) else (
+-    echo LOGONPASS=xxx >> "%LOG%"
+-)
+-
+ 
+ if "%OU%" == "" (
+     set OU_PATH=
+@@ -53,27 +42,4 @@ echo Run PS Command: "%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Crede
+ if not "%errorlevel%" == "0" (
+     echo PS-Command failed! Abort! >> "%LOG%"
+     exit /b 1
+-)
+-
+-rem set admin account credentials
+-if not "%LOGONDOMAIN%" == "" (
+-    set ADMINUSER=%LOGONDOMAIN%\%LOGONUSER%
+-) else (
+-    set ADMINUSER=%LOGONUSER%
+-)
+-
+-if not "%LOGONUSER%" == "" (
+-    echo Add %ADMINUSER% to local admin group >> "%LOG%"
+-    net localgroup Administrators "%ADMINUSER%" /add
+-    
+-    echo Add %LOGONUSER% as autologon account >> "%LOG%" 
+-    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v AutoAdminLogon /t REG_SZ /d 1
+-    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultUserName /t REG_SZ /d "%LOGONUSER%"
+-    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultPassword /t REG_SZ /d "%LOGONPASS%"
+-    if not "%LOGONDOMAIN%" == "" (
+-        echo Add %LOGONDOMAIN% as autologon domain >> "%LOG%" 
+-        reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultDomainName /t REG_SZ /d "%LOGONDOMAIN%"
+-    )
+-)
+-
+-echo All Done. >> "%LOG%"
+\ No newline at end of file
++)
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

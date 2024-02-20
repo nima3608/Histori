@@ -1,0 +1,840 @@
+From 113bea16d9a687cf1a5cad40a2bdb24ec6f0615a Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 3 Nov 2015 14:51:07 +0000
+Subject: [PATCH 0616/1000] MANTIS 0037350 extension: integration of EZ-Access
+ device for KIS kiosk
+
+added keyboard.idl
+V1.0
+
+massai_systools.lib
+V1.0.0.30
+- added mSysDeviceIO.h, mSysFindKeyboardFilter.h
+
+
+textidl.lib
+V1.0.0.12
+- added text constants for keyboard.idl
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@920 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysDeviceIO.h    |  31 +++
+ .../inc/systools/mSysFindKeyboardFilter.h     |  12 +
+ .../Interfaces/inc/textIDL/textkeyboard.h     |  23 ++
+ .../Massai/cpp/Systools/makefile.mak          |  12 +
+ .../src/TestSysFindKeyboardFilter.cpp         |  29 ++
+ .../Massai/cpp/Systools/src/local_def.cpp     |   9 +-
+ .../cpp/Systools/src/mSysDeviceIOW32.cpp      | 125 +++++++++
+ .../Systools/src/mSysFindKeyboardFilter.cpp   |  77 ++++++
+ .../cpp/Systools/src/mSysUSBDeviceW32.cpp     |   2 +-
+ .../Massai/cpp/textIDL/makefile.mak           |   1 +
+ .../Massai/cpp/textIDL/src/local_def.cpp      |   9 +-
+ .../Massai/cpp/textIDL/src/textKeyboard.cpp   | 257 ++++++++++++++++++
+ .../Massai/idl/Massai/keyboard.idl            |  61 +++++
+ .../Massai/idl/Massai/makefile.mak            |   1 +
+ 14 files changed, 644 insertions(+), 5 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
+ create mode 100644 SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+ create mode 100644 SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
+new file mode 100644
+index 00000000..02da1bb1
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysDeviceIO.h
+@@ -0,0 +1,31 @@
++// Device IO Control
++#pragma once
++
++#include <string>
++#include <stdexcept>
++#include "tools/TraceInterface.h"
++
++namespace mSysDeviceIO
++{
++  class DeviceIOException: public std::runtime_error
++  {
++    public:
++      explicit DeviceIOException(const std::string& what_arg);
++  };
++
++  class device
++  {
++    public:
++      virtual ~device();
++      virtual std::string send(unsigned int code, size_t size) = 0;
++      virtual void close() = 0;
++  };
++
++  class deviceOptions
++  {
++    public:
++      deviceOptions();
++  };
++
++  device* createDeviceControl(const std::string& name, const deviceOptions& options, MASSAI::trace::TraceInterface& trc);
++}
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h b/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
+new file mode 100644
+index 00000000..8a0d103f
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysFindKeyboardFilter.h
+@@ -0,0 +1,12 @@
++// keyboard filter helper functions
++#pragma once
++
++#include <string>
++#include "tools/TraceInterface.h"
++#include "systools/mSysUSBDevice.h"
++
++namespace mSysKeyboard
++{
++  // return keyboard filter
++  std::string getKeyboardFilter(mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc);
++}
+diff --git a/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h b/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
+new file mode 100644
+index 00000000..e24561b5
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/textIDL/textkeyboard.h
+@@ -0,0 +1,23 @@
++#pragma once
++
++#include "keyboard.h"
++#include <string>
++#include <ostream>
++
++namespace ipsKeyboard
++{
++  std::string keyScanCodeText (const ipsKeyboardIDL::keyScanCode& data);
++  std::string resultCodeText  (const ipsKeyboardIDL::resultCode& data);
++  std::string statusCodeText  (const ipsKeyboardIDL::statusCode& data);
++  std::string eventText       (const ipsKeyboardIDL::event& data);
++  std::string scanCodeListText(const ipsKeyboardIDL::scanCodeList& data);
++  std::string statusText      (const ipsKeyboardIDL::status& data);
++  std::string statusResultText(const ipsKeyboardIDL::statusResult& data);
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::resultCode& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusCode& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::event& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::scanCodeList& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::status& data);
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusResult& data);
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index b511c055..22ab46e3 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -13,6 +13,8 @@ MY_CFLAGS =             $(MY_CFLAGS_2) $(INC_INTERFACES) $(INC_BOOST) $(INC_PSAP
+ MY_LIB1 =               $(LIB_DST_SYSTOOLS)
+ 
+ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
++                        $(_OBJ)\mSysDeviceIOW32.obj \
++                        $(_OBJ)\mSysFindKeyboardFilter.obj \
+                         $(_OBJ)\matDaemonW32.obj \
+                         $(_OBJ)\matThreadW32.obj \
+                         $(_OBJ)\mEventSemW32.obj \
+@@ -166,5 +168,15 @@ MY_BIN12_LINKLIBS =     winscard.lib
+ 
+ MY_BIN12_OBJS =         $(_OBJ)\TestSysSmartCardReader.obj
+ 
++######################################################################
++
++MY_BIN13 =              $(_BIN)\TestSysFindKeyboardFilter.exe
++
++MY_BIN13_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++
++MY_BIN13_LINKLIBS =     User32.lib setupapi.lib
++
++MY_BIN13_OBJS =         $(_OBJ)\TestSysFindKeyboardFilter.obj
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
+new file mode 100644
+index 00000000..c8290864
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysFindKeyboardFilter.cpp
+@@ -0,0 +1,29 @@
++// Test mSysFindKeyboardFilter
++
++#include "systools/mSysFindKeyboardFilter.h"
++#include "tools/TraceLocal.h"
++#include <iostream>
++
++using MASSAI::trace::TraceLocal;
++
++int main(int argc, char **argv)
++{
++  TraceLocal trc("TestSysKeyboardFilter");
++  try
++  {
++    if(argc == 1)
++    {
++      std::cout << mSysKeyboard::getKeyboardFilter(mSysUSBDevice::DEV_SEARCH_PRESENT, trc);
++    }
++    else
++    {
++      std::cout << "Usage: TestSysKeyboardFilter.exe" << std::endl;
++      std::cout << "  find KeyboardFilter" << std::endl;
++    }
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 0c743de0..ac93664c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 29);
++VERSION_ID_DT(systools, 1, 0, 0, 30);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 29);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.29
++@version 1.0.0.30
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.30
++\li 03.11.2015
++\li extension SteT Mantis 0037350: integration of EZ-Access device for KIS kiosk
++- added mSysDeviceIO.h, mSysFindKeyboardFilter.h
++
+ \version 1.0.0.29
+ \li 04.10.2015
+ \li change SteT Mantis 0037349: integration of ingenico payment device for KIS kiosk
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
+new file mode 100644
+index 00000000..f0ea39fa
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysDeviceIOW32.cpp
+@@ -0,0 +1,125 @@
++// timed input/output
++
++#include "systools/mSysDeviceIO.h"
++#include "mSysErrorW32.h"
++#include <windows.h>
++
++using namespace mSysDeviceIO;
++using MASSAI::trace::TraceInterface;
++
++namespace
++{
++  enum Constans
++  {
++    READ_BUFFER_SIZE = 4096,
++  };
++
++  class deviceImpl: public device
++  {
++    public:
++      deviceImpl(const std::string& name, const deviceOptions& options, TraceInterface& trc);
++      virtual ~deviceImpl();
++      virtual std::string send(unsigned int code, size_t size);
++      virtual void close();
++
++    private:
++      TraceInterface& m_trc;
++      HANDLE m_handle;
++      std::string m_name;
++  };
++
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, const std::string& name, unsigned long errorCode);
++}
++
++namespace
++{
++  void traceLastError(TraceInterface& trc,
++    long level, const char* file, short line, const char* function,
++    const char* where, const std::string& name, unsigned long errorCode)
++  {
++    mSysError::traceLastError(trc, level, file, line, function,
++      (name + " " + where).c_str(), errorCode);
++  }
++
++  deviceImpl::deviceImpl(const std::string& name, const deviceOptions& options, TraceInterface& trc):
++    m_trc(trc),
++    m_handle(INVALID_HANDLE_VALUE),
++    m_name(name)
++  {
++    m_handle = CreateFile
++    (
++      name.c_str(),
++      GENERIC_READ | GENERIC_WRITE,
++      0,
++      0,
++      OPEN_EXISTING,
++      0,
++      0
++    );
++    if(m_handle == INVALID_HANDLE_VALUE)
++    {
++      DWORD resultCode = GetLastError();
++      traceLastError(m_trc, MajorError_HERE, "CreateFile", m_name, resultCode);
++      throw DeviceIOException(mSysError::getErrorText(resultCode));
++    }
++  }
++
++  deviceImpl::~deviceImpl()
++  {
++    close();
++  }
++
++  void deviceImpl::close()
++  {
++    if(m_handle != INVALID_HANDLE_VALUE)
++    {
++      HANDLE handle = m_handle;
++      m_handle = INVALID_HANDLE_VALUE;
++      if(!CloseHandle(handle))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseFileHandle", m_name, GetLastError());
++      }
++    }
++  }
++
++  std::string deviceImpl::send(unsigned int code, size_t size)
++  {
++    std::string result;
++    char* buffer = new char[size];
++    DWORD read = 0;
++    if(!DeviceIoControl(m_handle, code, 0, 0, buffer, size, &read, 0))
++    {
++      DWORD resultCode = GetLastError();
++      delete[] buffer;
++      traceLastError(m_trc, MajorError_HERE, "DeviceIoControl", m_name, resultCode);
++      throw DeviceIOException(mSysError::getErrorText(resultCode));
++    }
++    else
++    {
++      result = std::string(buffer, read);
++    }
++    delete[] buffer;
++    return result;
++  }
++}
++
++namespace mSysDeviceIO
++{
++  DeviceIOException::DeviceIOException(const std::string& what_arg):
++    std::runtime_error(what_arg)
++  {}
++
++  deviceOptions::deviceOptions()
++  {}
++
++  device::~device()
++  {}
++
++  device* createDeviceControl(const std::string& name, const deviceOptions& options, MASSAI::trace::TraceInterface& trc)
++  {
++    deviceImpl* result = new deviceImpl(name, options, trc);
++    return result;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+new file mode 100644
+index 00000000..7aff2061
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysFindKeyboardFilter.cpp
+@@ -0,0 +1,77 @@
++// keyboard filter helper functions
++
++#include "systools/mSysFindKeyboardFilter.h"
++#include "mSysErrorW32.h"
++#include "mSysUSBDeviceW32.h"
++#include <sstream>
++#include <iomanip>
++#include <windows.h>
++
++using MASSAI::trace::TraceInterface;
++using mSysUSBDeviceW32::Devices;
++using mSysUSBDeviceW32::DeviceData;
++using mSysUSBDevice::Search;
++
++namespace
++{
++  const GUID KBFILTER_GUID     = {0x3fb7299d, 0x6847, 0x4490, {0xb0, 0xc9, 0x99, 0xe0, 0x98, 0x6a, 0xb8, 0x86} };
++  const std::string DEVICE_ID = "{d3658391-1f71-463c-b7ea-097ceaec5271}#ipskeyboardfilter";
++
++  class FindKeyboardFilter
++  {
++    public:
++      FindKeyboardFilter(Search search, TraceInterface& trc);
++      ~FindKeyboardFilter();
++
++      std::string getDevice();
++
++    private:
++      Search m_search;
++      TraceInterface& m_trc;
++  };
++
++}
++
++namespace
++{
++  FindKeyboardFilter::FindKeyboardFilter(Search search, TraceInterface& trc):
++    m_search(search),
++    m_trc(trc)
++  {}
++
++  FindKeyboardFilter::~FindKeyboardFilter()
++  {}
++
++  std::string FindKeyboardFilter::getDevice()
++  {
++    std::string result;
++    try
++    {
++      Devices devices(KBFILTER_GUID, m_search, m_trc);
++      for(DWORD i = 0;; i++)
++      {
++        DeviceData devicedata(devices, i, KBFILTER_GUID, m_trc);
++        std::string name = devicedata.getDeviceName();
++        if(name.find(DEVICE_ID) != std::string::npos)
++        {
++          result = name;
++          m_trc.writeTrace(BasicRuntime_HERE, "device: (%s)", result.c_str());
++        }
++      }
++    }
++    catch(const mSysError::SystemError& e)
++    {
++      m_trc.writeTrace(MajorError_HERE, "Exception: (%s)(%d; %s)", e.where(), e.getErrorCode(), e.what());
++    }
++    return result;
++  }
++}
++
++namespace mSysKeyboard
++{
++  std::string getKeyboardFilter(mSysUSBDevice::Search search, MASSAI::trace::TraceInterface& trc)
++  {
++    FindKeyboardFilter find(search, trc);
++    return find.getDevice();
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+index 00dd973d..e20f3c3e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysUSBDeviceW32.cpp
+@@ -155,7 +155,7 @@ namespace mSysUSBDeviceW32
+       {
+         mSysError::traceLastError(m_trc, MajorError_HERE, "SetupDiEnumDeviceInfo", errorCode);
+       }
+-      throw SystemError("SetupDiEnumDeviceInterfaces", errorCode);
++      throw SystemError("SetupDiEnumDeviceInfo", errorCode);
+     }
+   }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/makefile.mak b/SelfServiceCommon/Massai/cpp/textIDL/makefile.mak
+index 93e54b2a..1baef730 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/textIDL/makefile.mak
+@@ -15,6 +15,7 @@ MY_CFLAGS = \
+ MY_LIB1 = $(LIB_DST_TEXTIDL)
+ 
+ MY_LIB1_OBJS = \
++    $(_OBJ)\textKeyboard.obj \
+     $(_OBJ)\textgppdev.obj \
+     $(_OBJ)\textatb2dev.obj \
+     $(_OBJ)\textidl.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
+index a6aad6a5..448cfa17 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(textIDL, 1, 0, 0, 11);
++VERSION_ID_DT(textIDL, 1, 0, 0, 12);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(textIDL, 1, 0, 0, 11);
+ 
+ \page textidl.lib Release Notes - textidl.lib
+ 
+-\version 1.0.0.11
++\version 1.0.0.12
+ 
+ \section changehistory Change history
+ 
+ textidl.lib
+ 
++\version 1.0.0.12
++\li 03.11.2015
++\li Mantis 0037350: integration of EZ-Access device for KIS kiosk
++- added text constants for keyboard.idl
++
+ \version 1.0.0.11
+ \li 10.02.2015
+ \li Mantis 0035513: BTP-Component: switch power off (OPTION45) on ERR9, out of memory
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+new file mode 100644
+index 00000000..fd8754de
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/textKeyboard.cpp
+@@ -0,0 +1,257 @@
++#include "textIDL/textKeyboard.h"
++#include "textidl.h"
++#include "corbasrvr.h"
++#include <sstream>
++
++using MASSAI::idl_text::unknown;
++
++namespace ipsKeyboard
++{
++  std::string keyScanCodeText(const ipsKeyboardIDL::keyScanCode& data)
++  {
++    switch(data)
++    {
++      case VK_LBUTTON:             return "LBUTTON";
++      case VK_RBUTTON:             return "RBUTTON";
++      case VK_CANCEL:              return "CANCEL";
++      case VK_MBUTTON:             return "MBUTTON";
++      case VK_XBUTTON1:            return "XBUTTON1";
++      case VK_XBUTTON2:            return "XBUTTON2";
++      case VK_BACK:                return "BACK";
++      case VK_TAB:                 return "TAB";
++      case VK_CLEAR:               return "CLEAR";
++      case VK_RETURN:              return "RETURN";
++      case VK_SHIFT:               return "SHIFT";
++      case VK_CONTROL:             return "CONTROL";
++      case VK_MENU:                return "MENU";
++      case VK_PAUSE:               return "PAUSE";
++      case VK_CAPITAL:             return "CAPITAL";
++      case VK_KANA:                return "KANA";
++      case VK_JUNJA:               return "JUNJA";
++      case VK_FINAL:               return "FINAL";
++      case VK_HANJA:               return "HANJA";
++      case VK_ESCAPE:              return "ESCAPE";
++      case VK_CONVERT:             return "CONVERT";
++      case VK_NONCONVERT:          return "NONCONVERT";
++      case VK_ACCEPT:              return "ACCEPT";
++      case VK_MODECHANGE:          return "MODECHANGE";
++      case VK_SPACE:               return "SPACE";
++      case VK_PRIOR:               return "PRIOR";
++      case VK_NEXT:                return "NEXT";
++      case VK_END:                 return "END";
++      case VK_HOME:                return "HOME";
++      case VK_LEFT:                return "LEFT";
++      case VK_UP:                  return "UP";
++      case VK_RIGHT:               return "RIGHT";
++      case VK_DOWN:                return "DOWN";
++      case VK_SELECT:              return "SELECT";
++      case VK_PRINT:               return "PRINT";
++      case VK_EXECUTE:             return "EXECUTE";
++      case VK_SNAPSHOT:            return "SNAPSHOT";
++      case VK_INSERT:              return "INSERT";
++      case VK_DELETE:              return "DELETE";
++      case VK_HELP:                return "HELP";
++      case VK_LWIN:                return "LWIN";
++      case VK_RWIN:                return "RWIN";
++      case VK_APPS:                return "APPS";
++      case VK_SLEEP:               return "SLEEP";
++      case VK_NUMPAD0:             return "NUMPAD0";
++      case VK_NUMPAD1:             return "NUMPAD1";
++      case VK_NUMPAD2:             return "NUMPAD2";
++      case VK_NUMPAD3:             return "NUMPAD3";
++      case VK_NUMPAD4:             return "NUMPAD4";
++      case VK_NUMPAD5:             return "NUMPAD5";
++      case VK_NUMPAD6:             return "NUMPAD6";
++      case VK_NUMPAD7:             return "NUMPAD7";
++      case VK_NUMPAD8:             return "NUMPAD8";
++      case VK_NUMPAD9:             return "NUMPAD9";
++      case VK_MULTIPLY:            return "MULTIPLY";
++      case VK_ADD:                 return "ADD";
++      case VK_SEPARATOR:           return "SEPARATOR";
++      case VK_SUBTRACT:            return "SUBTRACT";
++      case VK_DECIMAL:             return "DECIMAL";
++      case VK_DIVIDE:              return "DIVIDE";
++      case VK_F1:                  return "F1";
++      case VK_F2:                  return "F2";
++      case VK_F3:                  return "F3";
++      case VK_F4:                  return "F4";
++      case VK_F5:                  return "F5";
++      case VK_F6:                  return "F6";
++      case VK_F7:                  return "F7";
++      case VK_F8:                  return "F8";
++      case VK_F9:                  return "F9";
++      case VK_F10:                 return "F10";
++      case VK_F11:                 return "F11";
++      case VK_F12:                 return "F12";
++      case VK_F13:                 return "F13";
++      case VK_F14:                 return "F14";
++      case VK_F15:                 return "F15";
++      case VK_F16:                 return "F16";
++      case VK_F17:                 return "F17";
++      case VK_F18:                 return "F18";
++      case VK_F19:                 return "F19";
++      case VK_F20:                 return "F20";
++      case VK_F21:                 return "F21";
++      case VK_F22:                 return "F22";
++      case VK_F23:                 return "F23";
++      case VK_F24:                 return "F24";
++      case VK_NUMLOCK:             return "NUMLOCK";
++      case VK_SCROLL:              return "SCROLL";
++      case VK_LSHIFT:              return "LSHIFT";
++      case VK_RSHIFT:              return "RSHIFT";
++      case VK_LCONTROL:            return "LCONTROL";
++      case VK_RCONTROL:            return "RCONTROL";
++      case VK_LMENU:               return "LMENU";
++      case VK_RMENU:               return "RMENU";
++      case VK_BROWSER_BACK:        return "BROWSER_BACK";
++      case VK_BROWSER_FORWARD:     return "BROWSER_FORWARD";
++      case VK_BROWSER_REFRESH:     return "BROWSER_REFRESH";
++      case VK_BROWSER_STOP:        return "BROWSER_STOP";
++      case VK_BROWSER_SEARCH:      return "BROWSER_SEARCH";
++      case VK_BROWSER_FAVORITES:   return "BROWSER_FAVORITES";
++      case VK_BROWSER_HOME:        return "BROWSER_HOME";
++      case VK_VOLUME_MUTE:         return "VOLUME_MUTE";
++      case VK_VOLUME_DOWN:         return "VOLUME_DOWN";
++      case VK_VOLUME_UP:           return "VOLUME_UP";
++      case VK_MEDIA_NEXT_TRACK:    return "MEDIA_NEXT_TRACK";
++      case VK_MEDIA_PREV_TRACK:    return "MEDIA_PREV_TRACK";
++      case VK_MEDIA_STOP:          return "MEDIA_STOP";
++      case VK_MEDIA_PLAY_PAUSE:    return "MEDIA_PLAY_PAUSE";
++      case VK_LAUNCH_MAIL:         return "LAUNCH_MAIL";
++      case VK_LAUNCH_MEDIA_SELECT: return "LAUNCH_MEDIA_SELECT";
++      case VK_LAUNCH_APP1:         return "LAUNCH_APP1";
++      case VK_LAUNCH_APP2:         return "LAUNCH_APP2";
++      case VK_OEM_1:               return "OEM_1";
++      case VK_OEM_PLUS:            return "OEM_PLUS";
++      case VK_OEM_COMMA:           return "OEM_COMMA";
++      case VK_OEM_MINUS:           return "OEM_MINUS";
++      case VK_OEM_PERIOD:          return "OEM_PERIOD";
++      case VK_OEM_2:               return "OEM_2";
++      case VK_OEM_3:               return "OEM_3";
++      case VK_OEM_4:               return "OEM_4";
++      case VK_OEM_5:               return "OEM_5";
++      case VK_OEM_6:               return "OEM_6";
++      case VK_OEM_7:               return "OEM_7";
++      case VK_OEM_8:               return "OEM_8";
++      case VK_OEM_102:             return "OEM_102";
++      case VK_PROCESSKEY:          return "PROCESSKEY";
++      case VK_PACKET:              return "PACKET";
++      case VK_ATTN:                return "ATTN";
++      case VK_CRSEL:               return "CRSEL";
++      case VK_EXSEL:               return "EXSEL";
++      case VK_EREOF:               return "EREOF";
++      case VK_PLAY:                return "PLAY";
++      case VK_ZOOM:                return "ZOOM";
++      case VK_NONAME:              return "NONAME";
++      case VK_PA1:                 return "PA1";
++      case VK_OEM_CLEAR:           return "OEM_CLEAR";
++      default:                     return unknown("keyScanCode", data);
++    }
++  }
++
++  std::string resultCodeText(const ipsKeyboardIDL::resultCode& data)
++  {
++    switch(data)
++    {
++      case ipsKeyboardIDL::RC_OK:       return "OK";
++      case ipsKeyboardIDL::RC_LISTENER: return "LISTENER";
++      default:                          return unknown("resultCode", data);
++    }
++  }
++
++  std::string statusCodeText(const ipsKeyboardIDL::statusCode& data)
++  {
++    switch(data)
++    {
++      case ipsKeyboardIDL::STATUS_OK:    return "OK";
++      case ipsKeyboardIDL::STATUS_ERROR: return "ERROR";
++      default:                           return unknown("statusCode", data);
++    }
++  }
++
++  std::string eventText(const ipsKeyboardIDL::event& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
++  std::string scanCodeListText(const ipsKeyboardIDL::scanCodeList& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
++  std::string statusText(const ipsKeyboardIDL::status& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
++  std::string statusResultText(const ipsKeyboardIDL::statusResult& data)
++  {
++    std::ostringstream out;
++    out << data;
++    return out.str();
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::resultCode& data)
++  {
++    out << resultCodeText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusCode& data)
++  {
++    out << statusCodeText(data);
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::event& data)
++  {
++    out << keyScanCodeText(data.scanCode);
++    if(data.keyUp)
++    {
++      out << " pressed";
++    }
++    if(data.keyDown)
++    {
++      out << " released";
++    }
++    if(data.extension0)
++    {
++      out << " extension 0";
++    }
++    if(data.extension1)
++    {
++      out << " extension 1";
++    }
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::scanCodeList& data)
++  {
++    out << "{";
++    for(unsigned int i= 0; i < data.length(); i++)
++    {
++      out << keyScanCodeText(data[i]) << " ";
++    }
++    out << "}";
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::status& data)
++  {
++    out << data.statusCode;
++    return out;
++  }
++
++  std::ostream& operator<<(std::ostream& out, const ipsKeyboardIDL::statusResult& data)
++  {
++    out << "result: (" << data.resultCode << ")";
++    out << "status: (" << data.status << ")";
++    return out;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/idl/Massai/keyboard.idl b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+new file mode 100644
+index 00000000..7389275b
+--- /dev/null
++++ b/SelfServiceCommon/Massai/idl/Massai/keyboard.idl
+@@ -0,0 +1,61 @@
++//  interface definition for keyboard/keypad
++#ifndef KEYBOARD_IDL
++#define KEYBOARD_IDL
++
++#pragma prefix "massai.materna.com"
++
++module ipsKeyboardIDL
++{
++  const string interface_version = "1.0";
++          
++  typedef long keyScanCode;
++
++  enum resultCode
++  {
++    RC_OK,
++    RC_LISTENER
++  };
++  
++  enum statusCode
++  {
++    STATUS_OK,
++    STATUS_ERROR
++  };
++
++  struct event
++  {
++    keyScanCode scanCode;
++    boolean keyUp;
++    boolean keyDown;
++    boolean extension0;
++    boolean extension1;
++  };
++  
++  typedef sequence<keyScanCode> scanCodeList;
++  
++  struct status
++  {
++    statusCode statusCode;
++  };
++  
++  struct statusResult
++  {
++    resultCode resultCode;
++    status status;
++  };
++  
++  interface keyboardListener
++  {
++    void statusIndication(in status status);
++    void eventIndication(in event event);
++  };
++
++  interface keyboardService
++  {
++    statusResult getStatus();
++    void setListener(in scanCodeList scanCodes, in keyboardListener listener);
++    void rmvListener(in keyboardListener listener);    
++  };  
++};
++
++#endif
+diff --git a/SelfServiceCommon/Massai/idl/Massai/makefile.mak b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+index 195c1ece..11a9bd22 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/makefile.mak
++++ b/SelfServiceCommon/Massai/idl/Massai/makefile.mak
+@@ -10,6 +10,7 @@ MY_IDLFLAGS = \
+     $(TAO_DEFINES) -DUSE_TAO_ORB_IDL
+ 
+ MY_GEN_CPPS = \
++    $(_GEN)\keyboard.cpp \
+     $(_GEN)\appcontrol.cpp \
+     $(_GEN)\cfgmgr.cpp \
+     $(_GEN)\controller.cpp \
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,437 @@
+From 85f8f7b451cbfdedb9fa26a471566145707c4b99 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 18 Apr 2012 18:40:35 +0000
+Subject: [PATCH 084/462] Mantis 0023014: Build: create debug version of
+ platform
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@113 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             |   7 +-
+ SelfServiceBuild/Build/scripts/setenv.bat     | 330 ++++++++++++------
+ 2 files changed, 228 insertions(+), 109 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index 871dec3..cdcb17e 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -180,9 +180,6 @@ DEP_MAKEOFILES   = make.ofiles
+ DEP_MAKEDEP      = make.dep
+ MKFILES          = $(BUILDDIR)\mkfiles.pl
+ MKDEP            = $(BUILDDIR)\mkdep.pl
+-#MKDEPFLAGS       = -op$(_OBJ) -oeobj -sds $(_INC) $(_GEN) \
+-#                   $(COMMONROOT)\Interfaces\inc \
+-#                   $(PLATFORMROOT)\Interfaces\inc
+ MKDEPFLAGS       = -op$(_OBJ) -oeobj -rp$(_OBJ) -reres -xi$(DIR_GLOBALS) -xi$(DIR_GLOBALSLIB)
+ 
+ # Damit ggf. die Dummy-Datei fuer die in "makefile.rules.mak"
+@@ -215,7 +212,11 @@ GRACEFULLCRASH   = -INCLUDE:_gracefullycrash $(_LIB)\gracefullycrash.lib
+ STDDEFINES       = -DWIN32 -DWINNT $(TAO_DEFINES) -DMSYSTHREAD_USE_SEH
+ 
+ !if "$(VC_COMPILER_VERSION)" == "VC10"
++!if "$(PLATFORM_DEBUG)" == "TRUE"
++STDCFLAGS        = -nologo -c -MDd -W3 -GR -EHsc -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
++!else
+ STDCFLAGS        = -nologo -c -MD -W3 -GR -EHsc -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
++!endif
+ STDDEFINES       = $(STDDEFINES) $(BOOST_DEFINES) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NON_CONFORMING_SWPRINTFS -D_COMPILER_VERSION_VC10
+ # to decide optimization level 
+ MY_CFLAGS_1 	  = -GR -Gy 
+diff --git a/SelfServiceBuild/Build/scripts/setenv.bat b/SelfServiceBuild/Build/scripts/setenv.bat
+index 2d9e94d..5433b56 100644
+--- a/SelfServiceBuild/Build/scripts/setenv.bat
++++ b/SelfServiceBuild/Build/scripts/setenv.bat
+@@ -44,66 +44,144 @@ set PLATFORMROOT=%MASSAIROOT%\SelfServicePlatform
+ if  "%DIR_GLOBALS%_" == "_" set DIR_GLOBALS=%MASSAIROOT%\Globals
+ if  "%DIR_GLOBALSLIB%_" == "_" set DIR_GLOBALSLIB=%MASSAIROOT%\GlobalsLib
+ 
++rem ######################################################################
++rem # VC6/VC10 differentiation
++rem ######################################################################
++
++if "%VC_COMPILER_VERSION%"=="VC10" (
++  set VC_COMPILER_VC10=10
++  set USE_ACE_TAO=2.0
++  set USE_MFC=NEW
++  set USE_BOOST=1.44
++  set USE_FLEX=2.5.4
++  set USE_FREEIMAGE=3.9.3_VC10
++  set USE_SPRIT=BOOST
++  set USE_TINYXML=2.6.2-STL
++  set USE_XERCES=3.1.1
++  set USE_EXTERNAL_THREADSAFE_STRING=FALSE
++  if "%PLATFORM_DEBUG%"=="TRUE" (
++    set USE_BOOST=1.44_DEBUG
++    set USE_MFC=NEW_DEBUG
++  )
++) else (
++  set VC_COMPILER_VC6=6
++  set USE_ACE_TAO=OLD
++  set USE_MFC=OLD
++  set USE_BOOST=1.33
++  set USE_FLEX=1.6
++  set USE_FREEIMAGE=3.9.3-STL-Threadsafe
++  set USE_SPRIT=1.6.1
++  set USE_TINYXML=2.3.4-STL-Threadsafe
++  set USE_XERCES=1.5.1
++  set USE_EXTERNAL_THREADSAFE_STRING=TRUE
++)
++
++rem ######################################################################
++rem # ThirdParty-Software
++rem ######################################################################
++
++
+ rem ######################################################################
+ rem # ACE/TAO
+ rem ######################################################################
+ 
+-if "%VC_COMPILER_VERSION%"=="VC10" goto USE_ACE_TAO_2_0
+-set VC_COMPILER_VC6=6
+-set TAO_VERSION=1.4.0
+-rem Sonderfall: ACE/TAO 1.2.0 kann per Parameter definiert werden.
+-if "%1" == "120" set TAO_VERSION=1.2.0
+-set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%TAO_VERSION%\win32
+-set TAO_ROOT=%ACE_ROOT%
+-goto END_USE_ACE_TAO_2_0
+-:USE_ACE_TAO_2_0
+-set VC_COMPILER_VC10=10
+-set TAO_VERSION=2.0.0
+-set ACE_VERSION=6.1.1
+-set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%ACE_VERSION%\ACE_wrappers
+-set TAO_ROOT=%ACE_ROOT%\TAO
+-:END_USE_ACE_TAO_2_0
++if "%USE_ACE_TAO%"=="OLD" (
++  goto USE_ACE_TAO_OLD
++) else if "%USE_ACE_TAO%"=="2.0" (
++  goto USE_ACE_TAO_2.0
++) else (
++  echo No valid ACE/TAO version selected: %USE_ACE_TAO%
++  goto END_USE_ACE_TAO
++)
++:USE_ACE_TAO_OLD
++  set TAO_VERSION=1.4.0
++  rem Sonderfall: ACE/TAO 1.2.0 kann per Parameter definiert werden.
++  if "%1" == "120" set TAO_VERSION=1.2.0
++  set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%TAO_VERSION%\win32
++  set TAO_ROOT=%ACE_ROOT%
++goto END_USE_ACE_TAO
++:USE_ACE_TAO_2.0
++  set TAO_VERSION=2.0.0
++  set ACE_VERSION=6.1.1
++  set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%ACE_VERSION%\ACE_wrappers
++  set TAO_ROOT=%ACE_ROOT%\TAO
++goto END_USE_ACE_TAO
++:END_USE_ACE_TAO
+ 
+ 
+ rem ######################################################################
+-rem # ThirdParty-Software
++rem # MFC
+ rem ######################################################################
+ 
+ set LIB_ATL=
+-if NOT "%VC_COMPILER_VERSION%"=="VC10" goto OLD_MFC
+-if NOT "%MFC_ROOT%"=="" goto NO_STANDARD_MFC_ROOT
+-set MFC_ROOT=c:\WinDDK\7600.16385.1
+-:NO_STANDARD_MFC_ROOT
+-set DIR_MFC=%MFC_ROOT%\lib\Mfc\i386
+-set LIB_MFC=%DIR_MFC%\mfcs42.lib %DIR_MFC%\mfc42.lib
+-set LIB_ATL=%MFC_ROOT%\lib\ATL\i386\atls.lib %MFC_ROOT%\lib\ATL\i386\atlthunk.lib
+-:OLD_MFC
++
++if "%USE_MFC%"=="NEW" (
++  goto USE_MFC_NEW
++) else if "%USE_MFC%"=="NEW_DEBUG" (
++  goto USE_MFC_NEW_DEBUG
++) else (
++  goto END_USE_MFC
++)
++:USE_MFC_NEW
++  if "%MFC_ROOT%"=="" set MFC_ROOT=c:\WinDDK\7600.16385.1
++  set DIR_MFC=%MFC_ROOT%\lib\Mfc\i386
++  set LIB_MFC=%DIR_MFC%\mfcs42.lib %DIR_MFC%\mfc42.lib
++  set LIB_ATL=%MFC_ROOT%\lib\ATL\i386\atls.lib %MFC_ROOT%\lib\ATL\i386\atlthunk.lib
++goto END_USE_MFC
++:USE_MFC_NEW_DEBUG
++  if "%MFC_ROOT%"=="" set MFC_ROOT=c:\WinDDK\7600.16385.1
++  set DIR_MFC=%MFC_ROOT%\lib\Mfc\i386
++  set LIB_MFC=%DIR_MFC%\mfcs42d.lib %DIR_MFC%\mfc42d.lib
++  set LIB_ATL=%MFC_ROOT%\lib\ATL\i386\atls.lib %MFC_ROOT%\lib\ATL\i386\atlthunk.lib
++goto END_USE_MFC
++:END_USE_MFC
+ 
+ set DIR_AUTH=%DIR_GLOBALSLIB%\authenticator\0.9.9.9\win32
+ set INC_AUTH=-I%DIR_AUTH%\include
+ set LIB_AUTH=%DIR_AUTH%\lib\au_sdk.lib
+ 
+-if "%VC_COMPILER_VERSION%"=="VC10" goto USE_BOOST_1_44
+-set DIR_BOOST=%DIR_GLOBALSLIB%\boost\1.31.0-STL-Threadsafe\win32
+-set INC_BOOST=-I%DIR_BOOST%\include
+-set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc6-mt-1_31.lib %DIR_BOOST%\lib\libboost_filesystem-vc6-mt-1_31.lib
+-
+-set DIR_REGEX=%DIR_BOOST%
+-set INC_REGEX=-I%DIR_REGEX%\include
+-set LIB_REGEX=%DIR_REGEX%\lib\libboost_regex-vc6-mt-1_31.lib
+ 
+-goto END_USE_BOOST_1_44
+-:USE_BOOST_1_44
+-set BOOST_VERSION=1.44
+-set DIR_BOOST=%DIR_GLOBALSLIB%\boost\boost_1_44
+-set INC_BOOST=-I%DIR_BOOST%
+-set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_filesystem-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_system-vc100-mt-1_44.lib
+-
+-set DIR_REGEX=%DIR_BOOST%
+-set INC_REGEX=-I%DIR_REGEX%
+-set LIB_REGEX=%DIR_REGEX%\lib\libboost_regex-vc100-mt-1_44.lib
+-
+-:END_USE_BOOST_1_44
++if "%USE_BOOST%"=="1.33" (
++  goto USE_BOOST_1.33
++) else if "%USE_BOOST%"=="1.44" (
++  goto USE_BOOST_1.44
++) else if "%USE_BOOST%"=="1.44_DEBUG" (
++  goto USE_BOOST_1.44_DEBUG
++) else (
++  echo No valid Boost version selected: %USE_BOOST%
++  goto END_USE_BOOST
++)
++:USE_BOOST_1.33
++  set BOOST_VERSION=1.33
++  set DIR_BOOST=%DIR_GLOBALSLIB%\boost\1.31.0-STL-Threadsafe\win32
++  set INC_BOOST=-I%DIR_BOOST%\include
++  set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc6-mt-1_31.lib %DIR_BOOST%\lib\libboost_filesystem-vc6-mt-1_31.lib
++
++  set DIR_REGEX=%DIR_BOOST%
++  set INC_REGEX=-I%DIR_REGEX%\include
++  set LIB_REGEX=%DIR_REGEX%\lib\libboost_regex-vc6-mt-1_31.lib
++goto END_USE_BOOST
++:USE_BOOST_1.44
++  set BOOST_VERSION=1.44
++  set DIR_BOOST=%DIR_GLOBALSLIB%\boost\boost_1_44
++  set INC_BOOST=-I%DIR_BOOST%
++  set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_filesystem-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_system-vc100-mt-1_44.lib
++
++  set DIR_REGEX=%DIR_BOOST%
++  set INC_REGEX=-I%DIR_REGEX%
++  set LIB_REGEX=%DIR_REGEX%\lib\libboost_regex-vc100-mt-1_44.lib
++goto END_USE_BOOST
++:USE_BOOST_1.44_DEBUG
++  set BOOST_VERSION=1.44
++  set DIR_BOOST=%DIR_GLOBALSLIB%\boost\boost_1_44
++  set INC_BOOST=-I%DIR_BOOST%
++  set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc100-mt-gd-1_44.lib %DIR_BOOST%\lib\libboost_filesystem-vc100-mt-gd-1_44.lib %DIR_BOOST%\lib\libboost_system-vc100-mt-gd-1_44.lib
++
++  set DIR_REGEX=%DIR_BOOST%
++  set INC_REGEX=-I%DIR_REGEX%
++  set LIB_REGEX=%DIR_REGEX%\lib\libboost_regex-vc100-mt-gd-1_44.lib
++goto END_USE_BOOST
++:END_USE_BOOST
+ 
+ rem set DIR_REGEX=%DIR_GLOBALSLIB%\regex\0.9.9.9\win32
+ rem set INC_REGEX=-I%DIR_REGEX%\include
+@@ -118,34 +196,52 @@ set DIR_DIRECTORMX=%DIR_GLOBALSLIB%\dmxdk\0.9.9.9\win32
+ set INC_DIRECTORMX=-I%DIR_DIRECTORMX%\include
+ set LIB_DIRECTORMX=%DIR_DIRECTORMX%\lib\win\xsupport.lib
+ 
+-if NOT "%VC_COMPILER_VERSION%"=="VC10" goto USE_OLD_FLEX
+-set DIR_FLEX=%DIR_GLOBALSLIB%\flexbison\2.5.4\win32
+-set INC_FLEX=-I%DIR_FLEX%\include
+-set LIB_FLEX=%DIR_FLEX%\lib\libfl.a
+-set FLEX=%DIR_FLEX%\bin\flex.cmd
+-goto END_USE_OLD_FLEX
+-:USE_OLD_FLEX
+-set DIR_FLEX=%DIR_GLOBALSLIB%\flexbison\1.6\win32
+-rem set INC_FLEX=-I%DIR_FLEX%\include    not used because there is a changed flexlexer.h in SelfServiceCommon\Interfaces\inc\text\FlexLexer.h
+-set LIB_FLEX=%DIR_FLEX%\lib\libflex.lib
+-set FLEX=%DIR_FLEX%\bin\flex.exe
+-:END_USE_OLD_FLEX
++if "%USE_FLEX%"=="2.5.4" (
++  goto USE_FLEX_2.5.4
++) else if "%USE_FLEX%"=="1.6" (
++  goto USE_FLEX_1.6
++) else (
++  echo No valid Flex version selected: %USE_FLEX%
++  goto END_USE_FLEX
++)
++:USE_FLEX_2.5.4
++  set DIR_FLEX=%DIR_GLOBALSLIB%\flexbison\2.5.4\win32
++  set INC_FLEX=-I%DIR_FLEX%\include
++  set LIB_FLEX=%DIR_FLEX%\lib\libfl.a
++  set FLEX=%DIR_FLEX%\bin\flex.cmd
++goto END_USE_FLEX
++:USE_FLEX_1.6
++  set DIR_FLEX=%DIR_GLOBALSLIB%\flexbison\1.6\win32
++  rem set INC_FLEX=-I%DIR_FLEX%\include    not used because there is a changed flexlexer.h in SelfServiceCommon\Interfaces\inc\text\FlexLexer.h
++  set LIB_FLEX=%DIR_FLEX%\lib\libflex.lib
++  set FLEX=%DIR_FLEX%\bin\flex.exe
++goto END_USE_FLEX
++:END_USE_FLEX
+ 
+ set DIR_FLTK=%DIR_GLOBALSLIB%\fltk\1.3.0\win32
+ set LIB_FLTK=%DIR_FLTK%\lib\fltkd.lib
+ 
+-if NOT "%VC_COMPILER_VERSION%"=="VC10" goto USE_THREADSAFE_FREEIMAGE
+-set DIR_FREEIMAGE=%DIR_GLOBALSLIB%\freeimage\3.9.3_VC10\win32
+-set INC_FREEIMAGE=-I%DIR_FREEIMAGE%\include
+-set LIB_FREEIMAGE=%DIR_FREEIMAGE%\lib\freeimage.lib
+-set LIB_FREEIMAGES=%DIR_FREEIMAGE%\lib\freeimage.lib
+-goto END_USE_THREADSAFE_FREEIMAGE
+-:USE_THREADSAFE_FREEIMAGE
+-set DIR_FREEIMAGE=%DIR_GLOBALSLIB%\freeimage\3.9.3-STL-Threadsafe\win32
+-set INC_FREEIMAGE=-I%DIR_FREEIMAGE%\include
+-set LIB_FREEIMAGE=%DIR_FREEIMAGE%\lib\freeimage.lib
+-set LIB_FREEIMAGES=%DIR_FREEIMAGE%\lib\freeimages.lib
+-:END_USE_THREADSAFE_FREEIMAGE
++if "%USE_FREEIMAGE%"=="3.9.3_VC10" (
++  goto USE_FREEIMAGE_3.9.3_VC10
++) else if "%USE_FREEIMAGE%"=="3.9.3-STL-Threadsafe" (
++  goto USE_FREEIMAGE_3.9.3-STL-Threadsafe
++) else (
++  echo No valid FreeImage version selected: %USE_FREEIMAGE%
++  goto END_USE_FREEIMAGE
++)
++:USE_FREEIMAGE_3.9.3_VC10
++  set DIR_FREEIMAGE=%DIR_GLOBALSLIB%\freeimage\3.9.3_VC10\win32
++  set INC_FREEIMAGE=-I%DIR_FREEIMAGE%\include
++  set LIB_FREEIMAGE=%DIR_FREEIMAGE%\lib\freeimage.lib
++  set LIB_FREEIMAGES=%DIR_FREEIMAGE%\lib\freeimage.lib
++goto END_USE_FREEIMAGE
++:USE_FREEIMAGE_3.9.3-STL-Threadsafe
++  set DIR_FREEIMAGE=%DIR_GLOBALSLIB%\freeimage\3.9.3-STL-Threadsafe\win32
++  set INC_FREEIMAGE=-I%DIR_FREEIMAGE%\include
++  set LIB_FREEIMAGE=%DIR_FREEIMAGE%\lib\freeimage.lib
++  set LIB_FREEIMAGES=%DIR_FREEIMAGE%\lib\freeimages.lib
++goto END_USE_FREEIMAGE
++:END_USE_FREEIMAGE
+ 
+ set DIR_GSOAP=%DIR_GLOBALSLIB%\gsoap\2.7.8\win32
+ set WSDLCOMP=%DIR_GSOAP%\bin\wsdl2h.exe
+@@ -179,45 +275,69 @@ set LIB_QTSDK=%DIR_QTSDK%\libraries\qtmlclient.lib
+ set DIR_SED=%DIR_GLOBALSLIB%\sed\0.9.9.9\win32
+ set SED=%DIR_SED%\bin\sed.exe
+ 
+-if "%VC_COMPILER_VERSION%"=="VC10" goto USE_BOOST_SPIRIT
+-set DIR_SPIRIT=%DIR_GLOBALSLIB%\spirit\1.6.1
+-set INC_SPIRIT=-I%DIR_SPIRIT%\include
+-goto END_USE_BOOST_SPIRIT
+-:USE_BOOST_SPIRIT
+-set DIR_SPIRIT=%DIR_BOOST%\boost\spirit
+-set INC_SPIRIT=-I%DIR_SPIRIT%\include -I%DIR_SPIRIT%
+-:END_USE_BOOST_SPIRIT
+-
+-if "%VC_COMPILER_VERSION%"=="VC10" goto USE_NEW_TINYXML
+-rem set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.3.1\win32
+-rem set INC_TINYXML=-I%DIR_TINYXML%\inc
+-rem set LIB_TINYXML=%DIR_TINYXML%\lib\tinyxml.lib
+-rem goto END_USE_NEW_TINYXML
+-set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.3.4-STL-Threadsafe\win32
+-set INC_TINYXML=-I%DIR_GLOBALSLIB%\tinyxml\2.3.4\win32\inc
+-set LIB_TINYXML=%DIR_TINYXML%\lib\tinyxml.lib
+-set LIB_TINYXMLSTL=%DIR_TINYXML%\lib\tinyxml_STL.lib
+-goto END_USE_NEW_TINYXML
+-:USE_NEW_TINYXML
+-set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.6.2-STL\win32
+-set INC_TINYXML=-I%DIR_TINYXML%\inc
+-set LIB_TINYXML=%DIR_TINYXML%\lib\tinyxml.lib
+-set LIB_TINYXMLSTL=%DIR_TINYXML%\lib\tinyxmlSTL.lib
+-:END_USE_NEW_TINYXML
++if "%USE_SPRIT%"=="1.6.1" (
++  goto USE_SPRIT_1.6.1
++) else if "%USE_SPRIT%"=="BOOST" (
++  goto USE_SPRIT_BOOST
++) else (
++  goto END_USE_SPIRIT
++)
++:USE_SPRIT_1.6.1
++  set DIR_SPIRIT=%DIR_GLOBALSLIB%\spirit\1.6.1
++  set INC_SPIRIT=-I%DIR_SPIRIT%\include
++goto END_USE_SPIRIT
++:USE_SPRIT_BOOST
++  set DIR_SPIRIT=%DIR_BOOST%\boost\spirit
++  set INC_SPIRIT=-I%DIR_SPIRIT%\include -I%DIR_SPIRIT%
++goto END_USE_SPIRIT
++:END_USE_SPIRIT
++
++if "%USE_TINYXML%"=="2.3.4-STL-Threadsafe" (
++  goto USE_TINYXML_2.3.4-STL-Threadsafe
++) else if "%USE_TINYXML%"=="2.6.2-STL" (
++  goto USE_TINYXML_2.6.2-STL
++) else (
++  echo No valid Tiny XML version selected: %USE_TINYXML%
++  goto END_USE_TINYXML
++)
++:USE_TINYXML_2.3.4-STL-Threadsafe
++  set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.3.4-STL-Threadsafe\win32
++  set INC_TINYXML=-I%DIR_GLOBALSLIB%\tinyxml\2.3.4\win32\inc
++  set LIB_TINYXML=%DIR_TINYXML%\lib\tinyxml.lib
++  set LIB_TINYXMLSTL=%DIR_TINYXML%\lib\tinyxml_STL.lib
++goto END_USE_TINYXML
++:USE_TINYXML_2.6.2-STL
++  set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.6.2-STL\win32
++  set INC_TINYXML=-I%DIR_TINYXML%\inc
++  set LIB_TINYXML=%DIR_TINYXML%\lib\tinyxml.lib
++  set LIB_TINYXMLSTL=%DIR_TINYXML%\lib\tinyxmlSTL.lib
++goto END_USE_TINYXML
++:END_USE_TINYXML
+ 
+ set DIR_WEBSPHERE=%DIR_GLOBALSLIB%\websphere\5.3\win32
+ set INC_WEBSPHERE=-I%DIR_WEBSPHERE%\include\c -I%DIR_WEBSPHERE%\include\cpp
+ set LIB_WEBSPHERE=%DIR_WEBSPHERE%\lib\imqb23in.lib %DIR_WEBSPHERE%\lib\imqb23vn.lib %DIR_WEBSPHERE%\lib\imqc23in.lib %DIR_WEBSPHERE%\lib\imqc23vn.lib %DIR_WEBSPHERE%\lib\imqs23in.lib %DIR_WEBSPHERE%\lib\imqs23vn.lib %DIR_WEBSPHERE%\lib\imqx23vn.lib
+ 
+-if "%VC_COMPILER_VERSION%"=="VC10" goto USE_XERCES_3
+-set DIR_XERCES=%DIR_GLOBALSLIB%\xerces\1.5.1\win32
+-set LIB_XERCES=%DIR_XERCES%\lib\xerces-c_1.lib
++if "%USE_XERCES%"=="1.5.1" (
++  goto USE_XERCES_1.5.1
++) else if "%USE_XERCES%"=="3.1.1" (
++  goto USE_XERCES_3.1.1
++) else (
++  echo No valid Xerces version selected: %USE_XERCES%
++  goto END_USE_XERCES
++)
++
++:USE_XERCES_1.5.1
++  set DIR_XERCES=%DIR_GLOBALSLIB%\xerces\1.5.1\win32
++  set LIB_XERCES=%DIR_XERCES%\lib\xerces-c_1.lib
++  set INC_XERCES=-I%DIR_XERCES%\include
++goto END_USE_XERCES
++:USE_XERCES_3.1.1
++  set DIR_XERCES=%DIR_GLOBALSLIB%\xerces\3.1.1\win32_vc10
++  set LIB_XERCES=%DIR_XERCES%\lib\xerces-c_3.lib
++  set INC_XERCES=-I%DIR_XERCES%\include
+ goto END_USE_XERCES
+-:USE_XERCES_3
+-set DIR_XERCES=%DIR_GLOBALSLIB%\xerces\3.1.1\win32_vc10
+-set LIB_XERCES=%DIR_XERCES%\lib\xerces-c_3.lib
+ :END_USE_XERCES
+-set INC_XERCES=-I%DIR_XERCES%\include
+ 
+ set DIR_ZLIB=%DIR_GLOBALSLIB%\zlib\1.1.3\win32
+ set INC_ZLIB=-I%DIR_ZLIB%\include
+@@ -301,9 +421,9 @@ set INC_ABLS_MASSAI_IDL=-I%ABLSROOT%\Massai\idl\Massai
+ set INC_COMMON_BILLING=-I%COMMONROOT%\Massai\cpp\BillingService\inc
+ set INC_COMMON_MASSAI_IDL=-I%COMMONROOT%\Massai\idl\Massai
+ set INC_COMMON_INTER=-I%COMMONROOT%\Interfaces\inc -I%COMMONROOT%\Interfaces\generic
+-if "%VC_COMPILER_VERSION%"=="VC10" goto DONT_USE_EXTERNAL_THREADSAFE_STRING
+-set INC_COMMON_INTER=-I%COMMONROOT%\Interfaces\inc\string_threadsafe %INC_COMMON_INTER%
+-:DONT_USE_EXTERNAL_THREADSAFE_STRING
++if "%USE_EXTERNAL_THREADSAFE_STRING%"=="TRUE" (
++  set INC_COMMON_INTER=-I%COMMONROOT%\Interfaces\inc\string_threadsafe %INC_COMMON_INTER%
++)
+ set INC_HOSTIF_MSHOSTIF=-I%HOSTIFROOT%\Services\cpp\MSHostIF\inc
+ set INC_PLATFORM_INTER=-I%PLATFORMROOT%\Interfaces\inc
+ set INC_CUSS_INTER=-I%CUSSROOT%\Interfaces\inc
+@@ -325,9 +445,7 @@ rem ######################################################################
+ 
+ set BUILDDIR=%BUILDROOT%\Build\scripts
+ set PATH=%TAO_ROOT%\bin;%DIR_XERCES%\bin;%PATH%
+-if NOT "%TAO_VERSION%"=="2.0.0" goto END_ACE_TAO_2_0_MORE_PATHS
+-set PATH=%ACE_ROOT%\bin;%ACE_ROOT%\lib;%PATH%
+-:END_ACE_TAO_2_0_MORE_PATHS
++if "%TAO_VERSION%"=="2.0.0" set PATH=%ACE_ROOT%\bin;%ACE_ROOT%\lib;%PATH%
+ set PATH=%_BIN%;%_DLL%;%BUILDDIR%;%PATH%
+ set PATH=%BUILDROOT%\Build\cygwin\bin;%PATH%
+ 
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,215 @@
+From cc92d3b1195b0b5fa47861efbec124e986cc71f7 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 17 Mar 2017 15:25:53 +0000
+Subject: [PATCH 0832/1077] MANTIS 45224 massaiCfgXB.exe version 1.7.1 - MANTIS
+ 45224: Setinitial of selections - Interpret meta data, when reading selection
+ values.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1175 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++--
+ .../cpp/CfgXMgrB/inc/cfgValueSelection.hpp    | 11 +-----
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 12 +++++--
+ .../cpp/CfgXMgrB/src/cfgMetaSelection.cpp     | 17 +++++++--
+ .../cpp/CfgXMgrB/src/cfgValueSelection.cpp    | 36 +++++--------------
+ 5 files changed, 45 insertions(+), 44 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 89870a76..890b41ae 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -514,8 +514,17 @@
+ //! @par     Change:
+ //! - MANTIS 44417: Config process does not handle Windows reboot ...
+ //! - Use new method setShutdownHook() to control termination.
+-#define FILE_VER_BIN 1,7,0,0
+-#define FILE_VER_DTS "1.7.0.0"
++// #define FILE_VER_BIN 1,7,0,0
++// #define FILE_VER_DTS "1.7.0.0"
++//
++//! @version 1.7.1
++//! @date    17.03.2017
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 45224: Setinitial of selections
++//! - Interpret meta data, when reading selection values.
++#define FILE_VER_BIN 1,7,1,0
++#define FILE_VER_DTS "1.7.1.0"
+ //
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueSelection.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueSelection.hpp
+index 5ad04256..2a07463f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueSelection.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgValueSelection.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2017 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -79,15 +79,6 @@ public:
+    **/
+    explicit cfgValueSelection( cfgType_Selection_Index NdxValue );
+ 
+-   /**
+-    *
+-    * Constructor.
+-    *
+-    * @param NdxValue:  The (flat) initial value.
+-    *
+-   **/
+-   explicit cfgValueSelection( cfgFlatZ const & NdxValue );
+-
+    /**
+     *
+     * Constructor.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 37663f0b..0539ea77 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -496,9 +496,17 @@
+ //! - MANTIS 44373: Config-error files format
+ //! - The config files were written in "cooked" mode. This lead
+ //!   to additional newline characters. Now they are written "binary".
+-#define FILE_VER_BIN 1,6,5,0
+-#define FILE_VER_DTS "1.6.5.0"
++// #define FILE_VER_BIN 1,6,5,0
++// #define FILE_VER_DTS "1.6.5.0"
+ //
++//! @version 1.7.1
++//! @date    17.03.2017
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 45224: Setinitial of selections
++//! - Interpret meta data, when reading selection values.
++#define FILE_VER_BIN 1,7,1,0
++#define FILE_VER_DTS "1.7.1.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+index 8e9e2713..f61712e4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2017 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -20,6 +20,7 @@
+ 
+ #include "cfgMetaSelection.hpp"
+ 
++#include "cfgRightsMan.hpp"
+ #include "cfgToken.h"
+ #include "cfgToXML.hpp"
+ 
+@@ -648,10 +649,20 @@ bool cfgMetaSelection::valueAllowed( cfgValue const & Value ) const
+ **/
+ cfgValue * cfgMetaSelection::valueFactory
+    (
+-      cfgFlatZ const & Src
++      cfgFlatZ const & flat_val
+    ) const
+ {
+-   return new cfgValueSelection( Src );
++   char const * const str_val = flat_val.c_str();
++   if( cfgRightsMan::mayCreate( getRights() ) )
++   {
++      // Not yet created, the value is a string
++      return new cfgValueSelection( str_val );
++   }
++   else
++   {
++      // Is already created, the value is an index
++      return new cfgValueSelection( atoi( str_val ) );
++   }
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueSelection.cpp
+index 649b6035..ac6c5e45 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgValueSelection.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2005 Materna Information & Communications
++ * Copyright (c) 2002-2017 Materna Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,6 +29,8 @@ cfgValueSelection::cfgValueSelection( cfgType_Selection_Index NdxValue ) :
+    M_NdxValid( true ),
+    M_StrValue()
+ {
++   //-std::cout << "cfgValueSelection::cfgValueSelection"
++   //-  "( <cfgType_Selection_Index> )" << std::endl;
+ }
+ 
+ 
+@@ -44,32 +46,8 @@ cfgValueSelection::cfgValueSelection( char const * StrValue ) :
+    M_NdxValid( false ),
+    M_StrValue( StrValue )
+ {
+-}
+-
+-
+-
+-/**
+- *
+- * Method implementation - see cfgValueSelection.hpp.
+- *
+-**/
+-cfgValueSelection::cfgValueSelection( cfgFlatZ const & NdxValue ) :
+-   cfgValue(),
+-   M_NdxValue( 0 ),
+-   M_NdxValid( false ),
+-   M_StrValue( "" )
+-{
+-   char const * const Str = NdxValue.c_str();
+-   // ToDo: Check for meta available (not just digit)
+-   if( ( Str[0] >= '0' ) && ( Str[0] <= '9' ) )
+-   {
+-      M_NdxValid = true;
+-      M_NdxValue = static_cast<unsigned>( atoi( Str ) );
+-   }
+-   else
+-   {
+-      M_StrValue = Str;
+-   }
++   //-std::cout << "cfgValueSelection::cfgValueSelection"
++   //-  "( " << StrValue << " )" << std::endl;
+ }
+ 
+ 
+@@ -81,6 +59,8 @@ cfgValueSelection::cfgValueSelection( cfgFlatZ const & NdxValue ) :
+ **/
+ cfgValueSelection::~cfgValueSelection()
+ {
++      //-std::cout << "cfgValueSelection::~cfgValueSelection()"
++      //-          << std::endl;
+ }
+ 
+ 
+@@ -92,6 +72,8 @@ cfgValueSelection::~cfgValueSelection()
+ **/
+ cfgValue & cfgValueSelection::operator=( cfgValue const & Src )
+ {
++   //-std::cout << "cfgValueSelection::operator=( <cfgValue> )"
++   //-          << std::endl;
+    cfgValueSelection const & SrcOk =
+       dynamic_cast<cfgValueSelection const &>( Src );
+    M_NdxValue = SrcOk.M_NdxValue;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,121 @@
+From 2e49afaa7d59bc89655b1a1a7f97aa3a2e43efdc Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 24 Oct 2018 17:08:09 +0000
+Subject: [PATCH 0926/1077] MANTIS 0045259 extension: MAT_CLA: HTML5: replace
+ CORBA by WS
+
+massai_text.lib
+V1.0.0.9
+- add readEnv: mText::getConfigValues for reading selected values; currently TRACES.TrcServ.TraceDirectory
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1385 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/readEnv.h             |  1 +
+ .../Massai/cpp/Text/src/local_def.cpp         |  9 +++--
+ .../Massai/cpp/Text/src/readEnv.cpp           | 33 +++++++++++++++++++
+ 3 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/readEnv.h b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+index 2ba67037..346d96ed 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/readEnv.h
++++ b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+@@ -14,6 +14,7 @@ namespace mText
+   typedef std::map<std::string, std::string> Environment;
+ 
+   Environment getConfigVariables(const std::string& authentification, MASSAI::trace::TraceInterface& trc);
++  Environment getConfigValues(const std::string& authentification, MASSAI::trace::TraceInterface& trc);
+   Environment getFullEnvironment(MASSAI::trace::TraceInterface& trc);
+   Environment getSystemEnvironment(MASSAI::trace::TraceInterface& trc);
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index b42a173c..6b19dfbb 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,23 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 8);
++VERSION_ID_DT(text, 1, 0, 0, 9);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.8
++\version 1.0.0.9
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.9
++\li 24.10.2018
++\li extension - SteT MANTIS 0045259 MAT_CLA: HTML5: replace CORBA by WS
++- add readEnv: mText::getConfigValues for reading selected values; currently TRACES.TrcServ.TraceDirectory
++
+ \version 1.0.0.8
+ \li 01.12.2016
+ \li extension - SteT Mantis 0043868: integration of EZ-Access device for KIS kiosk
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+index 2ab873c1..d35de13d 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "text/readEnv.h"
+ #include "cfgclnt/nConfigTextList.hpp"
++#include "cfgclnt/nConfigBasicText.hpp"
+ #include <windows.h>
+ #include <stdlib.h>
+ 
+@@ -41,6 +42,10 @@ namespace
+     "windir"
+   };
+ 
++  const char* textConfigurationValues[]= {
++    "TRACES.TrcServ.TraceDirectory"
++  };
++
+   typedef std::list<std::string> TextList;
+ 
+   class EnvironmentConfiguration: public gcTextList
+@@ -115,6 +120,34 @@ namespace mText
+     return result;
+   }
+ 
++  Environment getConfigValues(const std::string& authentification, MASSAI::trace::TraceInterface& trc)
++  {
++    Environment result;
++    nConfig::basicText read(authentification.c_str());
++    for(int i = 0; i < sizeof(textConfigurationValues)/sizeof(*textConfigurationValues); i++)
++    {
++      const char* key = textConfigurationValues[i];
++      try
++      {
++        const char* value = read.get(key);
++        if(value)
++        {
++          trc.writeTrace(SecondaryRuntime_HERE, "config: (%.100s)->(%.1000s)", key, value);
++          result[key] = value;
++        }
++        else
++        {
++          trc.writeTrace(SecondaryRuntime_HERE, "config: (%.100s) not set", key);
++        }
++      }
++      catch(const nConfig::exception& e)
++      {
++        trc.writeTrace(MajorError_HERE, "read configuration value failed: (%s)", e.what());
++      }
++    }
++    return result;
++  }
++
+   Environment getFullEnvironment(TraceInterface& trc)
+   {
+     Environment result;
+-- 
+2.41.0.windows.1
+

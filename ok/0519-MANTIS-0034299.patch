@@ -1,0 +1,245 @@
+From 07d8e8dd599f2b498fd9a69b7ee968c037d3d045 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 28 Oct 2014 17:47:42 +0000
+Subject: [PATCH 0519/1000] MANTIS 0034299 change: switch resolution; start
+ application with default resolution
+
+massai_systools.lib
+V1.0.0.23
+- added method maximize, minimize, showDefault in mSysWindow
+
+massai_text.lib
+V1.0.0.7
+- new function "TextList split(const std::string& input, const std::string& delimiter);" to split a text into a text list
+
+textidl.lib
+V1.0.0.10
+- added defaultResolution to applicationStart in appControl
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@747 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysWindow.h      |  4 ++-
+ .../Interfaces/inc/text/textTools.h           |  1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     |  9 +++++--
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp | 26 ++++++++++++-------
+ .../Massai/cpp/Text/src/local_def.cpp         |  9 +++++--
+ .../Massai/cpp/Text/src/textTools.cpp         |  7 +++++
+ .../Massai/cpp/textIDL/src/local_def.cpp      |  9 +++++--
+ .../Massai/cpp/textIDL/src/textappcontrol.cpp |  1 +
+ 8 files changed, 50 insertions(+), 16 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index 474b04ce..b99e4b8c 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -23,7 +23,9 @@ namespace mSysWindow
+       // Warning: this may simulate pressing shift in the current process
+       //   to get the right to activate the window
+       virtual void activate()= 0;
+-      virtual void showMaximized()= 0;
++      virtual void maximize()= 0;
++      virtual void minimize()= 0;
++      virtual void showDefault()= 0;
+       virtual void show()= 0;
+       virtual void hide()= 0;
+       virtual void close()= 0;
+diff --git a/SelfServiceCommon/Interfaces/inc/text/textTools.h b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+index ff4087bf..860d181d 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/textTools.h
++++ b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+@@ -24,6 +24,7 @@ namespace MASSAI
+           partList:      "",  "aa", "bb", "cc", ""
+           delimiterList: ":", ";",  ";",  ";"
+     */
++    TextList split(const std::string& input, const std::string& delimiter);
+     void split(const std::string& input, const std::string& delimiter, TextList& partList);
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList);
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 61fb329e..12a41264 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 22);
++VERSION_ID_DT(systools, 1, 0, 0, 23);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 22);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.22
++@version 1.0.0.23
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.23
++\li 28.10.20014
++\li Mantis 0034299: switch resolution; start application with default resolution
++- added method maximize, minimize, showDefault in mSysWindow
++
+ \version 1.0.0.22
+ \li 23.10.2014
+ \li extension - SteT Mantis 0034299: AppControl: switch resolution; start application with default resolution
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 9fa4813e..9019b6e9 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -24,7 +24,9 @@ namespace
+       WindowW32(HWND hwnd, const std::string& desktop, TraceInterface& trc);
+       virtual ~WindowW32();
+       virtual void activate();
+-      virtual void showMaximized();
++      virtual void maximize();
++      virtual void minimize();
++      virtual void showDefault();
+       virtual void show();
+       virtual void hide();
+       virtual void close();
+@@ -49,7 +51,6 @@ namespace
+         unsigned long errorCode
+       );
+       bool isMaximized();
+-      void maximize();
+       bool isTopMost();
+       void setTopMost();
+       bool switchToWindow();
+@@ -122,11 +123,6 @@ namespace
+     return result;
+   }
+ 
+-  void WindowW32::maximize()
+-  {
+-    ShowWindow(m_hwnd, SW_MAXIMIZE);
+-  }
+-
+   bool WindowW32::isTopMost()
+   {
+     return (GetWindowLong(m_hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+@@ -207,12 +203,24 @@ namespace
+     }
+   }
+ 
+-  void WindowW32::showMaximized()
++  void WindowW32::minimize()
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "minimize (%d)(%s)", m_hwnd, m_title.c_str());
++    ShowWindow(m_hwnd, SW_MINIMIZE);
++  }
++
++  void WindowW32::maximize()
+   {
+-    m_trc.writeTrace(BasicRuntime_HERE, "showMaximized (%d)(%s)", m_hwnd, m_title.c_str());
++    m_trc.writeTrace(BasicRuntime_HERE, "maximize (%d)(%s)", m_hwnd, m_title.c_str());
+     ShowWindow(m_hwnd, SW_SHOWMAXIMIZED);
+   }
+ 
++  void WindowW32::showDefault()
++  {
++    m_trc.writeTrace(BasicRuntime_HERE, "show (%d)(%s)", m_hwnd, m_title.c_str());
++    ShowWindow(m_hwnd, SW_SHOWDEFAULT);
++  }
++
+   void WindowW32::show()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "show (%d)(%s)", m_hwnd, m_title.c_str());
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 82877681..359b8956 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,18 +1,23 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(text, 1, 0, 0, 6);
++VERSION_ID_DT(text, 1, 0, 0, 7);
+ 
+ /*! \file
+ \brief Release Notes - massai_text.lib
+ 
+ \page massai_text.lib Release Notes - massai_text.lib - text tool library
+ 
+-\version 1.0.0.6
++\version 1.0.0.7
+ 
+ \section changehistory Change history
+ 
+ massai_text.lib
+ 
++\version 1.0.0.7
++\li 28.10.20014
++\li Mantis 0034299: switch resolution; start application with default resolution
++- new function "TextList split(const std::string& input, const std::string& delimiter);" to split a text into a text list
++
+ \version 1.0.0.6
+ \li 12.08.2014
+ \li change - SteT Mantis 0033302: mstarter: use only defined system environment variables for substitution
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+index 3d6a4012..b31d9344 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+@@ -85,6 +85,13 @@ namespace MASSAI
+           partList:      "",  "aa", "bb", "cc", ""
+           delimiterList: ":", ";",  ";",  ";"
+     */
++    TextList split(const std::string& input, const std::string& delimiter)
++    {
++      TextList result;
++      split(input, delimiter, result);
++      return result;
++    }
++
+     void split(const std::string& input, const std::string& delimiter, TextList& partList)
+     {
+       TextList delimiterList;
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
+index b1150e8c..3edd1af4 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(textIDL, 1, 0, 0, 9);
++VERSION_ID_DT(textIDL, 1, 0, 0, 10);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(textIDL, 1, 0, 0, 9);
+ 
+ \page textidl.lib Release Notes - textidl.lib
+ 
+-@version 1.0.0.9
++@version 1.0.0.10
+ 
+ \section changehistory Change history
+ 
+ textidl.lib
+ 
++\version 1.0.0.10
++\li 28.10.20014
++\li Mantis 0034299: switch resolution; start application with default resolution
++- added defaultResolution to applicationStart in appControl
++
+ \version 1.0.0.9
+ \li 26.11.2013
+ \li Mantis 0029957: ConveyorComp: CUSS1.3 Conveyor (without ConveyorAEA)
+diff --git a/SelfServiceCommon/Massai/cpp/textIDL/src/textappcontrol.cpp b/SelfServiceCommon/Massai/cpp/textIDL/src/textappcontrol.cpp
+index 0b747272..32557405 100644
+--- a/SelfServiceCommon/Massai/cpp/textIDL/src/textappcontrol.cpp
++++ b/SelfServiceCommon/Massai/cpp/textIDL/src/textappcontrol.cpp
+@@ -80,5 +80,6 @@ std::ostream& operator<<(std::ostream& out, const appControl::applicationStart&
+     out << "cmdLine[" << i << "]: (" << app.cmdLine[i].in()  << ")\n";
+   }
+   out << "switchTimeout: (" << app.switchTimeout << ")\n";
++  out << "defaultResolution: (" << app.defaultResolution << ")\n";
+   return out;
+ }
+-- 
+2.41.0.windows.1
+

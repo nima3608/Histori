@@ -1,0 +1,1359 @@
+From 71c0c030999ff797188a912172d611c24f4550f1 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 22 Aug 2012 09:38:25 +0000
+Subject: [PATCH 0253/1000] Mantis 22014
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@396 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcData.hpp      |  46 +++
+ .../Massai/cpp/Controller/inc/mcProcess.hpp   | 130 ++++++++
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |  14 +-
+ .../Massai/cpp/Controller/inc/mctools.h       |   2 +-
+ .../Massai/cpp/Controller/makefile.mak        |   7 +-
+ .../Massai/cpp/Controller/src/main.cpp        | 277 ++++++++++--------
+ .../Massai/cpp/Controller/src/mcProcess.cpp   | 258 ++++++++++++++++
+ .../Massai/cpp/Controller/src/mcdata.cpp      |  41 +++
+ .../Massai/cpp/Controller/src/mctools.cpp     |  77 +++--
+ .../Massai/cpp/Controller/src/scheduler.cpp   |   6 +-
+ .../Massai/cpp/Controller/src/serverwin.cpp   | 103 ++-----
+ 11 files changed, 709 insertions(+), 252 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/inc/mcData.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Controller/src/mcdata.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcData.hpp b/SelfServiceCommon/Massai/cpp/Controller/inc/mcData.hpp
+new file mode 100644
+index 00000000..a8bb817b
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcData.hpp
+@@ -0,0 +1,46 @@
++/**
++ **************************************************************************
++ *
++ * @file mcData.hpp
++ *
++ * Contains class mcData.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MCDATA_HPP
++#define MCDATA_HPP
++
++#include "mcProcess.hpp"
++
++
++/**
++ *
++ * Control the life-cycle of "global" data.
++ * Placing objects in this struct will gurantee its destruction
++ * before main() ends.
++ *
++**/
++struct mcData
++{
++
++   mcProcessListMonitor     m_processlistmonitor;
++
++   mcData();
++
++   ~mcData() throw();
++
++};
++
++
++#endif // #ifndef MCDATA_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp b/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
+new file mode 100644
+index 00000000..ef265cdd
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
+@@ -0,0 +1,130 @@
++/**
++ **************************************************************************
++ *
++ * @file mcProcess.hpp
++ *
++ * Contains mControl-specific adaptations for process control
++ * with classes:
++ * - mcProcessCallback
++ * - mcProcessControl
++ * - mcProcessListMonitor
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef MCPROCESS_HPP
++#define MCPROCESS_HPP
++
++#include "systools/mSysProcess.hpp"
++
++#include <list>
++
++
++/**
++ *
++ * This is the mControl-specific sink for data events
++ * form the child processes.
++ *
++**/
++class mcProcessCallback :
++    public mSysProcess::callBack
++{
++
++   std::string const                    m_application_name;
++
++   std::string const                    m_stream_name;
++
++public:
++
++   mcProcessCallback
++      (
++         char const * application_name,
++         char const * stream_name
++      );
++
++   void lineOut( char const * line ) const;
++
++private:
++
++   mcProcessCallback();
++
++   mcProcessCallback & operator=( mcProcessCallback const & src );
++
++};
++
++
++/**
++ *
++ * Control a child process.
++ *
++**/
++class mcProcessControl
++{
++
++   std::string const                    m_application_name;
++
++   mSysProcess::child *                 m_child;
++
++   mcProcessCallback const              m_logging;
++
++   mcProcessCallback const              m_stderr;
++
++   mcProcessCallback const              m_stdout;
++
++public:
++
++   mcProcessControl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name
++      );
++
++   ~mcProcessControl() throw();
++
++   char const * getName() const;
++
++   mSysProcess::status getStatus() const;
++
++   void kill();
++
++private:
++
++    mcProcessControl();
++
++};
++
++
++/**
++ *
++ * Monitor a list of processes.
++ *
++**/
++class mcProcessListMonitor
++{
++
++   std::list<mcProcessControl *>        m_list;
++
++public:
++
++   mcProcessListMonitor();
++
++   ~mcProcessListMonitor() throw();
++
++   void add( mcProcessControl * processcontrol );
++
++   void check();
++
++};
++
++
++#endif // #ifndef MCPROCESS_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index 217c3fb9..dfb3f051 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,15 +9,23 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,4
+-#define FILE_VER_STR     "FileVersion", "1.0.2.4\0"
++#define FILE_VER_BIN     1,0,2,5
++#define FILE_VER_STR     "FileVersion", "1.0.2.5\0"
+ 
+ /*! \page mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+  *
+- *  @version 1.0.2.4
++ *  @version 1.0.2.5
+  *
+  *  \section change1 Change history
+  *
++ *  \date 22.08.2012 \li V1.0.2.5
++ *                   \li JK: Mantis 22014 "do not start mcontrol.exe as console".
++ *                   \li - Change link-options to generate pure Windos app.
++ *                   \li - Like for "mStarter" pipe the output of other controlled processes to trace.
++ *                   \li - Remove console outputs, no longer useful.
++ *                   \li - Remove the default dependency to "massaiConfig" ("massaiConfig" is no longer used).
++ *                   \li - Remove the deprecated use of "mSysException::standardException".
++ *
+  *  \date 31.05.2012 \li V1.0.2.4
+  *                   \li bugfix - 0023436: Mcontrol - W7 dialog pops up if the string "update" is found in a name.
+  *                   \li Rename mUpdate.exe to mUpdat.exe
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mctools.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mctools.h
+index 2ec41e24..8d8b2153 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mctools.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mctools.h
+@@ -25,7 +25,7 @@ void      execSysCmdsShutdown ();
+ long      loadHostsFile       ();
+ long      setWorkingDir       ();
+ char     *getWorkingDir       ();
+-long      mSystem             ( char const *pszCmd );
++long      mSystem             ( char const *cmd, char const * purpose );
+ long      waitForService      (
+                                 char const * serviceName,
+                                 long lTimeout,
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+index 35b399ef..69938edb 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Controller/makefile.mak
+@@ -11,7 +11,7 @@ MY_CFLAGS = \
+     $(INC_ACETAO) \
+     $(INC_INTERFACES) \
+     $(INC_BOOST) \
+-    -DGLOBAL_EVENTSEMAPHORE \
++    -DGLOBAL_EVENTSEMAPHORE
+ 
+ STDUSERLIBS = \
+     $(LIB_MASSAI) \
+@@ -44,6 +44,8 @@ MY_BIN1_OBJS = \
+     $(_OBJ)\controller_skel.obj \
+     $(_OBJ)\httpDownload.obj \
+     $(_OBJ)\main.obj \
++    $(_OBJ)\mcData.obj \
++    $(_OBJ)\mcProcess.obj \
+     $(_OBJ)\mctools.obj \
+     $(_OBJ)\mdci.obj \
+     $(_OBJ)\mdci_skel.obj \
+@@ -57,6 +59,9 @@ MY_BIN1_USER_LIBS = \
+     $(STDUSERLIBS) \
+     $(LIB_MSYSTOOLS)
+ 
++MY_BIN1_LDFLAGS = \
++    -subsystem:windows
++
+ MY_BIN1_LINKLIBS = \
+     $(STDLINKLIBS) \
+     $(SYS_COMCTL32)
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index d589d894..911d3b52 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -10,14 +10,13 @@
+ //
+ //---------------------------------------------------------------------------
+ 
+-#include <time.h>
+-#include <stdlib.h>
+-#include <stdio.h>
++#include "mcData.hpp"
+ 
+ #include "massaiCorba/corbasrvr.h"
+ 
+ #include "massaidll/massai.hpp"
+-
++#include "text/mArgScan.hpp"
++#include "text/mMainCommandLine.hpp"
+ #include "trc/trace.h"
+ #include "serverwin.h"
+ #include "resource.h"
+@@ -25,16 +24,25 @@
+ 
+ #include "server.h"
+ 
++#include "resource.h"
++
+ #include "config.h"
+ #include "reboot.h"
+ #include "mctools.h"
+ #include "scheduler.h"
+ #include "systools/matDaemon.h"
++
++#if 0
+ #include "systools/mSysException.hpp"
++#endif
+ 
+ #include "text/cEnvSubst.hpp"
+ 
+ #include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++
+ 
+ 
+ // global vars for this file ------------------------------------------------
+@@ -47,9 +55,30 @@ static bool      bPortableMCC= false;
+ static HINSTANCE hInstance;
+ static HWND      hwnd= 0;
+ 
++
++
++namespace
++{
++
++
++   mcData *     l_mcdata( 0 );
++
++
++} // namespace
++
++
++
++mcData * getMcData()
++{
++   return l_mcdata;
++}
++
++
++
+ CEnvSubst EnvS;
+ 
+ extern long setLevel(long level);
++
+ //---------------------------------------------------------------------------
+ //
+ //  function:   void exitHandler(int iSignal)
+@@ -171,34 +200,30 @@ bool noSNMP()
+     return(fNoSNMP);
+ }
+ 
+-//---------------------------------------------------------------------------
+-//
+-//  function:   int WINAPI WinMain(HINSTANCE hInst, char *szCmdLine )
+-//
+-//  purpose:    Standard windows program entry
+-//
+-//  date:       04.05.2001, 09:33
+-//
+-//  author:     Materna Information & Communications (AGe)
+-//
+-//---------------------------------------------------------------------------
+ 
+-int WINAPI myWinMain( HINSTANCE hInst, char const * CmdLine )
++
++/**
++ *
++ * My main.
++ *
++**/
++int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+ {
+-MSG          msg ;
+-WNDCLASS     wndclass;
+ 
+-char         szService[256];
+-char        *pStr;
+-int          x,cx,
+-             y,cy;
+-long         i;
+-long         rc;
+-long         lWait = 60000;
+-long         lDelay = -1;
+-FILE        *fp;
++    mMainCommandLine     cmdline_parser( cmdline );
++    argScan              args( cmdline_parser.argc(), cmdline_parser.argv() );
++
++    MSG          msg ;
++    WNDCLASS     wndclass;
+ 
+-//setLevel(9);
++    int          x,cx,
++                 y,cy;
++    long         rc;
++    long         lWait = 60000;
++    long         lDelay = -1;
++    FILE        *fp;
++
++    //setLevel(9);
+ 
+ 
+     HANDLE isRunning;
+@@ -244,36 +269,22 @@ FILE        *fp;
+ 
+     fp = fopen("mcontrol.log","w+");
+ 
+-    char szCmdLine[1024];
+-    strncpy( szCmdLine, CmdLine, sizeof(szCmdLine) - 1 );
+-    strlwr(szCmdLine);
+-
+     if(fp)
+     {
+-      fprintf(fp,"%s cmdLine = %s\n",timeStamp(),szCmdLine);
++      fprintf(fp,"%s cmdLine = %s\n",timeStamp(),cmdline);
+       fflush(fp);
+     }
+ 
+-    if((pStr = strstr(szCmdLine,"-delaybeforestart:")) != NULL)
++    lDelay = args.optionInteger( "DELAYBEFORESTART", -1 );
++    if( ( lDelay != -1 ) && fp )
+     {
+-       pStr += 18;
+-
+-       lDelay = atoi(pStr);
+-
+-       if(!lDelay)
+-         lDelay = -1;
+-
+-       if(fp)
+-       {
+-         fprintf(fp,"%s found option [delaybeforestart:], delay = %d\n",timeStamp(),lDelay);
+-         fflush(fp);
+-       }
++      fprintf(fp,"%s found option [delaybeforestart:], delay = %d\n",timeStamp(),lDelay);
++      fflush(fp);
+     }
+ 
+-    if((pStr = strstr(szCmdLine,"-enableportablemcc")) != NULL)
++    if( args.option( "ENABLEPORTABLEMCC" ) )
+     {
+        bPortableMCC = true;
+-
+        if(fp)
+        {
+          fprintf(fp,"%s found option [enableportablemcc], removable device check for mcc enabled\n",timeStamp());
+@@ -281,80 +292,91 @@ FILE        *fp;
+        }
+     }
+ 
+-    if((pStr = strstr(szCmdLine,"-wait:")) != NULL)
++    lWait = args.optionInteger( "WAIT", -1 );
++    if( fp )
+     {
+-       pStr += 6;
+-
+-       lWait = atoi(pStr);
+-
+-       if(!lWait)
+-         lWait = -1;
+-
+-       if(fp)
++       if( lWait != -1 )
+        {
+          fprintf(fp,"%s found option [wait:], to = %d\n",timeStamp(),lWait);
+-         fflush(fp);
+        }
+-    }
+-    else if((pStr = strstr(szCmdLine,"-wait")) != NULL)
+-    {
+-       // wait endlessly for trace service
+-
+-       lWait = -1;
+-
+-       if(fp)
++       else
+        {
+-         fprintf(fp,"%s found option [wait], to = %d\n",timeStamp(),lWait);
+-         fflush(fp);
++         fprintf(fp,"%s found option [wait], to = <infinite>\n",timeStamp());
+        }
++       fflush(fp);
+     }
+ 
+-    if((pStr = strstr(szCmdLine,"-service:")) != NULL)
++    char const * const szService = args.option( "SERVICE" );
++    if( szService && fp )
+     {
+-       pStr += 9;
+-
+-       for(i = 0; *pStr && *pStr != ' ' && i < (sizeof(szService)-1); i++,pStr++)
+-         szService[i] = *pStr;
+-
+-       szService[i] = '\0';
+-
+-       if(fp)
+-       {
+-         fprintf(fp,"%s found option [service:], name = %s\n",timeStamp(),szService);
+-         fflush(fp);
+-       }
++      fprintf(fp,"%s found option [service:], name = %s\n",timeStamp(),szService);
++      fflush(fp);
++      rc = waitForService(szService,lWait,fp);
+     }
+-    else
+-      strcpy(szService,"massaiConfig");
+-
+-    rc = waitForService(szService,lWait,fp);
+ 
+     if(fp)
+     {
+       fclose(fp);
+     }
+ 
++    if( args.help() )
++    {
++      MessageBox
++        (
++          NULL,
++          TEXT
++            (
++               "USAGE:\tmControl [-delaybeforestart:seconds]"
++               " [-wait[:timeout]]\n\t[-service:servicename]"
++               " [-server] [-nolog|-nosnmp]\n\n"
++               "-delaybeforestart\n\tSet delay in seconds to wait"
++               " before startup\n"
++               "-wait\tSet timeout in ms for initial waiting for"
++               " dependencies,\n\t- default is 60000\n"
++               "\t- wait forever, if no timeout is given\n"
++               "-service\tSet dependency\n"
++               "-server\tRun in server mode, default is kiosk mode\n"
++               "-enableportablemcc\n\tEnables the detection of"
++               " a mcc on removable devices\n"
++               "-nolog\tEvent logging disabled\n"
++               "-nosnmp\tFor event logging use logservice instead of"
++               " massaisnmp,\n\tdo not send start platform event"
++            ),
++          szAppName,
++          MB_ICONEXCLAMATION
++        );
++      exit( 0 );
++    }
++
+     // We have to wait a bit for the SNMP-Service, XP seems to report a "running" status too soon.
+     // OS_Sleep(10000);
+     // we now wait for the semaphore of the massaiSNMP.dll before we send an event
+ 
+     if(rc != 0)
+     {
+-      MessageBox(NULL,
+-                 TEXT ("ERROR: Service <massaiConfig> not running.\n\nPlease start massai configuration- and trace services first."),
+-                 szAppName,
+-                 MB_ICONERROR) ;
+-
+-       exit(-2);
++      MessageBox
++        (
++          NULL,
++          TEXT
++            (
++              "ERROR: Service <massaiConfig> not running.\n\nPlease"
++              " start massai configuration- and trace services first."
++            ),
++          szAppName,
++          MB_ICONERROR
++        );
++      exit( -2 );
+     }
+ 
+     // well...
+ 
++#if 0
+     //
+     // This object will by its mere presence in this block catch
+     // structured Windows exceptions and throw them as C++ std::exceptions
+     //
+     mSysException::standardException Guard;
++#endif
+ 
+     openTrace("mControl");
+ 
+@@ -362,13 +384,14 @@ FILE        *fp;
+ 
+     try
+     {
+-      if(strstr(szCmdLine,"-server") || mDaemon_isService())
++
++      if( args.option( "SERVER" ) || mDaemon_isService() )
+         fServerMode = true;
+ 
+-      if(strstr(szCmdLine,"-nolog"))
++      if( args.option( "NOLOG" ) )
+         fNoLOG = true;
+ 
+-      if(strstr(szCmdLine,"-nosnmp"))
++      if( args.option( "NOSNMP" ) )
+         fNoSNMP = true;
+ 
+       if(noLOG())
+@@ -395,16 +418,22 @@ FILE        *fp;
+       TRACE(HERE,"   of '.EXE' Files") ;
+       printInfoAboutFiles ("..\\bin\\*.exe") ;
+ 
+-/*
+-      if((pStr = strstr(strlwr(szCmdLine),"-wait:")) != NULL)
++       //! Organize "global" data.
++      class mcDataHere
+       {
+-        pStr += 6;
+-
+-        lDelay = atol(pStr);
+-      }
+-      else
+-        lDelay = 0;
+-*/
++           mcData       m_mcdata;
++      public:
++           mcDataHere() :
++              m_mcdata()
++           {
++              l_mcdata = &m_mcdata;
++           }
++           ~mcDataHere()
++           {
++              l_mcdata = 0;
++           }
++      };
++      mcDataHere data;
+ 
+       if((rc = setWorkingDir()) != 0)
+         TRACE(HERE,"Failed to set working directory, rc = %d",rc);
+@@ -551,20 +580,17 @@ FILE        *fp;
+     {
+       char const * se = X.what();
+       TRACE( HERE, "%s", se );
+-      std::cout << se << std::endl;
+       SendMessage(hwnd,WM_CLOSE,0,0);
+     }
+     catch( char * se )
+     {
+       TRACE( HERE, "%s", se );
+-      std::cout << se << std::endl;
+       SendMessage(hwnd,WM_CLOSE,0,0);
+     }
+     catch(...)
+     {
+       char const * se = "unknown exception";
+       TRACE( HERE, "%s", se );
+-      std::cout << se << std::endl;
+       SendMessage(hwnd,WM_CLOSE,0,0);
+     }
+ 
+@@ -576,6 +602,25 @@ FILE        *fp;
+ 
+ 
+ 
++//---------------------------------------------------------------------------
++//
++//  function:   int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPreInst, char *szCmdLine, int iCmdShow)
++//
++//  purpose:    Standard windows program entry
++//
++//  date:       04.05.2001, 09:33
++//
++//  author:     Materna Information & Communications (AGe)
++//
++//---------------------------------------------------------------------------
++
++int WINAPI WinMain( HINSTANCE hInst, HINSTANCE, char * CmdLine, int )
++{
++   return commonMain( hInst, CmdLine );
++}
++
++
++
+ /**
+  *
+  * Service process implementation.
+@@ -589,11 +634,12 @@ int mDaemon_main( int argc, char const * const * argv )
+       CommandLine += " ";
+       CommandLine += argv[A];
+    }
+-   return myWinMain
+-      (
+-         GetModuleHandle( 0 ),
+-         CommandLine.c_str()
+-      );
++   int const R = commonMain
++                  (
++                     GetModuleHandle( 0 ),
++                     CommandLine.c_str()
++                  );
++   return R;
+ }
+ 
+ 
+@@ -631,14 +677,7 @@ char const * mDaemon_dependencies()
+ **/
+ char const * mDaemon_help()
+ {
+-  return "[-delaybeforestart:seconds][-wait[:timeout]][-service:servicename][-server][-nolog|-nosnmp]\n"
+-         "-delaybeforestart:seconds  set delay in seconds to wait before startup\n"
+-         "-wait[:timeout]  set timeout in ms for initial waiting for dependencies, default 60000, -wait waits forever\n"
+-         "-service:servicename  set dependency, default is massaiConfig\n"
+-         "-server  run in server mode, default is kiosk mode\n"
+-         "-enableportablemcc  enables the detection of a mcc on removable devices\n"
+-         "-nolog  event logging disabled\n"
+-         "-nosnmp  for event logging use logservice instead of massaisnmp: do not send start platform event\n";
++   return "";
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
+new file mode 100644
+index 00000000..d9b729c3
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
+@@ -0,0 +1,258 @@
++/**
++ **************************************************************************
++ *
++ * @file mcProcess.cpp
++ *
++ * Implements class mcProcessCallback.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
++#include "mcProcess.hpp"
++
++// Common header
++#include "trc/trace.h"
++
++// For STILL_ACTIVE
++#include <windows.h>
++
++
++
++#define MCPLM   "mcProcessListMonitor::"
++
++
++
++/*
++ *
++ * Class mcProcessCallback method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessCallback::mcProcessCallback
++   (
++      char const * application_name,
++      char const * stream_name
++   ) :
++   m_application_name( application_name ),
++   m_stream_name( stream_name )
++{
++}
++
++
++
++/*
++ *
++ * Class mcProcessCallback method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessCallback::lineOut( char const * line ) const
++{
++   TRACE
++      (
++         HERE, "%s:%s[%s]",
++         m_application_name.c_str(),
++         m_stream_name.c_str(),
++         line
++      );
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::mcProcessControl
++   (
++      mSysProcess::parent &     parent,
++      char const *              application_name
++   ) :
++   m_application_name( application_name ),
++   m_child( 0 ),
++   m_logging( application_name, "mSysProcess" ),
++   m_stderr( application_name, "STDERR" ),
++   m_stdout( application_name, "STDOUT" )
++{
++   parent
++#ifdef DO_MCPROCESS_LOGGING
++      .setLogging( m_logging )
++#endif
++      .setHide()
++      .setStdErr( m_stderr ).setStdOut( m_stdout );
++   m_child = parent.newChild();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::~mcProcessControl() throw()
++{
++   try
++   {
++      delete m_child;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++char const * mcProcessControl::getName() const
++{
++   return m_application_name.c_str();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mSysProcess::status mcProcessControl::getStatus() const
++{
++   return m_child->getStatus();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessControl::kill()
++{
++   m_child->kill();
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessListMonitor::mcProcessListMonitor() :
++   m_list()
++{
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessListMonitor::~mcProcessListMonitor() throw()
++{
++   try
++   {
++      // Remove already stopped processes ...
++      check();
++      // ... and stop the rest.
++      for(
++            std::list<mcProcessControl *>::const_iterator it =
++               m_list.begin();
++            it != m_list.end();
++            ++it
++         )
++      {
++         mcProcessControl * p = *it;
++         TRACE
++            (
++               HERE, MCPLM "~mcProcessListMonitor - kill [%s]",
++               p->getName()
++            );
++         p->kill();
++         delete p;
++      }
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessListMonitor::add( mcProcessControl * processcontrol )
++{
++   if( processcontrol )
++   {
++      // Scan existing processes
++      check();
++      //
++      m_list.push_back( processcontrol );
++      TRACE
++         (
++            HERE, MCPLM "add(%s) -> processes controlled = %d.",
++            processcontrol->getName(),
++            m_list.size()
++         );
++   }
++}
++
++
++
++/*
++ *
++ * Class mcProcessListMonitor method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessListMonitor::check()
++{
++   std::list<mcProcessControl *>::iterator it = m_list.begin();
++   while( it != m_list.end() )
++   {
++      if( (*it)->getStatus() != mSysProcess::STATUS_RUNNING )
++      {
++         TRACE
++            (
++               HERE, MCPLM "check - remove control of [%s]",
++               (*it)->getName()
++            );
++         delete *it;
++         it = m_list.erase( it );
++      }
++      else
++      {
++         ++it;
++      }
++   }
++   TRACE
++      (
++         HERE, MCPLM "check -> processes controlled = %d.",
++         m_list.size()
++      );
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mcdata.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mcdata.cpp
+new file mode 100644
+index 00000000..14e51502
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mcdata.cpp
+@@ -0,0 +1,41 @@
++/**
++ **************************************************************************
++ *
++ * @file mcData.cpp
++ *
++ * Implements class mcData.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++// Exported
++#include "mcData.hpp"
++
++// Common header
++#include "trc/trace.h"
++
++
++
++mcData::mcData()
++{
++}
++
++
++
++mcData::~mcData() throw()
++{
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
+index c7d2ac7d..7a60c177 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mctools.cpp
+@@ -14,6 +14,8 @@
+ 
+ #include "mctools.h"
+ 
++#include "mcData.hpp"
++
+ #include <list>
+ #include <time.h>
+ #include <sys/timeb.h>
+@@ -23,16 +25,24 @@
+ #include "config.h"
+ #include "trc/trace.h"
+ #include "httpDownLoad.h"
++#include "mcProcess.hpp"
+ 
+ #include "text/cEnvSubst.hpp"
++
++#include <sstream>
++
+ extern CEnvSubst EnvS;
+ 
++mcData * getMcData();
++
+ using namespace std;
+ 
+ // constants for this file --------------------------------------------------
+ 
+ #define HOSTS_FILE  "/etc/hosts.massai"
+ 
++#define MSYSTEM_NAME    "mSystem"
++
+ cfgStr *pHostFileLoadFrom = NULL;
+ cfgStr *pHostFileSaveTo   = NULL;
+ 
+@@ -485,45 +495,21 @@ BOOL                rc;
+ //
+ //---------------------------------------------------------------------------
+ 
+-long mSystem(const char *pszCmd)
++long mSystem( char const * cmd, char const * purpose )
+ {
+-STARTUPINFO         si;
+-PROCESS_INFORMATION pi;
+-BOOL                rc;
+-char                szTask[2048];
+-
+-    if(!pszCmd)
+-      return(-1);
+-
+-    memset(&si,0,sizeof(STARTUPINFO));
+-
+-    si.cb          = sizeof(STARTUPINFO);
+-    si.dwFlags     = STARTF_USESHOWWINDOW;
+-    si.wShowWindow = SW_SHOWMINIMIZED;
+-
+-    sprintf(szTask,"cmd.exe /X /C \"%s\"",pszCmd);
+-
+-    TRACE(HERE,"mSystem(%s)",szTask);
+-
+-    rc = CreateProcess(NULL,                // application name
+-                       szTask,              // command line with args
+-                       NULL,                // use default
+-                       NULL,                // use default
+-                       FALSE,               // don`t inherit handles
+-                       0,                   // creation flags
+-                       NULL,                // use parents env.
+-                       getWorkingDir(),     // current directory name
+-                       &si,                 // startup information
+-                       &pi);                // returned process information
+-
+-    if(!rc)
+-    {
+-      TRACE(HERE,"error = %d",GetLastError());
+-
+-      return(GetLastError());
+-    }
+-    else
+-      return(0);
++   std::string task( "cmd.exe /X /C \"" );
++   task += cmd;
++   task += "\"";
++   TRACE( HERE, "mSystem(%s)", task.c_str() );
++   mSysProcess::parent par;
++   par.setCommandline( task.c_str() );
++   mcProcessControl * ctrl = new mcProcessControl( par, ( std::string( "mSystem." ) + purpose ).c_str() );
++   mcData * mcdata = getMcData();
++   if( mcdata )
++   {
++      mcdata->m_processlistmonitor.add( ctrl );
++   }
++   return 0;
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -544,10 +530,12 @@ void execSysCmdsStartup()
+    if (pStartupCommands==NULL)
+       pStartupCommands = new cfgListSysCommands ("PLATFORM.STARTUP.SystemCommands");
+    list<string> cmdlist = EnvS.substEnvList(pStartupCommands->get());
+-
++   int index( 1 );
+    for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+    {
+-      long const rc = mSystem((*i).c_str());
++      std::ostringstream oss;
++      oss << "execSysCmdsStartup#" << index++;
++      long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
+       TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+    }
+    TRACE( HERE, "execSysCmdsStartup." );
+@@ -571,10 +559,13 @@ void execSysCmdsShutdown()
+    if (pShutDownCommands==NULL)
+       pShutDownCommands = new cfgListSysCommands ("PLATFORM.SHUTDOWN.SystemCommands");
+    list<string> cmdlist = EnvS.substEnvList(pShutDownCommands->get());
+-   for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++ )
++   int index( 1 );
++   for( list<string>::iterator i = cmdlist.begin(); i != cmdlist.end(); i++)
+    {
+-      long const rc = mSystem((*i).c_str());
+-      TRACE( HERE, "executed sys command [%s], rc = %d", (*i).c_str(), rc );
++      std::ostringstream oss;
++      oss << "execSysCmdsShutdown#" << index++;
++      long const rc = mSystem( (*i).c_str(), oss.str().c_str() );
++      TRACE(HERE,"executed sys command [%s], rc = %d",(*i).c_str(),rc);
+    }
+    TRACE( HERE, "execSysCmdsShutdown." );
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
+index 47947dad..c34d78f7 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/scheduler.cpp
+@@ -275,7 +275,7 @@ static long lCnt = 0;
+                         (*pstI)->hour(),
+                         (*pstI)->minute());
+ 
+-            rc = mSystem((*pstI)->cmd());
++            rc = mSystem((*pstI)->cmd(),"scheduled");
+           }
+         }
+       }
+@@ -306,7 +306,7 @@ static long lCnt = 0;
+                         (*pstI)->hour(),
+                         (*pstI)->minute());
+ 
+-            rc = mSystem((*pstI)->cmd());
++            rc = mSystem((*pstI)->cmd(),"scheduled");
+           }
+         }
+       }
+@@ -331,7 +331,7 @@ static long lCnt = 0;
+                         (*pstI)->hour(),
+                         (*pstI)->minute());
+ 
+-            rc = mSystem((*pstI)->cmd());
++            rc = mSystem((*pstI)->cmd(),"scheduled");
+           }
+         }
+       }
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index 9fa98db3..0dca0395 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -10,6 +10,8 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++// Local header
++#include "mcProcess.hpp"
+ 
+ #include <stdlib.h>
+ #include <stdarg.h>
+@@ -48,6 +50,9 @@
+ #define UPDATE_NAME    "mUpdat.exe"
+ #define REBOOT_KIOSK   123
+ 
++// Define DO_MCPROCESS_LOGGING for more internals of mSysProcess
++//#define DO_MCPROCESS_LOGGING
++
+ #define START_DELAY_TIMER      1
+ #define OVERLAY_INFO_OFF 0
+ #define OVERLAY_INFO_1 1
+@@ -58,81 +63,7 @@ static HANDLE  hSem     = NULL;
+ using namespace mControl;
+ 
+ 
+-/**
+- *
+- * This is the sink for data events form the child processes.
+- *
+-**/
+-class myCallBack :
+-    public mSysProcess::callBack
+-{
+-
+-    std::string const         M_App;
+-    std::string const         M_Which;
+-
+-public:
+-
+-    myCallBack( char const * App, char const * Which ) :
+-        M_App( App ),
+-        M_Which( Which )
+-    {
+-    }
+-
+-    void lineOut( char const * Line ) const
+-    {
+-        TRACE( HERE, "%s:%s[%s]", M_App.c_str(), M_Which.c_str(), Line );
+-    }
+-
+-private:
+-
+-    myCallBack();
+-
+-};
+-
+-
+-/**
+- *
+- * Control a child process.
+- *
+-**/
+-class myProcess
+-{
+-
+-    mSysProcess::child * M_Child;
+-    myCallBack const     M_Logging;
+-    myCallBack const     M_StdErr;
+-    myCallBack const     M_StdOut;
+-
+-public:
+-
+-    myProcess( mSysProcess::parent & Parent, char const * Prog ) :
+-        M_Child( 0 ),
+-        M_Logging( Prog, "mSysProcess" ),
+-        M_StdErr( Prog, "STDERR" ),
+-        M_StdOut( Prog, "STDOUT" )
+-    {
+-        Parent.setLogging( M_Logging ).setStdErr( M_StdErr ).setStdOut( M_StdOut );
+-        M_Child = Parent.newChild();
+-    }
+-
+-    ~myProcess()
+-    {
+-        delete M_Child;
+-    }
+-
+-    mSysProcess::status getStatus() const
+-    {
+-        return M_Child->getStatus();
+-    }
+-
+-private:
+-
+-    myProcess();
+-
+-};
+-
+-
+-static myProcess * hStarter = NULL;
++static mcProcessControl * hStarter = NULL;
+ 
+ 
+ static HWND    hwndFocus;
+@@ -412,11 +343,15 @@ long startUpdate()
+     else
+       sprintf(szProg,"%s\\%s",szPath,UPDATE_NAME);
+     mSysProcess::parent Update;
+-    myCallBack Logging( UPDATE_NAME, "mSysProcess" );
+-    myCallBack StdErr( UPDATE_NAME, "STDERR" );
+-    myCallBack StdOut( UPDATE_NAME, "STDOUT" );
++#ifdef DO_MCPROCESS_LOGGING
++    mcProcessCallback Logging( UPDATE_NAME, "mSysProcess" );
++#endif
++    mcProcessCallback StdErr( UPDATE_NAME, "STDERR" );
++    mcProcessCallback StdOut( UPDATE_NAME, "STDOUT" );
+     Update
++#ifdef DO_MCPROCESS_LOGGING
+         .setLogging( Logging )
++#endif
+         .setMinimized()
+         .setStdErr( StdErr )
+         .setStdOut( StdOut )
+@@ -484,7 +419,7 @@ char               *pStr;
+ 
+     mSysProcess::parent Parent;
+     Parent.setCommandline( szProg );
+-    hStarter = new myProcess( Parent, STARTER_NAME );
++    hStarter = new mcProcessControl( Parent, STARTER_NAME );
+     if( hStarter->getStatus() != mSysProcess::STATUS_FAILED )
+         return 0;
+     else
+@@ -1528,11 +1463,15 @@ INITCOMMONCONTROLSEX iccex;
+                                     sExe.append(sHelp);
+                                     //TRACE(HERE, "sExe: %s", sExe.c_str());
+                                     mSysProcess::parent Arrival;
+-                                    myCallBack Logging( sExe.c_str(), "mSysProcess" );
+-                                    myCallBack StdErr( sExe.c_str(), "STDERR" );
+-                                    myCallBack StdOut( sExe.c_str(), "STDOUT" );
++#ifdef DO_MCPROCESS_LOGGING
++                                    mcProcessCallback Logging( sExe.c_str(), "mSysProcess" );
++#endif
++                                    mcProcessCallback StdErr( sExe.c_str(), "STDERR" );
++                                    mcProcessCallback StdOut( sExe.c_str(), "STDOUT" );
+                                     Arrival
++#ifdef DO_MCPROCESS_LOGGING
+                                         .setLogging( Logging )
++#endif
+                                         .setCommandline( sExe.c_str() )
+                                         .setWorkDirectory( sDirectory.c_str() )
+                                         .setStdErr( StdErr )
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,200 @@
+From 6c5619c40f4e0be7386dad294704108be5f4e172 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 22 Mar 2021 16:36:06 +0000
+Subject: [PATCH 1042/1077] MANTIS 0060292 change: mstarter: shutdown plattform
+ on kiosk shutdown
+
+mstarter.exe
+V1.1.1.15
+- shutdown platform at kiosk shutdown
+- register for early shutdown
+- check for WM_ENDSESSION
+
+mControl.exe
+V1.0.2.26
+- log WM_ENDSESSION, WM_QUERYENDSESSION events
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1639 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  | 11 +++++--
+ .../Massai/cpp/Controller/inc/mstarter_def.h  | 13 ++++++--
+ .../Massai/cpp/Controller/src/mstarter.cpp    | 30 +++++++++++--------
+ .../Massai/cpp/Controller/src/serverwin.cpp   | 16 ++++++++--
+ 4 files changed, 48 insertions(+), 22 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index 93a6b8d3..b65fb882 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -9,8 +9,8 @@
+  *
+  ************************************************************************/
+ 
+-#define FILE_VER_BIN     1,0,2,25
+-#define FILE_VER_STR     "FileVersion", "1.0.2.25"
++#define FILE_VER_BIN     1,0,2,26
++#define FILE_VER_STR     "FileVersion", "1.0.2.26"
+ 
+ /*!
+ \file
+@@ -18,12 +18,17 @@
+ 
+ \page mControl.exe Release Notes - mControl.exe - platform startup, starts mudpate.exe, mstarter.exe; servant for systemControl interface
+ 
+-@version 1.0.2.25
++@version 1.0.2.26
+ 
+ \section change1 Change history
+ 
+ mControl.exe
+ 
++\version 1.0.2.26
++\li 22.03.2021
++\li change - SteT Mantis 0060292: mstarter: shutdown plattform on kiosk shutdown
++- log WM_ENDSESSION, WM_QUERYENDSESSION events
++
+ \version 1.0.2.25
+ \li 13.07.2020
+ \li change - Mantis 0058521: Screen freeze at platform start on GUI interaction on Windows 10
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+index bc9c7a1a..136fa866 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mstarter_def.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,1,1,14
+-#define FILE_VER_STR     "FileVersion", "1.1.1.14"
++#define FILE_VER_BIN     1,1,1,15
++#define FILE_VER_STR     "FileVersion", "1.1.1.15"
+ 
+ /*!
+ \file
+@@ -7,12 +7,19 @@
+ 
+ \page mstarter.exe Release Notes - mstarter.exe - process manager
+ 
+-@version 1.1.1.14
++@version 1.1.1.15
+ 
+ \section change1 Change history
+ 
+ mstarter.exe
+ 
++\version 1.1.1.15
++\li 22.03.2021
++\li change - SteT Mantis 0060292: mstarter: shutdown plattform on kiosk shutdown
++- shutdown platform at kiosk shutdown
++- register for early shutdown
++- check for WM_ENDSESSION
++
+ \version 1.1.1.14
+ \li 07.08.2019
+ \li change - Mantis 0055514: mcontrol, mstarter: Update Icons
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+index c009e041..5acd2f69 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mstarter.cpp
+@@ -26,12 +26,24 @@ namespace
+     writeTraceText(level, file, line, function, text);
+     std::cout << text << std::endl;
+   }
++
++  eventSemaphore* createEvent(const std::string& name)
++  {
++    if(name.size() > 0)
++    {
++      return new eventSemaphore(SEM_OPEN, SEM_RAW_NAME, name.c_str());
++    }
++    else
++    {
++      return new eventSemaphore();
++    }
++  }
+ }
+ 
+ int main(int argc, const char** argv)
+ {
+   standardException guard;
+-  eventSemaphore terminate;
++  eventSemaphore* terminate;
+   TraceClient trc;
+   try
+   {
+@@ -43,7 +55,6 @@ int main(int argc, const char** argv)
+       __DATE__,
+       __TIME__);
+ 
+-    mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_LATE, &terminate, &trc);
+     Arguments args= readArguments(argc, argv);
+     Notifier notifyMControl(trc);
+     Config config(trc, args.isServer, args.watchDogTimeout);
+@@ -60,18 +71,11 @@ int main(int argc, const char** argv)
+     }
+     else
+     {
++      terminate = createEvent(args.stopSemaphore);
++      mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_EARLY, terminate, "mstarter", L"shutdown platform", &trc);
+       processList.start(&config);
+-      if(args.stopSemaphore.size() > 0)
+-      {
+-        eventSemaphore sem(SEM_OPEN, SEM_RAW_NAME, args.stopSemaphore.c_str());
+-        log(BasicRuntime_HERE, "wait for semaphore");
+-        sem.wait();
+-      }
+-      else
+-      {
+-        log(BasicRuntime_HERE, "wait for ctrl-c");
+-        terminate.wait();
+-      }
++      log(BasicRuntime_HERE, "wait for terminating...");
++      terminate->wait();
+       log(BasicRuntime_HERE, "terminating...");
+       config.setListener(0);
+       processList.stop();
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index 1c7642bf..c6cb660b 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -653,6 +653,16 @@ LRESULT CALLBACK serverwinWindowProc
+ 
+      INITCOMMONCONTROLSEX       iccex;
+ 
++
++     if(message == WM_ENDSESSION)
++     {
++        TRACE(MajorWarning_HERE, "WM_ENDSESSION");
++     }
++     if(message == WM_QUERYENDSESSION)
++     {
++        TRACE(MajorWarning_HERE, "WM_QUERYENDSESSION");
++     }
++
+      switch(message)
+      {
+      case WM_CREATE:
+@@ -684,11 +694,11 @@ LRESULT CALLBACK serverwinWindowProc
+               if(cx<=1080 && FileExists(".\\mcontrol_1080.bmp"))
+               {
+                 hBitmap = CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1080.bmp");
+-              }    
++              }
+               else if(cx>1080 && FileExists(".\\mcontrol_1824.bmp"))
+               {
+                 hBitmap = CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1824.bmp");
+-              }    
++              }
+             } else
+             {
+               if(cx<=1024 && FileExists(".\\mcontrol_1024.bmp"))
+@@ -700,7 +710,7 @@ LRESULT CALLBACK serverwinWindowProc
+                 hBitmap = CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp");
+               }
+             }
+-            
++
+             if(!hBitmap)
+             {
+               if(FileExists(".\\mcontrol.bmp"))
+-- 
+2.41.0.windows.1
+

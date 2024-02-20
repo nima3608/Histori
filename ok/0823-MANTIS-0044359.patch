@@ -1,0 +1,85 @@
+From 7ae047609fd28f43f82a926821cd328729a50991 Mon Sep 17 00:00:00 2001
+From: mbrinkma <mbrinkma@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 19 Jan 2017 16:37:35 +0000
+Subject: [PATCH 0823/1077] MANTIS 0044359 Unit3 does not recognize bags when
+ user re-places bag after CC#P1 is completed
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1148 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/fsm/mStateMachine.hpp  | 53 +++++++++++--------
+ 1 file changed, 31 insertions(+), 22 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
+index 4cfd06d1..c1795335 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachine.hpp
+@@ -1251,6 +1251,36 @@ namespace StateMachine
+       virtual void logging( logLevel, char const * )
+       {
+       }
++      /**
++       *
++       * For notifying about state transitions.
++       *
++      **/
++      virtual void onStateChange(std::string const & Tree, Materna::StateMachine::place<EVT> const * prevPlace, EVT const & Evt, Materna::StateMachine::place<EVT> const * newPlace, int logLevelForChanges)
++      {
++            //
++            // Log the transition
++            //
++            std::ostringstream LogStream;
++            if( Tree.length() )
++               LogStream << Tree << ".";
++            LogStream << prevPlace->name() << " + " << Evt;
++            if( newPlace != prevPlace )
++            {
++               LogStream << " -> " << newPlace->name();
++               logging
++                  (
++                     walker<EVT>::logLevel(logLevelForChanges),
++                     LogStream.str().c_str()
++                  );
++            }
++            else
++            {
++               LogStream << ".";
++               logging( Log_SecondaryRuntime,
++                              LogStream.str().c_str() );
++            }
++      }
+ 
+       /**
+        *
+@@ -1552,28 +1582,7 @@ bool Materna::StateMachine::place<EVT>::inputTransitions
+          //
+          if( !RefT )
+          {
+-            //
+-            // Log the transition
+-            //
+-            std::ostringstream LogStream;
+-            if( Tree.length() )
+-               LogStream << Tree << ".";
+-            LogStream << name() << " + " << Evt;
+-            if( pTarget != this )
+-            {
+-               LogStream << " -> " << pTarget->name();
+-               Wlk.logging
+-                  (
+-                     walker<EVT>::logLevel(TrI->getLoglevel()),
+-                     LogStream.str().c_str()
+-                  );
+-            }
+-            else
+-            {
+-               LogStream << ".";
+-               Wlk.logging( Wlk.Log_SecondaryRuntime,
+-                              LogStream.str().c_str() );
+-            }
++            Wlk.onStateChange(Tree, this, Evt, pTarget, TrI->getLoglevel());
+             if( pTarget != this )
+             {
+                Dst = pTarget;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,563 @@
+From 09a65d42c453c06316bf08c263ce0bfa68a1aae9 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 1 Dec 2014 10:07:07 +0000
+Subject: [PATCH 0623/1076] MANTIS 0034821 CfgXMgrB: directory listener
+ function extension report child changes
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@786 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/CfgTools/inc/TestCfgListener_def.h    |  32 +++
+ .../Massai/cpp/CfgTools/makefile.mak          |  23 ++
+ .../cpp/CfgTools/res/TestCfgListener.rc       |  49 ++++
+ .../cpp/CfgTools/src/TestCfgListener.cpp      | 216 ++++++++++++++++++
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  14 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp |  72 +++---
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     |  20 ++
+ 8 files changed, 406 insertions(+), 33 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgTools/inc/TestCfgListener_def.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgTools/res/TestCfgListener.rc
+ create mode 100644 SelfServiceCommon/Massai/cpp/CfgTools/src/TestCfgListener.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/TestCfgListener_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/TestCfgListener_def.h
+new file mode 100644
+index 00000000..f25fdcd9
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/TestCfgListener_def.h
+@@ -0,0 +1,32 @@
++//-------------------------------------------------------------------------
++//
++// Characteristics for TestCfgListener.exe
++//
++//-------------------------------------------------------------------------
++
++
++//-------------------------------------------------------------------------
++//
++// Versions
++//
++//
++// 
++#define FILE_VER_BIN 0,0,0,1
++#define FILE_VER_DTS "0.0.0.1\0"
++//
++//-------------------------------------------------------------------------
++
++
++#define FILEDESCRIPTION  "FileDescription"  ,"TestCfgListener\0"
++#define INTERNALNAME     "InternalName"     ,"TestCfgListener\0"
++#define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
++#define ORIGINALFILENAME "OriginalFilename" ,"TestCfgListener.exe\0"
++#define FILE_VER_STR     "FileVersion"      ,FILE_VER_DTS
++
++
++//-------------------------------------------------------------------------
++//
++// End of file
++//
++//-------------------------------------------------------------------------
++
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/makefile.mak b/SelfServiceCommon/Massai/cpp/CfgTools/makefile.mak
+index af6df0e2..839949de 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/makefile.mak
+@@ -162,4 +162,27 @@ MY_BIN6_GEN_DIRS = \
+ 
+ ######################################################################
+ 
++MY_BIN7 = \
++    $(_BIN)\TestCfgListener.exe
++
++MY_BIN7_RES = \
++    $(_OBJ)\TestCfgListener.res
++
++MY_BIN7_OBJS = \
++    $(_OBJ)\CfgMgr.obj \
++    $(_OBJ)\CfgMgr_skel.obj \
++    $(_OBJ)\TestCfgListener.obj
++
++MY_BIN7_USER_LIBS = \
++    $(LIB_MASSAI) \
++    $(LIB_MCORBA) \
++    $(LIB_MCFGCLNT)
++
++MY_BIN7_LINKLIBS = \
++    $(SYS_ACETAO)
++
++MY_BIN7_GEN_DIRS = \
++    $(GEN_MASSAI_COMMON)
++
++######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/res/TestCfgListener.rc b/SelfServiceCommon/Massai/cpp/CfgTools/res/TestCfgListener.rc
+new file mode 100644
+index 00000000..2670c604
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/res/TestCfgListener.rc
+@@ -0,0 +1,49 @@
++//
++// TestCfgListener.rc
++//
++#include "Global_def.h"
++#include "TestCfgListener_def.h"
++
++#include "winver.h"
++
++
++
++VS_VERSION_INFO VERSIONINFO
++ FILEVERSION FILE_VER_BIN
++ PRODUCTVERSION PRODUCT_VER_BIN
++ FILEFLAGSMASK 0x3fL
++#ifdef _DEBUG
++ FILEFLAGS 0x1L
++#else
++ FILEFLAGS 0x0L
++#endif
++ FILEOS 0x40004L
++ FILETYPE 0x2L
++ FILESUBTYPE 0x0L
++BEGIN
++    BLOCK "StringFileInfo"
++    BEGIN
++        BLOCK "040704b0"
++        BEGIN
++            VALUE COMPANY
++            VALUE FILEDESCRIPTION
++            VALUE FILE_VER_STR
++            VALUE INTERNALNAME
++            VALUE COPYRIGHT
++            VALUE LEGALTRADEMARKS
++            VALUE ORIGINALFILENAME
++            VALUE PRODUCT
++            VALUE PRODUCT_VER_STR
++        END
++    END
++    BLOCK "VarFileInfo"
++    BEGIN
++        VALUE "Translation", 0x407, 1200
++    END
++END
++
++
++
++//
++// End of file
++//
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/TestCfgListener.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/TestCfgListener.cpp
+new file mode 100644
+index 00000000..0095d2a6
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/TestCfgListener.cpp
+@@ -0,0 +1,216 @@
++/**
++ **************************************************************************
++ *
++ * @file TestCfgListener.cpp
++ *
++ * Copyright (c) 2014 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++
++#include "massaiCorba/orbIncDefs.h"
++#include <CfgMgr_skel.h>
++#include "massaiCorba/corbaclnt.h"
++
++#include "cfgclnt/CfgMgrIPC.h"
++
++#include "CfgMgr.h"
++
++#include "cfgToken.h"
++
++#include "text/mArgScan.hpp"
++#include "systools/mEventSem.hpp"
++#include <iostream>
++#include <fstream>
++
++#define DSPLERR "TestCfgListener - "
++#define DSPLLIN "TestCfgListener: "
++
++#define HINDENT1 "          "
++#define HINDENT2 "                           "
++
++#include "TestCfgListener_def.h"
++
++#define MAT_VERS_ID "$Materna$Ver$Rel$Rev: "
++
++char _atsaver[] = MAT_VERS_ID FILE_VER_DTS;
++
++
++class configNodeChange : public POA_Config::changeListener
++{
++   std::ostream * M_Log;
++
++public:
++   configNodeChange( ) :
++      POA_Config::changeListener(),
++      M_Log( & std::cout )
++   {
++      if( M_Log )
++         *M_Log << "created configNodeChange" << std::endl;
++   }
++
++   ~configNodeChange()
++   {
++      if( M_Log )
++      {
++         try
++         {
++            *M_Log << "~configNodeChange" << std::endl;
++         }
++         catch( ... )
++         {
++         }
++      }
++   }
++
++   void valueChanged( char const * Item ) throw()
++   {
++      try
++      {
++         if( M_Log ) *M_Log << "configNodeChange: valueChanged( " << Item << " )" << std::endl;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++private:
++
++};
++
++   
++int main( int argc, char ** argv )
++{
++   
++   try
++   {
++      argScan Arg( argc, argv );
++      char const * Host = Arg.option( "HOST" );
++      if( Host )
++      {
++         std::cout << DSPLLIN "CfgMgr host:" << Host << std::endl;
++      }
++      else
++      {
++         Host = CFGMGR_HOST;
++      }
++      char const * DstItem = Arg.argument( 1 );
++      if( DstItem && DstItem[0] )
++      {
++         //
++         // Item is specified
++         //
++         Config::Node *      TxtProxy = 0;
++         corbaClient<Config::Node> * Clnt =
++            new corbaCallbackClient<Config::Node> ( Host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXT );
++         TxtProxy = Clnt->proxy();
++         if( !TxtProxy )
++         {
++            std::cout << DSPLERR "Could not connect the node servant." << std::endl;
++            return 1;
++         }
++                     
++         configNodeChange change1 = configNodeChange( );
++         configNodeChange change2 = configNodeChange( );
++         
++         Config::access acc1;
++         acc1.Item = CORBA::string_dup( "" );
++
++         Config::access acc2;
++         acc2.Item = CORBA::string_dup( DstItem );
++         acc2.Authorization = CORBA::string_dup( argv[0] );
++         
++         try
++         {
++            TxtProxy->addChangeListener( acc1, change1._this());
++         }
++         catch(...)
++         {
++            std::cout << DSPLERR "Could not add ChangeListener 1." << std::endl;
++            return 1;
++         }
++
++         try
++         {
++            TxtProxy->addChangeListener( acc2, change2._this());
++         }
++         catch(...)
++         {
++            std::cout << DSPLERR "Could not add ChangeListener for " <<  DstItem << std::endl;
++            return 1;
++         }
++
++         for(;;)
++         {
++            Materna::MSSD::eventSemaphore().wait( 1000 );
++         }         
++         
++      }
++      else
++      {
++         //
++         // Item not specified
++         //
++         std::cout
++            << "TestCfgListener Vers." << _atsaver + 22 << "\n"
++            << HINDENT1
++               "Copyright (c) 2004-2014 MATERNA Information & Communications\n"
++            << HINDENT1 "usage:"
++               " TestCfgListener"
++               " [-host:<Config-host>] <item>\n"
++            << std::endl;
++      }
++      return 0;
++   }
++   catch( Config::Node::notFound & )
++   {
++      std::cout << DSPLERR "Got notFound exception" << std::endl;
++   }
++   catch( Config::Node::wrongParam & )
++   {
++      std::cout << DSPLERR "Got wrongParam exception" << std::endl;
++   }
++   catch( Config::Node::noConfiguration & )
++   {
++      std::cout << DSPLERR "Got noConfiguration exception" << std::endl;
++   }
++   catch( Config::Node::notAuthorized & )
++   {
++      std::cout << DSPLERR "Got notAuthorized exception" << std::endl;
++   }
++   catch( Config::Node::notCreated & )
++   {
++      std::cout << DSPLERR "Got notCreated exception" << std::endl;
++   }
++   catch( Config::Node::outOfRange & )
++   {
++      std::cout << DSPLERR "Got outOfRange exception" << std::endl;
++   }
++   catch( Config::Node::alreadyExists & )
++   {
++      std::cout << DSPLERR "Got alreadyExists exception" << std::endl;
++   }
++   catch( CORBA::Exception & X )
++   {
++      std::cout << DSPLERR "Got CORBA::Exception: " << X << std::endl;
++   }
++   catch( std::exception & X )
++   {
++      std::cout << DSPLERR "Got std::exception: " << X.what() << std::endl;
++   }
++   catch( ... )
++   {
++      std::cout << DSPLERR "Got unknown exception" << std::endl;
++   }
++   return 1;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 2eb40b1d..a1132fe4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -375,8 +375,17 @@
+ //!     indications. Otherwise a change-indication would be sent only
+ //!     when some client calls.
+ //!   - In traces show detailed listener exceptions
+-#define FILE_VER_BIN 1,3,0,0
+-#define FILE_VER_DTS "1.3.0.0"
++//#define FILE_VER_BIN 1,3,0,0
++//#define FILE_VER_DTS "1.3.0.0"
++//
++//! @version 1.4.0
++//! @date    01.12.2014
++//! @author  GiT
++//! @par     Change:
++//! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++//
++#define FILE_VER_BIN 1,4,0,0
++#define FILE_VER_DTS "1.4.0.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 12dd0c90..93a9c6ce 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -366,9 +366,17 @@
+ //!     indications. Otherwise a change-indication would be sent only
+ //!     when some client calls.
+ //!   - In traces show detailed listener exceptions
+-#define FILE_VER_BIN 1,3,0,0
+-#define FILE_VER_DTS "1.3.0.0"
+-
++//#define FILE_VER_BIN 1,3,0,0
++//#define FILE_VER_DTS "1.3.0.0"
++//
++//! @version 1.4.0
++//! @date    01.12.2014
++//! @author  GiT
++//! @par     Change:
++//! - MANTIS 0034821: CfgXMgrB: directory listener function extension report child changes
++//
++#define FILE_VER_BIN 1,4,0,0
++#define FILE_VER_DTS "1.4.0.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+index 148c8961..478725cf 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Base.cpp
+@@ -17,6 +17,7 @@
+ #include "systools/mAutoMutex.hpp"
+ 
+ #include <map>
++#include <vector>
+ #include <string>
+ 
+ #include "trc/TraceClt.h"
+@@ -39,6 +40,22 @@ namespace
+    Materna::MSSD::mutexSemaphore Mutex;
+ 
+ 
++   // a helper function
++  std::vector<std::string> getPathPraefixList(const std::string &text, const char sep)
++  {
++    std::vector<std::string> ergList;
++    ergList.push_back("");
++    int start = 0, end = 0;
++    while ((end = text.find(sep, start)) != std::string::npos)
++    {
++      if(end)
++        ergList.push_back(text.substr(0, end));
++      start = end + 1;
++    }
++    if(text.length())
++      ergList.push_back(text);
++    return ergList;
++  }   
+ 
+    /*
+     * End of module-privates
+@@ -202,8 +219,6 @@ void cfgCorba_Base::removeChangeListenerItem
+    }
+ }
+ 
+-
+-
+ /**
+  *
+  * Method implementation (see cfgCorba_Base.hpp)
+@@ -212,33 +227,34 @@ void cfgCorba_Base::removeChangeListenerItem
+ void cfgCorba_Base::valueChanged( cfgPath const & ItemPath )
+ {
+    Materna::MSSD::autoMutex OnlyOne( Mutex );
+-   char const * const ItemC = ItemPath.c_str();
+-   valChgListeners::iterator It( M_ValChgListeners.find( ItemC ) );
+-   if( It != M_ValChgListeners.end() )
++   try
+    {
+-      writeTrace
+-      (
+-         SecondaryRuntime_HERE, "valueChanged(%s) - indicate ...",
+-         ItemC
+-      );
+-      valChgListener * const ValChgListener = It->second;
+-      try
+-      {
+-         ValChgListener->mBroadcastIndication( ItemC );
+-      }
+-      catch( ... )
+-      {
+-         writeTrace
+-         (
+-            SecondaryRuntime_HERE, "valueChanged(%s) - exception",
+-            ItemC
+-         );
+-      }
+-      writeTrace
+-      (
+-         SecondaryRuntime_HERE, "valueChanged(%s) - indicate.",
+-         ItemC
+-      );
++     std::vector<std::string> ppl;
++     valChgListeners::iterator It;
++     ppl = getPathPraefixList( ItemPath.c_str() , '.' );
++     std::vector< std::string >::iterator pplIt;
++   
++     for( pplIt = ppl.begin(); pplIt != ppl.end(); ++pplIt)
++     {
++       It = M_ValChgListeners.find( (*pplIt).c_str() );
++       if( It != M_ValChgListeners.end() )
++       {
++          writeTrace( SecondaryRuntime_HERE, "valueChanged(%s) - indicate to %s ...", ItemPath.c_str(),(*pplIt).c_str() );
++          valChgListener * const ValChgListener = It->second;
++          try
++          {
++            ValChgListener->mBroadcastIndication( ItemPath.c_str() );
++          }
++          catch( ... )
++          {
++            writeTrace( SecondaryRuntime_HERE, "valueChanged(%s) - exception", ItemPath.c_str() );
++          }
++       }
++     }
++   }
++   catch(...)
++   {
++      writeTrace( SecondaryRuntime_HERE, "Error: unknown exception in valueChanged");
+    }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index bc0bdf3a..30595055 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -2095,6 +2095,16 @@ void cfgEntity::itemCreate
+          // Create meta and item data.
+          reference const Ref = M_Meta->cemFromMeta( MetaData );
+          //-std::cout << "cfgEntity::itemCreate - update" << std::endl;
++         changeInfo * const Info = new changeInfo( M_IListeners, Item );
++         if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
++         {
++            // Queue full would lead to a client not getting the change info.
++            writeTrace
++               (
++                  SecondaryRuntime_HERE,
++                  CENT "itemCreate error: could not queue change indication!"
++               );
++         }         
+          M_Value->cevUpdate( Item, Ref, ValDef );
+       }
+    }
+@@ -2127,6 +2137,16 @@ void cfgEntity::itemDelete
+    }
+    //-std::cout << "cfgEntity::itemDelete ..." << std::endl;
+    M_Value->cevDelete( Item );
++   changeInfo * const Info = new changeInfo( M_IListeners, Item );
++   if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
++   {
++      // Queue full would lead to a client not getting the change info.
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            CENT "itemDelete error: could not queue change indication!"
++         );
++   }
+    allSaveEntity();
+    //-std::cout << "cfgEntity::itemDelete." << std::endl;
+ }
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,1592 @@
+From 18dade1725a900df04c097949b4b5fe053de7995 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 28 Jun 2013 13:21:02 +0000
+Subject: [PATCH 0421/1076] aea_parser.lib V1.0.0.3 Mantis 0027792:
+ AEASimulation: return error for invalid id in clear command
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@516 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/AEAParser/inc/aeaToken.h       |   1 +
+ .../cpp/AEAParser/src/aeaBagtagPectab.cpp     |  88 +++++++--
+ .../cpp/AEAParser/src/aeaBagtagResponse.cpp   |  22 +--
+ .../AEAParser/src/aeaBoardingPassResponse.cpp |  35 ++--
+ .../Massai/cpp/AEAParser/src/aeaContext.cpp   | 174 +++++++++++-------
+ .../Massai/cpp/AEAParser/src/aeaReceipt.cpp   |  26 +--
+ .../Massai/cpp/AEAParser/src/aeaResponse.cpp  |  24 +--
+ .../cpp/AEAParser/src/aeaSimulator_Impl.cpp   |   7 +-
+ .../Massai/cpp/AEAParser/src/aeaToken.cpp     |  84 +++++++--
+ .../Massai/cpp/AEAParser/src/local_def.cpp    |   8 +-
+ 10 files changed, 311 insertions(+), 158 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaToken.h b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaToken.h
+index 962ab52c..806ad477 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaToken.h
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/inc/aeaToken.h
+@@ -43,6 +43,7 @@ namespace Tokenizer
+   bool readDocumentType(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd);
+   bool readLogoCmd(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, Iterator& idBegin);
+   bool readLogoId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd);
++  bool readLongLogoId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd);
+   bool readTemplateCmd(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, Iterator& idBegin);
+   bool readTemplateId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd);
+   bool readColor(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
+index 68d30d61..a69a5b9a 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagPectab.cpp
+@@ -1,14 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaBagtagPectab.cpp
+-//
+-//  purpose:    aea command data, pectab data structure for parsing baggage tag commands
+-//
+-//  author:     Materna Information & Communications (SteT)
+-//
+-//  history:
+-//---------------------------------------------------------------------------
+-
++// aea command data, pectab data structure for parsing baggage tag commands
+ 
+ #pragma warning (disable:4786)
+ 
+@@ -17,7 +7,6 @@
+ #include "aeaToken.h"
+ #include "Tools/TraceDelegate.h"
+ 
+-
+ namespace
+ {
+   const char* BTP_PECTAB_LOAD= "BTT";
+@@ -30,14 +19,13 @@ namespace
+   const char* BEFORE_FIRST_FIELD= "00";
+ }
+ 
+-
+-
+ namespace MASSAI
+ {
+   namespace AEA
+   {
+     BagTagPectabField::BagTagPectabField()
+     {}
++
+     BagTagPectabField* BagTagPectabField::readPectabField(char referenceChar, char delimiter, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       if(Tokenizer::readFieldId(inBegin, inEnd, outBegin, inBegin))
+@@ -74,18 +62,22 @@ namespace MASSAI
+       return 0;
+ 
+     }
++
+     const std::string& BagTagPectabField::getId() const
+     {
+       return m_elementId;
+     }
++
+     bool BagTagPectabField::mirror() const
+     {
+       return m_mirror;
+     }
++
+     void BagTagPectabField::setMirror(bool mirror)
+     {
+       m_mirror= mirror;
+     }
++
+     void BagTagPectabField::readElementReference(char referenceChar, const std::string& text, StringList& referenceList, StringList& textList, MASSAI::trace::TraceDelegate& trace) const
+     {
+       std::string::size_type pos= 0;
+@@ -121,7 +113,7 @@ namespace MASSAI
+     {
+       std::string prefix;
+       std::string number;
+-      if(fieldLength < content.size())
++      if(fieldLength < static_cast<int>(content.size()))
+       {
+         prefix= std::string(content, 0, content.size() - fieldLength);
+         number= std::string(content, content.size() - fieldLength, fieldLength);
+@@ -133,22 +125,21 @@ namespace MASSAI
+       char buffer[256];
+       __int64 value= _atoi64(number.c_str()) + increment;
+       number= _i64toa(value, buffer, 10);
+-      if(number.size() > fieldLength)
++      if(static_cast<int>(number.size()) > fieldLength)
+       {
+         number= std::string(number, content.size() - fieldLength, fieldLength);
+       }
+-      if(number.size() < fieldLength && prefix.size() > 0)
++      if(static_cast<int>(number.size()) < fieldLength && prefix.size() > 0)
+       {
+         number= std::string(fieldLength - number.size(), '0') + number;
+       }
+       return prefix + number;
+-
+     }
+ 
+ 
+-
+     BagTagCharacter::BagTagCharacter()
+     {}
++
+     bool BagTagCharacter::readBagTagCharacter(char referenceChar, char delimiter, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+@@ -212,49 +203,58 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     Orientation BagTagCharacter::getPrintOrientation() const
+     {
+       return m_printOrientation;
+     }
++
+     HorizontalAlignment BagTagCharacter::getHorizontalAlignment() const
+     {
+       return m_horizontalAlignment;
+     }
++
+     ReverseView BagTagCharacter::getReverseView() const
+     {
+       return m_reverseView;
+     }
++
+     int BagTagCharacter::getX() const
+     {
+       return m_x;
+     }
++
+     int BagTagCharacter::getY() const
+     {
+       return m_y;
+     }
++
+     int BagTagCharacter::getHeight() const
+     {
+       return m_height;
+     }
++
+     int BagTagCharacter::getWidth() const
+     {
+       return m_width;
+     }
++
+     const StringList& BagTagCharacter::getReferenceList() const
+     {
+       return m_referenceList;
+     }
++
+     const StringList& BagTagCharacter::getPrefixTextList() const
+     {
+       return m_prefixTextList;
+     }
++
+     bool BagTagCharacter::useIncrement() const
+     {
+       return m_increment;
+     }
+ 
+ 
+-
+     BagTagLogo::BagTagLogo()
+     {}
+ 
+@@ -308,37 +308,46 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     Orientation BagTagLogo::getPrintOrientation() const
+     {
+       return m_printOrientation;
+     }
++
+     HorizontalAlignment BagTagLogo::getHorizontalAlignment() const
+     {
+       return m_horizontalAlignment;
+     }
++
+     ReverseView BagTagLogo::getReverseView() const
+     {
+       return m_reverseView;
+     }
++
+     int BagTagLogo::getX() const
+     {
+       return m_x;
+     }
++
+     int BagTagLogo::getY() const
+     {
+       return m_y;
+     }
++
+     const StringList& BagTagLogo::getReferenceList() const
+     {
+       return m_referenceList;
+     }
++
+     const StringList& BagTagLogo::getPrefixTextList() const
+     {
+       return m_prefixTextList;
+     }
+ 
++
+     BagTagSeparation::BagTagSeparation()
+     {}
++
+     bool BagTagSeparation::readBagTagSeparation(char delimiter, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+@@ -387,29 +396,36 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     Orientation BagTagSeparation::getPrintOrientation() const
+     {
+       return m_printOrientation;
+     }
++
+     HorizontalAlignment BagTagSeparation::getHorizontalAlignment() const
+     {
+       return m_horizontalAlignment;
+     }
++
+     int BagTagSeparation::getY() const
+     {
+       return m_y;
+     }
++
+     int BagTagSeparation::getHeight() const
+     {
+       return m_height;
+     }
++
+     int BagTagSeparation::getWidth() const
+     {
+       return m_width;
+     }
+ 
++
+     BagTagBarcodeDefinition::BagTagBarcodeDefinition()
+     {}
++
+     bool BagTagBarcodeDefinition::readBarcodeType(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+@@ -471,6 +487,7 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     bool BagTagBarcodeDefinition::readBarcodeFormat(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+@@ -521,34 +538,42 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     int BagTagBarcodeDefinition::getX() const
+     {
+       return m_x;
+     }
++
+     int BagTagBarcodeDefinition::getY() const
+     {
+       return m_y;
+     }
++
+     int BagTagBarcodeDefinition::getHeight() const
+     {
+       return m_height;
+     }
++
+     PectabBarcode BagTagBarcodeDefinition::getBarcode() const
+     {
+       return m_barcode;
+     }
++
+     bool BagTagBarcodeDefinition::useCheckDigit() const
+     {
+       return m_withCheckDigit;
+     }
++
+     int BagTagBarcodeDefinition::getWideBarDots() const
+     {
+       return m_wideBarDots;
+     }
++
+     int BagTagBarcodeDefinition::getNarrowBarDots() const
+     {
+       return m_narrowBarDots;
+     }
++
+     int BagTagBarcodeDefinition::getErrorLevel() const
+     {
+       return m_errorLevel;
+@@ -557,6 +582,7 @@ namespace MASSAI
+ 
+     BagTagBarcode::BagTagBarcode()
+     {}
++
+     bool BagTagBarcode::readBagTagBarcode(char referenceChar, char delimiter, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, MASSAI::trace::TraceDelegate& trace)
+     {
+       bool result= false;
+@@ -612,34 +638,42 @@ namespace MASSAI
+       }
+       return result;
+     }
++
+     const BagTagBarcodeDefinition& BagTagBarcode::getBarcode() const
+     {
+       return m_barcode;
+     }
++
+     Orientation BagTagBarcode::getPrintOrientation() const
+     {
+       return m_printOrientation;
+     }
++
+     HorizontalAlignment BagTagBarcode::getHorizontalAlignment() const
+     {
+       return m_horizontalAlignment;
+     }
++
+     int BagTagBarcode::getX() const
+     {
+       return m_x;
+     }
++
+     int BagTagBarcode::getY() const
+     {
+       return m_y;
+     }
++
+     const StringList& BagTagBarcode::getReferenceList() const
+     {
+       return m_referenceList;
+     }
++
+     const StringList& BagTagBarcode::getPrefixTextList() const
+     {
+       return m_prefixTextList;
+     }
++
+     bool BagTagBarcode::useIncrement() const
+     {
+       return m_increment;
+@@ -648,6 +682,7 @@ namespace MASSAI
+ 
+     BagTagPectabData::BagTagPectabData()
+     {}
++
+     bool BagTagPectabData::readPectabData(const std::string& contextId, const std::string& pectabCmd, AEAPrintProcessorContext& processor, MASSAI::trace::TraceDelegate& trace) throw(ParseException)
+     {
+       std::string::const_iterator it= pectabCmd.begin();
+@@ -765,54 +800,67 @@ namespace MASSAI
+       }
+       return isPectab;
+     }
++
+     const std::string& BagTagPectabData::pectab() const
+     {
+       return m_pectab;
+     }
++
+     const std::string& BagTagPectabData::pectabId() const
+     {
+       return m_pectabId;
+     }
++
+     char BagTagPectabData::continuationCharacter() const
+     {
+       return m_continuationCharacter;
+     }
++
+     int BagTagPectabData::autoIncrementFieldLength() const
+     {
+       return m_autoIncrementFieldLength;
+     }
++
+     char BagTagPectabData::colorSteering() const
+     {
+       return m_colorSteering;
+     }
++
+     int BagTagPectabData::width_tenth_mm() const
+     {
+       return m_width_tenth_mm;
+     }
++
+     int BagTagPectabData::mirrorPoint_tenth_mm() const
+     {
+       return m_mirrorPoint_tenth_mm;
+     }
++
+     char BagTagPectabData::elementReferenceCharacter() const
+     {
+       return m_elementReferenceCharacter;
+     }
++
+     char BagTagPectabData::delimiter() const
+     {
+       return m_delimiter;
+     }
++
+     int BagTagPectabData::version() const
+     {
+       return m_version;
+     }
++
+     const std::string& BagTagPectabData::pectabVersion() const
+     {
+       return m_pectabVersion;
+     }
++
+     const BagTagPectabFieldMap& BagTagPectabData::getFields() const
+     {
+       return m_fieldMap;
+     }
++
+     const BagTagPectabField* BagTagPectabData::getField(const std::string& fieldId) const
+     {
+       BagTagPectabFieldMap::const_iterator it= m_fieldMap.find(fieldId);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagResponse.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagResponse.cpp
+index 635cd487..94e5b3a6 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagResponse.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBagtagResponse.cpp
+@@ -1,15 +1,3 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaBagtagResponse.cpp
+-//
+-//  purpose:
+-//
+-//  author:     Materna Information & Communications
+-//
+-//  history:
+-//---------------------------------------------------------------------------
+-
+-
+ #include "aeaBagtagResponse.h"
+ #include "AEAParser/aeaStatus.h"
+ #include <sstream>
+@@ -30,6 +18,7 @@ namespace
+       return "ERR5";
+     }
+   }
++
+   std::string stockText(int stockId, PaperStatus status)
+   {
+     std::ostringstream out;
+@@ -47,6 +36,7 @@ namespace
+     }
+     return out.str();
+   }
++
+   std::string printedText(size_t printed)
+   {
+     std::ostringstream out;
+@@ -60,7 +50,6 @@ namespace
+     }
+     return out.str();
+   }
+-
+ }
+ 
+ namespace MASSAI
+@@ -71,17 +60,20 @@ namespace MASSAI
+       m_transactionCode(transactionCode),
+       m_jobCount(jobCount)
+     {}
++
+     AEABagtagResponse::~AEABagtagResponse()
+     {}
++
+     Command AEABagtagResponse::getCommandType() const
+     {
+       return COMMAND_PRINT;
+     }
++
+     std::string AEABagtagResponse::getResponse(const Status& status) const
+     {
+       std::string result;
+       size_t printed= 0;
+-      int i= 0;
++      unsigned int i= 0;
+       for(; i < status.feeder.size() && i < 1; i++)
+       {
+         const FeederStatus& feeder= status.feeder[i];
+@@ -97,10 +89,12 @@ namespace MASSAI
+       result= m_transactionCode + couponResponse(m_jobCount, printed) + result;
+       return result;
+     }
++
+     ResultCode AEABagtagResponse::getResultCode() const
+     {
+       return RESULT_SUCCESS;
+     }
++
+     size_t AEABagtagResponse::getDocumentCount() const
+     {
+       return m_jobCount;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassResponse.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassResponse.cpp
+index 6602acab..6cd4dcb0 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassResponse.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassResponse.cpp
+@@ -1,15 +1,3 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaBoardingPassResponse.cpp
+-//
+-//  purpose:
+-//
+-//  author:     Materna Information & Communications
+-//
+-//  history:
+-//---------------------------------------------------------------------------
+-
+-
+ #include "aeaBoardingPassResponse.h"
+ #include "AEAParser/aeaStatus.h"
+ #include <sstream>
+@@ -38,6 +26,7 @@ namespace
+       }
+     }
+   }
++
+   std::string couponResponse(const std::string& rsp, size_t printJobs, size_t printed)
+   {
+     if(rsp.size() != 0)
+@@ -53,6 +42,7 @@ namespace
+       return "ERR5";
+     }
+   }
++
+   std::string voidedText(size_t voided)
+   {
+     std::ostringstream out;
+@@ -70,6 +60,7 @@ namespace
+     }
+     return out.str();
+   }
++
+   std::string dispenserText(DispenserStatus status)
+   {
+     if(status == DS_FULL)
+@@ -81,6 +72,7 @@ namespace
+       return "S";
+     }
+   }
++
+   std::string ribbonText(RibbonStatus status)
+   {
+     if(status == RS_OK)
+@@ -96,6 +88,7 @@ namespace
+       return "O";
+     }
+   }
++
+   std::string stockText(int stockId, PaperStatus status)
+   {
+     std::ostringstream out;
+@@ -113,6 +106,7 @@ namespace
+     }
+     return out.str();
+   }
++
+   std::string printedText(size_t printed)
+   {
+     std::ostringstream out;
+@@ -126,7 +120,6 @@ namespace
+     }
+     return out.str();
+   }
+-
+ }
+ 
+ namespace MASSAI
+@@ -139,6 +132,7 @@ namespace MASSAI
+       m_jobCount(jobCount),
+       m_stockCount(stockCount)
+     {}
++
+     AEACouponResponse::AEACouponResponse(const std::string& transactionCode, char delimiter, const std::string& rsp, size_t stockCount):
+       m_transactionCode(transactionCode),
+       m_delimiter(1, delimiter),
+@@ -146,18 +140,21 @@ namespace MASSAI
+       m_stockCount(stockCount),
+       m_rsp(rsp)
+     {}
++
+     AEACouponResponse::~AEACouponResponse()
+     {}
++
+     Command AEACouponResponse::getCommandType() const
+     {
+       return COMMAND_PRINT;
+     }
++
+     std::string AEACouponResponse::getResponse(const Status& status) const
+     {
+       std::string result;
+       size_t printed= 0;
+       size_t voided= 0;
+-      int i= 0;
++      unsigned int i= 0;
+       for(; i < status.feeder.size(); i++)
+       {
+         const FeederStatus& feeder= status.feeder[i];
+@@ -179,39 +176,45 @@ namespace MASSAI
+       result= m_transactionCode + couponResponse(m_rsp, m_jobCount, printed) + result;
+       return result;
+     }
++
+     ResultCode AEACouponResponse::getResultCode() const
+     {
+       return RESULT_SUCCESS;
+     }
++
+     size_t AEACouponResponse::getDocumentCount() const
+     {
+       return m_jobCount;
+     }
+ 
+ 
+-
+     AEAReceiptResponse::AEAReceiptResponse(const std::string& transactionCode):
+       m_transactionCode(transactionCode)
+     {}
++
+     AEAReceiptResponse::~AEAReceiptResponse()
+     {}
++
+     Command AEAReceiptResponse::getCommandType() const
+     {
+       return COMMAND_PRINT;
+     }
++
+     std::string AEAReceiptResponse::getResponse(const Status& status) const
+     {
+       size_t printed= 0;
+-      for(int i= 0; i < status.feeder.size(); i++)
++      for(unsigned int i= 0; i < status.feeder.size(); i++)
+       {
+         printed+= status.feeder[i].printed;
+       }
+       return m_transactionCode + receiptResponse(status.printerStatus, printed);
+     }
++
+     ResultCode AEAReceiptResponse::getResultCode() const
+     {
+       return RESULT_SUCCESS;
+     }
++
+     size_t AEAReceiptResponse::getDocumentCount() const
+     {
+       return 1;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+index eb6d1238..6cc29302 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaContext.cpp
+@@ -91,9 +91,9 @@ namespace MASSAI
+       std::string::const_iterator lcBegin, lcEnd;
+       if(Tokenizer::readText(LOGO_CLEAR, it, end, lcBegin, lcEnd))
+       {
+-        isClearLogo= true;
+         if(lcEnd == end)
+         {
++          isClearLogo= true;
+           trace.writeTrace(BasicRuntime_HERE, "ClearLogos clear all logos");
+           Logos::iterator it= m_logos.begin();
+           Logos::iterator end= m_logos.end();
+@@ -108,26 +108,38 @@ namespace MASSAI
+         {
+           std::string::const_iterator logoBegin, logoEnd;
+           it= lcEnd;
+-          while(Tokenizer::readLogoId(it, end, logoBegin, logoEnd))
++          while(Tokenizer::readLongLogoId(it, end, logoBegin, logoEnd))
+           {
+             it= logoEnd;
+-            Logos::iterator logoIt= m_logos.find(std::string(logoBegin, logoEnd));
+-            if(logoIt == m_logos.end())
+-            {
+-              trace.writeTrace(BasicRuntime_HERE, "Ignore ClearLogos (%.1000s): not found", std::string(logoBegin, logoEnd).c_str());
+-            }
+-            else
++          }
++          if(it == end)
++          {
++            isClearLogo= true;
++            it= lcEnd;
++            while(Tokenizer::readLongLogoId(it, end, logoBegin, logoEnd))
+             {
+-              trace.writeTrace(BasicRuntime_HERE, "ClearLogos (%.1000s)", std::string(logoBegin, logoEnd).c_str());
+-              processor.processClear(logoIt->second);
+-              m_logoOrder.remove(logoIt->first);
+-              m_logos.erase(logoIt);
++              it= logoEnd;
++              Logos::iterator logoIt= m_logos.find(std::string(logoBegin, logoEnd));
++              if(logoIt == m_logos.end())
++              {
++                trace.writeTrace(BasicRuntime_HERE, "Ignore ClearLogos (%.1000s): not found", std::string(logoBegin, logoEnd).c_str());
++              }
++              else
++              {
++                trace.writeTrace(BasicRuntime_HERE, "ClearLogos (%.1000s)", std::string(logoBegin, logoEnd).c_str());
++                processor.processClear(logoIt->second);
++                m_logoOrder.remove(logoIt->first);
++                m_logos.erase(logoIt);
++              }
+             }
+           }
+         }
+-        std::string response= m_transactionCode + LOGO_CLEAR + RETURN_OK;
+-        logostatus(response);
+-        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        if(isClearLogo)
++        {
++          std::string response= m_transactionCode + LOGO_CLEAR + RETURN_OK;
++          logostatus(response);
++          rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        }
+       }
+       return isClearLogo;
+     }
+@@ -278,9 +290,9 @@ namespace MASSAI
+       std::string::const_iterator pcBegin, pcEnd;
+       if(Tokenizer::readText(PECTAB_CLEAR, it, end, pcBegin, pcEnd))
+       {
+-        isClearPectab= true;
+         if(pcEnd == end)
+         {
++          isClearPectab= true;
+           trace.writeTrace(BasicRuntime_HERE, "ClearPectabs clear all pectabs");
+           BagTagPectabDatas::iterator it= m_pectabs.begin();
+           BagTagPectabDatas::iterator end= m_pectabs.end();
+@@ -297,26 +309,38 @@ namespace MASSAI
+           it= pcEnd;
+           while(Tokenizer::readBTPPectab(it, end, pectabBegin, pectabEnd) && Tokenizer::readBTPPectabVersion(pectabEnd, end, versionBegin, versionEnd))
+           {
+-            std::string& pectabId= std::string(pectabBegin, pectabEnd);
+-            std::string& pectabVersion= std::string(versionBegin, versionEnd);
+             it= versionEnd;
+-            BagTagPectabDatas::iterator pectabIt= m_pectabs.find(std::make_pair(pectabId, pectabVersion));
+-            if(pectabIt == m_pectabs.end())
+-            {
+-              trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) (%.1000s) : not found", pectabId.c_str(), pectabVersion.c_str());
+-            }
+-            else
++          }
++          if(it == end)
++          {
++            isClearPectab= true;
++            it= pcEnd;
++            while(Tokenizer::readBTPPectab(it, end, pectabBegin, pectabEnd) && Tokenizer::readBTPPectabVersion(pectabEnd, end, versionBegin, versionEnd))
+             {
+-              trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", pectabId.c_str(), pectabIt->second.version());
+-              processor.processClear(pectabIt->second);
+-              m_pectabs.erase(pectabIt);
+-              m_pectabOrder.remove(pectabId + pectabVersion);
++              std::string& pectabId= std::string(pectabBegin, pectabEnd);
++              std::string& pectabVersion= std::string(versionBegin, versionEnd);
++              it= versionEnd;
++              BagTagPectabDatas::iterator pectabIt= m_pectabs.find(std::make_pair(pectabId, pectabVersion));
++              if(pectabIt == m_pectabs.end())
++              {
++                trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) (%.1000s) : not found", pectabId.c_str(), pectabVersion.c_str());
++              }
++              else
++              {
++                trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", pectabId.c_str(), pectabIt->second.version());
++                processor.processClear(pectabIt->second);
++                m_pectabs.erase(pectabIt);
++                m_pectabOrder.remove(pectabId + pectabVersion);
++              }
+             }
+           }
+         }
+-        std::string response= transactionCode() + PECTAB_CLEAR + RETURN_OK;
+-        pectabstatus(response);
+-        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        if(isClearPectab)
++        {
++          std::string response= transactionCode() + PECTAB_CLEAR + RETURN_OK;
++          pectabstatus(response);
++          rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        }
+       }
+       return isClearPectab;
+     }
+@@ -436,9 +460,9 @@ namespace MASSAI
+       std::string::const_iterator pcBegin, pcEnd;
+       if(Tokenizer::readText(PECTAB_CLEAR, it, end, pcBegin, pcEnd))
+       {
+-        isClearPectab= true;
+         if(pcEnd == end)
+         {
++          isClearPectab= true;
+           trace.writeTrace(BasicRuntime_HERE, "ClearPectabs clear all pectabs");
+           Pectabs::iterator it= m_pectabs.begin();
+           Pectabs::iterator end= m_pectabs.end();
+@@ -456,27 +480,39 @@ namespace MASSAI
+           while(Tokenizer::readPectab(it, end, pectabBegin, pectabEnd) && Tokenizer::readPectabVersion(pectabEnd, end, versionBegin, versionEnd))
+           {
+             it= versionEnd;
+-            Pectabs::iterator pectabIt= m_pectabs.find(std::string(pectabBegin, pectabEnd));
+-            if(pectabIt == m_pectabs.end())
+-            {
+-              trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) %d: not found", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
+-            }
+-            else if((*pectabIt).second.version() == Tokenizer::pectabVersion(versionBegin, versionEnd))
+-            {
+-              trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
+-              processor.processClear(pectabIt->second);
+-              m_pectabOrder.remove(pectabIt->first);
+-              m_pectabs.erase(pectabIt);
+-            }
+-            else
++          }
++          if(it == end)
++          {
++            isClearPectab= true;
++            it= pcEnd;
++            while(Tokenizer::readPectab(it, end, pectabBegin, pectabEnd) && Tokenizer::readPectabVersion(pectabEnd, end, versionBegin, versionEnd))
+             {
+-              trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) %d: version is %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd), (*pectabIt).second.version());
++              it= versionEnd;
++              Pectabs::iterator pectabIt= m_pectabs.find(std::string(pectabBegin, pectabEnd));
++              if(pectabIt == m_pectabs.end())
++              {
++                trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) %d: not found", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
++              }
++              else if((*pectabIt).second.version() == Tokenizer::pectabVersion(versionBegin, versionEnd))
++              {
++                trace.writeTrace(BasicRuntime_HERE, "ClearPectabs (%.1000s) %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd));
++                processor.processClear(pectabIt->second);
++                m_pectabOrder.remove(pectabIt->first);
++                m_pectabs.erase(pectabIt);
++              }
++              else
++              {
++                trace.writeTrace(BasicRuntime_HERE, "Ignore ClearPectabs (%.1000s) %d: version is %d", std::string(pectabBegin, pectabEnd).c_str(), Tokenizer::pectabVersion(versionBegin, versionEnd), (*pectabIt).second.version());
++              }
+             }
+           }
+         }
+-        std::string response= transactionCode() + PECTAB_CLEAR + RETURN_OK;
+-        pectabstatus(response);
+-        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        if(isClearPectab)
++        {
++          std::string response= transactionCode() + PECTAB_CLEAR + RETURN_OK;
++          pectabstatus(response);
++          rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        }
+       }
+       return isClearPectab;
+     }
+@@ -553,9 +589,9 @@ namespace MASSAI
+       std::string::const_iterator lcBegin, lcEnd;
+       if(Tokenizer::readText(TEMPLATE_CLEAR, it, end, lcBegin, lcEnd))
+       {
+-        isClearTemplate= true;
+         if(lcEnd == end)
+         {
++          isClearTemplate= true;
+           trace.writeTrace(BasicRuntime_HERE, "ClearTemplates clear all templates");
+           Templates::iterator it= m_templates.begin();
+           Templates::iterator end= m_templates.end();
+@@ -573,23 +609,35 @@ namespace MASSAI
+           while(Tokenizer::readTemplateId(it, end, templateBegin, templateEnd))
+           {
+             it= templateEnd;
+-            Templates::iterator templateIt= m_templates.find(std::string(templateBegin, templateEnd));
+-            if(templateIt == m_templates.end())
+-            {
+-              trace.writeTrace(BasicRuntime_HERE, "Ignore ClearTemplates (%.1000s): not found", std::string(templateBegin, templateEnd).c_str());
+-            }
+-            else
++          }
++          if(it == end)
++          {
++            isClearTemplate= true;
++            it= lcEnd;
++            while(Tokenizer::readTemplateId(it, end, templateBegin, templateEnd))
+             {
+-              trace.writeTrace(BasicRuntime_HERE, "ClearTemplates (%.1000s)", templateIt->first.c_str());
+-              processor.processClear(templateIt->second);
+-              m_templateOrder.remove(templateIt->first);
+-              m_templates.erase(templateIt);
++              it= templateEnd;
++              Templates::iterator templateIt= m_templates.find(std::string(templateBegin, templateEnd));
++              if(templateIt == m_templates.end())
++              {
++                trace.writeTrace(BasicRuntime_HERE, "Ignore ClearTemplates (%.1000s): not found", std::string(templateBegin, templateEnd).c_str());
++              }
++              else
++              {
++                trace.writeTrace(BasicRuntime_HERE, "ClearTemplates (%.1000s)", templateIt->first.c_str());
++                processor.processClear(templateIt->second);
++                m_templateOrder.remove(templateIt->first);
++                m_templates.erase(templateIt);
++              }
+             }
+           }
+         }
+-        std::string response= transactionCode() + TEMPLATE_CLEAR + RETURN_OK;
+-        templatestatus(response);
+-        rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        if(isClearTemplate)
++        {
++          std::string response= transactionCode() + TEMPLATE_CLEAR + RETURN_OK;
++          templatestatus(response);
++          rsp= AEAResult(new AEAConstResponse(COMMAND_SETUP, RESULT_SUCCESS, response));
++        }
+       }
+       return isClearTemplate;
+     }
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
+index 64d1f300..f1a37176 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaReceipt.cpp
+@@ -1,13 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaReceipt.cpp
+-//
+-//  purpose:    interpret aea commands
+-//
+-//  author:     Materna Information & Communications
+-//
+-//  history:
+-//---------------------------------------------------------------------------
++//  interpret aea commands
+ 
+ #pragma warning (disable:4786)
+ 
+@@ -22,28 +13,36 @@ namespace MASSAI
+       PrintReceiptException::PrintReceiptException(const std::string& what):
+         std::runtime_error(what)
+       {}
++
+       PrintReceiptInvalidFontException::PrintReceiptInvalidFontException(const std::string& font):
+         PrintReceiptException(std::string("Invalid font: ") + font)
+       {}
++
+       PrintReceiptInvalidFontException::PrintReceiptInvalidFontException():
+         PrintReceiptException("No font set!")
+       {}
++
+       PrintReceiptInvalidFontSizeException::PrintReceiptInvalidFontSizeException(const std::string& fontsize):
+         PrintReceiptException(std::string("Invalid font size: ") + fontsize)
+       {}
++
+       PrintReceiptInvalidFontSizeException::PrintReceiptInvalidFontSizeException():
+         PrintReceiptException("No font size set!")
+       {}
++
+       PrintReceiptInvalidCLFException::PrintReceiptInvalidCLFException(const std::string& clf):
+         PrintReceiptException(std::string("Invalid clf: ") + clf)
+       {}
++
+       Font::Font():
+         fontId(0),
+         fontSizeId(0)
+       {}
++
+       ReceiptCommand::ReceiptCommand():
+         pCommand(0)
+       {}
++
+       ReceiptPrinting::ReceiptPrinting()
+       {
+         { // receiptCLF -> receiptCLFMap
+@@ -68,10 +67,11 @@ namespace MASSAI
+           }
+         }
+       }
++
+       ReceiptCommand ReceiptPrinting::parseCLF(const std::string& clf) const
+       {
+         ReceiptCommand result;
+-        int i= CLF_MAX_SIZE;
++        unsigned int i= CLF_MAX_SIZE;
+         if(i > clf.length())
+         {
+           i= clf.length();
+@@ -86,7 +86,8 @@ namespace MASSAI
+           }
+         }
+         return result;
+-      };
++      }
++
+       const ReceiptFont* ReceiptPrinting::getFont(const std::string& id)
+       {
+         const ReceiptFont* result= 0;
+@@ -101,6 +102,7 @@ namespace MASSAI
+         }
+         return result;
+       }
++
+       const ReceiptFontSize* ReceiptPrinting::getFontSize(const std::string& id)
+       {
+         const ReceiptFontSize* result= 0;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaResponse.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaResponse.cpp
+index b43f5ab5..74837696 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaResponse.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaResponse.cpp
+@@ -1,16 +1,3 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaReponse.cpp
+-//
+-//  purpose:
+-//
+-//  date:       14.06.2010
+-//
+-//  author:     Materna Information & Communications
+-//
+-//  history:
+-//---------------------------------------------------------------------------
+-
+ #include "AEAParser/aeaResponse.h"
+ #include "AEAParser/aeaStatus.h"
+ 
+@@ -20,12 +7,15 @@ namespace MASSAI
+   {
+     AEAResponse::AEAResponse()
+     {}
++
+     AEAResponse::~AEAResponse()
+     {}
++
+     Command AEAResponse::getCommandType() const
+     {
+       return COMMAND_UNKNOWN;
+     }
++
+     std::string AEAResponse::getResponse() const
+     {
+       Status status;
+@@ -33,7 +23,7 @@ namespace MASSAI
+       status.dispenserStatus= DS_OK;
+       status.printerStatus= PS_OK;
+       status.feeder.resize(3);
+-      for(int i= 0; i < status.feeder.size(); i++)
++      for(unsigned int i= 0; i < status.feeder.size(); i++)
+       {
+         status.feeder[i].printed= 0;
+         status.feeder[i].voided= 0;
+@@ -42,6 +32,7 @@ namespace MASSAI
+       status.feeder[0].printed= getDocumentCount();
+       return getResponse(status);
+     }
++
+     size_t AEAResponse::getDocumentCount() const
+     {
+       return 0;
+@@ -51,6 +42,7 @@ namespace MASSAI
+     {
+       return "";
+     }
++
+     ResultCode AEAResponse::getResultCode() const
+     {
+       return RESULT_FORMAT_ERROR;
+@@ -61,16 +53,20 @@ namespace MASSAI
+       m_resultCode(resultCode),
+       m_response(response)
+     {}
++
+     AEAConstResponse::~AEAConstResponse()
+     {}
++
+     Command AEAConstResponse::getCommandType() const
+     {
+       return m_cmd;
+     }
++
+     std::string AEAConstResponse::getResponse(const Status& status) const
+     {
+       return m_response;
+     }
++
+     ResultCode AEAConstResponse::getResultCode() const
+     {
+       return m_resultCode;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_Impl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_Impl.cpp
+index cc675237..d5bb1068 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_Impl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_Impl.cpp
+@@ -87,7 +87,12 @@ namespace MASSAI
+         result= do_input(cmd);
+         if(result.get() == 0)
+         {
+-          result= AEAResult(new AEAConstResponse(COMMAND_UNKNOWN, RESULT_FORMAT_ERROR, m_transactionCode + RETURN_ERROR_ILLOGICAL + cmd));
++          std::string prefix = cmd;
++          if(cmd.size() > 2)
++          {
++            prefix = std::string(cmd, 0, 2);
++          }
++          result= AEAResult(new AEAConstResponse(COMMAND_UNKNOWN, RESULT_FORMAT_ERROR, m_transactionCode + RETURN_ERROR_ILLOGICAL + prefix));
+         }
+         {
+           Materna::MSSD::autoMutex mx(m_access);
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaToken.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaToken.cpp
+index d67a1113..b91d9b6f 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaToken.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaToken.cpp
+@@ -1,15 +1,4 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       aeaToken.cpp
+-//
+-//  purpose:    parse aea commands
+-//
+-//  date:       24.05.2007
+-//
+-//  author:     Materna Information & Communications (SteT)
+-//
+-//  history:
+-//---------------------------------------------------------------------------
++// parse aea commands
+ 
+ #pragma warning (disable:4786)
+ 
+@@ -24,7 +13,6 @@ using namespace::Tokenizer;
+ 
+ namespace
+ {
+-
+   void extractBagTagOrientation(Iterator inBegin, MASSAI::AEA::Orientation& orientation, MASSAI::AEA::HorizontalAlignment& alignment, MASSAI::AEA::ReverseView& reverseView)
+   {
+     switch(*inBegin)
+@@ -64,6 +52,7 @@ namespace Tokenizer
+   {
+     return in.substr(0, text.size()) == text;
+   }
++
+   bool readChar(char text, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -76,6 +65,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readChar(const std::string& list, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -88,6 +78,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readAlpha(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -113,6 +104,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readDigit(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -125,6 +117,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readDigit(int count, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -140,6 +133,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readToChar(char text, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -155,6 +149,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readToChar(const std::string& list, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -189,6 +184,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readPectab(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -218,10 +214,12 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readPectabVersion(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     return readDigit(inBegin, inEnd, outBegin, outEnd);
+   }
++
+   bool readTransactionCode(char delimiter, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -239,6 +237,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readFieldId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -268,6 +267,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readDocumentType(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -304,6 +304,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readTemplateId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -320,6 +321,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readTemplateCmd(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, Iterator& idBegin)
+   {
+     bool result= false;
+@@ -335,6 +337,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readLogoId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -351,6 +354,24 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
++  bool readLongLogoId(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
++  {
++    bool result= false;
++    outBegin= inBegin;
++    if(inBegin != inEnd && (isdigit(*inBegin) || isalpha(*inBegin))) // 1 digit addressing
++    {
++      ++inBegin;
++      if(inBegin != inEnd && (isdigit(*inBegin) || isalpha(*inBegin))) // 2 digit addressing
++      {
++        ++inBegin;
++        outEnd= inBegin;
++        result= true;
++      }
++    }
++    return result;
++  }
++
+   bool readLogoCmd(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd, Iterator& idBegin)
+   {
+     bool result= false;
+@@ -362,6 +383,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readColor(char cmd, Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -378,6 +400,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readRow(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -390,6 +413,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readCLF(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -420,6 +444,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readOrientation(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -432,6 +457,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readTemplateFontDomain(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -444,6 +470,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readTemplateFont(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -461,6 +488,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readTemplateCharFactor(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -473,6 +501,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   void charFactor(Iterator inBegin, int& width, int& height)
+   {
+     switch(*inBegin)
+@@ -496,6 +525,7 @@ namespace Tokenizer
+       default: height= -1; width= -1;
+     }
+   }
++
+   int characterValue(Iterator inBegin)
+   {
+     switch(*inBegin)
+@@ -563,6 +593,7 @@ namespace Tokenizer
+     charFactor(inBegin, width, height);
+     return height;
+   }
++
+   int charWidthFactor(Iterator inBegin)
+   {
+     int width;
+@@ -570,6 +601,7 @@ namespace Tokenizer
+     charFactor(inBegin, width, height);
+     return height;
+   }
++
+   MASSAI::AEA::PectabFont font(Iterator inBegin)
+   {
+     switch(*inBegin)
+@@ -590,6 +622,7 @@ namespace Tokenizer
+         return MASSAI::AEA::PT_FONT_UNKNOWN;
+     }
+   }
++
+   MASSAI::AEA::TemplateFontDomain fontDomain(Iterator inBegin)
+   {
+     switch(*inBegin)
+@@ -604,6 +637,7 @@ namespace Tokenizer
+         return MASSAI::AEA::FD_UNKNOWN;
+     }
+   }
++
+   MASSAI::AEA::Orientation orientation(Iterator inBegin)
+   {
+     switch(*inBegin)
+@@ -620,10 +654,12 @@ namespace Tokenizer
+         return MASSAI::AEA::PT_OR_UNKNOWN;
+     }
+   }
++
+   int digit(Iterator inBegin)
+   {
+     return *inBegin - '0';
+   }
++
+   int digit(Iterator inBegin, Iterator inEnd)
+   {
+     int result= 0;
+@@ -631,19 +667,23 @@ namespace Tokenizer
+       result= result * 10 + digit(inBegin);
+     return result;
+   }
++
+   int row(Iterator inBegin)
+   {
+     return *inBegin - 'A';
+   }
++
+   int pectabVersion(Iterator inBegin, Iterator inEnd)
+   {
+     return digit(inBegin);
+   }
++
+   std::string documentType(Iterator inBegin, Iterator inEnd)
+   {
+     std::string result= std::string(inBegin, inBegin + 1);
+     return result;
+   }
++
+   std::string clf(Iterator inBegin, Iterator inEnd)
+   {
+     std::string result;
+@@ -651,6 +691,7 @@ namespace Tokenizer
+       result= std::string(inBegin, inBegin + 4);
+     return result;
+   }
++
+   char dec(unsigned int value)
+   {
+     switch(value)
+@@ -674,18 +715,22 @@ namespace Tokenizer
+   {
+     return readDigit(2, inBegin, inEnd, outBegin, outEnd);
+   }
++
+   bool readBTPPectabVersion(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     return readDigit(2, inBegin, inEnd, outBegin, outEnd);
+   }
++
+   bool readBagTagFont(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     return readChar('0', inBegin, inEnd, outBegin, outEnd);
+   }
++
+   bool readMirrorIndicator(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     return readChar(' ', inBegin, inEnd, outBegin, outEnd) || readChar('M', inBegin, inEnd, outBegin, outEnd);
+   }
++
+   bool readBagTagOrientation(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -698,6 +743,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readBagTagLineOrientation(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -720,6 +766,7 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool readBagTagBarcodeOrientation(Iterator inBegin, Iterator inEnd, Iterator& outBegin, Iterator& outEnd)
+   {
+     bool result= false;
+@@ -741,10 +788,12 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   bool mirrorIndicator(Iterator inBegin)
+   {
+     return *inBegin == 'M';
+   }
++
+   MASSAI::AEA::Orientation bagTagOrientation(Iterator inBegin)
+   {
+     MASSAI::AEA::Orientation orientation;
+@@ -753,6 +802,7 @@ namespace Tokenizer
+     extractBagTagOrientation(inBegin, orientation, alignment, reverseView);
+     return orientation;
+   }
++
+   MASSAI::AEA::HorizontalAlignment bagTagAlignment(Iterator inBegin)
+   {
+     MASSAI::AEA::Orientation orientation;
+@@ -761,6 +811,7 @@ namespace Tokenizer
+     extractBagTagOrientation(inBegin, orientation, alignment, reverseView);
+     return alignment;
+   }
++
+   MASSAI::AEA::ReverseView bagTagReverseView(Iterator inBegin)
+   {
+     MASSAI::AEA::Orientation orientation;
+@@ -799,11 +850,12 @@ namespace Tokenizer
+       default: return -1;
+     }
+   }
++
+   std::string fromHexLittleEndian(const std::string& data)
+   {
+     std::string result;
+     result.reserve(data.size() / 2);
+-    for(int i= 0; i < data.size() - 1; i+= 2)
++    for(unsigned int i= 0; i < data.size() - 1; i+= 2)
+     {
+       int v1= fromHex(data[i]);
+       int v2= fromHex(data[i+1]);
+@@ -817,11 +869,12 @@ namespace Tokenizer
+     }
+     return result;
+   }
++
+   std::string fromHexBigEndian(const std::string& data)
+   {
+     std::string result;
+     result.reserve(data.size() / 2);
+-    for(int i= 0; i < data.size() - 1; i+= 2)
++    for(unsigned int i= 0; i < data.size() - 1; i+= 2)
+     {
+       int v1= fromHex(data[i]);
+       int v2= fromHex(data[i+1]);
+@@ -835,5 +888,4 @@ namespace Tokenizer
+     }
+     return result;
+   }
+-
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
+index e76bcb52..6c43df79 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/local_def.cpp
+@@ -1,8 +1,14 @@
+ #include "Tools/VERSIONLIB.h"
+ 
++VERSION_ID_DT(aea_parser, 1, 0, 0, 3);
++
+ /*!
+ \page aea_parser aea_parser - Release Notes
+ 
++\date 26.06.2013
++\li V1.0.0.3
++\li Mantis 0027792: AEASimulation: return error for invalid id in clear command
++
+ \date 26.06.2013
+ \li V1.0.0.2
+ \li Mantis 0027739: AEASimulation: use load order for id enumeration
+@@ -14,7 +20,5 @@
+ \date 19.10.2010
+ \li V1.0.0.0
+ \li SteT Initial Version
+-
+ */
+ 
+-VERSION_ID_DT(aea_parser, 1, 0, 0, 3);
+-- 
+2.41.0.windows.1
+

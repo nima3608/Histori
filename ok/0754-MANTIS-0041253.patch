@@ -1,0 +1,172 @@
+From 58e95108dc73c159face23fe8dc4476b74b74143 Mon Sep 17 00:00:00 2001
+From: jschyra <jschyra@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 30 May 2016 14:45:05 +0000
+Subject: [PATCH 0754/1077] MANTIS 0041253 [SetKioskData]:  - Increase Version
+ to 2.1.0.0  - Add logoutput to joinDom.cmd  - BUGFIX: Get correct page data
+ for AUTOLOGON configuration.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1023 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.iss | 18 +++----
+ .../Build/setup/SetKioskData/joinDom.cmd      | 50 +++++++++++++++----
+ 2 files changed, 50 insertions(+), 18 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index b6a2a089..24a183f7 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -5,7 +5,7 @@ FlatComponentsList=False
+ AlwaysShowComponentsList=False
+ ShowComponentSizes=False
+ AppName=Set Kiosk Data
+-AppVersion=2.0.0
++AppVersion=2.1.0
+ AppCopyright=© 2012 MATERNA GmbH Information & Communications
+ ChangesEnvironment=True
+ CreateAppDir=False
+@@ -18,14 +18,14 @@ AppPublisherURL=http://www.materna-ips.com
+ AppSupportURL=http://www.materna-ips.com
+ AppUpdatesURL=http://www.materna-ips.com
+ Uninstallable=no
+-VersionInfoVersion=2.0.0
++VersionInfoVersion=2.1.0
+ VersionInfoCompany=MATERNA GmbH Information & Communications
+ VersionInfoDescription=Set Kiosk Data
+-VersionInfoTextVersion=2.0.0
++VersionInfoTextVersion=2.1.0
+ VersionInfoCopyright=© 2012 MATERNA GmbH Information & Communications
+ VersionInfoProductName=SetKioskData
+-VersionInfoProductVersion=2.0.0
+-VersionInfoProductTextVersion=2.0.0
++VersionInfoProductVersion=2.1.0
++VersionInfoProductTextVersion=2.1.0
+ Encryption=False
+ SetupLogging=True
+ OutputBaseFilename=SetKioskData
+@@ -61,7 +61,7 @@ Name: {userstartup}\SetKioskData.lnk; Type: files
+ Filename: "{tmp}\configEnvironment.cmd"; Parameters: """{code:GetAirport}"" ""{code:GetArea}"" ""{code:GetTerminal}"" ""{code:GetKioskName}"""; WorkingDir: "{tmp}"
+ Filename: "{tmp}\configHostname.cmd"; Parameters: """{code:GetKioskName}"""; WorkingDir: "{tmp}"; Check: RunSetHostname
+ Filename: "{tmp}\configConveyor.cmd"; Parameters: """{code:GetConvName}"" ""{code:GetBHSHost}"" ""{code:GetBHSPort}"" ""{code:GetSICKHost}"" ""{code:GetSICKPort}"""; WorkingDir: "{tmp}"; Check: RunConveyor
+-Filename: "{tmp}\joinDom.cmd"; Parameters: """{code:GetDomainName}"" ""{code:GetKioskName}"" ""{code:GetDomainUser}"" ""{code:GetOperationUnit}"" ""{code:GetLogonDomain}"" ""{code:GetLogonUser}"" ""{code:GetLogonPassword}"""; WorkingDir: "{tmp}"; Flags: waituntilterminated; Check: RunAddDomain
++Filename: "{tmp}\joinDom.cmd"; Parameters: """{log}"" ""{code:GetDomainName}"" ""{code:GetKioskName}"" ""{code:GetDomainUser}"" ""{code:GetOperationUnit}"" ""{code:GetLogonDomain}"" ""{code:GetLogonUser}"" ""{code:GetLogonPassword}"""; WorkingDir: "{tmp}"; Flags: waituntilterminated; Check: RunAddDomain
+ 
+ [Code]
+ var
+@@ -286,19 +286,19 @@ end;
+ 
+ function GetLogonDomain(Param:String): String;
+ begin
+-    Result := GetPageData('DOMAIN', 'Domain (NETBIOS) Name (if any):');
++    Result := GetPageData('AUTOLOGON', 'Domain (NETBIOS) Name (if any):');
+     LOG('Domain (NETBIOS) Name: ' + Result);
+ end;
+ 
+ function GetLogonUser(Param:String): String;
+ begin
+-    Result := GetPageData('DOMAIN', 'Windows logon User:');
++    Result := GetPageData('AUTOLOGON', 'Windows logon User:');
+     LOG('Windows logon User: ' + Result);
+ end;
+ 
+ function GetLogonPassword(Param:String): String;
+ begin
+-    Result := GetPageData('DOMAIN', 'Logon Password:');
++    Result := GetPageData('AUTOLOGON', 'Logon Password:');
+     LOG('Logon Password: xxx');
+ end;
+ 
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+index d2a03597..99c2558a 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
++++ b/SelfServiceCommon/Build/setup/SetKioskData/joinDom.cmd
+@@ -1,32 +1,59 @@
+ @echo off
+-
+ setlocal
+ 
+-set DOMAIN=%~1
+-set NAME=%~2
+-set USER=%~3
+-set OU=%~4
+-set LOGONDOMAIN=%~5
+-set LOGONUSER=%~6
+-set LOGONPASS=%~7
++set VERSION=2.1.0
++
++set LOG=%~1
++set DOMAIN=%~2
++set NAME=%~3
++set USER=%~4
++set OU=%~5
++set LOGONDOMAIN=%~6
++set LOGONUSER=%~7
++set LOGONPASS=%~8
+ set PS=%SystemRoot%\system32\WINDOWSPOWERSHELL\V1.0\powershell.exe
+ 
++if "%LOG%" == "" (
++    set LOG=nul
++) else (
++    set LOG=%LOG%.joinDom.log
++)
++
++echo Run %~dp0 %VERSION% >> "%LOG%"
++echo Given properties: >> "%LOG%"
++echo DOMAIN=%DOMAIN% >> "%LOG%"
++echo NAME=%NAME% >> "%LOG%"
++echo USER=%USER% >> "%LOG%"
++echo OU=%OU% >> "%LOG%"
++echo LOGONDOMAIN=%LOGONDOMAIN% >> "%LOG%"
++echo LOGONUSER=%LOGONUSER% >> "%LOG%"
++if "%LOGONPASS%" == "" (
++    echo LOGONPASS= >> "%LOG%"
++) else (
++    echo LOGONPASS=xxx >> "%LOG%"
++)
++
++
+ if "%OU%" == "" (
+     set OU_PATH=
+ ) else (
++    echo Add OU Path switch to PS-Command >> "%LOG%"
+     set OU_PATH=-OUPath '%OU%'
+ )
+ 
+ if /I "%NAME%" == "%COMPUTERNAME%" (
+     set NEW_NAME=
+ ) else (
++    echo Add NewName switch to PS-Command >> "%LOG%"
+     set NEW_NAME=-NewName %NAME%
+ )
+ 
+ rem "%PS%" "Add-Computer -DomainName %DOMAIN% -ComputerName %COMPUTERNAME% -NewName %NAME% -Credential %USER% %OU_PATH%"
+-"%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Credential %USER% %OU_PATH%"
++echo Run PS Command: "%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Credential %USER% %OU_PATH%" >> "%LOG%"
++"%PS%" "Add-Computer -DomainName %DOMAIN% %NEW_NAME% -Credential %USER% %OU_PATH%" >> "%LOG%" 2>&1
+ 
+ if not "%errorlevel%" == "0" (
++    echo PS-Command failed! Abort! >> "%LOG%"
+     exit /b 1
+ )
+ 
+@@ -38,12 +65,17 @@ if not "%LOGONDOMAIN%" == "" (
+ )
+ 
+ if not "%LOGONUSER%" == "" (
++    echo Add %ADMINUSER% to local admin group >> "%LOG%"
+     net localgroup Administrators "%ADMINUSER%" /add
+     
++    echo Add %LOGONUSER% as autologon account >> "%LOG%" 
+     reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v AutoAdminLogon /t REG_SZ /d 1
+     reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultUserName /t REG_SZ /d "%LOGONUSER%"
+     reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultPassword /t REG_SZ /d "%LOGONPASS%"
+     if not "%LOGONDOMAIN%" == "" (
++        echo Add %LOGONDOMAIN% as autologon domain >> "%LOG%" 
+         reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /f /v DefaultDomainName /t REG_SZ /d "%LOGONDOMAIN%"
+     )
+ )
++
++echo All Done. >> "%LOG%"
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

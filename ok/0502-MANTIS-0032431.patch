@@ -1,0 +1,1158 @@
+From 2999b7c4538cfcdb687816047f7a1009f7cf722e Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 1 Oct 2014 10:38:28 +0000
+Subject: [PATCH 0502/1000] MANTIS 0032431 Basic Project implementation
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@729 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |  48 ++----
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  59 ++++++-
+ .../Massai/cpp/mControl/inc/mControl_impl.h   |  17 +-
+ .../cpp/mControl/inc/mControl_kioskReboot.h   |  37 ++++-
+ .../cpp/mControl/inc/mControl_notification.h  |  48 +++++-
+ .../cpp/mControl/inc/mControl_scheduler.h     |  36 ++++-
+ .../cpp/mControl/inc/mControl_servant.h       |   4 +-
+ .../Massai/cpp/mControl/inc/mControl_tools.h  |   7 +-
+ .../Massai/cpp/mControl/inc/mcontrol_def.h    |   6 +-
+ .../mControl/inc/test_pocoNotificationQueue.h |  85 +---------
+ .../Massai/cpp/mControl/makefile.mak          |   6 +-
+ .../cpp/mControl/src/mControl_dialog.cpp      |  81 ++++++++++
+ .../Massai/cpp/mControl/src/mControl_impl.cpp |  21 ++-
+ .../cpp/mControl/src/mControl_kioskReboot.cpp |  50 ++++++
+ .../Massai/cpp/mControl/src/mControl_main.cpp | 145 ++++++++++++++++--
+ .../mControl/src/mControl_notification.cpp    |  44 ++++++
+ .../cpp/mControl/src/mControl_scheduler.cpp   |  72 +++++++++
+ .../cpp/mControl/src/mControl_servant.cpp     |   1 -
+ .../cpp/mControl/src/mControl_tools.cpp       |   1 -
+ 19 files changed, 606 insertions(+), 162 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 796fb723..deaa0904 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -1,42 +1,20 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_config.h
++//
++//  purpose:    class definition: Config
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
+ #ifndef WINDOWCONFIG_H
+ #define WINDOWCONFIG_H
+ 
+ namespace mControl
+ {
+-	/*
+-    class ScheduledTask;
+-
+-    class cfgListSysCommands : public nConfig::gcTextList, public Notification
+-    {
+-        // Default list 
+-        std::list<std::string> defStringList;
+-
+-        ** This method is called, when the configuration subsystem needs to
+-         *  create a new configuration item.
+-         *
+-        void create(char const * & Rights,char const * & Explanation, std::list<std::string> & Default)
+-        {
+-          
+-           Rights = "rwl";    // "[r][w][+]"
+-
+-           Explanation = "List of system commands to be executed.";
+-
+-           Default = *(&defStringList);
+-           
+-        }
+-
+-        cfgListSysCommands();
+-
+-      public:
+-
+-        explicit cfgListSysCommands(char const *pszItem) :
+-           nConfig::gcTextList(pszItem,"massaiControl"),
+-           defStringList()
+-        {
+-           //defStringList.push_back( "Eins" );
+-           //defStringList.push_back( "Zwei" );
+-        }
+-    };
+-	*/
++	class Config;
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index e3885dd3..a171c706 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -1,13 +1,66 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_dialog.h
++//
++//  purpose:    class definition: Dialog
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
+ #ifndef DIALOG_H
+ #define DIALOG_H
+ 
++#include "Poco/Runnable.h"
++#include "Poco/NotificationQueue.h"
++#include "Poco/Notification.h"
++
++//Windows includes
++#include <windows.h>
++#include <stdlib.h>
++#include <string.h>
++#include <tchar.h>
++
++using Poco::Runnable;
++using Poco::NotificationQueue;
++using Poco::Notification;
++
+ namespace mControl
+ {
+-    class Dialog
++    class Dialog  : public Runnable
+     {
++    private:
++      NotificationQueue &         m_notificationQueue; 
++
+     public:
+-	    Dialog();
+-	    ~Dialog();
++      /**
++      * Windows MessageQueue Handler
++      */
++      static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
++
++
++
++      /**
++      * Needs to be implemented from the Runnable interface.
++      * Here the it should handle the Messages, which are insereted by the Scheduler and the Rebooter.
++      */
++      void run();
++	  
++
++
++      /**
++      * getter Methods
++      */
++      NotificationQueue& getNotificationQueue();
++
++
++
++      //Constructor
++      Dialog(NotificationQueue& queue);
++      //Destructor
++	  ~Dialog();
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+index 19d7127b..cc1d2b5e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+@@ -2,7 +2,7 @@
+ //
+ //  file:       mControl_impl.h
+ //
+-//  purpose:    class definition
++//  purpose:    class definition: mControl_Impl
+ //
+ //  date:       01.09.2014
+ //
+@@ -25,13 +25,24 @@ namespace mControl
+     {
+         private:
+           NotificationQueue   m_notificationQueue;
+-          ScheduledTasks      m_scheduledTasks;
++          Scheduler      m_scheduledTasks;
++          KioskReboot         m_kioskRebooter;
++          Dialog              m_Dialog;
+           
+         public:
++          /**
++          * getter Methods
++          */
++          Scheduler&     getScheduler();
++          KioskReboot&        getRebooter();
++          Dialog&             getDialog();
++          NotificationQueue&  getQueue();
+ 
+-          ScheduledTasks& getTasks();
+ 
++
++          //Constructor
+           mControl_Impl();
++          //Destructor
+           ~mControl_Impl();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
+index d0275423..e33be5cb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_kioskReboot.h
+@@ -2,7 +2,7 @@
+ //
+ //  file:       mControl_kioskReboot.h
+ //
+-//  purpose:    class definition
++//  purpose:    class definition: KioskReboot
+ //
+ //  date:       01.09.2014
+ //
+@@ -14,10 +14,12 @@
+ #define MCONTROL_KIOSKREBOOT_H
+ 
+ #include "..\inc\mControl_scheduler.h"
++#include "massaidll/mDate.hpp"
+ 
+ #include "Poco/Runnable.h"
+ #include "Poco/NotificationQueue.h"
+ 
++
+ using Poco::Runnable;
+ using Poco::NotificationQueue;
+ 
+@@ -25,6 +27,9 @@ namespace mControl
+ {
+     class KioskReboot : public Runnable
+     {
++      private:
++        long lStartDelay;
++        NotificationQueue &         m_notificationQueue;  
+ 
+       public:
+         /**
+@@ -33,12 +38,40 @@ namespace mControl
+         */
+         void run();
+ 
++
++
+         /**
++        * default implementation
++        *
+         * Saves the last reboot
++        * @return long - successful completion
+         */
+         long saveRebootDate();
+ 
+-	      KioskReboot(void);
++
++
++        /**
++        * default implementation
++        *
++        * Get the last reboot date of the Kiosk
++        * @param lastDate : mDate* - pointer to the date Variable
++        * @return long - successful
++        */
++        long getLastRebootDate(mDate* lastDate);
++
++
++
++        /**
++        * getter Methods
++        */
++        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++        long getDelay(){ return lStartDelay; }
++
++
++
++        //Constructor
++	      KioskReboot(long sDelay, NotificationQueue& queue);
++        //Destructor
+ 	      ~KioskReboot();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+index 502aabb3..a48a21f6 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_notification.h
+@@ -1,19 +1,55 @@
+-#ifndef NOTIFICATIONOBJECT_H
+-#define NOTIFICATIONOBJECT_H
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_notification.h
++//
++//  purpose:    class definition: MControlNotification
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#ifndef MCONTROL_NOTIFICATIONOBJECT_H
++#define MCONTROL_NOTIFICATIONOBJECT_H
+ 
+ #include <string>
++
+ #include "Poco/Notification.h"
++#include "Poco/NotificationQueue.h"
++#include "Poco/ThreadPool.h"
++#include "Poco/Runnable.h"
++#include "Poco/AutoPtr.h"
++
++using Poco::Notification;
++using Poco::NotificationQueue;
++using Poco::ThreadPool;
++using Poco::Runnable;
++using Poco::AutoPtr;
++using namespace std;
+ 
+ namespace mControl 
+ {
+-    class schedulerNotification : public Notification 
++    class MControlNotification : public Notification 
+     {
+       private: 
+-        String      m_info;
++        string      m_info;
++        int         m_id;
+ 
+       public:
+-	      NotificationObejct();
+-	      ~NotificationObejct();
++        /**
++        * getter Methods
++        */
++        string data() const;
++        int getId() const;
++        void printString();
++
++
++
++        //Constructor
++	    MControlNotification (string data, int id);
++        //Destructor
++        ~MControlNotification ();
+     };
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+index 95fe2a5a..a1af6e9e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_scheduler.h
+@@ -2,7 +2,7 @@
+ //
+ //  file:       mControl_scheduler.h
+ //
+-//  purpose:    class definition
++//  purpose:    class definition: Scheduler
+ //
+ //  date:       01.09.2014
+ //
+@@ -14,28 +14,36 @@
+ #define MCONTROL_SCHEDULER_H
+ 
+ #include <list>
++
++#include "trc/trace.h"
++#include "..\inc\mControl_notification.h"
++#include "..\inc\mcontrol_def.h"
++
+ #include "Poco/Runnable.h"
+ #include "Poco/NotificationQueue.h"
++#include "Poco/Notification.h"
++
+ 
+ using Poco::Runnable;
+ using Poco::NotificationQueue;
++using Poco::Notification;
+ 
+ namespace mControl
+ {
+-    class ScheduledTasks : public Runnable
++    class Scheduler : public Runnable
+     {
+       private:
+         NotificationQueue &         m_notificationQueue;      
+-        std::list<std::string>      m_cmdList;            //List of configuratoin items/applications
+-        //Zeit-/Datum Variablen
++        std::list<std::string *>    m_cmdList;            //List of configuratoin items/applications
++        
+ 
+         /**
+         * creates a new command List to get scheduled
+         */
+-        void newList();
++        void initList();      
+ 
+         /**
+-        * Deletes all the command of the scheduled list
++        * Deletes all the commands of the scheduled list.
+         */
+         void deleteList();
+ 
+@@ -46,8 +54,20 @@ namespace mControl
+       */
+       void run();
+ 
+-	    ScheduledTasks(NotificationQueue & queue);
+-	    ~ScheduledTasks();
++
++
++      /**
++      * getter Methods
++      */
++      NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++      std::list<std::string *>& getCmdList(){ return m_cmdList; }
++
++
++
++      //Constructor
++	    Scheduler(NotificationQueue & queue);
++      //Destructor
++	    ~Scheduler();
+     };
+ }
+ #endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+index cf0c112f..25d19096 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_servant.h
+@@ -2,7 +2,7 @@
+ //
+ //  file:       mControl_servant.h
+ //
+-//  purpose:    class definition
++//  purpose:    class definition: Servant
+ //
+ //  date:       01.09.2014
+ //
+@@ -25,7 +25,9 @@ namespace mControl
+     class Servant : public POA_Controller::kioskControl
+     {
+         public:
++            //Constructor
+ 	        Servant();
++            //Destructor
+ 	        ~Servant();
+     };
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+index 4c8a156d..e4ff437c 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_tools.h
+@@ -15,11 +15,6 @@
+ 
+ namespace mControl
+ {
+-    class Tools
+-    {
+-    public:
+-	    Tools(void);
+-	    ~Tools(void);
+-    };
++    class Tools;
+ }
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+index 0a2d434f..9b6abf6d 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mcontrol_def.h
+@@ -1,7 +1,7 @@
+ /**
+  *  @file      mcontrol_def.h
+  *
+- *  @brief     Version constants
++ *  @brief     Version constants and often used headers
+  *
+  *  @date      21.03.2006
+  *
+@@ -21,4 +21,8 @@
+ #define LEGALTRADEMARKS  "LegalTrademarks"  ,"\0"
+ #define ORIGINALFILENAME "OriginalFilename" ,"mcontrol.exe\0"
+ 
++#define REBOOTER_ID 1
++#define SCHEDULER_ID 0
++
++#define APP_NAME "mControl"
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/test_pocoNotificationQueue.h b/SelfServiceCommon/Massai/cpp/mControl/inc/test_pocoNotificationQueue.h
+index 3a7458b6..cb4f897b 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/test_pocoNotificationQueue.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/test_pocoNotificationQueue.h
+@@ -1,6 +1,9 @@
+ #ifndef test_pocoNotificationQueue_h
+ #define test_pocoNotificationQueue_h
+ 
++#include <iostream>
++#include <string>
++
+ #include "Poco/Notification.h"
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/ThreadPool.h"
+@@ -12,92 +15,18 @@ using Poco::NotificationQueue;
+ using Poco::ThreadPool;
+ using Poco::Runnable;
+ using Poco::AutoPtr;
++using namespace std;
+ 
+ class WorkNotification: public Notification
+ {
+ public:
+-    WorkNotification(int data): _data(data) {}
+-    int data(int index) const
++    WorkNotification(string data): _data(data) {}
++    string data() const
+     {
+         return _data;
+     }
+ private:
+-    int _data;
++    string _data;
+ };
+ 
+-class Worker: public Runnable
+-{
+-private:
+-    NotificationQueue& _queue;
+-    int id;
+-
+-public:
+-    /**
+-    *   constructor
+-    *   @param queue
+-    */
+-    Worker(NotificationQueue& queue, int i) : 
+-        _queue(queue),
+-        id(i)
+-    {
+-    }
+-
+-    int getId()
+-    {
+-        return id;
+-    }
+-
+-
+-    /**
+-    *   Do whatever the thread needs to do. Must be overridden by subclasses.
+-    */
+-    void run()
+-    {
+-        //dequeue a Notification out of the Queue
+-        AutoPtr<Notification> pNf(_queue.waitDequeueNotification());
+-        
+-        //work as long as there are Notifications
+-        while (pNf)
+-        {
+-            //get next Notification
+-            WorkNotification* pWorkNf = dynamic_cast<WorkNotification*>(pNf.get());
+-            if (pWorkNf)
+-            {
+-                std::cout<<"Worker[" << this ->getId() <<"] , Data["<< pWorkNf ->data(10) <<"]"<<std::endl;
+-            }
+-            pNf = _queue.waitDequeueNotification();
+-        }
+-    }
+-
+-};
+-
+-void testNotification()
+-{
+-    NotificationQueue queue;
+-
+-    // create worker threads
+-    Worker worker1(queue,1); 
+-    Worker worker2(queue,2);
+-
+-    // start workers
+-    ThreadPool::defaultPool().start(worker1); 
+-    ThreadPool::defaultPool().start(worker2);
+-    
+-    // create some work
+-    for (int i = 0; i < 10; ++i)
+-    {
+-        queue.enqueueNotification(new WorkNotification(i));
+-    }
+-
+-    // wait until all work is done
+-    while (!queue.empty())
+-    {
+-        Poco::Thread::sleep(100);
+-    }
+-
+-    // tell workers they're done
+-    queue.wakeUpAll(); 
+-    ThreadPool::defaultPool().joinAll();
+-}
+-
+ #endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+index 98c2cd2f..4445a4ab 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/mControl/makefile.mak
+@@ -49,21 +49,23 @@ MY_BIN1_RES = \
+ MY_BIN1_OBJS = \
+     $(_OBJ)\controller.obj \
+     $(_OBJ)\controller_skel.obj \
++	$(_OBJ)\mControl_dialog.obj \
+ 	$(_OBJ)\mControl_main.obj \
++	$(_OBJ)\mControl_notification.obj \
+     $(_OBJ)\mControl_impl.obj \
+ 	$(_OBJ)\mControl_kioskReboot.obj \
+ 	$(_OBJ)\mControl_scheduler.obj \
+ 	$(_OBJ)\mControl_servant.obj \
+ 	$(_OBJ)\mControl_tools.obj \
+ 	$(_OBJ)\mControl_config.obj \
+-	$(_OBJ)\mControl_dialog.obj \
++	
+ 	
+ MY_BIN1_USER_LIBS = \
+     $(STDUSERLIBS) \
+     $(LIB_MSYSTOOLS)
+ 
+ MY_BIN1_LDFLAGS = \
+-    -subsystem:console
++    -subsystem:windows
+ 
+ MY_BIN1_LINKLIBS = \
+     $(STDLINKLIBS) \
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 64d1f341..b8a9fdf4 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -10,9 +10,90 @@
+ //
+ //---------------------------------------------------------------------------
+ 
++#include <iostream>
++#include <exception>
++
+ #include "..\inc\mControl_dialog.h"
++#include "..\inc\mControl_notification.h"
++
++#include "trc/trace.h"
++
++#include "Poco/AutoPtr.h"
++
++using Poco::AutoPtr;
++using namespace std;
+ 
+ namespace mControl
+ {
++  NotificationQueue& Dialog::getNotificationQueue()
++  {
++    return m_notificationQueue;
++  }
++  
++  void Dialog::run()
++  {
++    TRACE(HERE,"Dialog-Thread run() started...");
++    TRACE(HERE,"Size of NotificationQueue in Dialog: [%d] ", m_notificationQueue.size());
++
++    //dequeue a Notification out of the Queue
++    AutoPtr<Notification> pNf;
++    MControlNotification* pWorkNf;
++
++    //work as long as there are Notifications
++    while(!m_notificationQueue.empty())
++    {    
++      //get next Notification
++      pNf = m_notificationQueue.waitDequeueNotification();
++      pWorkNf = dynamic_cast<MControlNotification*>(pNf.get());
++      
++      if (pWorkNf)
++      {
++        string data = pWorkNf->data();
++        TRACE(HERE,"MControlNotification dequeued");
++        pWorkNf->printString();
++      }
++    }
++  }
++	    
++  Dialog::Dialog(NotificationQueue& queue) :
++    m_notificationQueue(queue)
++  {
++  }
++
++	Dialog::~Dialog()
++  {
++  }
++
++  LRESULT CALLBACK Dialog::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
++  {
++      PAINTSTRUCT ps;
++      HDC hdc;
++      TCHAR greeting[] = _T("Hello, World!");
++
++      switch (message)
++      {
++      case WM_PAINT:
++          hdc = BeginPaint(hWnd, &ps);
++
++          // Here your application is laid out.
++          // For this introduction, we just print out "Hello, World!"
++          // in the top left corner.
++          TextOut(hdc,
++              5, 5,
++              greeting, _tcslen(greeting));
++          // End application specific layout section.
++
++          EndPaint(hWnd, &ps);
++          break;
++      case WM_DESTROY:
++          PostQuitMessage(0);
++          break;
++      default:
++          return DefWindowProc(hWnd, message, wParam, lParam);
++          break;
++      }
++
++      return 0;
++  }
+ 
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+index cf690593..50b26ebb 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+@@ -17,14 +17,31 @@ namespace mControl
+   
+   mControl_Impl::mControl_Impl() :
+     m_notificationQueue(),
+-    m_scheduledTasks(m_notificationQueue)
++    m_scheduledTasks(m_notificationQueue),
++    m_kioskRebooter(100, m_notificationQueue),
++    m_Dialog(m_notificationQueue)
+   {}
+ 
+-  ScheduledTasks& mControl_Impl::getTasks() 
++  Scheduler& mControl_Impl::getScheduler() 
+   {
+     return m_scheduledTasks;
+   }
+ 
++  KioskReboot& mControl_Impl::getRebooter()
++  {
++    return m_kioskRebooter;
++  }
++
++  Dialog& mControl_Impl::getDialog()
++  {
++    return m_Dialog;
++  }
++
++  NotificationQueue& mControl_Impl::getQueue()
++  {
++    return m_notificationQueue;
++  }
++
+   mControl_Impl::~mControl_Impl()
+   {
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+index 72958f84..c3822825 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_kioskReboot.cpp
+@@ -11,8 +11,58 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "..\inc\mControl_kioskReboot.h"
++#include "..\inc\mControl_notification.h";
++#include "..\inc\mcontrol_def.h"
++
++#include "trc/trace.h"
+ 
+ namespace mControl
+ {
++  KioskReboot::KioskReboot(long sDelay, NotificationQueue& queue) : 
++    lStartDelay(),
++    m_notificationQueue(queue)
++  {
++  }
++
++  KioskReboot::~KioskReboot()
++  {
++  }
++
++  //TODO: implement correct functionality
++  long KioskReboot::saveRebootDate()
++  {
++    return 1;
++  }
++
++  //TODO: -get the exact last reboot date
++  //      -configure correct return value
++  long KioskReboot::getLastRebootDate(mDate* lastDate)
++  {
++    mDate today = lastDate->today();
++    (*lastDate) = today;
++
++    if(lastDate)
++      return 1;
++    else
++      return 0;
++  }
++
++  void KioskReboot::run()
++  {
++    TRACE(HERE,"KioskReboot-Thread run() started...");
++
++    mDate lastRebootDate = mDate();
++    long correctDate = this->getLastRebootDate( &lastRebootDate );
++
++    //TRACE(HERE,"last date of reboot: %d.%s.%d", lastRebootDate.dayOfMonth(), lastRebootDate.monthOfYear(), lastRebootDate.year() );
+ 
++    if(correctDate)
++    {
++      getNotificationQueue().enqueueNotification( new MControlNotification("cmd_REBOOTKIOSK", REBOOTER_ID) );
++    }
++    else
++    {
++      TRACE(HERE,"incorrect Date");
++    }
++  }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+index 3b9b26f2..68fcc219 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_main.cpp
+@@ -14,24 +14,38 @@
+ 
+ //#include "test_pocoNotificationQueue.h"
+ #include "..\inc\mControl_impl.h"
++#include "..\inc\mControl_notification.h"
++#include "..\inc\mControl_dialog.h"
++
++//Poco inlcudes
++#include "Poco/ThreadPool.h"
++#include "Poco/AutoPtr.h"
++
++//Materna includes
++#include "trc/trace.h"
++
++//Windows includes
++#include <windows.h>
++#include <stdlib.h>
++#include <string.h>
++#include <tchar.h>
+ 
+ using namespace mControl;
+ using namespace std;
+ 
+-int main(int argc, char** argv)
+-{
+-  //just an empty console application right now
++using Poco::ThreadPool;
++using Poco::AutoPtr;
+ 
+-  mControl_Impl impl;
+ 
+-  cout<<"starting Scheduler..."<<endl;
+-  impl.getTasks().run();
+-  
++// Global variables                                                 //VARIABLEN IN KLASSE PACKEN
+ 
+-  system("pause");
+-  return 0;
+-}
++    // The main window class name.
++    static TCHAR szWindowClass[] = _T("win32app");
++
++    // The string that appears in the application's title bar.
++    static TCHAR szTitle[] = _T("mConrol");
+ 
++    HINSTANCE hInst;
+ 
+ 
+ //---------------------------------------------------------------------------
+@@ -45,8 +59,113 @@ int main(int argc, char** argv)
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
+-/*int WINAPI WinMain( HINSTANCE hInst, HINSTANCE, char * cmdline, int )
++int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+ {
+-    return 0;
+-}*/
+ 
++    WNDCLASSEX wcex;
++
++    wcex.cbSize = sizeof(WNDCLASSEX);
++    wcex.style          = CS_HREDRAW | CS_VREDRAW;
++    wcex.lpfnWndProc    = Dialog::WndProc;
++    wcex.cbClsExtra     = 0;
++    wcex.cbWndExtra     = 0;
++    wcex.hInstance      = hInstance;
++    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++    wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
++    wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
++    wcex.lpszMenuName   = NULL;
++    wcex.lpszClassName  = szWindowClass;
++    wcex.hIconSm        = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_APPLICATION));
++
++    if (!RegisterClassEx(&wcex))
++    {
++        MessageBox(NULL,
++            _T("Call to RegisterClassEx failed!"),
++            _T("Win32 Guided Tour"),
++            NULL);
++
++        return 1;
++    }
++
++    hInst = hInstance; // Store instance handle in our global variable
++
++    // The parameters to CreateWindow explained:
++    // szWindowClass: the name of the application
++    // szTitle: the text that appears in the title bar
++    // WS_OVERLAPPEDWINDOW: the type of window to create
++    // CW_USEDEFAULT, CW_USEDEFAULT: initial position (x, y)
++    // 500, 100: initial size (width, length)
++    // NULL: the parent of this window
++    // NULL: this application dows not have a menu bar
++    // hInstance: the first parameter from WinMain
++    // NULL: not used in this application
++    HWND hWnd = CreateWindow(
++        szWindowClass,
++        szTitle,
++        WS_OVERLAPPEDWINDOW,
++        CW_USEDEFAULT, CW_USEDEFAULT,
++        500, 100,
++        NULL,
++        NULL,
++        hInstance,
++        NULL
++    );
++
++    if (!hWnd)
++    {
++        MessageBox(NULL,
++            _T("Call to CreateWindow failed!"),
++            _T("Win32 Guided Tour"),
++            NULL);
++
++        return 1;
++    }
++
++    // The parameters to ShowWindow explained:
++    // hWnd: the value returned from CreateWindow
++    // nCmdShow: the fourth parameter from WinMain
++    ShowWindow(hWnd,
++        nCmdShow);
++    UpdateWindow(hWnd);
++
++    // Main message loop:
++    MSG msg;
++    while (GetMessage(&msg, NULL, 0, 0))
++    {
++        TranslateMessage(&msg);
++        DispatchMessage(&msg);
++    }
++
++    return (int) msg.wParam;
++}
++
++
++
++
++int common_main(int argc, char** argv)
++{
++  //just an empty console application right now
++  
++  openTrace("mControl");
++  TRACE(HERE,"mControl-Main started...");
++  
++  mControl_Impl impl;
++  
++  //Start Rebooter and Scheduler
++  ThreadPool::defaultPool().start(impl.getRebooter());
++  //Poco::Thread::sleep(100);
++
++  ThreadPool::defaultPool().start(impl.getScheduler());
++  //Poco::Thread::sleep(100);
++  
++  ThreadPool::defaultPool().start(impl.getDialog());
++
++  // tell workers they're done
++  Poco::Thread::sleep(100);
++  impl.getQueue().wakeUpAll(); 
++  ThreadPool::defaultPool().joinAll();
++
++  cout<<"\nmControl-Main finished, press any key to continue...";
++  getchar();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+index e69de29b..583cacc8 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_notification.cpp
+@@ -0,0 +1,44 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_notification.cpp
++//
++//  purpose:    notification implementation
++//
++//  date:       01.09.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#include "..\inc\mControl_notification.h"
++#include <iostream>
++
++using namespace std;
++
++namespace mControl
++{
++    MControlNotification ::MControlNotification (string data, int id) :
++      m_info(data),
++      m_id(id)
++    {
++    }
++
++    string MControlNotification ::data() const
++    {
++      return m_info;
++    }
++
++    int MControlNotification ::getId() const
++    {
++      return m_id;
++    }
++
++    void MControlNotification::printString()
++    {
++      cout << "new dequeued Notification, Data[" << this->data() << "] , ID[" << this->getId() << "] " << endl;
++    }
++
++    MControlNotification ::~MControlNotification ()
++    {
++    }
++}
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index 099721bf..6a753c53 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -9,9 +9,81 @@
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
++#include <string>
+ 
+ #include "..\inc\mControl_scheduler.h"
++#include "..\inc\test_pocoNotificationQueue.h"
++#include "..\inc\mControl_notification.h"
++#include "..\inc\mcontrol_def.h"
++
++#include "trc/trace.h"
+ 
+ namespace mControl
+ {
++  /**
++  * simple init method, just for testing the class
++  */
++  void Scheduler::initList()
++  {
++    getCmdList().push_back(new std::string( "cmd_RESTARTSCHEDULER") );
++    for(int i=1; i < 10; i++)
++    {
++      getCmdList().push_back(new std::string( "cmd_" + std::to_string(static_cast<long long>(i)) ));
++    }
++  }
++
++
++  void Scheduler::deleteList()
++  {
++    std::string * actualCmd;
++    std::list<std::string *>::iterator  cmdIterator;
++
++    while(!getCmdList().empty())
++    {
++      cmdIterator = getCmdList().begin();
++
++      actualCmd = *cmdIterator;
++
++      delete actualCmd;
++      getCmdList().erase(cmdIterator);
++    }
++
++  }
++
++  void Scheduler::run()
++  {
++    TRACE(HERE,"Scheduler-Thread run() started...");
++    TRACE(HERE,"Size of NotificationQueue in Scheduler: [%d] ",m_notificationQueue.size());
++
++    std::list<std::string *>::iterator  cmdIterator;
++    int i=0;
++
++    for(cmdIterator = getCmdList().begin(); cmdIterator != getCmdList().end(); cmdIterator++, i++)
++    {
++      if( stricmp( (*cmdIterator)->c_str(),"cmd_RESTARTSCHEDULER") == 0 )
++      {
++        //scheduled restart, here the scheduler is restarted by adding a Notification to the Queue
++        //TODO: restarting scheduler
++        getNotificationQueue().enqueueNotification( new MControlNotification( (*cmdIterator)->data(), SCHEDULER_ID) );
++      }
++      else
++      {
++        //scheduled exec, here the cmd are started in mSysProcess's 
++        //TODO: Replace the WorkNotification by cmd exec 
++        getNotificationQueue().enqueueNotification( new MControlNotification( (*cmdIterator)->data(), SCHEDULER_ID) );
++      }
++    }
++  }
++
++  Scheduler::Scheduler(NotificationQueue& queue) :
++    m_notificationQueue(queue)
++  {
++    m_cmdList.clear();
++    this->initList();
++  }
++  
++
++  Scheduler::~Scheduler()
++  {
++  }
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+index 269567e9..6ba0ca5e 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_servant.cpp
+@@ -14,5 +14,4 @@
+ 
+ namespace mControl
+ {
+-
+ }
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+index c8b60cc1..fddb369b 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_tools.cpp
+@@ -14,5 +14,4 @@
+ 
+ namespace mControl
+ {
+-
+ }
+-- 
+2.41.0.windows.1
+

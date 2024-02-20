@@ -1,0 +1,590 @@
+From 585e0b39b883b4a213fc6112caf6f75cb621d173 Mon Sep 17 00:00:00 2001
+From: sbornema <sbornema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 18 Apr 2019 06:59:04 +0000
+Subject: [PATCH 0879/1000] Mantis 0054430: CBP Exit Biometrics Pilot Program
+ Trial in Tampa/Florida (need latest XB01 schema)
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1449 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Cuss/CUSS.BIOMETRIC.XSD        | 479 +++++++++++++++---
+ 1 file changed, 422 insertions(+), 57 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Cuss/CUSS.BIOMETRIC.XSD b/SelfServiceCommon/Massai/idl/Cuss/CUSS.BIOMETRIC.XSD
+index 450bb280..120771e9 100644
+--- a/SelfServiceCommon/Massai/idl/Cuss/CUSS.BIOMETRIC.XSD
++++ b/SelfServiceCommon/Massai/idl/Cuss/CUSS.BIOMETRIC.XSD
+@@ -1,121 +1,370 @@
+-<?xml version="1.0" encoding="UTF-8"?>
+ <xsd:schema xmlns:tns="urn:CUSS-1.5/types/biometrics" xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:CUSS-1.5/types/biometrics" elementFormDefault="qualified" attributeFormDefault="unqualified">
+-    <xsd:element name="biometrics" type="tns:biometrics">
++    <!-- Global types -->
++    <xsd:simpleType name="score">
+         <xsd:annotation>
+-            <xsd:documentation>biometric objects</xsd:documentation>
++            <xsd:documentation>Comparision or match score</xsd:documentation>
+         </xsd:annotation>
+-    </xsd:element>
+-    <xsd:complexType name="biometrics">
++        <xsd:restriction base="xsd:integer">
++            <xsd:minInclusive value="0">
++                <xsd:annotation>
++                    <xsd:documentation>no match</xsd:documentation>
++                </xsd:annotation>
++            </xsd:minInclusive>
++            <xsd:maxInclusive value="100">
++                <xsd:annotation>
++                    <xsd:documentation>perfect match</xsd:documentation>
++                </xsd:annotation>
++            </xsd:maxInclusive>
++        </xsd:restriction>
++    </xsd:simpleType>
++    
++    <!-- Command element types -->
++    <xsd:simpleType name="commandType">
++        <xsd:annotation>
++            <xsd:documentation>Possible camera commands</xsd:documentation>
++        </xsd:annotation>
++        <xsd:restriction base="xsd:string">
++            <xsd:enumeration value="getBiometricImage" >
++                <xsd:annotation>
++                    <xsd:documentation>Get biometric face image. Returns a quality rated face image with the minimum given absolute quality value (threshold)</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="getIdentifiedBiometricImage" >
++                <xsd:annotation>
++                    <xsd:documentation>Get biometric face image which was identified by the matching server. This command only returns data in case of a previous enrollment operation</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="getActualImage" >
++                <xsd:annotation>
++                    <xsd:documentation>Get biometric face image. Returns a *non* quality rated face image. Nothing will be returned, if no face is detected</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="compareImages" >
++                <xsd:annotation>
++                    <xsd:documentation>Compares two given images (e.g. for ID check). Requires comparison data in element compareData</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="compareImageWithCameraImage" >
++                <xsd:annotation>
++                    <xsd:documentation>Compares given images against camera image. Requires comparison data in element compareData</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="enrollPerson" >
++                <xsd:annotation>
++                    <xsd:documentation>Perform biometric enrollment with given data. Requires enrollment data in element enrollmentData</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="deleteEnrollment" >
++                <xsd:annotation>
++                    <xsd:documentation>Deltes enrollment and template data for an already enrolled person</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++        </xsd:restriction>
++    </xsd:simpleType>
++    
++    <xsd:simpleType name="qualityMetricType">
++        <xsd:annotation>
++            <xsd:documentation>The quality metrics types of an image</xsd:documentation>
++        </xsd:annotation>
++        <xsd:restriction base="xsd:string">
++            <xsd:enumeration value="VerticalPosition">
++                <xsd:annotation>
++                    <xsd:documentation>-1: bad quality, 0: medium quality, 1: good quality</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="HorizontalPosition">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="HeadImageWidthRatio">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="HeadImageHeightRatio">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="FrontalFace">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="Brightness">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="EqualBrightness">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NaturalSkinColor">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="FaceContrast">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="FlashReflection">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="EyesOpened">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="LookStraight">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NoRedEyes">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="MouthClosed">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NoHat">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NoHeavyFrame">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NoFrameOnEyes">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="NoTintedGlasses">
++                <xsd:annotation>
++                    <xsd:documentation>dto.</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++            <xsd:enumeration value="QualityValue">
++                <xsd:annotation>
++                    <xsd:documentation>Device proprietary absolute quality value (0-100)</xsd:documentation>
++                </xsd:annotation>
++            </xsd:enumeration>
++        </xsd:restriction>
++    </xsd:simpleType>
++    
++    <xsd:simpleType name="qualityMetricValue">
++        <xsd:restriction base="xsd:integer">
++            <xsd:minInclusive value="-1">
++                <xsd:annotation>
++                    <xsd:documentation>no match</xsd:documentation>
++                </xsd:annotation>
++            </xsd:minInclusive>
++            <xsd:maxInclusive value="100">
++                <xsd:annotation>
++                    <xsd:documentation>perfect match</xsd:documentation>
++                </xsd:annotation>
++            </xsd:maxInclusive>
++        </xsd:restriction>
++    </xsd:simpleType>
++
++    <xsd:complexType name="qualityMetric">
+         <xsd:annotation>
+-            <xsd:documentation>biometric objects</xsd:documentation>
++            <xsd:documentation></xsd:documentation>
+         </xsd:annotation>
+         <xsd:sequence>
+-            <xsd:element name="capture" type="tns:capture" minOccurs="0" maxOccurs="unbounded">
++            <xsd:element name="type" type="tns:qualityMetricType">
+                 <xsd:annotation>
+-                    <xsd:documentation>list of captures</xsd:documentation>
++                    <xsd:documentation>TBC</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="value" type="tns:qualityMetricValue">
++                <xsd:annotation>
++                    <xsd:documentation>Minimum value in case of a camera command (to device). Detected value in case of a signalled capture (from device)</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="weight" type="xsd:integer" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Weight for value element in case of cammera command (to device)</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+         </xsd:sequence>
+     </xsd:complexType>
+-    <xsd:complexType name="capture">
++
++    <xsd:complexType name="deleteEnrollmentData">
+         <xsd:annotation>
+-            <xsd:documentation>capture data</xsd:documentation>
++            <xsd:documentation>Data element for command deleteEnrollment</xsd:documentation>
+         </xsd:annotation>
+         <xsd:sequence>
+-            <xsd:element name="timestamp" type="xsd:dateTime" minOccurs="0">
+-                <xsd:annotation>
+-                    <xsd:documentation>timestamp of capture</xsd:documentation>
+-                </xsd:annotation>
+-            </xsd:element>
+-            <xsd:element name="captureResult" type="tns:captureResult" minOccurs="0">
++            <xsd:element name="personId" type="xsd:string" minOccurs="0">
+                 <xsd:annotation>
+-                    <xsd:documentation>result of capture</xsd:documentation>
++                    <xsd:documentation>Unique identifier for identified person</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <!--
+-            <xsd:element name="userInstruction" type="tns:userInstruction" minOccurs="0">
++        </xsd:sequence>
++    </xsd:complexType>
++
++    <xsd:complexType name="enrollmentData">
++        <xsd:annotation>
++            <xsd:documentation>Data element for command enrollPerson</xsd:documentation>
++        </xsd:annotation>
++        <xsd:sequence>
++            <xsd:element name="identCode" type="xsd:base64Binary">
+                 <xsd:annotation>
+-                    <xsd:documentation>user instruction on capture failure</xsd:documentation>
++                    <xsd:documentation>Base64 encoded identification data (e.g. barcode)</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            -->
+-            <xsd:element name="captureType" type="tns:captureType" minOccurs="0">
++            <xsd:element name="image" type="xsd:base64Binary">
+                 <xsd:annotation>
+-                    <xsd:documentation>type of capture</xsd:documentation>
++                    <xsd:documentation>Base64 encoded image data</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <xsd:element name="score" type="tns:score" minOccurs="0">
++        </xsd:sequence>
++    </xsd:complexType>
++
++    <xsd:complexType name="compareData">
++        <xsd:annotation>
++            <xsd:documentation>Data element for command compareImageWithCameraImage and compareImages</xsd:documentation>
++        </xsd:annotation>
++        <xsd:sequence>
++            <xsd:element name="image1" type="xsd:base64Binary">
+                 <xsd:annotation>
+-                    <xsd:documentation>match score</xsd:documentation>
++                    <xsd:documentation>Base64 encoded image data of first image for compare operation (e.g. passport image)</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <xsd:element name="image" type="tns:image" minOccurs="0" maxOccurs="unbounded">
++            <xsd:element name="image2" type="xsd:base64Binary">
+                 <xsd:annotation>
+-                    <xsd:documentation>capture image</xsd:documentation>
++                    <xsd:documentation>Base64 encoded image data of second image for compare operation (e.g. face image). Empty in case of the compare operation against current camera image</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <xsd:element name="biometricTemplateData" type="tns:biometricTemplateData" minOccurs="0">
++            <xsd:element name="score" type="tns:score" minOccurs="0">
+                 <xsd:annotation>
+-                    <xsd:documentation>capture biometric data</xsd:documentation>
++                    <xsd:documentation>Required min. matching score in percent (e.g. 30)</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+         </xsd:sequence>
+     </xsd:complexType>
+-    <xsd:complexType name="biometricTemplateData">
++    
++    <xsd:complexType name="command">
+         <xsd:annotation>
+-            <xsd:documentation>biometric template data</xsd:documentation>
++            <xsd:documentation></xsd:documentation>
+         </xsd:annotation>
+         <xsd:sequence>
+-            <xsd:element name="data" type="xsd:base64Binary">
++            <xsd:element name="id" type="xsd:string">
++                <xsd:annotation>
++                    <xsd:documentation>Command id reference</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="type" type="tns:commandType">
++                <xsd:annotation>
++                    <xsd:documentation>TBC</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="qualityThreshold" type="xsd:integer" minOccurs="0">
+                 <xsd:annotation>
+-                    <xsd:documentation>binary biometric template data</xsd:documentation>
++                    <xsd:documentation>Absolute calculated threshold (calculation algorithm still unclear!). Only pictures above this value must be sent by device and processed by KA</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <!--
+-            <xsd:element name="biometricFormat" type="tns:biometricFormat" minOccurs="0" maxOccurs="unbounded">
++            <xsd:element name="quality" type="tns:qualityMetric" minOccurs="0" maxOccurs="unbounded">
+                 <xsd:annotation>
+-                    <xsd:documentation>biometric template data format</xsd:documentation>
++                    <xsd:documentation>TBC</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="enrollmentData" type="tns:enrollmentData" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Required data in case of enrollment</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="compareData" type="tns:compareData" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Required data in case of image comparision</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="deleteEnrollmentData" type="tns:deleteEnrollmentData" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Required data in case of revoking an enrollment</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            -->
+         </xsd:sequence>
+     </xsd:complexType>
+-    <xsd:complexType name="image">
++
++    <!-- Command response element types -->
++    <xsd:simpleType name="commandResult">
++        <xsd:restriction base="xsd:string">
++            <xsd:enumeration value="success"/>
++            <xsd:enumeration value="timeout"/>
++            <xsd:enumeration value="cameraError"/>
++            <xsd:enumeration value="invalidConfiguration"/>
++            <xsd:enumeration value="matchSuccess"/>
++            <xsd:enumeration value="matchFailed"/>
++            <xsd:enumeration value="failed"/>
++        </xsd:restriction>
++    </xsd:simpleType>
++    
++    <xsd:complexType name="commandResponse">
+         <xsd:annotation>
+-            <xsd:documentation>image</xsd:documentation>
++            <xsd:documentation>command response data type</xsd:documentation>
+         </xsd:annotation>
+         <xsd:sequence>
+-            <xsd:element name="data" type="xsd:base64Binary">
++            <xsd:element name="id" type="xsd:string">
+                 <xsd:annotation>
+-                    <xsd:documentation>binary image data</xsd:documentation>
++                    <xsd:documentation>Command id reference</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <xsd:element name="imageFormat" type="tns:imageFormat" minOccurs="0">
++            <xsd:element name="type" type="tns:commandType">
+                 <xsd:annotation>
+-                    <xsd:documentation>image file format</xsd:documentation>
++                    <xsd:documentation>Corresponding command</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-            <xsd:element name="imageType" type="tns:imageType" minOccurs="0">
++            <xsd:element name="result" type="tns:commandResult">
+                 <xsd:annotation>
+-                    <xsd:documentation>type of image</xsd:documentation>
++                    <xsd:documentation>TBC</xsd:documentation>
+                 </xsd:annotation>
+             </xsd:element>
+-        </xsd:sequence>
+-    </xsd:complexType>
+-    <xsd:simpleType name="score">
+-        <xsd:restriction base="xsd:integer">
+-            <xsd:minInclusive value="0">
++            <xsd:element name="message" type="xsd:string" minOccurs="0">
+                 <xsd:annotation>
+-                    <xsd:documentation>no match</xsd:documentation>
++                    <xsd:documentation>Error message if available</xsd:documentation>
+                 </xsd:annotation>
+-            </xsd:minInclusive>
+-            <xsd:maxInclusive value="100">
++            </xsd:element>
++            <xsd:element name="score" type="tns:score" minOccurs="0">
+                 <xsd:annotation>
+-                    <xsd:documentation>perfect match</xsd:documentation>
++                    <xsd:documentation>match score</xsd:documentation>
+                 </xsd:annotation>
+-            </xsd:maxInclusive>
++            </xsd:element>
++        </xsd:sequence>
++    </xsd:complexType>
++
++    <xsd:simpleType name="identificationResult">
++        <xsd:restriction base="xsd:string">
++            <xsd:annotation>
++                <xsd:documentation>
++                    State of identification. 
++                	NoIdentification: Identification is deactivated
++                	IdentifiedAndValid: Face was identified by matching server
++                	IdentifiedAndNotValid: Face was identified by matching server but record is marked as invalid / blacklisted
++                	NoResult -> Person is not in the database
++                </xsd:documentation>
++            </xsd:annotation>
++            <xsd:enumeration value="NoIdentification"/>
++            <xsd:enumeration value="IdentifiedAndValid"/>
++            <xsd:enumeration value="IdentifiedAndNotValid"/>
++            <xsd:enumeration value="NoResult"/>
+         </xsd:restriction>
+     </xsd:simpleType>
++
++    <!-- Capture element types -->
+     <xsd:simpleType name="captureType">
+         <xsd:restriction base="xsd:string">
+             <xsd:enumeration value="face"/>
+@@ -124,12 +373,14 @@
+             <xsd:enumeration value="both eyes"/>
+         </xsd:restriction>
+     </xsd:simpleType>
++    
+     <xsd:simpleType name="imageFormat">
+         <xsd:restriction base="xsd:string">
+             <xsd:enumeration value="png"/>
+             <xsd:enumeration value="jpg"/>
+         </xsd:restriction>
+     </xsd:simpleType>
++    
+     <xsd:simpleType name="imageType">
+         <xsd:restriction base="xsd:string">
+             <xsd:enumeration value="thumbnail"/>
+@@ -138,13 +389,127 @@
+             <xsd:enumeration value="photo"/>
+         </xsd:restriction>
+     </xsd:simpleType>
++    
+     <xsd:simpleType name="captureResult">
+         <xsd:restriction base="xsd:string">
+             <xsd:enumeration value="success"/>
+             <xsd:enumeration value="cancelled"/>
+             <xsd:enumeration value="timeout"/>
+             <xsd:enumeration value="failed"/>
+-            <xsd:enumeration value="match failed"/>
++            <xsd:enumeration value="tooBad"/>
+         </xsd:restriction>
+     </xsd:simpleType>
+-</xsd:schema>
++    
++    <xsd:complexType name="capture">
++        <xsd:annotation>
++            <xsd:documentation>capture data main element</xsd:documentation>
++        </xsd:annotation>
++        <xsd:sequence>
++            <xsd:element name="timestamp" type="xsd:dateTime" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>timestamp of capture</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="captureResult" type="tns:captureResult" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>result of capture</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="captureType" type="tns:captureType" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>type of capture</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="score" type="tns:score" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>match score</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="identificationResult" type="tns:identificationResult" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>TBC</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="personId" type="xsd:string" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Unique identifier for an identified person. Only applicable for a command response to getIdentifiedBiometricImage</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="identCode" type="xsd:base64Binary" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Identifier which was enrolled for this person as (*potentially crypted*) base64 representation (e.g. barcode, passport, xml...)</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="absoluteQuality" type="xsd:integer" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>Absolute calculated threshold (calculation algorithm still unclear!). Only pictures above this value must be sent by device and processed by KA</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="quality" type="tns:qualityMetric" minOccurs="0" maxOccurs="unbounded">
++                <xsd:annotation>
++                    <xsd:documentation>TBC</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="image" type="tns:image" minOccurs="0" maxOccurs="unbounded">
++                <xsd:annotation>
++                    <xsd:documentation>capture image</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++        </xsd:sequence>
++    </xsd:complexType>
++    
++    <xsd:complexType name="image">
++        <xsd:annotation>
++            <xsd:documentation>image</xsd:documentation>
++        </xsd:annotation>
++        <xsd:sequence>
++            <xsd:element name="data" type="xsd:base64Binary">
++                <xsd:annotation>
++                    <xsd:documentation>binary image data</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="imageFormat" type="tns:imageFormat" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>image file format</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="imageType" type="tns:imageType" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>type of image</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++        </xsd:sequence>
++    </xsd:complexType>
++    
++    <!-- Global element sub-types -->
++    <xsd:complexType name="biometrics">
++        <xsd:annotation>
++            <xsd:documentation>biometric root type</xsd:documentation>
++        </xsd:annotation>
++        <xsd:sequence>
++            <xsd:element name="command" type="tns:command" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>list of commands</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="commandResponse" type="tns:commandResponse" minOccurs="0">
++                <xsd:annotation>
++                    <xsd:documentation>list of commands</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++            <xsd:element name="capture" type="tns:capture" minOccurs="0" maxOccurs="unbounded">
++                <xsd:annotation>
++                    <xsd:documentation>list of captures</xsd:documentation>
++                </xsd:annotation>
++            </xsd:element>
++        </xsd:sequence>
++    </xsd:complexType>
++
++    <!-- root element -->
++    <xsd:element name="biometrics" type="tns:biometrics">
++        <xsd:annotation>
++            <xsd:documentation>biometrics root element</xsd:documentation>
++        </xsd:annotation>
++    </xsd:element>
++
++</xsd:schema>
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

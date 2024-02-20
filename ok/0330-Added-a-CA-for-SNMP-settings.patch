@@ -1,0 +1,143 @@
+From 83fe9becc06cd359504dfc411c32b53b80c6c234 Mon Sep 17 00:00:00 2001
+From: vjudin <vjudin@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 3 Apr 2013 11:38:58 +0000
+Subject: [PATCH 0330/1000] Added a CA for SNMP settings.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@498 90b65887-3827-0410-9a23-83215b262276
+---
+ .../src/MConfig_CustomAction.cpp              | 114 +++++++++++++++++-
+ 1 file changed, 113 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 0ce0eac0..e792b5ff 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -26,6 +26,8 @@
+ #include <string>
+ #include <set>
+ #include <vector>
++#include <regex>
++
+ #include "strutil.h"
+ 
+ #include "MConfig_CA_Log.h"
+@@ -1704,4 +1706,114 @@ LExit:
+ 	
+ 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+     return WcaFinalize(er);
+-}
+\ No newline at end of file
++}
++
++using std::tr1::wregex;
++extern "C" UINT __stdcall CA_WriteSNMPConfigFile (MSIHANDLE hInstall)
++{
++    HRESULT hResult = WcaInitialize (hInstall, "CA_WriteSNMPConfigFile");
++    if (FAILED (hResult))
++    {
++        WcaLog(LOGMSG_STANDARD, "WcaInitialize failed %x", hResult );
++        return ERROR_INSTALL_FAILURE;
++    }
++
++    // write file C:\usr\share\snmp\snmpd.conf
++    std::ofstream oSnmpdConf( "C:\\usr\\share\\snmp\\snmpd.conf" );
++    oSnmpdConf << "###########################################################################" << std::endl <<
++                  "#" << std::endl <<
++                  "# snmpd.conf" << std::endl << 
++                  "#" << std::endl <<
++                  //"#   - created by the snmpconf configuration program" << std::endl << 
++                  "#" << std::endl << std::endl <<
++                  "###########################################################################" << std::endl <<
++                  "# SECTION: Access Control Setup" << std::endl <<
++                  "#" << std::endl <<
++                  "#   This section defines who is allowed to talk to your running" << std::endl << 
++                  "#   snmp agent." << std::endl << std::endl <<
++                  "# rocommunity: a SNMPv1/SNMPv2c read-only access community name" << std::endl << 
++                  "#   arguments:  community [default|hostname|network/bits] [oid]" << std::endl << 
++                  "rocommunity public" << std::endl;
++
++    wchar_t *wszTrapSink = NULL,       // arguments: community-string
++            *wszAgents = NULL;   // arguments: [transport:]port[@interface/address],... 
++    //--------------------------------------------//
++    hResult = WcaGetProperty( L"AgentAddresses", &wszAgents );
++    if( wszAgents != NULL )
++    {
++        //--------------------------------------------//
++        std::wstring wstrAgents( wszAgents );
++        oSnmpdConf << "###########################################################################" << std::endl 
++                   << "# SECTION: Agent Operating Mode"  << std::endl 
++                   << "#" << std::endl 
++                   << "#   This section defines how the agent will operate when it" << std::endl 
++                   << "#   is running.2 " << std::endl 
++                   << std::endl 
++                   << "# agentaddress: The IP address and port number that the agent will listen on." << std::endl 
++                   << "#   By default the agent listens to any and all traffic from any" << std::endl 
++                   << "#   interface on the default SNMP port (161).  This allows you to" << std::endl 
++                   << "#   specify which address, interface, transport type and port(s) that you" << std::endl 
++                   << "#   want the agent to listen on.  Multiple definitions of this token" << std::endl 
++                   << "#   are concatenated together (using ':'s)." << std::endl // which is wrong - ':' are used 4 ports
++                   << "#   arguments: [transport:]port[@interface/address],..." << std::endl ;                   
++
++        wregex wrg( L"((udp|tcp)[:])?(\\d+)(@[[:digit:]]{1,3}.[[:digit:]]{1,3}.[[:digit:]]{1,3}.[[:digit:]]{1,3})?");    
++        std::regex_iterator<std::wstring::iterator> rit( wstrAgents.begin(), wstrAgents.end(), wrg);
++        std::regex_iterator<std::wstring::iterator> rend;
++    
++        int i = 0;
++        while (rit!=rend) 
++        {
++            if( i++ == 0 )
++                oSnmpdConf << "agentaddress " ;            
++            else
++                oSnmpdConf << ", ";
++            oSnmpdConf << ToNarrow( rit->str().c_str()) ;
++            ++rit; 
++        }
++        if( i )
++            oSnmpdConf << std::endl;
++        ReleaseStr( wszAgents );
++    }
++    
++    //--------------------------------------------//
++    hResult = WcaGetProperty( L"TrapReceivers", &wszTrapSink  );
++    if( wszTrapSink != NULL )
++    {
++        /**
++         trap2sink: 
++            You can send SNMPv2 traps using the trapsink token. A non-standard port can be specified by adding the port 
++            after the host name or IP address.
++            trap2sink 192.168.1.99:1199 trapComm
++
++        informsink:
++            You can send SNMPv2 informs, which the remote side should confirm, using the informsink token. A non-standard 
++            port can be specified by adding the port after the host name or IP address.
++            informsink 192.1.68.88:1188 trapComm
++        */
++        std::wstring wstrTrapSink( wszTrapSink );
++        wregex wrTrap(L"[[:digit:]]{1,3}.[[:digit:]]{1,3}.[[:digit:]]{1,3}.[[:digit:]]{1,3}(:(\\d){1,5})?");
++        std::regex_iterator<std::wstring::iterator> riT( wstrTrapSink.begin(), wstrTrapSink.end(), wrTrap );
++        std::regex_iterator<std::wstring::iterator> rEnd;
++        oSnmpdConf << "##########################################################################" << std::endl
++                  << "# SECTION: Trap Destinations" << std::endl
++                  << "#" << std::endl
++                  << "#   Here we define who the agent will send traps to." << std::endl
++                  << "# trapcommunity: Default trap sink community to use" << std::endl
++                  << "#   arguments: community-string" << std::endl;
++                 //#trap2sink  traprecv.materna.de:1162  public
++        while (riT!=rEnd) 
++        {
++            oSnmpdConf << "trap2sink " << ToNarrow( riT->str().c_str()) << std::endl;
++            ++riT;
++        }
++
++        //--------------------------------------------//
++        ReleaseStr( wszTrapSink );
++    }
++    
++    UINT er = SUCCEEDED(hResult) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++
++    return WcaFinalize(er);
++
++}
+-- 
+2.41.0.windows.1
+

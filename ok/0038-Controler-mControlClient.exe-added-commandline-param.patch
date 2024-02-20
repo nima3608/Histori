@@ -1,0 +1,245 @@
+From 48147a662d0ec33cf457aee1ce0cfe4dda2750b3 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 19 May 2011 10:47:57 +0000
+Subject: [PATCH 0038/1000] Controler - mControlClient.exe added commandline
+ parameter to execute one command
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@143 90b65887-3827-0410-9a23-83215b262276
+---
+ .../cpp/Controller/inc/mcontrolClient_def.h   |   4 +-
+ .../Massai/cpp/Controller/src/test.cpp        | 163 ++++++++++++++++--
+ 2 files changed, 152 insertions(+), 15 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrolClient_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrolClient_def.h
+index ce5686eb..ed3b40f9 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrolClient_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrolClient_def.h
+@@ -1,8 +1,8 @@
+ #define IDI_ICON1 101
+ #define IDI_ICON2 102
+ 
+-#define FILE_VER_BIN     1,0,0,0
+-#define FILE_VER_STR     "FileVersion", "1.0.0.0\0"
++#define FILE_VER_BIN     1,0,0,1
++#define FILE_VER_STR     "FileVersion", "1.0.0.1\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"mcontrolClient\0"
+ #define INTERNALNAME     "InternalName"     ,"mcontrolClient\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/test.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/test.cpp
+index fc0681c1..f74b7c1a 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/test.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/test.cpp
+@@ -14,6 +14,8 @@
+ #include "controller.h"
+ #include "pslist.h"
+ 
++#include "mArgScan.hpp"
++
+ #include "massaidll/massai.hpp"
+ #include "massaidll/mThreadEx.h"
+ 
+@@ -22,7 +24,101 @@ using namespace std;
+ 
+ bool fTerminate = false;
+ 
+-Controller::kioskControl_ptr handler;
++Controller::kioskControl_ptr handler=NULL;
++
++int execCommand(char c)
++{
++  int rc = 0;
++  if(handler)
++  {
++    try
++    {
++      switch(c)
++      {
++      case 's':
++
++           rc = handler->startPlatform();
++
++           cout << "startPlatform() = " << rc << "\n";
++           break;
++
++      case 'd':
++
++           rc = handler->shutdownPlatform();
++
++           cout << "shutdownPlatform() = " << rc << "\n";
++           break;
++
++      case 'D':
++
++           rc = handler->forcedShutdownPlatform();
++
++           cout << "forcedShutdownPlatform() = " << rc << "\n";
++           break;
++
++      case 'P':
++
++           rc = handler->forcedRestartPlatform();
++
++           cout << "forcedRestartPlatform() = " << rc << "\n";
++           break;
++
++      case 'r':
++
++           rc = handler->rebootKiosk();
++
++           cout << "rebootKiosk() = " << rc << "\n";
++           break;
++
++      case 'R':
++
++           rc = handler->forcedRebootKiosk();
++
++           cout << "forcedRebootKiosk() = " << rc << "\n";
++           break;
++
++      case 'O':
++
++           rc = handler->forcedShutdownKiosk();
++
++           cout << "forcedShutdownKiosk() = " << rc << "\n";
++           break;
++
++      case 'o':
++
++           rc = handler->shutdownKiosk();
++
++           cout << "shutdownKiosk() = " << rc << "\n";
++           break;
++
++      case 'h':
++
++           rc = handler->reloadHostsFile();
++
++           if(rc < 0)
++             cout << "reloadHostsFile() = " << rc << "\n";
++           else
++             cout << "reloadHostsFile() = " << rc << " bytes transferred\n";
++           break;
++      default:
++             cout << "command not supported\n";
++             rc = -1;
++           break;
++      }
++    }
++    catch(CORBA::SystemException& e)
++    {
++      cout << e << endl;
++      rc = -1;
++    }
++  }
++  else
++  {
++    cout << "no connection to servant !!\n";
++    rc = -1;
++  }
++  return rc;
++}
+ 
+ //---------------------------------------------------------------------------
+ //
+@@ -48,7 +144,7 @@ Controller::processList *pl;
+ 
+       do
+       {
+-        cout << "\nContoller commands:\n\n";
++        cout << "\nController commands:\n\n";
+         cout << "  l     : list processes\n";
+         cout << "  k<id> : kill process\n";
+         cout << "  s     : start platform\n";
+@@ -64,7 +160,7 @@ Controller::processList *pl;
+         cout << "  t     : system time & last reboot time\n";
+         cout << "  T     : set new system time\n";
+         cout << "  h     : reload the etc/hosts file from server\n";
+-        cout << "  q     : quit tests\n\n";
++        cout << "  q     : quit mControlClient\n\n";
+         cout << "> ";
+         cin >> c;
+ 
+@@ -222,29 +318,70 @@ Controller::processList *pl;
+ 
+ int main( int argc, char ** argv )
+ {
++int dRC = 0;
+ loop ui;
+ CORBA::Object_var obj;
+ corbaClient <Controller::kioskControl> *clnt1;
+ 
+-    if(argc == 2)
+-      clnt1 = new corbaClient <Controller::kioskControl>(argv[1],19998,"massaiKioskControl");
+-    else
+-    {
+-      printf("optional: test <IP address>\nconnecting to localhost...\n");
+ 
+-      clnt1 = new corbaClient <Controller::kioskControl>("127.0.0.1",19998,"massaiKioskControl");
++   argScan A( argc, argv );
++
++   if( A.help() )
++   {
++      cout
++   << "Usage: " << argv[0] << " [-KIOSK:ip] [-COMMAND:x]" << endl
++   << "© 2011  MATERNA GmbH Information & Communications" << endl
++   << "Function: Controls a massai platform." << endl
++   << "  -KIOSK:xxx.xxx.xxx.xxx ip of the kiosk where the massai platform is running." << endl
++   << "         (Default: 127.0.0.1)" << endl
++   << "  -COMMAND:x Execute command x." << endl
++   << "             If this parameter is omitted interactive mode is started." << endl
++   << "             Commands:" << endl
++   << "             s     : start platform\n"
++   << "             d     : shutdown platform.\n"
++   << "             D     : shutdown platform (FORCED: ignores busy mode !)\n"
++   << "             P     : restart platform (FORCED: ignores busy mode !)\n"
++   << "             r     : reboot kiosk\n"
++   << "             R     : reboot kiosk (FORCED: ignores busy mode !)\n"
++   << "             o     : shut down kiosk\n"
++   << "             O     : shut down kiosk (FORCED: ignores busy mode !)\n"
++   << "             h     : reload the etc/hosts file from server\n"
++   << endl;
++      return -1;
++   }
++
++   const char* szParDummy;
++
++   if( A.option( "KIOSK" ) )
++    szParDummy = A.option("KIOSK");
++   if (!szParDummy)
++      szParDummy ="127.0.0.1";
++   clnt1 = new corbaClient <Controller::kioskControl>(szParDummy,19998,"massaiKioskControl");
++
++   handler = clnt1->proxy();
++
++  if(A.option("COMMAND"))
++  {
++    szParDummy = A.option("COMMAND");
++    if(szParDummy)
++    {
++      dRC = execCommand(szParDummy[0]);
++    } else
++    {
++      cout << "No command found in COMMAND: parameter." << "\n";
++      dRC = -1;
+     }
+-
+-    handler = clnt1->proxy();
+-
++  } else
++  {
+     // Start UI thread
+ 
+     ui.run();
+ 
+     while(!fTerminate)
+       OS_Sleep(200);
++  }
+ 
+-    return 0;
++  return dRC;
+ }
+ 
+ //-------------------------------------------------------------------------
+-- 
+2.41.0.windows.1
+

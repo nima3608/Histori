@@ -1,0 +1,103 @@
+From db282f3e24a6c39007d59bb18cccf62d84b91e6d Mon Sep 17 00:00:00 2001
+From: sspata <sspata@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Tue, 27 Feb 2018 10:22:08 +0000
+Subject: [PATCH 293/462] Build: new copy_KioskStatus.pl script
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@484 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/scripts/copy_KioskStatus.pl         | 83 +++++++++++++++++++
+ 1 file changed, 83 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/scripts/copy_KioskStatus.pl
+
+diff --git a/SelfServiceBuild/Build/scripts/copy_KioskStatus.pl b/SelfServiceBuild/Build/scripts/copy_KioskStatus.pl
+new file mode 100644
+index 0000000..bf3a303
+--- /dev/null
++++ b/SelfServiceBuild/Build/scripts/copy_KioskStatus.pl
+@@ -0,0 +1,83 @@
++#!/usr/bin/perl -w
++#
++use strict;
++our $VERSION="0.0.0.1";
++
++use Archive::Zip qw( :ERROR_CODES :CONSTANTS );
++use File::Spec;
++use File::DosGlob;
++use File::Copy::Recursive qw(fcopy dircopy);
++use File::Path qw(make_path);
++use Getopt::Long;
++use DateTime;
++
++my $destPath = "";
++my $sourceRepoPath = "";
++my $version = "0.0.0.0";
++
++my $help = 0;
++my $argv_count = $#ARGV+1;
++
++GetOptions ("destpath=s"   => \$destPath,
++            "sourcepath=s" => \$sourceRepoPath,
++            "help!"     => \$help
++            )  or die "Invalid commmand line options. Try --help\n";
++
++if( $argv_count < 2 or $argv_count > 2 or ($destPath eq "") or $help )
++{
++  print STDERR "usage: $0 --destpath=\"PATH\" --sourcepath=\"PATH\" \n" ;
++  print STDERR "example: --destpath=\"\\\\file07.one.materna.com\\ONE\\Projekte\\London_Gatwick_Airport\\02_DEV_QA_OC\\020_DEV_Entwicklung\\Übergabe_QA\\GAL_IPS_SSDM_V1.0.2\" \n";
++  print STDERR "         --sourcepath=\"\\\\BOB\\Subversion\\Platform\\RC-4.15.8015\" \n";
++  exit 0;
++}
++
++if (! -e $sourceRepoPath)
++{
++  die "$sourceRepoPath does not exist!\n";
++}
++if (! -e $destPath)
++{
++  print "$destPath does not exist but will be created\n";
++}  
++
++make_path(File::Spec->catdir($destPath,"KioskStatus"));
++$destPath = "$destPath\\KioskStatus";
++make_path(File::Spec->catdir($destPath,"config"),
++          File::Spec->catdir($destPath,"lib"));
++
++dircopy(File::Spec->catdir($sourceRepoPath,"SelfServicePlatform\\Massai\\java\\KioskStatusReporting\\config_deploy"), 
++        File::Spec->catdir($destPath,"config")) or die $!;
++
++my $libDir = File::Spec->catfile($destPath,"lib");
++
++my $srcDir = File::Spec->catdir($sourceRepoPath,"SelfServiceBuild\\Build\\output\\jar");
++myCopyFile($srcDir,$libDir,"massai-kioskstatus.jar");
++myCopyFile($srcDir,$libDir,"massai-platform.jar");
++myCopyFile($srcDir,$libDir,"massai-config.jar");
++myCopyFile($srcDir,$libDir,"eventReportingClient-1.1-SNAPSHOT.jar");
++myCopyFile($srcDir,$libDir,"guava-23.3-android.jar");
++myCopyFile($srcDir,$libDir,"jackson-jr-all-2.9.0.jar");
++myCopyFile($srcDir,$libDir,"joda-time-2.3.jar");
++myCopyFile($srcDir,$libDir,"massai-tools.jar");
++
++my $orbDir = File::Spec->catdir($sourceRepoPath,"SelfServiceCommon\\Massai\\java\\OpenORB-1.3.1\\OpenORB\\dist");
++myCopyFile($orbDir,$libDir,"avalon-framework.jar");
++myCopyFile($orbDir,$libDir,"excalibur-configuration.jar");
++myCopyFile($orbDir,$libDir,"logkit.jar");
++myCopyFile($orbDir,$libDir,"openorb-1.3.1.jar");
++myCopyFile($orbDir,$libDir,"openorb_tools-1.3.1.jar");
++
++my $thirdPartyDir = File::Spec->catdir("\\\\BOB\\C\\Globals", "Globals\\ThirdParty");
++myCopyFile(File::Spec->catdir($thirdPartyDir,"log4j\\1.2.17"),$libDir,"log4j-1.2.17.jar");
++
++sub myCopyFile
++{
++  my $srcDir = shift;
++  my $destDir = shift;
++  my $fname = shift;
++  
++  fcopy(File::Spec->catfile($srcDir,$fname),     
++        File::Spec->catfile($destDir,$fname)) or die "$! :\nfrom: $srcDir\nto: $destDir\nfile: $fname";
++}
++  
++exit 0;
+-- 
+2.41.0.windows.1
+

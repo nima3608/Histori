@@ -1,0 +1,1241 @@
+From 4e7e9df3875419a8032a7b24a7ca0c7173601a8e Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 29 Nov 2012 16:34:42 +0000
+Subject: [PATCH 0378/1076] MANTIS0025235: Build OpenOrb in common
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@451 90b65887-3827-0410-9a23-83215b262276
+---
+ .../java/OpenORB-1.3.1/OpenORB/build.xml      | 1221 +++++++++++++++++
+ 1 file changed, 1221 insertions(+)
+ create mode 100644 SelfServiceCommon/Massai/java/OpenORB-1.3.1/OpenORB/build.xml
+
+diff --git a/SelfServiceCommon/Massai/java/OpenORB-1.3.1/OpenORB/build.xml b/SelfServiceCommon/Massai/java/OpenORB-1.3.1/OpenORB/build.xml
+new file mode 100644
+index 00000000..634b9873
+--- /dev/null
++++ b/SelfServiceCommon/Massai/java/OpenORB-1.3.1/OpenORB/build.xml
+@@ -0,0 +1,1221 @@
++<!-- ********************************************************************** -->
++<!--                                    OpenORB                             -->
++<!--                                   build file                           -->
++<!-- NOTE:                                                                  -->
++<!--   The idl dependecies are as sophisticated as possible now, but one    -->
++<!--   issue remains. Most of the files include orb.idl for types they use. -->
++<!--   When one of the files that are included from orb.idl changes all the -->
++<!--   files that depend on it, i.e. include it, must be recompiled. This   -->
++<!--   is currently not working. What is working is that the dependencies   -->
++<!--   in the same idl package (orb,openorb,interop,misc) are working, but  -->
++<!--   not over idl package boundaries. That means when you change the type -->
++<!--   CORBA::OctetSeq that is used in Codec.idl from the misc.idl package  -->
++<!--   the dependency rules will not automatically detect that the misc.idl -->
++<!--   package has to be regenerated, only orb.idl will be generated in     -->
++<!--   this case.                                                           -->
++<!-- ********************************************************************** -->
++
++<!-- $Id: build.xml,v 1.87.2.2 2003/03/28 14:16:32 shawnboyce Exp $ -->
++
++<project name="OpenORB" default="help" basedir=".">
++
++  <!--
++    Give user a chance to override without editing this file
++    (and without typing -D each time he compiles it)
++
++    ant.properties in the user.home directory can hold global
++    ant settings that should be applied to any ant invocation.
++
++    The local.properties file should contain settings only for
++    the local project.
++  -->
++  <property file="local.properties" />
++  <property file="${user.home}/ant.properties" />
++
++
++  <!-- For version or name changes modify the values below:
++     NAME    - Name of the package.
++     VERSION - Version of the package.
++     SPEC    - Specification this package implements.
++  -->
++  <property name="NAME_LONG"                   value="OpenORB" />
++  <property name="NAME_SHORT"                  value="orb" />
++  <property name="VERSION_MAJOR"               value="1" />
++  <property name="VERSION_MINOR"               value="3" />
++  <property name="VERSION_MINOR_CHANGE"        value="1" />
++  <property name="SPEC_NAME"                   value="CORBA/IIOP" />
++  <property name="SPEC_VERSION_MAJOR"          value="2" />
++  <property name="SPEC_VERSION_MINOR"          value="4" />
++  <property name="SPEC_VERSION_MINOR_CHANGE"   value="2" />
++  <property name="SPEC_URL"                    value="http://www.omg.org/cgi-bin/doc?formal/01-02-01" />
++  <property name="MAIN_CLASS"                  value="org.openorb.util.CreateORBProperties" />
++  <property name="MANIFEST_CLASSPATH"          value="" />
++  <property name="VENDOR_ID"                   value="org.openorb.community-project" />
++  <property name="VENDOR"                      value="OpenORB Community Project" />
++  <property name="TOOLS_NAME"                  value="org/openorb/compiler/IdlCompiler" />
++  <property name="TOOLS_MAIN_CLASS"            value="org.openorb.compiler.IdlCompiler" />
++  <property name="TOOLS_MANIFEST_CLASSPATH"    value="" />
++  <property name="EXAMPLES_NAME"               value="org/openorb/orb/examples" />
++  <property name="EXAMPLES_MANIFEST_CLASSPATH" value="" />
++  <property name="TEST_NAME"                   value="org/openorb/test/OpenORBTest" />
++  <property name="TEST_MAIN_CLASS"             value="org.openorb.test.OpenORBTest" />
++  <property name="TEST_MANIFEST_CLASSPATH"     value="" />
++
++  <property name="project"                     value="${NAME_LONG}" />
++  <property name="version"                     value="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MINOR_CHANGE}" />
++  <property name="spec.version"                value="${SPEC_VERSION_MAJOR}.${SPEC_VERSION_MINOR}.${SPEC_VERSION_MINOR_CHANGE}" />
++  <property name="archive"                     value="${project}-${version}" />
++
++  <property name="src"                         value="src"/>
++  <property name="src.dir"                     value="src/main" />
++  <property name="etc.dir"                     value="src/etc" />
++  <property name="test.dir"                    value="src/test" />
++  <property name="examples.dir"                value="src/examples" />
++  <property name="build.dir"                   value="build" />
++  <property name="conf.dir"                    value="src/config" />
++  <property name="lib.dir"                     value="lib" />
++  <property name="dist.dir"                    value="dist" />
++  <property name="gensrc.dir"                  value="${build.dir}/gensrc" />
++  <property name="idl.dir"                     value="src/idl" />
++  <property name="doc.dir"                     value="src/doc" />
++
++
++  <property name="tools.dir"                   value="../tools" />
++
++  <property name="build.debug"                 value="on" />
++  <property name="build.deprecation"           value="off" />
++  <property name="build.optimize"              value="off" />
++
++  <property name="main-jar"                    value="openorb-${version}.jar" />
++  <property name="tools-jar"                   value="openorb_tools-${version}.jar" />
++  <property name="test-jar"                    value="openorb_test-${version}.jar" />
++  <property name="examples-jar"                value="openorb_examples-${version}.jar" />
++
++  <property name="checkstyle-results"          value="${build.dir}/checkstyle-results.txt" />
++  <property name="checkstyle-cache"            value="${build.dir}/checkstyle-cache.txt" />
++
++  <property name="compiler-override-src"       value="src/compiler-override"/>
++  <property name="compiler-override-classes"   value="${build.dir}/compiler-override"/>
++  <property name="jdk-runtime-library"         value="${java.home}/lib/rt.jar"/>
++
++  <path id="bootstrap-classpath">
++    <pathelement path="${compiler-override-classes}" />
++    <pathelement path="${jdk-runtime-library}" />
++  </path>
++
++
++  <!-- =============================== -->
++  <!--     CLASSPATH used to build     -->
++  <!-- =============================== -->
++  <path id="project.class.path">
++    <pathelement path="${tools.dir}/lib/ant.jar" />
++    <pathelement path="${tools.dir}/lib/avalon-framework.jar" />
++    <pathelement path="${tools.dir}/lib/batik.jar" />
++    <pathelement path="${tools.dir}/lib/excalibur-configuration.jar" />
++    <pathelement path="${tools.dir}/lib/fop.jar" />
++    <pathelement path="${tools.dir}/lib/jimi.jar" />
++    <pathelement path="${tools.dir}/lib/junit.jar" />
++    <pathelement path="${tools.dir}/lib/logkit.jar" />
++    <pathelement path="${tools.dir}/lib/xerces.jar" />
++    <pathelement path="${tools.dir}/lib/xalan.jar" />
++    <pathelement path="${build.dir}/main" />
++    <pathelement path="${build.dir}/test" />
++    <pathelement path="${build.dir}/examples" />
++  </path>
++
++
++
++  <!-- =============================== -->
++  <!--               Help              -->
++  <!-- =============================== -->
++  <target name="help">
++  <echo>
++----------------------------------------------------------------------
++${NAME_LONG} build targets
++----------------------------------------------------------------------
++
++dependency targets
++==================
++clean          : Delete everything that has been created by the build
++                 process. Depends on clean-all.
++doc            : Create the documentation. Depends on compile-javadoc,
++                 compile-docbook
++examples       : Build the examples. Depends on main,build-examples,
++                 create-examples-jar.
++help (DEFAULT) : Show this list of dependency targets.
++idl-compiler   : Build the IDL compiler. Depends on
++                 build-idl-compiler, initialize-directory-tree.
++idl            : Build the IDL compiler and the IDL files. Depends on
++                 idl-compiler, compile-idl.
++checkstyle     : Run checkstyle on the source code.
++install        : Install the jar files in a common directory. The common
++                 directory can be specified via the install.path property
++                 in the local.properties file. Depends on jar-all and doc.
++jar-all        : Create all the jar files. Depends on main,compile-test-idl,
++                 build-test,build-examples,create-main-jar,create-test-jar,
++                 create-examples-jar.
++jar            : Create the jar file. Depends on main,
++                 create-main-jar.
++jar-test       : Create the test jar file. Depends on main,
++                 compile-test-idl,build-test,create-test-jar.
++jar-examples   : Create the examples jar file. Depends on examples,
++                 create-examples-jar.
++main           : Build the main classes. Depends on idl, build-main.
++test           : Build and run the test cases. Depends on main,
++                 build-test,create-test-jar,run-test.
++release        : Cleanup everything, rebuild without debug info, and
++                 create the tarballs. Depends on clean,
++                 initialize-directory-tree, build-idl-compiler,
++                 compile-idl, build-main, build-test, run-test,
++                 build-examples, jar, doc, create-binary-tarball,
++                 create-source-tarball
++targets        : Show a list of all targets. Depends on help.
++version        : Show the current version of the package. Depends on
++                 initialize-directory-tree.
++    </echo>
++  </target>
++
++  <target name="targets" depends="help">
++  <echo>
++worker targets
++==============
++initialize-directory-tree     : Initialize the directory tree for the
++                                build process.
++dump-info                     : Show ant environment information.
++create-release-info           : Create the ReleaseInfo class with the
++                                version information from this file
++                                (including uptodate check).
++create-manifest-file          : Create the main manifest file.
++create-tools-manifest-file    : Create the tools manifest file.
++create-examples-manifest-file : Create the examples manifest file.
++create-test-manifest-file     : Create the test manifest file.
++clean-all                     : Delete everything that has been
++                                created by the build.
++clean-test                    : Delete the test classes.
++clean-examples                : Delete the example classes.
++clean-main                    : Delete the main classes and the
++                                generated source.
++                                Depends on clean-classes,clean-gensrc.
++clean-classes                 : Delete the main classes.
++clean-gensrc                  : Delete the generated source files.
++compile-idl                   : Compile all IDL files. Depends on
++                                compile-orb-idl, compile-interop-idl,
++                                compile-misc-idl, compile-openorb-idl.
++compile-interop-idl           : Compile the interop.idl file
++                                (including uptodate check).
++compile-misc-idl              : Compile the misc.idl file (including
++                                uptodate check).
++compile-orb-idl               : Compile the orb.idl file (including
++                                uptodate check).
++compile-openorb-idl           : Compile the openorb.idl file
++                                (including uptodate check).
++compile-test-idl              : Compile the test idl files
++                                (including uptodate check).
++build-idl-compiler            : Build the IDL compiler.
++build-main                    : Build the main classes.
++build-test                    : Build the test cases.
++build-examples                : Build the examples.
++build-codesetdb               : Build the CodeSet Database
++create-main-jar               : Create the main jar files.
++create-test-jar               : Create the test jar file.
++create-examples-jar           : Create the examples jar file.
++compile-javadoc               : Create the javadoc documentation.
++compile-docbook               : Create the PDF/HTML documentation.
++copy-bin-to-dir               : Copy all binary generated files to a
++                                directory specified by the "bin" property
++create-source-tarball         : Create the source tarball.
++create-binary-tarball         : Create the binary tarball.
++run-test                      : Run the test cases.
++run-checkstyle                : Run checkstyle on the sources.
++dos2unix                      : Converts all java, idl and xml files in
++                                ${src} to unix format if not already.
++purge-bak                     : Removes temporary files from ${src} directory
++    </echo>
++  </target>
++
++  <target name="version" depends="initialize-directory-tree">
++    <java classname="org.openorb.ReleaseInfo" fork="yes">
++      <classpath refid="project.class.path" />
++    </java>
++  </target>
++
++
++  <target name="dos2unix">
++    <fixcrlf
++        eol="lf"
++        eof="remove"
++        srcdir="${src}"
++        includes="**/*.java,**/*.idl,**/*.xml"
++    />
++    <fixcrlf
++        eol="lf"
++        eof="remove"
++        srcdir="${basedir}"
++        includes="WHATSNEW,README,local.properties"
++    />
++  </target>
++
++  <target name="purge-bak">
++    <delete>
++      <fileset dir="${src}" includes="**/*.bak"/>
++    </delete>
++  </target>
++
++  <!-- =============================== -->
++  <!--            Manifest             -->
++  <!-- =============================== -->
++  <target name="create-manifest-file">
++    <copy file="${etc.dir}/manifest.mf" toDir="${build.dir}" />
++    <replace file="${build.dir}/manifest.mf" token="@@NAME@@" value="${NAME_LONG}" />
++    <replace file="${build.dir}/manifest.mf" token="@@MANIFEST_CLASSPATH@@" value="${MANIFEST_CLASSPATH}" />
++    <replace file="${build.dir}/manifest.mf" token="@@MAIN_CLASS@@" value="${MAIN_CLASS}" />
++    <replace file="${build.dir}/manifest.mf" token="@@EXTENSION_NAME@@" value="${NAME_SHORT}" />
++    <replace file="${build.dir}/manifest.mf" token="@@SPEC_TITLE@@" value="${SPEC_NAME}" />
++    <replace file="${build.dir}/manifest.mf" token="@@SPEC_VERSION@@" value="${spec.version}" />
++    <replace file="${build.dir}/manifest.mf" token="@@VENDOR_ID@@" value="${VENDOR_ID}" />
++    <replace file="${build.dir}/manifest.mf" token="@@VENDOR@@" value="${VENDOR}" />
++    <replace file="${build.dir}/manifest.mf" token="@@IMPL_VERSION@@" value="${version}" />
++  </target>
++
++  <target name="create-tools-manifest-file">
++    <copy file="${etc.dir}/tools-manifest.mf" toDir="${build.dir}" />
++    <replace file="${build.dir}/tools-manifest.mf" token="@@TOOLS_NAME@@" value="${TOOLS_NAME}" />
++    <replace file="${build.dir}/tools-manifest.mf" token="@@TOOLS_MANIFEST_CLASSPATH@@" value="${TOOLS_MANIFEST_CLASSPATH}" />
++    <replace file="${build.dir}/tools-manifest.mf" token="@@TOOLS_MAIN_CLASS@@" value="${TOOLS_MAIN_CLASS}" />
++  </target>
++
++  <target name="create-examples-manifest-file">
++    <copy file="${etc.dir}/examples-manifest.mf" toDir="${build.dir}" />
++    <replace file="${build.dir}/examples-manifest.mf" token="@@EXAMPLES_NAME@@" value="${EXAMPLES_NAME}" />
++    <replace file="${build.dir}/examples-manifest.mf" token="@@EXAMPLES_MANIFEST_CLASSPATH@@" value="${EXAMPLES_MANIFEST_CLASSPATH}" />
++  </target>
++
++  <target name="create-test-manifest-file">
++    <copy file="${etc.dir}/test-manifest.mf" toDir="${build.dir}" />
++    <replace file="${build.dir}/test-manifest.mf" token="@@TEST_NAME@@" value="${TEST_NAME}" />
++    <replace file="${build.dir}/test-manifest.mf" token="@@TEST_MANIFEST_CLASSPATH@@" value="${TEST_MANIFEST_CLASSPATH}" />
++    <replace file="${build.dir}/test-manifest.mf" token="@@TEST_MAIN_CLASS@@" value="${TEST_MAIN_CLASS}" />
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--          Initialization         -->
++  <!-- =============================== -->
++  <target name="create-release-info" if="release_info_not_uptodate">
++    <echo file="${gensrc.dir}/main/org/openorb/ReleaseInfo.java">package org.openorb;
++
++/**
++ * This class contains release information for this package.
++ * This class is created by the ant script src/build.xml, DO NOT EDIT !
++ */
++public class ReleaseInfo
++{
++    public final static String NAME_LONG                 = "${NAME_LONG}";
++    public final static String NAME_SHORT                = "${NAME_SHORT}";
++
++    public final static short  VERSION_MAJOR             = ${VERSION_MAJOR};        public final static short  VERSION_MINOR             = ${VERSION_MINOR};        public final static short  VERSION_MINOR_CHANGE      = ${VERSION_MINOR_CHANGE};
++    public final static String VERSION                   = "" + VERSION_MAJOR + "." + VERSION_MINOR + "." + VERSION_MINOR_CHANGE;
++
++    public final static short  SPEC_VERSION_MAJOR        = ${SPEC_VERSION_MAJOR};
++    public final static short  SPEC_VERSION_MINOR        = ${SPEC_VERSION_MINOR};
++    public final static short  SPEC_VERSION_MINOR_CHANGE = ${SPEC_VERSION_MINOR_CHANGE};
++    public final static String SPEC_VERSION              = "" + SPEC_VERSION_MAJOR + "." + SPEC_VERSION_MINOR + "." + SPEC_VERSION_MINOR_CHANGE;
++
++    public final static String RELEASE                   = NAME_LONG + " Version " + VERSION;
++    public final static String RELEASE_TAG               = NAME_LONG + "_" + VERSION_MAJOR + "_" + VERSION_MINOR + "_" + VERSION_MINOR_CHANGE;
++
++    public static void main(String[] args)
++    {
++        System.out.println(NAME_LONG + ":");
++        System.out.println("\t" + NAME_LONG + " " + VERSION);
++        System.out.println("\t" + RELEASE_TAG);
++        System.out.println("\t${SPEC_NAME} " + SPEC_VERSION + " (${SPEC_URL})");
++    }
++}
++    </echo>
++  </target>
++
++  <target name="dump-info">
++    <echo>
++
++       ++++                                    ++++    ++++++    ++++++
++     +++  +++                                +++  +++  ++   +++  ++   +++
++     ++    ++                                ++    ++  ++    ++  ++    ++
++     ++    ++  ++ +++      ++++    ++ +++    ++    ++  ++    ++  ++   +++
++     ++    ++  +++++++    ++++++   +++++++   ++    ++  ++   +++  +++++++
++     ++    ++  ++    ++  ++    ++  ++    ++  ++    ++  ++++++    ++   +++
++     ++    ++  ++    ++  ++++++++  ++    ++  ++    ++  ++  +++   ++    ++
++     ++    ++  ++    ++  ++        ++    ++  ++    ++  ++   ++   ++    ++
++     +++  +++  +++  +++  +++   ++  ++    ++  +++  +++  ++   ++   ++   +++
++       ++++    ++ +++      +++++   ++    ++    ++++    ++    ++  ++++++
++               ++
++               ++
++
++     - Vendor : ${VENDOR}
++
++     - Module : ${project}
++     - Version: ${version}
++
++     - Contact: mailto:openorb-users@lists.sf.net
++
++    </echo>
++    <echo message="java.vm.info=${java.vm.info}" />
++    <echo message="java.vm.name=${java.vm.name}" />
++    <echo message="java.vm.vendor=${java.vm.vendor}" />
++    <echo message="java.vm.version=${java.vm.version}" />
++    <echo message="os.arch=${os.arch}" />
++    <echo message="os.name=${os.name}" />
++    <echo message="os.version=${os.version}" />
++    <echo message="file.encoding=${file.encoding}" />
++    <echo message="user.language=${user.language}" />
++    <echo message="build.debug=${build.debug}" />
++    <echo message="build.deprecation=${build.debug}" />
++    <echo message="build.optimize=${build.debug}" />
++  </target>
++
++  <target name="initialize-directory-tree" depends="dump-info">
++    <tstamp/>
++    <mkdir dir="${build.dir}/main/org/openorb/config" />
++    <mkdir dir="${build.dir}/main/org/openorb/idl" />
++    <mkdir dir="${build.dir}/main/org/openorb/CORBA/kernel" />
++    <mkdir dir="${build.dir}/test" />
++    <mkdir dir="${build.dir}/examples" />
++    <mkdir dir="${gensrc.dir}/main/org/openorb" />
++    <mkdir dir="${gensrc.dir}/test" />
++    <mkdir dir="${gensrc.dir}/examples" />
++    <mkdir dir="${dist.dir}" />
++    <mkdir dir="${compiler-override-classes}" />
++
++    <copy todir="${dist.dir}">
++      <fileset dir="${tools.dir}/lib" includes="logkit.jar"/>
++      <fileset dir="${tools.dir}/lib" includes="avalon-framework.jar"/>
++      <fileset dir="${tools.dir}/lib" includes="excalibur-configuration.jar"/>
++      <fileset dir="${tools.dir}/lib" includes="xerces.jar"/>
++      <fileset dir="${tools.dir}/lib" includes="junit.jar"/>
++    </copy>
++
++    <copy todir="${build.dir}/main/org/openorb/config">
++      <fileset dir="${conf.dir}" includes="*.xml" />
++    </copy>
++
++    <copy todir="${build.dir}/main/org/openorb/idl">
++      <fileset dir="${idl.dir}" includes="*.idl" />
++    </copy>
++
++    <javac srcdir="${compiler-override-src}"
++           destdir="${compiler-override-classes}"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}" 
++           source="1.4" >
++      <classpath refid="project.class.path" />
++    </javac>
++
++    <uptodate property="release_info_not_uptodate" targetfile="src/build.xml">
++      <srcfiles dir= "${gensrc.dir}/main/org/openorb" includes="ReleaseInfo.java" />
++    </uptodate>
++    <antcall target="create-release-info" />
++    <javac srcdir="${gensrc.dir}/main"
++           destdir="${build.dir}/main"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}"
++           bootclasspathref="bootstrap-classpath" 
++           source="1.4" >
++      <include name="org/openorb/ReleaseInfo.java" />
++      <classpath refid="project.class.path" />
++    </javac>
++
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--            Clean up             -->
++  <!-- =============================== -->
++  <target name="clean" depends="clean-all">
++  </target>
++
++  <target name="clean-all">
++    <delete failonerror="false" dir="${build.dir}" />
++    <delete failonerror="false" dir="${dist.dir}" />
++    <delete failonerror="false" quiet="true">
++      <fileset dir="${basedir}" includes="**/*.log" />
++    </delete>
++  </target>
++
++  <target name="clean-main" depends="clean-classes,clean-gensrc">
++    <delete failonerror="false" quiet="true" file="${dist.dir}/${main-jar}" />
++    <delete failonerror="false" quiet="true" file="${dist.dir}/${tools-jar}" />
++  </target>
++
++  <target name="clean-test">
++    <delete failonerror="false" quiet="true">
++      <fileset dir="${build.dir}/test" includes="**/*.class" />
++    </delete>
++    <delete failonerror="false" quiet="true" dir="${gensrc.dir}/test" />
++    <delete failonerror="false" quiet="true" file="${dist.dir}/${test-jar}" />
++  </target>
++
++  <target name="clean-examples">
++    <delete failonerror="false" quiet="true">
++      <fileset dir="${build.dir}/examples" includes="**/*.class" />
++    </delete>
++    <delete failonerror="false" quiet="true" dir="${gensrc.dir}/examples" />
++    <delete failonerror="false" quiet="true" file="${dist.dir}/${examples-jar}" />
++  </target>
++
++  <target name="clean-classes">
++    <delete failonerror="false" quiet="true">
++      <fileset dir="${build.dir}/main" includes="**/*.class" />
++    </delete>
++  </target>
++
++  <target name="clean-gensrc">
++    <delete failonerror="false" quiet="true">
++      <fileset dir="${gensrc.dir}/main" includes="**/*.java" />
++    </delete>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--            IDL compiler         -->
++  <!-- =============================== -->
++  <target name="idl-compiler" depends="initialize-directory-tree,build-idl-compiler"/>
++
++  <target name="build-idl-compiler">
++    <javac srcdir="${src.dir}"
++           destdir="${build.dir}/main"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}"
++           bootclasspathref="bootstrap-classpath"
++           source="1.4" >
++      <include name="org/openorb/compiler/" />
++      <exclude name="org/openorb/compiler/doc/" />
++      <exclude name="org/openorb/compiler/ir/" />
++      <exclude name="org/openorb/compiler/orb/" />
++      <classpath refid="project.class.path" />
++    </javac>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--                IDL              -->
++  <!-- =============================== -->
++  <target name="idl" depends="idl-compiler,compile-idl"/>
++  <target name="compile-idl" depends="compile-orb-idl,compile-interop-idl,compile-misc-idl,compile-openorb-idl">
++
++<!--
++
++#!/bin/sh
++# To generate the include lines for the following delete command first
++# comment out the delete line, then generate the idl target, cd to the
++# src/main directory and execute the following script:
++for i in $(find org/omg -name \*.java -print | sort)
++do
++  if [ -f ../../build/gensrc/$i ]
++  then
++    echo $i
++    echo '        <include name="$i" />' >> tmp-fls
++  fi
++done
++
++-->
++    <!-- The reason why the generated files are deleted again is that the
++         files generated are missing certain adaptions, e.g. the system
++         exceptions must be derived from SystemException, but the idl
++         compiler automatically derives the exceptions from UserException.
++         Therefore the modified versions of those files are checked into
++         src/main subtree and they need to be deleted from the latest idl
++         compile otherwise further compilation fails with a duplicate
++         class exception. -->
++    <delete quiet="false">
++      <fileset dir="${gensrc.dir}/main">
++        <include name="org/omg/CORBA/AbstractBaseHelper.java" />
++        <include name="org/omg/CORBA/BAD_CONTEXT.java" />
++        <include name="org/omg/CORBA/BAD_INV_ORDER.java" />
++        <include name="org/omg/CORBA/BAD_OPERATION.java" />
++        <include name="org/omg/CORBA/BAD_PARAM.java" />
++        <include name="org/omg/CORBA/BAD_QOS.java" />
++        <include name="org/omg/CORBA/BAD_TYPECODE.java" />
++        <include name="org/omg/CORBA/CODESET_INCOMPATIBLE.java" />
++        <include name="org/omg/CORBA/COMM_FAILURE.java" />
++        <include name="org/omg/CORBA/DATA_CONVERSION.java" />
++        <include name="org/omg/CORBA/FREE_MEM.java" />
++        <include name="org/omg/CORBA/IMP_LIMIT.java" />
++        <include name="org/omg/CORBA/INITIALIZE.java" />
++        <include name="org/omg/CORBA/INTERNAL.java" />
++        <include name="org/omg/CORBA/INTF_REPOS.java" />
++        <include name="org/omg/CORBA/INVALID_TRANSACTION.java" />
++        <include name="org/omg/CORBA/INV_FLAG.java" />
++        <include name="org/omg/CORBA/INV_IDENT.java" />
++        <include name="org/omg/CORBA/INV_OBJREF.java" />
++        <include name="org/omg/CORBA/INV_POLICY.java" />
++        <include name="org/omg/CORBA/MARSHAL.java" />
++        <include name="org/omg/CORBA/NO_IMPLEMENT.java" />
++        <include name="org/omg/CORBA/NO_MEMORY.java" />
++        <include name="org/omg/CORBA/NO_PERMISSION.java" />
++        <include name="org/omg/CORBA/NO_RESOURCES.java" />
++        <include name="org/omg/CORBA/NO_RESPONSE.java" />
++        <include name="org/omg/CORBA/OBJECT_NOT_EXIST.java" />
++        <include name="org/omg/CORBA/OBJ_ADAPTER.java" />
++        <include name="org/omg/CORBA/PERSIST_STORE.java" />
++        <include name="org/omg/CORBA/REBIND.java" />
++        <include name="org/omg/CORBA/TIMEOUT.java" />
++        <include name="org/omg/CORBA/TRANSACTION_build.java" />
++        <include name="org/omg/CORBA/TRANSACTION_MODE.java" />
++        <include name="org/omg/CORBA/TRANSACTION_REQUIRED.java" />
++        <include name="org/omg/CORBA/TRANSACTION_ROLLEDBACK.java" />
++        <include name="org/omg/CORBA/TRANSACTION_UNAVAILABLE.java" />
++        <include name="org/omg/CORBA/TRANSIENT.java" />
++        <include name="org/omg/CORBA/UNKNOWN.java" />
++      </fileset>
++    </delete>
++  </target>
++
++  <target name="idl2java">
++    <echo message="Compiling ${source}..." />
++    <java failonerror="true" classname="org.openorb.compiler.IdlCompiler" fork="true">
++      <classpath refid="project.class.path" />
++      <arg line="-silence -all -d ${destination} -I ${idl.dir} -I ${idl.dir}/test ${source}" />
++    </java>
++  </target>
++
++
++<!--   NOT USED ! TODO/FIXME
++          Polling.idl     <- not implemented !!!???
++-->
++
++  <target name="check-interop-idl">
++    <condition property="interop-idl-modified">
++    <or>
++      <uptodate targetfile="${idl.dir}/interop.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/BiDirPolicy/**/*.java" />
++          <include name="org/omg/CONV_FRAME/**/*.java" />
++          <include name="org/omg/IOP/**/*.java" />
++          <include name="org/omg/IIOP/**/*.java" />
++          <include name="org/omg/GIOP/**/*.java" />
++          <include name="org/omg/SendingContext/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/BiDirPolicy.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/BiDirPolicy/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CONV_FRAME.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CONV_FRAME/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/GIOP.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/IOP/**/*.java" />
++          <include name="org/omg/IIOP/**/*.java" />
++          <include name="org/omg/GIOP/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/GIOP.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/IOP/**/*.java" />
++          <include name="org/omg/IIOP/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/IOP.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/IOP/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/IOP_DCE.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/IOP/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/SendingContext.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/SendingContext/**/*.java" />
++      </uptodate>
++    </or>
++    </condition>
++  </target>
++  <target name="compile-interop-idl" depends="check-interop-idl" if="interop-idl-modified">
++    <antcall target="idl2java" >
++      <param name="destination" value="${gensrc.dir}/main" />
++      <param name="source" value="${idl.dir}/interop.idl" />
++    </antcall>
++  </target>
++
++  <target name="check-misc-idl">
++    <condition property="misc-idl-modified">
++    <or>
++      <uptodate targetfile="${idl.dir}/misc.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/Dynamic/**/*.java" />
++          <include name="org/omg/DynamicAny/**/*.java" />
++          <include name="org/omg/Messaging/**/*.java" />
++          <include name="org/omg/PortableInterceptor/**/*.java" />
++          <include name="org/omg/PortableServer/**/*.java" />
++          <include name="org/omg/TimeBase/**/*.java" />
++          <include name="org/omg/CosNaming/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/Dynamic.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/Dynamic/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/DynamicAny.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/DynamicAny/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/Messaging.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/Messaging/**/*.java" />
++          <include name="org/omg/TimeBase/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/TimeBase.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/TimeBase/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/PortableInterceptor.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/PortableInterceptor/**/*.java" />
++          <include name="org/omg/Dynamic/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/PortableServer.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/PortableServer/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CosNaming.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CosNaming/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/Codec.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/IOP/**/*.java" />
++      </uptodate>
++    </or>
++    </condition>
++  </target>
++  <target name="compile-misc-idl" depends="check-misc-idl" if="misc-idl-modified">
++    <antcall target="idl2java" >
++      <param name="destination" value="${gensrc.dir}/main" />
++      <param name="source" value="${idl.dir}/misc.idl" />
++    </antcall>
++  </target>
++
++  <target name="check-orb-idl">
++    <condition property="orb-idl-modified">
++    <or>
++      <uptodate targetfile="${idl.dir}/orb.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/omg/CORBA/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_Current.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_CustomMarshal.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_DomainManager.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_InterfaceRepository.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_ORB.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_Policy.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_StandardExceptions.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/CORBA_Stream.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/omg/CORBA/**/*.java" />
++      </uptodate>
++    </or>
++    </condition>
++  </target>
++  <target name="compile-orb-idl" depends="check-orb-idl" if="orb-idl-modified">
++    <antcall target="idl2java" >
++      <param name="destination" value="${gensrc.dir}/main" />
++      <param name="source" value="${idl.dir}/orb.idl" />
++    </antcall>
++  </target>
++
++  <target name="check-openorb-idl">
++    <condition property="openorb-idl-modified">
++    <or>
++      <uptodate targetfile="${idl.dir}/openorb.idl">
++        <srcfiles dir="${gensrc.dir}/main">
++          <include name="org/openorb/corbaloc/**/*.java" />
++          <include name="org/openorb/policy/**/*.java" />
++        </srcfiles>
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/OpenORB_policy.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/openorb/policy/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/OpenORB_corbaloc.idl">
++        <srcfiles dir="${gensrc.dir}/main" includes="org/openorb/corbaloc/**/*.java" />
++      </uptodate>
++    </or>
++    </condition>
++  </target>
++  <target name="compile-openorb-idl" depends="check-openorb-idl" if="openorb-idl-modified">
++    <antcall target="idl2java" >
++      <param name="destination" value="${gensrc.dir}/main" />
++      <param name="source" value="${idl.dir}/openorb.idl" />
++    </antcall>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--            Main                 -->
++  <!-- =============================== -->
++  <target name="main" depends="idl,build-main"/>
++
++  <target name="build-main">
++    <javac srcdir="${src.dir};${gensrc.dir}/main"
++           destdir="${build.dir}/main"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}"
++           bootclasspathref="bootstrap-classpath"
++           source="1.4" >
++      <classpath refid="project.class.path" />
++    </javac>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--              Inspect            -->
++  <!--                                 -->
++  <!-- Exclude files that are either   -->
++  <!-- generated automatically or are  -->
++  <!-- marked deprecated.              -->
++  <!-- =============================== -->
++  <target name="checkstyle" depends="initialize-directory-tree,run-checkstyle" />
++
++  <target name="run-checkstyle">
++    <taskdef classpath="${tools.dir}/lib/checkstyle-all.jar"
++             resource="checkstyletask.properties"/>
++
++    <checkstyle
++      properties="${tools.dir}/etc/checkstyle.properties" 
++      cacheFile="${checkstyle-cache}" 
++      failOnViolation="true">
++      <fileset dir="${src.dir}"
++               includes="**/*.java"
++               excludes="**/compiler/**,org/omg/**,org/openorb/util/MapNamingContext.java,org/openorb/util/ContextUtilities.java,org/openorb/iiop/CodeSetDatabase.java,org/openorb/rmi/_Remote_Stub.java"/>
++      <fileset dir="${examples.dir}"
++               includes="**/*.java"
++               excludes="**/obv/**,**/idl_reflection/**"/>
++      <fileset dir="${test.dir}"
++               includes="**/*.java"
++               excludes="**/bench/**"/>
++<!--      <formatter type="plain" toFile="${checkstyle-results}"/> -->
++    </checkstyle>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--         CodeSet Database        -->
++  <!-- =============================== -->
++  <target name="build-codesetdb">
++    <java failonerror="true" classname="org.openorb.iiop.CodeSetDatabaseInitializer" fork="true">
++      <classpath refid="project.class.path" />
++      <arg line="${src.dir}/org/openorb/iiop/cs_registry1_2h.txt" />
++    </java>
++    <move file="CodeSetDatabase.java" todir="${src.dir}/org/openorb/iiop"/>
++  </target>
++
++
++  
++  <!-- =============================== -->
++  <!--              Test               -->
++  <!-- =============================== -->
++  <target name="test" depends="main,compile-test-idl,build-test,run-test"/>
++
++  <target name="check-test-idl">
++    <condition property="test-idl-modified">
++    <or>
++      <uptodate targetfile="${idl.dir}/test/test.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/benchmark.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/bench/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/bidir.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/iiop/bidir/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/complex.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/iiop/complex/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/dii.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/dynamic/**/DII*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/dsi.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/dynamic/**/DSI*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/poa.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/adapter/poa/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/primitive.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/iiop/primitive/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/state.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/iiop/state/**/*.java" />
++      </uptodate>
++      <uptodate targetfile="${idl.dir}/test/value.idl">
++        <srcfiles dir="${gensrc.dir}" includes="test/org/openorb/test/iiop/value/**/*.java" />
++      </uptodate>
++    </or>
++    </condition>
++  </target>
++  <target name="compile-test-idl" depends="check-test-idl" if="test-idl-modified">
++    <antcall target="idl2java" >
++      <param name="destination" value="${gensrc.dir}/test" />
++      <param name="source" value="${idl.dir}/test/test.idl" />
++    </antcall>
++    <delete failonerror="false" quiet="true" dir="${gensrc.dir}/test/org/omg" />
++
++  </target>
++
++  <target name="build-test">
++    <javac srcdir="${test.dir};${gensrc.dir}/test"
++           destdir="${build.dir}/test"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}"
++           bootclasspathref="bootstrap-classpath"
++           source="1.4" >
++      <classpath refid="project.class.path" />
++    </javac>
++  </target>
++
++  <target name="run-test">
++    <java failonerror="true"
++          classname="junit.textui.TestRunner"
++          fork="yes">
++      <classpath refid="project.class.path" />
++        <jvmarg line="-Dorg.omg.CORBA.ORBClass=org.openorb.CORBA.ORB
++                      -Dorg.omg.CORBA.ORBSingletonClass=org.openorb.CORBA.ORBSingleton
++                      -Djavax.rmi.CORBA.StubClass=org.openorb.rmi.StubDelegateImpl
++                      -Djavax.rmi.CORBA.UtilClass=org.openorb.rmi.UtilDelegateImpl
++                      -Djavax.rmi.CORBA.PortableRemoteObjectClass=org.openorb.rmi.PortableRemoteObjectDelegateImpl" />
++      <arg line="org.openorb.test.OpenORBTest" />
++    </java>
++  </target>
++
++
++  <!-- =============================== -->
++  <!--             Examples            -->
++  <!-- =============================== -->
++  <target name="examples" depends="main,build-examples"/>
++
++  <target name="build-examples">
++    <mkdir dir="${build.dir}/examples" />
++    <mkdir dir="${gensrc.dir}/examples" />
++
++    <!-- compile the IDL for all the examples -->
++    <!-- examples requiring BOA -->
++    <echo message="examples requiring BOA"/>
++    <java classname="org.openorb.compiler.IdlCompiler" fork="yes" failonerror="yes">
++      <arg line="-I ${idl.dir} -boa -d ${gensrc.dir}/examples ${examples.dir}/dsi/boa/Sample.idl ${examples.dir}/any/poly.idl" />
++      <classpath refid="project.class.path" />
++      <sysproperty key="openorb.home" file="src" />
++    </java>
++    <!-- examples requiring POA -->
++    <java classname="org.openorb.compiler.IdlCompiler" fork="yes" failonerror="yes">
++      <arg line="-silence -I ${idl.dir} -d ${gensrc.dir}/examples ${examples.dir}/dsi/poa/Sample.idl ${examples.dir}/dynany/poly.idl ${examples.dir}/obv/custom/custom.idl ${examples.dir}/obv/inheritance/inheritance.idl ${examples.dir}/obv/support_abstract/support.idl ${examples.dir}/obv/support_interface/support.idl ${examples.dir}/obv/truncate/truncate.idl ${examples.dir}/obv/valuebox/box.idl ${examples.dir}/obv/valuetype/value.idl ${examples.dir}/poa/AdapterActivator/Calculator.idl ${examples.dir}/poa/DefaultServant/File.idl ${examples.dir}/poa/RootPOA/Calculator.idl ${examples.dir}/poa/ServantActivator/Calculator.idl ${examples.dir}/poa/ServantLocator/Calculator.idl ${examples.dir}/interceptors/interceptors.idl ${examples.dir}/${EXAMPLES_NAME}/messaging/Timeout.idl" />
++      <classpath refid="project.class.path" />
++      <sysproperty key="openorb.home" file="src" />
++    </java>
++    <!-- compile the sources -->
++    <javac srcdir="${examples.dir};${gensrc.dir}/examples"
++           destdir="${build.dir}/examples"
++           debug="${build.debug}"
++           deprecation="${build.deprecation}"
++           optimize="${build.optimize}"
++           bootclasspathref="bootstrap-classpath"
++           source="1.4" >
++      <classpath refid="project.class.path" />
++    </javac>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--          Distribution           -->
++  <!-- =============================== -->
++  <target name="jar-all" depends="main,compile-test-idl,build-test,build-examples,create-main-jar,create-test-jar,create-examples-jar"/>
++  <target name="jar" depends="main,create-main-jar"/>
++  <target name="jar-test" depends="main,compile-test-idl,build-test,create-test-jar"/>
++  <target name="jar-examples" depends="examples,create-examples-jar"/>
++
++  <target name="create-main-jar">
++    <delete file="${dist.dir}/${tools-jar}" />
++    <delete file="${dist.dir}/${main-jar}" />
++
++    <antcall target="create-tools-manifest-file" />
++    <jar jarfile="${dist.dir}/${tools-jar}"
++         manifest="${build.dir}/tools-manifest.mf" >
++      <fileset dir="${basedir}" includes="LICENSE.txt,EXOLAB.txt,README,WHATSNEW" />
++      <zipfileset dir="${idl.dir}" includes="*.idl" prefix="org/openorb/idl" />
++      <fileset dir="${build.dir}/main" includes="org/openorb/compiler/" />
++      <fileset dir="${build.dir}/main" includes="org/openorb/*.class,org/openorb/CORBA/kernel/,org/openorb/util/urlhandler/" />
++      <zipfileset dir="${conf.dir}" includes="*.xml,*.dtd" prefix="org/openorb/config" />
++    </jar>
++    <delete file="${build.dir}/tools-manifest.mf" />
++
++    <antcall target="create-manifest-file" />
++    <jar jarfile="${dist.dir}/${main-jar}" manifest="${build.dir}/manifest.mf">
++      <fileset dir="${build.dir}/main" excludes="org/openorb/compiler/**" />
++      <fileset dir="${src.dir}" includes="**/*.properties" />
++      <fileset dir="${src.dir}" includes="**/*.xml" />
++    </jar>
++    <delete file="${build.dir}/manifest.mf" />
++  </target>
++
++  <target name="create-test-jar">
++    <delete file="${dist.dir}/${test-jar}" />
++    <antcall target="create-test-manifest-file" />
++    <jar jarfile="${dist.dir}/${test-jar}" manifest="${build.dir}/test-manifest.mf" basedir="${build.dir}/test" />
++    <delete file="${build.dir}/test-manifest.mf" />
++  </target>
++
++  <target name="create-examples-jar">
++    <delete file="${dist.dir}/${examples-jar}" />
++    <antcall target="create-examples-manifest-file" />
++    <jar jarfile="${dist.dir}/${examples-jar}" manifest="${build.dir}/examples-manifest.mf" basedir="${build.dir}/examples" />
++    <delete file="${build.dir}/examples-manifest.mf" />
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--          Documentation          -->
++  <!-- =============================== -->
++  <target name="doc" depends="idl,compile-javadoc,compile-docbook" />
++
++  <target name="compile-javadoc">
++    <delete dir="${dist.dir}/javadoc" />
++    <mkdir   dir="${dist.dir}/javadoc" />
++    <javadoc destdir="${dist.dir}/javadoc"
++             doctitle="${project} ${version}"
++             windowtitle="${project} ${version}"
++             public="true"
++             noindex="true"
++             author="true"
++             packagenames="org.omg.*,org.openorb.*,org.apache.*"
++             verbose="false"
++             maxmemory="256m">
++      <sourcepath>
++        <pathelement path="${src.dir}"/>
++        <pathelement path="${gensrc.dir}/main"/>
++      </sourcepath>
++    </javadoc>
++  </target>
++
++  <target name="compile-docbook">
++    <java classname="org.apache.fop.apps.Fop" fork="yes">
++      <arg line="-q -xml ${doc.dir}/${NAME_SHORT}.xml -xsl ${tools.dir}/docbook/xsl/fo/docbook.xsl ${dist.dir}/${NAME_SHORT}.pdf" />
++      <classpath refid="project.class.path" />
++    </java>
++    <java classname="org.apache.xalan.xslt.Process" fork="yes">
++      <arg line="-IN ${doc.dir}/${NAME_SHORT}.xml -XSL ${tools.dir}/docbook/xsl/html/docbook.xsl -OUT ${dist.dir}/${NAME_SHORT}.html" />
++      <jvmarg line="-Djava.endorsed.dirs=${tools.dir}/lib" />
++      <classpath refid="project.class.path" />
++    </java>
++    <mkdir dir="${dist.dir}/html_img"/>
++    <copy todir="${dist.dir}/html_img" >
++       <fileset dir="${doc.dir}/images"/>
++    </copy>
++    <replace file="${dist.dir}/${NAME_SHORT}.html" token="src/doc/images/" value="html_img/"/>
++  </target>
++
++
++
++  <!-- =============================== -->
++  <!--          Tarballs               -->
++  <!-- =============================== -->
++  <target name="release" depends="clean">
++    <delete dir="${build.dir}" />
++    <mkdir dir="${build.dir}" />
++    <antcall target="initialize-directory-tree" />
++    <antcall target="run-checkstyle" />
++    <antcall target="build-idl-compiler" >
++      <param name="build.debug"       value="off" />
++      <param name="build.deprecation" value="on" />
++      <param name="build.optimize"    value="on" />
++    </antcall>
++    <antcall target="compile-idl" />
++    <antcall target="build-main" >
++      <param name="build.debug"       value="off" />
++      <param name="build.deprecation" value="on" />
++      <param name="build.optimize"    value="on" />
++    </antcall>
++    <antcall target="compile-test-idl" />
++    <antcall target="build-test" >
++      <param name="build.debug"       value="off" />
++      <param name="build.deprecation" value="on" />
++      <param name="build.optimize"    value="on" />
++    </antcall>
++    <antcall target="run-test" />
++    <antcall target="build-examples" >
++      <param name="build.debug"       value="off" />
++      <param name="build.deprecation" value="on" />
++      <param name="build.optimize"    value="on" />
++    </antcall>
++    <antcall target="create-main-jar" />
++    <antcall target="create-examples-jar" />
++    <antcall target="create-test-jar" />
++    <antcall target="compile-javadoc" />
++    <antcall target="compile-docbook" />
++    <antcall target="create-binary-tarball" />
++    <antcall target="create-source-tarball" />
++  </target>
++
++  <target name="create-source-tarball">
++    <delete file="${dist.dir}/${archive}-src.tgz" />
++    <delete file="${dist.dir}/${archive}-src.zip" />
++    <mkdir dir="${build.dir}/src/${NAME_LONG}" />
++    <mkdir dir="${build.dir}/src/${NAME_LONG}/src" />
++    <!--mkdir dir="${build.dir}/../lib" /-->
++    <copy todir="${build.dir}/src/${NAME_LONG}/src">
++      <fileset dir="src">
++        <exclude name="**/CVS/*" />
++      </fileset>
++    </copy>
++    <!--mkdir dir="${build.dir}/src/${NAME_LONG}/lib" />
++    <copy todir="${build.dir}/src/${NAME_LONG}/lib">
++      <fileset dir="${lib.dir}">
++        <exclude name="**/CVS/*" />
++      </fileset>
++    </copy-->
++    <copy todir="${build.dir}/src/${NAME_LONG}">
++      <fileset dir=".">
++        <include name="*.bat" />
++        <include name="*.sh" />
++        <include name="*.txt" />
++      </fileset>
++    </copy>
++    <tar basedir="${build.dir}/src"
++         tarfile="${dist.dir}/${archive}-src.tar"
++         defaultexcludes="true" />
++    <gzip src="${dist.dir}/${archive}-src.tar" zipfile="${dist.dir}/${archive}-src.tgz" />
++    <delete file="${dist.dir}/${archive}-src.tar" />
++    <zip zipfile="${dist.dir}/${archive}-src.zip" basedir="${build.dir}/src"
++         defaultexcludes="true" />
++    <delete dir="${build.dir}/src" />
++  </target>
++
++  <!-- Auxiliary target to copy all binary files to a directory -->
++  <target name="copy-bin-to-dir">
++    <mkdir    dir="${bin}/lib" />
++    <mkdir    dir="${bin}/doc" />
++    <mkdir    dir="${bin}/config" />
++    <copy file="${basedir}/README"
++              tofile="${bin}/README" />
++    <copy file="${basedir}/LICENSE.txt"
++              tofile="${bin}/LICENSE.txt" />
++    <copy file="${basedir}/EXOLAB.txt"
++              tofile="${bin}/EXOLAB.txt" />
++    <copy file="${basedir}/WHATSNEW"
++              tofile="${bin}/WHATSNEW" />
++
++    <copy file="${dist.dir}/${tools-jar}"
++              tofile="${bin}/lib/${tools-jar}" />
++    <copy file="${dist.dir}/${main-jar}"
++              tofile="${bin}/lib/${main-jar}" />
++    <copy file="${dist.dir}/${examples-jar}"
++              tofile="${bin}/lib/${examples-jar}" />
++    <copy file="${dist.dir}/${test-jar}"
++              tofile="${bin}/lib/${test-jar}" />
++
++    <copy file="${tools.dir}/lib/avalon-framework.jar"
++              tofile="${bin}/lib/avalon-framework.jar" />
++    <copy file="${tools.dir}/lib/logkit.jar"
++              tofile="${bin}/lib/logkit.jar" />
++    <copy file="${tools.dir}/lib/excalibur-configuration.jar"
++              tofile="${bin}/lib/excalibur-configuration.jar" />
++    <copy file="${tools.dir}/lib/xerces.jar"
++              tofile="${bin}/lib/xerces.jar" />
++    <copy file="${tools.dir}/lib/junit.jar"
++              tofile="${bin}/lib/junit.jar" />
++
++    <copy file="${conf.dir}/OpenORB.xml"
++              tofile="${bin}/config/OpenORB.xml" />
++    <copy file="${conf.dir}/default.xml"
++              tofile="${bin}/config/default.xml" />
++
++    <copy file="${conf.dir}/setConfig.bat"
++              tofile="${bin}/config/setConfig.bat" />
++    <copy file="${conf.dir}/setConfig.bat"
++              tofile="${bin}/config/add.bat" />
++    <copy file="${conf.dir}/setConfig.sh"
++              tofile="${bin}/config/setConfig.sh" />
++
++    <copy file="${conf.dir}/orb.properties"
++              tofile="${bin}/config/orb.properties" />
++
++    <copy file="${dist.dir}/${NAME_SHORT}.pdf"
++              tofile="${bin}/doc/${NAME_SHORT}.pdf" />
++    <copy file="${dist.dir}/${NAME_SHORT}.html"
++              tofile="${bin}/doc/${NAME_SHORT}.html" />
++    <mkdir dir="${bin}/doc/html_img"/>
++    <copy todir="${bin}/doc/html_img" >
++       <fileset dir="${dist.dir}/html_img"/>
++    </copy>
++
++    <copy todir="${bin}/idl" >
++       <fileset dir="${idl.dir}">
++         <exclude name="**/CVS/*" />
++       </fileset>
++    </copy>
++    <copy todir="${bin}/doc/javadoc">
++       <fileset dir="${dist.dir}/javadoc" />
++    </copy>
++    <copy todir="${bin}/examples">
++       <fileset dir="${examples.dir}">
++         <exclude name="**/CVS/*" />
++       </fileset>
++    </copy>
++    <copy todir="${bin}/test">
++       <fileset dir="${test.dir}">
++         <exclude name="**/CVS/*" />
++       </fileset>
++    </copy>
++  </target>
++
++  <target name="create-binary-tarball">
++    <property name="root" value="${build.dir}/distrib" />
++    <property name="bin" value="${root}/${NAME_LONG}-${version}" />
++    <delete   file="${dist.dir}/${archive}.tgz" />
++    <delete   file="${dist.dir}/${archive}.zip" />
++    <delete   dir="${bin}" />
++    <mkdir    dir="${bin}" />
++    <antcall target="copy-bin-to-dir"	>
++      <param name="bin"	value="${bin}" />
++    </antcall>
++    <tar basedir="${root}"
++         tarfile="${root}/${archive}.tar" />
++    <gzip src="${root}/${archive}.tar" zipfile="${dist.dir}/${archive}.tgz" />
++    <delete file="${root}/${archive}.tar" />
++    <zip basedir="${root}"
++         zipfile="${dist.dir}/${archive}.zip" />
++  </target>
++
++
++  <!-- =============================== -->
++  <!--          Install                -->
++  <!-- =============================== -->
++  <target name="check-install-path">
++    <available file="${install.path}" type="dir" property="install.path.present"/>
++  </target>
++
++  <target name="install" depends="check-install-path,jar-all,doc" if="install.path.present">
++    <echo message="Installing to ${install.path}..." />
++    <antcall target="copy-bin-to-dir" >
++      <param name="bin"   value="${install.path}" />
++    </antcall>
++  </target>
++
++</project>
+-- 
+2.41.0.windows.1
+

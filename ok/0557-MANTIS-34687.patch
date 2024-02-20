@@ -1,0 +1,186 @@
+From 4b6aeaeadd91d93c8c89e6155db5b8f132a3db4d Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 6 Jan 2015 15:15:21 +0000
+Subject: [PATCH 0557/1000] MANTIS 34687 MANTIS 34687: Non ASCII characters in
+ selection item description - Config service 1.4.2 - Process selecton item
+ description by xml-character-conversion too
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@805 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 ++++-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 ++++-
+ .../cpp/CfgXMgrB/src/cfgMetaSelection.cpp     | 49 +++++++++++++------
+ 3 files changed, 57 insertions(+), 18 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 19b6a6cc..1944c9ca 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -392,8 +392,17 @@
+ //! @par     Change:
+ //! - MANTIS 34968: Handle read-access rights
+ //!   If read-access is not given, return "***" for text items.
+-#define FILE_VER_BIN 1,4,1,0
+-#define FILE_VER_DTS "1.4.1.0"
++// #define FILE_VER_BIN 1,4,1,0
++// #define FILE_VER_DTS "1.4.1.0"
++//
++//! @version 1.4.2
++//! @date    06.01.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34687: Non ASCII characters in selection item description
++//!   Process selecton item description by xml-character-conversion too
++#define FILE_VER_BIN 1,4,2,0
++#define FILE_VER_DTS "1.4.2.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index a6466256..6826e1ee 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -383,8 +383,17 @@
+ //! @par     Change:
+ //! - MANTIS 34968: Handle read-access rights
+ //!   If read-access is not given, return "***" for text items.
+-#define FILE_VER_BIN 1,4,1,0
+-#define FILE_VER_DTS "1.4.1.0"
++// #define FILE_VER_BIN 1,4,1,0
++// #define FILE_VER_DTS "1.4.1.0"
++//
++//! @version 1.4.2
++//! @date    06.01.2015
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 34687: Non ASCII characters in selection item description
++//!   Process selecton item description by xml-character-conversion too
++#define FILE_VER_BIN 1,4,2,0
++#define FILE_VER_DTS "1.4.2.0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+index e9c3e5cd..8e9e2713 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaSelection.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -18,21 +18,36 @@
+ #pragma warning (disable:4786)
+ #endif /* _MSC_VER */
+ 
+-#include "cfgToken.h"
+ #include "cfgMetaSelection.hpp"
++
++#include "cfgToken.h"
++#include "cfgToXML.hpp"
++
+ #include "trc/TraceClt.h"
+ 
+ #include <algorithm>
+ 
+ 
+ 
++
++
++
+ namespace
+ {
+-   /*
+-    * Begin of anonymous namespace
+-    */
+ 
+ 
++   //! Intra-selection configuration file separator (as char)
++   char const c_sel_sep1_c = ',';
++
++   //! Intra-selection configuration file separator (as string)
++   char const c_sel_sep1_s[] = ",";
++
++   //! Inter-selection configuration file separator (as char)
++   char const c_sel_sep2_c = '\n';
++
++   //! Inter-selection configuration file separator (as string)
++   char const c_sel_sep2_s[] = "\n";
++
+ 
+    /**
+     *
+@@ -72,16 +87,22 @@ namespace
+          char const * Token
+       )
+    {
++      std::string tmp;
+       char C = *Token++;
+       while( C )
+       {
+-         if( ( C == ',' ) || ( C == '\n' ) || ( C == CFGTOKEN_ESCAPE ) )
++         if (
++            ( C == c_sel_sep1_c ) ||
++            ( C == c_sel_sep2_c ) ||
++            ( C == CFGTOKEN_ESCAPE )
++            )
+          {
+-            OS << CFGTOKEN_ESCAPE;
++            tmp += CFGTOKEN_ESCAPE;
+          }
+-         OS << C;
++         tmp += C;
+          C = *Token++;
+       }
++      cfgToXML( tmp ).copy( OS );
+    }
+ 
+ 
+@@ -101,9 +122,9 @@ namespace
+          cfgMetaSelection::select const & Src
+       )
+    {
+-      OS << Src.getNdxValue() << ",";
++      OS << Src.getNdxValue() << c_sel_sep1_s;
+       saveSelectToken( OS, Src.getStrValue().c_str() );
+-      OS << ",";
++      OS << c_sel_sep1_s;
+       saveSelectToken( OS, Src.getExplanation().c_str() );
+    }
+ 
+@@ -139,8 +160,8 @@ namespace
+                (
+                   Escaped ||
+                   (
+-                     ( C != ',' ) &&
+-                     ( C != '\n' )
++                     ( C != c_sel_sep1_c ) &&
++                     ( C != c_sel_sep2_c )
+                   )
+                )
+             )
+@@ -223,7 +244,7 @@ namespace
+          char const *      Src
+       ) throw( cfgReadCorruptedSelection )
+    {
+-      if( !Src || ( *Src != '\n' ) )
++      if( !Src || ( *Src != c_sel_sep2_c ) )
+       {
+          throw cfgReadCorruptedSelection();
+       }
+@@ -588,7 +609,7 @@ void cfgMetaSelection::save
+    {
+       Dst << Indent;
+       saveSelect( Dst, *I );
+-      Dst << std::endl;
++      Dst << c_sel_sep2_s;
+       ++I;
+    }
+    Dst << Indent << "</" CFGTOKEN_META ">" << std::endl;
+-- 
+2.41.0.windows.1
+

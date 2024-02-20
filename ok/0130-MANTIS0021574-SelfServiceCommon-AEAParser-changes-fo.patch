@@ -1,0 +1,159 @@
+From 28ab785c2e8904465175cd36a7dfb82215da14b6 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 17 Nov 2011 18:48:57 +0000
+Subject: [PATCH 0130/1000] MANTIS0021574: SelfServiceCommon AEAParser changes
+ for VC10 compatibilty
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@248 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/AEAParser/aeaBagtagPrintJob.h           | 3 ++-
+ .../Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h     | 3 ++-
+ SelfServiceCommon/Interfaces/inc/AEAParser/aeaResponse.h   | 3 ++-
+ SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak        | 4 +++-
+ .../Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp   | 5 +++--
+ .../cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp    | 7 ++++---
+ 6 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
+index b54283f7..5b08d15f 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBagtagPrintJob.h
+@@ -22,6 +22,7 @@
+ #include <map>
+ #include <list>
+ #include <memory>
++#include <boost/shared_ptr.hpp>
+ 
+ namespace MASSAI
+ {
+@@ -36,7 +37,7 @@ namespace MASSAI
+         TextMap templates;
+         std::string pectab;
+     };
+-    typedef std::list<std::auto_ptr<AEABagtagPrintJobPart> > JobList;
++    typedef std::list< boost::shared_ptr< AEABagtagPrintJobPart> > JobList;
+     struct AEABagtagPrintJob
+     {
+       public:
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
+index 571a9c27..d51feb77 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaBoardingPassPrintJob.h
+@@ -21,6 +21,7 @@
+ #include <string>
+ #include <map>
+ #include <list>
++#include <boost/shared_ptr.hpp>
+ #include <memory>
+ 
+ namespace MASSAI
+@@ -42,7 +43,7 @@ namespace MASSAI
+     struct AEATicketPrintJob
+     {
+       public:
+-        typedef std::list<std::auto_ptr<AEATicketPrintJobPart> > PrintJobPartList;
++        typedef std::list<boost::shared_ptr<AEATicketPrintJobPart> > PrintJobPartList;
+         PrintJobPartList printJobParts;
+     };
+     struct AEAReceiptField
+diff --git a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaResponse.h b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaResponse.h
+index 146fbf46..728a6bdb 100644
+--- a/SelfServiceCommon/Interfaces/inc/AEAParser/aeaResponse.h
++++ b/SelfServiceCommon/Interfaces/inc/AEAParser/aeaResponse.h
+@@ -20,6 +20,7 @@
+ #include <string>
+ #include <memory>
+ #include <stddef.h>
++#include <boost/shared_ptr.hpp>
+ 
+ namespace MASSAI
+ {
+@@ -68,7 +69,7 @@ namespace MASSAI
+         std::string m_response;
+     };
+ 
+-    typedef std::auto_ptr<AEAResponse> AEAResult;
++    typedef boost::shared_ptr<AEAResponse> AEAResult;
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+index 77cdfee5..6a33cc15 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+@@ -8,7 +8,9 @@
+ 
+ ######################################################################
+ 
+-MY_CFLAGS =     -GR -G5 $(INC_COMMON_INTER)
++MY_CFLAGS =     $(MY_CFLAGS_2) $(INC_COMMON_INTER) \
++                -DBOOST_ALL_NO_LIB \
++                $(INC_BOOST)
+ 
+ MY_LIB1 =       $(_LIB)\aeaParser.lib
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
+index 2203bb6e..28c8e2a2 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BagtagImpl.cpp
+@@ -17,6 +17,7 @@
+ #include "AEAParser/aeaBagtagPrintJob.h"
+ #include "AEAParser/aeaPrintProcessor.h"
+ #include <vector>
++#include <boost/shared_ptr.hpp>
+ #include "Tools/TraceDelegate.h"
+ 
+ namespace
+@@ -113,7 +114,7 @@ namespace MASSAI
+                 printJob.printCount= printCount;
+                 if(Tokenizer::readChar(it, end, readBegin, it))  // delimiter for this command
+                 {
+-                  typedef std::vector<std::auto_ptr<AEABagtagPrintJobPart> > JobList;
++                  typedef std::vector<boost::shared_ptr<AEABagtagPrintJobPart> > JobList;
+                   typedef std::list<JobList> JobListList;
+                   JobListList jobs;
+                   trace.writeTrace(BasicRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+@@ -124,7 +125,7 @@ namespace MASSAI
+                   {
+                     jobCount+= printCount;
+                     pPectab= context.pectab(pectabId, pectabVersion);
+-                    std::auto_ptr<AEABagtagPrintJobPart> jobBase= std::auto_ptr<AEABagtagPrintJobPart>(new AEABagtagPrintJobPart());
++                    boost::shared_ptr<AEABagtagPrintJobPart> jobBase(new AEABagtagPrintJobPart());
+                     // jobBase->isGenerated= true;
+                     if(pPectab == 0)
+                     {
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+index 1f9d5fc3..2fe3291e 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaSimulator_BoardingPassImpl.cpp
+@@ -21,6 +21,7 @@
+ 
+ using namespace MASSAI::AEA;
+ 
++
+ namespace
+ {
+   const char* PRINT_COUPON=  "CP";
+@@ -111,8 +112,8 @@ namespace MASSAI
+       char delimiter;
+       AEATicketPrintJob printJob;
+       AEATicketPrintJobPart::TextMap allData;
+-      std::auto_ptr<AEATicketPrintJobPart> job;
+-      std::auto_ptr<AEATicketPrintJobPart> all;
++      boost::shared_ptr< AEATicketPrintJobPart > job;
++      boost::shared_ptr< AEATicketPrintJobPart > all;
+       const PectabData* pPectab= 0;
+       const PectabData* pPectabAll= 0;
+       std::string actionCode;
+@@ -140,7 +141,7 @@ namespace MASSAI
+           while(Tokenizer::readText(actionCode, it, end, readBegin, it))  // Document Begin
+           {
+             trace.writeTrace(BasicRuntime_HERE, "Print Ticket (%.1000s)", std::string(readBegin, it).c_str());
+-            job= std::auto_ptr<AEATicketPrintJobPart>(new AEATicketPrintJobPart());
++            job= /*std::auto_ptr<AEATicketPrintJobPart>*/boost::shared_ptr< AEATicketPrintJobPart > (new AEATicketPrintJobPart());
+             if(Tokenizer::readChar(it, end, readBegin, it))  // delimiter for this command
+             {
+               trace.writeTrace(BasicRuntime_HERE, "Delimiter (%.1000s)", std::string(readBegin, it).c_str());
+-- 
+2.41.0.windows.1
+

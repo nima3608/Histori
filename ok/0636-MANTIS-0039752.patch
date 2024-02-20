@@ -1,0 +1,193 @@
+From ecb40a832bcd032cb882076273a1ca514f768820 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 11 Jan 2016 19:15:37 +0000
+Subject: [PATCH 0636/1000] MANTIS 0039752 extension: Ingenico Device
+ Serialnumber reading from Device during start up and writing in Device
+
+tools.lib
+V1.0.1.15
+
+extension: added setValue for cfgNumber, cfgText, cfgCachedNumber, cfgCachedText
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@943 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/configItem.h         |  4 ++
+ .../cpp/Tools/inc/local_def_msystools.h       | 11 +++--
+ .../Massai/cpp/Tools/src/configItem.cpp       | 40 ++++++++++++++++---
+ 3 files changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+index 949a22bc..d29cf78b 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/configItem.h
+@@ -44,6 +44,7 @@ namespace config
+       ~cfgCachedText();
+       std::string getValue();
+       std::string getItem();
++      void setValue(const std::string& value);
+ 
+     private:
+       std::string item;
+@@ -82,6 +83,7 @@ namespace config
+       ~cfgText();
+       std::string getValue() const throw(nConfig::exception);
+       std::string getItem();
++      void setValue(const std::string& value);
+ 
+     private:
+       std::string item;
+@@ -121,6 +123,7 @@ namespace config
+       ~cfgCachedNumber();
+       long getValue();
+       std::string getItem();
++      void setValue(long value);
+ 
+     private:
+       std::string explanation;
+@@ -162,6 +165,7 @@ namespace config
+       ~cfgNumber();
+       long getValue() const throw(nConfig::exception);
+       std::string getItem();
++      void setValue(long value);
+ 
+     private:
+       std::string item;
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+index dd83d0db..0613e714 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/local_def_msystools.h
+@@ -1,5 +1,5 @@
+-#define FILE_VER_BIN     1,0,1,14
+-#define FILE_VER_STR     "FileVersion", "1.0.1.14"
++#define FILE_VER_BIN     1,0,1,15
++#define FILE_VER_STR     "FileVersion", "1.0.1.15"
+ 
+ /*!
+ \file
+@@ -7,12 +7,17 @@
+ 
+ \page massai_tools.lib Release Notes - massai_tools.lib
+ 
+-@version 1.0.1.14
++@version 1.0.1.15
+ 
+ \section changehistory Change history
+ 
+ tools.lib
+ 
++\version 1.0.1.15
++\li 11.01.2016
++\li SteT - Mantis 0039752: Ingenico Device Serialnumber reading from Device during start up and writing in Device Configuration
++\li extension: added setValue for cfgNumber, cfgText, cfgCachedNumber, cfgCachedText
++
+ \version 1.0.1.14
+ \li 14.01.2015
+ \li JK - Mantis 35110: MassaiCfgxB: generates huge trace files
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+index ce3982c7..ffca5cdd 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/configItem.cpp
+@@ -51,7 +51,7 @@ namespace config
+ 
+   void cfgCachedText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
+   {
+-    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s)",
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s",
+       this->item.c_str(),
+       this->defaultValue.c_str(),
+       this->maxLength,
+@@ -71,6 +71,15 @@ namespace config
+     return cached();
+   }
+ 
++  void cfgCachedText::setValue(const std::string& value)
++  {
++    if(cached() != value)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %.200s", item.c_str(), value.c_str());
++      set(value.c_str());
++    }
++  }
++
+   std::string cfgCachedText::getItem()
+   {
+     return item;
+@@ -131,7 +140,7 @@ namespace config
+ 
+   void cfgText::create(const char*& rights, const char*& explanation, const char*& defaultValue, long& maxLength)
+   {
+-    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s)",
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %.200s(%d); %.200s; %.200s",
+       this->item.c_str(),
+       this->defaultValue.c_str(),
+       this->maxLength,
+@@ -166,6 +175,12 @@ namespace config
+     return item;
+   }
+ 
++  void cfgText::setValue(const std::string& value)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %.200s", item.c_str(), value.c_str());
++    set(value.c_str());
++  }
++
+ 
+   cfgCachedNumber::cfgCachedNumber
+   (
+@@ -210,7 +225,7 @@ namespace config
+ 
+   void cfgCachedNumber::create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max)
+   {
+-    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s)",
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s",
+       this->item.c_str(),
+       this->defaultValue,
+       this->min,
+@@ -232,6 +247,15 @@ namespace config
+     return cached();
+   }
+ 
++  void cfgCachedNumber::setValue(const long value)
++  {
++    if(cached() != value)
++    {
++      trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %d", item.c_str(), value);
++      set(value);
++    }
++  }
++
+   long cfgCachedNumber::uncached()
+   {
+     long result = get();
+@@ -291,7 +315,7 @@ namespace config
+ 
+   void cfgNumber::create(const char*& rights, const char*& explanation, long& defaultValue, long& min, long& max)
+   {
+-    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s)",
++    trc.writeTrace(BasicRuntime_HERE, "create item %.200s: %d(%d-%d); %.200s; %.200s",
+       this->item.c_str(),
+       this->defaultValue,
+       this->min,
+@@ -308,10 +332,16 @@ namespace config
+   long cfgNumber::getValue() const throw(nConfig::exception)
+   {
+     long result = get();
+-    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d)", item.c_str(), result);
++    trc.writeTrace(BasicRuntime_HERE, "get item %.200s: %d", item.c_str(), result);
+     return result;
+   }
+ 
++  void cfgNumber::setValue(const long value)
++  {
++    trc.writeTrace(BasicRuntime_HERE, "set item %.200s: %d", item.c_str(), value);
++    set(value);
++  }
++
+   std::string cfgNumber::getItem()
+   {
+     return item;
+-- 
+2.41.0.windows.1
+

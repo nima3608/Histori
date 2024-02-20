@@ -1,0 +1,360 @@
+From 1d745c693ec85cf14f0c97e7133863eb176af1ec Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 12 Nov 2014 16:16:36 +0000
+Subject: [PATCH 0531/1000] MANTIS 0032431 Command: WM_MASSAISTART_REMOTE
+ correct implementation done
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@763 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_dialog.h |  14 --
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  15 ++
+ .../cpp/mControl/src/mControl_dialog.cpp      |  81 -----------
+ .../cpp/mControl/src/mControl_scheduler.cpp   |   2 +
+ .../cpp/mControl/src/mControl_worker.cpp      | 134 +++++++++++++++++-
+ 5 files changed, 150 insertions(+), 96 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+index b3c51dcc..a3b7d824 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_dialog.h
+@@ -61,20 +61,6 @@ namespace mControl
+         void waitForStarterTermination();
+ 
+ 
+-        //TODO: implement with new process configuration
+-        /**
+-        *   Starts update service & waits for it's termination
+-        */
+-        long startUpdate();
+-
+-
+-        //TODO: implement with new process configuration
+-        /**
+-        *   create a public semaphor and start all progs via MSTART.EXE
+-        */
+-        long startAll();
+-
+-
+         /**
+         *   load bitmap from file
+         */
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+index f2c11820..977af045 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -38,6 +38,7 @@ namespace mControl
+         cfgListSysCommands*         m_shutDownCommands;
+         cfgListSysCommands*         m_startUpCommands;
+         mcProcessListMonitor        m_processListMonitor;
++        mcProcessControl *          m_processStarter;
+ 
+     public:
+         Worker(NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
+@@ -69,6 +70,20 @@ namespace mControl
+         *   this one doesn't pop up any windows
+         */
+         long mSystem( char const * cmd, char const * purpose );
++
++
++        //TODO: implement with new process configuration
++        /**
++        *   Starts update service & waits for it's termination
++        */
++        long startUpdate();
++
++
++        //TODO: implement with new process configuration
++        /**
++        *   create a public semaphor and start all progs via MSTART.EXE
++        */
++        long startAll();
+     };
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+index 87001944..25ad9901 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_dialog.cpp
+@@ -128,87 +128,6 @@ namespace mControl
+     }
+ 
+ 
+-    long Dialog::startUpdate()
+-    {
+-        /*
+-        char                szProg[256];
+-        char                szPath[512];
+-        char               *pStr;
+-        GetModuleFileName(0,szPath,sizeof(szPath));
+-
+-        if((pStr = strrchr(szPath,'\\')) != NULL)
+-          *pStr = '\0';
+-
+-        if(serverMode())
+-          sprintf(szProg,"%s\\%s -server",szPath,UPDATE_NAME);
+-        else
+-          sprintf(szProg,"%s\\%s",szPath,UPDATE_NAME);
+-        mSysProcess::parent Update;
+-    #ifdef DO_MCPROCESS_LOGGING
+-        mcProcessCallback Logging( UPDATE_NAME, "mSysProcess" );
+-    #endif
+-        mcProcessCallback StdErr( UPDATE_NAME, "STDERR" );
+-        mcProcessCallback StdOut( UPDATE_NAME, "STDOUT" );
+-        Update
+-    #ifdef DO_MCPROCESS_LOGGING
+-            .setLogging( Logging )
+-    #endif
+-            .setMinimized()
+-            .setStdErr( StdErr )
+-            .setStdOut( StdOut )
+-            .setCommandline( szProg );
+-        std::auto_ptr<mSysProcess::child> Child( Update.newChild() );
+-        return Child
+-                ->waitForTermination( 600 ) // Something went terrible wrong,
+-                                            // when not done after 600 secs.
+-                .getExitCode();
+-        */
+-        return 0;
+-    }
+-
+-
+-    long Dialog::startAll()
+-    {
+-        /*
+-    STARTUPINFO         si;
+-    char                szProg[256];
+-    char                szPath[512];
+-    char               *pStr;
+-
+-        hStarter = NULL;
+-
+-        memset(&si,0,sizeof(STARTUPINFO));
+-
+-        si.cb      = sizeof(STARTUPINFO);
+-        si.dwFlags = STARTF_USESHOWWINDOW;
+-
+-        si.wShowWindow = SW_SHOWMINIMIZED;
+-        //si.wShowWindow = SW_HIDE;
+-
+-        GetModuleFileName(0,szPath,sizeof(szPath));
+-
+-        if((pStr = strrchr(szPath,'\\')) != NULL)
+-          *pStr = '\0';
+-
+-        if(serverMode() && mDaemon_isService())
+-          sprintf(szProg,"%s\\%s %s -server -service",szPath,STARTER_NAME,SEM_NAME);
+-        else if(serverMode())
+-          sprintf(szProg,"%s\\%s %s -server",szPath,STARTER_NAME,SEM_NAME);
+-        else
+-          sprintf(szProg,"%s\\%s %s",szPath,STARTER_NAME,SEM_NAME);
+-
+-        mSysProcess::parent Parent;
+-        Parent.setCommandline( szProg );
+-        hStarter = new mcProcessControl( Parent, STARTER_NAME, SEM_NAME );
+-        if( hStarter->getStatus() != mSysProcess::STATUS_FAILED )
+-            return 0;
+-        else
+-            return 1;
+-            */
+-        return 0;
+-    }
+-
+-
+     HBITMAP Dialog::CreateBitmapObjectFromDibFile (HDC hdc, PTSTR szFileName)
+     {
+         BITMAPFILEHEADER * pbmfh;
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+index 4b89f5a8..850b3f95 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_scheduler.cpp
+@@ -52,6 +52,7 @@ namespace mControl
+             case WM_MASSAISTART_REMOTE:
+                     TRACE(HERE,"WM_MASSAISTART_REMOTE command enqueued");
+                     break;
++            /*
+             case WM_MASSAIREBOOT_REMOTE:
+                     TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command enqueued");
+                     break;
+@@ -67,6 +68,7 @@ namespace mControl
+             case WM_MASSAISTART_SCHEDULER:
+                     TRACE(HERE,"WM_MASSAISTART_SCHEDULER command enqueued");
+                     break;
++            */
+             default:
+                     TRACE(HERE,"default command enqueued");
+                     break;
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+index 515e00fb..ab5c1913 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -21,6 +21,7 @@
+ 
+ //MATERNA includes
+ #include "trc/trace.h"
++#include "systools/matDaemon.h"
+ 
+ 
+ using Poco::NotificationQueue;
+@@ -34,7 +35,8 @@ namespace mControl
+         m_globalConfig(config),
+         m_dialog(dialog),
+         m_shutDownCommands(NULL),
+-        m_startUpCommands(NULL)
++        m_startUpCommands(NULL),
++        m_processStarter(NULL)
+     {
+     }
+ 
+@@ -46,6 +48,7 @@ namespace mControl
+         //dequeue a Notification out of the Queue
+         AutoPtr<Notification> pNf;
+         MControlNotification* pWorkNf;
++        long rc;
+ 
+         //work as long as there are Notifications
+         while( !m_globalConfig.isTerminated() )
+@@ -67,6 +70,58 @@ namespace mControl
+                             break;
+                     case WM_MASSAISTART_REMOTE:
+                             TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_REMOTE");
++
++                            // request from remote !!
++
++                            if(!m_globalConfig.isStarted())
++                            {
++                                SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
++
++                                m_dialog.getWindowConfig().sendAlert(ALERT_E_START_REMOTE);
++
++                                m_globalConfig.setStarted( true );
++
++                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
++                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++                                UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
++
++                                // start update service previous to all other tasks ...
++
++                                rc = startUpdate();
++
++                                ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
++                                UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++
++                                if(rc == REBOOT_KIOSK)
++                                {
++                                    TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
++
++                                    rc = Tools::shutdownOS_Now(true);
++
++                                    TRACE(HERE,"kiosk reboot, rc = %d",rc);
++
++                                    PostQuitMessage(0);
++                                    rc = 0;
++                                    break;
++                                }
++
++                                // execute system commands before starting platform
++                                execSysCmdsStartup();
++
++                                rc = startAll();
++
++                                if(!rc)
++                                {
++                                    Sleep(1000);
++
++                                    SetActiveWindow(m_dialog.getWindowConfig().getHwnd());
++                                    SetFocus(m_dialog.getWindowConfig().getHwnd());
++                                }
++                            }
++                            else
++                                rc = -1;
++                            //TODO: find other way of return rc;
++                            TRACE(HERE,"Ask for correct execution: rc [ %d ]", rc); 
+                             break;
+ 
+                     case WM_MASSAIREBOOT_REMOTE:
+@@ -158,4 +213,81 @@ namespace mControl
+ 
+        return 0;
+     }
++
++
++    long Worker::startUpdate()
++    {
++        char                szProg[256];
++        char                szPath[512];
++        char               *pStr;
++        //Check if "A" is correct
++        GetModuleFileNameA(0,szPath,sizeof(szPath));
++
++        if((pStr = strrchr(szPath,'\\')) != NULL)
++          *pStr = '\0';
++
++        if(m_globalConfig.serverMode())
++          sprintf(szProg,"%s\\%s -server",szPath,UPDATE_NAME);
++        else
++          sprintf(szProg,"%s\\%s",szPath,UPDATE_NAME);
++        mSysProcess::parent Update;
++    #ifdef DO_MCPROCESS_LOGGING
++        mcProcessCallback Logging( UPDATE_NAME, "mSysProcess" );
++    #endif
++        mcProcessCallback StdErr( UPDATE_NAME, "STDERR" );
++        mcProcessCallback StdOut( UPDATE_NAME, "STDOUT" );
++        Update
++    #ifdef DO_MCPROCESS_LOGGING
++            .setLogging( Logging )
++    #endif
++            .setMinimized()
++            .setStdErr( StdErr )
++            .setStdOut( StdOut )
++            .setCommandline( szProg );
++        std::auto_ptr<mSysProcess::child> Child( Update.newChild() );
++        return Child
++                ->waitForTermination( 600 ) // Something went terrible wrong,
++                                            // when not done after 600 secs.
++                .getExitCode();
++    }
++
++
++    long Worker::startAll()
++    {
++        STARTUPINFO         si;
++        char                szProg[256];
++        char                szPath[512];
++        char               *pStr;
++
++        m_processStarter = NULL;
++
++        memset(&si,0,sizeof(STARTUPINFO));
++
++        si.cb      = sizeof(STARTUPINFO);
++        si.dwFlags = STARTF_USESHOWWINDOW;
++
++        si.wShowWindow = SW_SHOWMINIMIZED;
++        //si.wShowWindow = SW_HIDE;
++
++        //TODO: check if "A" is correct
++        GetModuleFileNameA(0,szPath,sizeof(szPath));
++
++        if((pStr = strrchr(szPath,'\\')) != NULL)
++          *pStr = '\0';
++
++        if(m_globalConfig.serverMode() && mDaemon_isService())
++          sprintf(szProg,"%s\\%s %s -server -service",szPath,STARTER_NAME,SEM_NAME);
++        else if(m_globalConfig.serverMode())
++          sprintf(szProg,"%s\\%s %s -server",szPath,STARTER_NAME,SEM_NAME);
++        else
++          sprintf(szProg,"%s\\%s %s",szPath,STARTER_NAME,SEM_NAME);
++
++        mSysProcess::parent Parent;
++        Parent.setCommandline( szProg );
++        m_processStarter = new mcProcessControl( Parent, STARTER_NAME, SEM_NAME );
++        if( m_processStarter->getStatus() != mSysProcess::STATUS_FAILED )
++            return 0;
++        else
++            return 1;
++    }
+ }
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

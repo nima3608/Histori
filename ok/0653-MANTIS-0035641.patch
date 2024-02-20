@@ -1,0 +1,235 @@
+From 79a7c13f9b94eaf3e3a49e84ffd04f03d2deac42 Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 27 Mar 2015 14:48:38 +0000
+Subject: [PATCH 0653/1076] MANTIS 0035641 Payment-Component: Setup
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@841 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |   4 +-
+ .../src/MConfig_CustomAction.cpp              | 186 +++++++++++++++++-
+ .../src/MConfig_CustomAction.def              |   2 +
+ 3 files changed, 189 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index 3bbbb831..9f46405c 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,15
+-#define FILE_VER_STR     "FileVersion", "1.0.0.15\0"
++#define FILE_VER_BIN     1,0,0,16
++#define FILE_VER_STR     "FileVersion", "1.0.0.16\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index 734a00ad..e4fbef6a 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -3211,4 +3211,188 @@ LExit:
+   return WcaFinalize(er);
+ }
+ 
+- 
++extern "C" _declspec(dllexport) UINT __stdcall CA_ChangeInProp(MSIHANDLE hInstall)
++{
++#define CHANGEINPROPNAME L"CHANGE_IN_PROP"
++#define CHANGEINPROPPATTERN L"CHANGE_IN_PROP_PATTERN"
++#define CHANGEINPROPREPLACE L"CHANGE_IN_PROP_REPLACE"
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++
++  std::string change_prop;
++  std::string change_prop_name;
++  std::string reg_expr;
++  std::string replacer;
++  
++  std::tr1::regex regexp;
++  std::string replaced;
++
++  LPWSTR pwzPropertyName = NULL;
++  LPWSTR pwzPropertyValue = NULL;
++  LPWSTR pwzPatternValue = NULL;
++  LPWSTR pwzReplaceValue = NULL;
++
++  dbstrs << L"MSI SETUP: CA_ChangeInProp" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_ChangeInProp");
++  dbstrs << L"MSI SETUP CA_ChangeInProp: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(CHANGEINPROPNAME, &pwzPropertyName);
++  if( hr == S_OK && pwzPropertyName && *pwzPropertyName!=0)
++  {
++    change_prop_name.assign( ToNarrow(pwzPropertyName) );
++    hr = WcaGetProperty( pwzPropertyName, &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get CHANGE_IN_PROP property value");
++    dbstrs << L"CA_ChangeInProp: Read " << CHANGEINPROPNAME << " (" << pwzPropertyName << L")" << std::endl;
++    Log_Str(dbstrs);
++  } 
++  ExitOnFailure(hr, "Failed to get CHANGE_IN_PROP property value");
++  dbstrs << L"MSI SETUP CA_ChangeInProp: Read CHANGE_IN_PROP (" << std::wstring(pwzPropertyValue).c_str() << L")";  
++  Log_Str(dbstrs);
++
++  hr = WcaGetProperty(CHANGEINPROPPATTERN, &pwzPatternValue);
++  ExitOnFailure(hr, "Failed to get CHANGE_IN_PROP_PATTERN property value");
++  dbstrs << L"MSI SETUP CA_ChangeInProp: Read CHANGE_IN_PROP_PATTERN (" << std::wstring(pwzPatternValue).c_str() << L")";  
++  Log_Str(dbstrs);
++
++  hr = WcaGetProperty(CHANGEINPROPREPLACE, &pwzReplaceValue);
++  ExitOnFailure(hr, "Failed to get CHANGE_IN_PROP_REPLACE property value");
++  dbstrs << L"MSI SETUP CA_ChangeInProp: Read CHANGE_IN_PROP_REPLACE (" << std::wstring(pwzReplaceValue).c_str() << L")";  
++  Log_Str(dbstrs);
++
++  change_prop.assign( ToNarrow(pwzPropertyValue) );
++  reg_expr.assign( ToNarrow(pwzPatternValue) );
++  replacer.assign( ToNarrow(pwzReplaceValue) );
++
++  try
++  {
++    regexp.assign(reg_expr.c_str(),std::tr1::regex::ECMAScript|std::tr1::regex::icase);
++  }
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << L"MSI SETUP CA_ChangeInProp exception - wrong format of regular expression" << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of regular expression");
++  }
++
++  try
++  {
++    replaced = std::tr1::regex_replace(change_prop,regexp,replacer);
++  }
++  catch(...)
++  {
++    dbstrs << L"MSI SETUP CA_ChangeInProp exception - regex_replace" << std::endl;
++    Log_Str(dbstrs);
++  }
++  if(!replaced.empty())
++  {
++    dbstrs << L"MSI SETUP CA_ChangeInProp " << ToWiden(change_prop_name.c_str()).c_str() << L" :" << ToWiden(replaced.c_str()).c_str() << std::endl;
++    Log_Str(dbstrs);
++    hr = WcaSetProperty(ToWiden(change_prop_name.c_str()).c_str(), ToWiden(replaced.c_str()).c_str());
++    ExitOnFailure(hr, "Failed to set property property value");
++  } else
++  {
++      dbstrs << L"MSI SETUP CA_ChangeInProp nothing replaced" << std::endl;
++      Log_Str(dbstrs);
++  }
++
++LExit:
++  if(pwzPropertyName)  ReleaseStr(pwzPropertyName);
++  if(pwzPropertyValue)  ReleaseStr(pwzPropertyValue);
++  if(pwzPatternValue)  ReleaseStr(pwzPatternValue);
++  if(pwzReplaceValue)  ReleaseStr(pwzReplaceValue);
++
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
++
++extern "C" _declspec(dllexport) UINT __stdcall CA_RemoveEmptyLinesInProp(MSIHANDLE hInstall)
++{
++#define REMOVEEMPTYLINESINPROPNAME L"REMOVE_EMPTY_LINES_IN_PROP"
++
++  std::wstringstream dbstrs;
++  std::wstringstream strbuf;
++
++  std::string rel_prop;
++  std::string rel_name;
++  std::string reg_expr;
++  std::string replacer;
++  
++  std::tr1::regex regexp;
++  std::string replaced;
++
++  LPWSTR pwzPropertyName = NULL;
++  LPWSTR pwzPropertyValue = NULL;
++
++  dbstrs << L"MSI SETUP: CA_RemoveEmptyLinesInProp" << std::endl;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_RemoveEmptyLinesInProp");
++  dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  hr = WcaGetProperty(REMOVEEMPTYLINESINPROPNAME, &pwzPropertyName);
++  if( hr == S_OK && pwzPropertyName && *pwzPropertyName!=0)
++  {
++    rel_name.assign( ToNarrow(pwzPropertyName) );
++    hr = WcaGetProperty( pwzPropertyName, &pwzPropertyValue);
++    ExitOnFailure(hr, "Failed to get REMOVE_EMPTY_LINES_IN_PROP property value");
++    dbstrs << L"CA_RemoveEmptyLinesInProp: Read " << REMOVEEMPTYLINESINPROPNAME << " (" << pwzPropertyName << L")" << std::endl;
++    Log_Str(dbstrs);
++  } 
++  ExitOnFailure(hr, "Failed to get REMOVE_EMPTY_LINES_IN_PROP property value");
++  dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp: Read REMOVE_EMPTY_LINES_IN_PROP (" << std::wstring(pwzPropertyValue).c_str() << L")";  
++  Log_Str(dbstrs);
++
++  rel_prop.assign( ToNarrow(pwzPropertyValue) );
++  reg_expr.assign( "^(\\s|\\t)*(\\r\\n)" );
++  replacer.assign( "" );
++
++  try
++  {
++    regexp.assign(reg_expr.c_str(),std::tr1::regex::ECMAScript|std::tr1::regex::icase);
++  }
++  catch(...)
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp exception - wrong format of regular expression" << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of regular expression");
++  }
++
++  try
++  {
++    replaced = std::tr1::regex_replace(rel_prop,regexp,replacer);
++  }
++  catch(...)
++  {
++    dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp exception - regex_replace" << std::endl;
++    Log_Str(dbstrs);
++  }
++  if(!replaced.empty())
++  {
++    dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp " << ToWiden(rel_name.c_str()).c_str() << L" :" << ToWiden(replaced.c_str()).c_str() << std::endl;
++    Log_Str(dbstrs);
++    hr = WcaSetProperty(ToWiden(rel_name.c_str()).c_str(), ToWiden(replaced.c_str()).c_str());
++    ExitOnFailure(hr, "Failed to set property property value");
++  } else
++  {
++      dbstrs << L"MSI SETUP CA_RemoveEmptyLinesInProp nothing replaced" << std::endl;
++      Log_Str(dbstrs);
++  }
++
++LExit:
++  if(pwzPropertyName)  ReleaseStr(pwzPropertyName);
++  if(pwzPropertyValue)  ReleaseStr(pwzPropertyValue);
++
++  er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++  return WcaFinalize(er);
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index 55e89de2..fb8315c8 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -29,6 +29,8 @@ EXPORTS
+   CA_CopyFile
+   CA_SetFeatureStateLocal
+   CA_GetUserSID
++  CA_ChangeInProp
++  CA_RemoveEmptyLinesInProp
+ 
+ 
+ 
+-- 
+2.41.0.windows.1
+

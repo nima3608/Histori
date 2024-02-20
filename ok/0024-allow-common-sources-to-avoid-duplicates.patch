@@ -1,0 +1,184 @@
+From be612f39f2f89d2731f4c6b58fb55fc6e9f75649 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 11 Aug 2010 18:07:27 +0000
+Subject: [PATCH 024/462] allow common sources to avoid duplicates
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@29 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             | 15 ++++
+ SelfServiceBuild/Build/cpp/makefile.mak       |  2 +
+ SelfServiceBuild/Build/cpp/makefile.rules.mak | 78 ++++++++++++++++++-
+ SelfServiceBuild/Build/scripts/mkfiles.pl     | 12 ++-
+ 4 files changed, 103 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index 84c8b1f..c7621c1 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -126,6 +126,21 @@ MKDEPFLAGS       = -op$(_OBJ) -oeobj -rp$(_OBJ) -reres -xi$(DIR_GLOBALS) -xi$(DI
+ 
+ INCLUDE          = $(INCLUDE);$(BUILDROOT)\Build\cpp
+ 
++######################################################################
++# Common-Sources
++######################################################################
++
++P_INC=..\$(_INC)
++P_SRC=..\$(_SRC)
++P_RES=..\$(_RES)
++P_SOAPGEN=..\$(_SOAPGEN)
++
++PP_INC=..\..\$(_INC)
++PP_SRC=..\..\$(_SRC)
++PP_RES=..\..\$(_RES)
++PP_SOAPGEN=..\..\$(_SOAPGEN)
++
++
+ ######################################################################
+ # Flags
+ ######################################################################
+diff --git a/SelfServiceBuild/Build/cpp/makefile.mak b/SelfServiceBuild/Build/cpp/makefile.mak
+index deb4e4b..a20e806 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.mak
+@@ -60,6 +60,7 @@ platform: cuss
+     cd $(PLATFORMROOT)\Massai\cpp\Contxt                       && $(MAKE)
+     cd $(PLATFORMROOT)\Massai\cpp\Conveyor                     && $(MAKE)
+     cd $(PLATFORMROOT)\Massai\cpp\ConveyorTest                 && $(MAKE)
++    cd $(PLATFORMROOT)\Massai\cpp\GPPDev                       && $(MAKE)
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\console               && $(MAKE)
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows               && $(MAKE)
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629         && $(MAKE)
+@@ -167,6 +168,7 @@ platform-clean: cuss-clean
+     cd $(PLATFORMROOT)\Massai\cpp\Contxt                       && $(MAKE) clean
+     cd $(PLATFORMROOT)\Massai\cpp\Conveyor                     && $(MAKE) clean
+     cd $(PLATFORMROOT)\Massai\cpp\ConveyorTest                 && $(MAKE) clean
++    cd $(PLATFORMROOT)\Massai\cpp\GPPDev                       && $(MAKE) clean
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\console               && $(MAKE) clean
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows               && $(MAKE) clean
+     cd $(PLATFORMROOT)\Massai\cpp\GPPDev\windows_IM629         && $(MAKE) clean
+diff --git a/SelfServiceBuild/Build/cpp/makefile.rules.mak b/SelfServiceBuild/Build/cpp/makefile.rules.mak
+index fe291fd..afb5fbd 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.rules.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.rules.mak
+@@ -10,6 +10,82 @@
+ 
+ .SUFFIXES: .mak .rc .l .idl .cpp .c .obj .res .lib .dll .exe
+ 
++######################################################################
++# Allgemeine Regeln Common-Common-Source
++######################################################################
++
++# cpp => obj
++{$(PP_SRC)}.cpp{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(PP_SRC)}.cpp{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# gsoap-cpp => obj
++{$(PP_SOAPGEN)}.cpp{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(PP_SOAPGEN)}.cpp{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.gen.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# c => obj
++{$(PP_SRC)}.c{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(PP_SRC)}.c{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# rc => res
++{$(PP_RES)}.rc{$(_OBJ)}.res:
++    $(RC) $(STDRCFLAGS) $(MY_RCFLAGS) -fo$@ $<
++
++# lex => cpp => obj
++{$(PP_SRC)}.l{$(_OBJ)}.obj:
++    $(FLEX) $(MY_FLEXFLAGS) -o$(_OBJ)\$(@B).cpp $<
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $(_OBJ)\$(@B).cpp -Fo$@
++
++{$(PP_SRC)}.l{$(_OBJ)}.lob:
++    $(FLEX) $(MY_FLEXFLAGS) -o$(_OBJ)\$(@B).cpp $<
++    $(LINT) -os($(_OBJ)\$(@B).lnt.gen.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $(_OBJ)\$(@B).cpp
++
++######################################################################
++# Allgemeine Regeln Common-Source
++######################################################################
++
++# cpp => obj
++{$(P_SRC)}.cpp{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(P_SRC)}.cpp{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# gsoap-cpp => obj
++{$(P_SOAPGEN)}.cpp{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(P_SOAPGEN)}.cpp{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.gen.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# c => obj
++{$(P_SRC)}.c{$(_OBJ)}.obj:
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $< -Fo$@
++
++{$(P_SRC)}.c{$(_OBJ)}.lob:
++    $(LINT) -os($(_OBJ)\$(@B).lnt.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $< 
++
++# rc => res
++{$(P_RES)}.rc{$(_OBJ)}.res:
++    $(RC) $(STDRCFLAGS) $(MY_RCFLAGS) -fo$@ $<
++
++# lex => cpp => obj
++{$(P_SRC)}.l{$(_OBJ)}.obj:
++    $(FLEX) $(MY_FLEXFLAGS) -o$(_OBJ)\$(@B).cpp $<
++    $(CC) $(STDCFLAGS) $(MY_CFLAGS) $(_OBJ)\$(@B).cpp -Fo$@
++
++{$(P_SRC)}.l{$(_OBJ)}.lob:
++    $(FLEX) $(MY_FLEXFLAGS) -o$(_OBJ)\$(@B).cpp $<
++    $(LINT) -os($(_OBJ)\$(@B).lnt.gen.txt) -oo($@) $(STDLINTLOBFLAGS) $(MY_LINTFLAGS) -COMPILER_OPTIONS $(STDCFLAGS) $(MY_CFLAGS) -LINT_OPTIONS $(_OBJ)\$(@B).cpp
++
+ ######################################################################
+ # Allgemeine Regeln
+ ######################################################################
+@@ -618,6 +694,6 @@ $(DEP_MAKEDEP): $(DEP_MAKEFILES)
+ 
+ 
+ $(DEP_MAKEFILES):
+-    $(PERL) $(MKFILES)
++    $(PERL) $(MKFILES) $(_SRC) $(_SOAPGEN) $(_RES) $(P_SRC) $(P_RES) $(P_SOAPGEN) $(PP_SRC) $(PP_RES) $(PP_SOAPGEN) 
+     
+ !include <make.dep>
+diff --git a/SelfServiceBuild/Build/scripts/mkfiles.pl b/SelfServiceBuild/Build/scripts/mkfiles.pl
+index 0581ac1..635c0e9 100644
+--- a/SelfServiceBuild/Build/scripts/mkfiles.pl
++++ b/SelfServiceBuild/Build/scripts/mkfiles.pl
+@@ -17,13 +17,19 @@ printf("$0 $MY_VERSION ($MY_DATE)\n");
+ # main - top level code
+ #
+ 
+-if ( @ARGV ) {				# parse command line args
+-    print "usage: perl $0\n\n";
++if ( @ARGV == 0 ) {				# parse command line args
++    print "usage: perl $0 dir...\n\n";
+     exit 1;
+ }
+ 
++my $aktDir;
++
+ $tolower = 0;
+-@files = &find_files(".","\.*",1);
++while(@ARGV > 0)
++{
++ $aktDir = pop;
++ @files = (@files,&find_files($aktDir,"\.*",1));
++}
+ 
+ @codefiles = sort grep(/\.(c|cpp|cc|s|h|hpp|icc|ia|rc|l)$/i,@files);
+ 
+-- 
+2.41.0.windows.1
+

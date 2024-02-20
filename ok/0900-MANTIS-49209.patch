@@ -1,0 +1,456 @@
+From 61fd951b7a5731c2180f233a06bece6fe1a060bd Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 6 Feb 2018 14:49:31 +0000
+Subject: [PATCH 0900/1077] MANTIS 49209 masaiCfgXB.exe / CfgXMgrB.exe version
+ 2.1.0 - MANTIS 49209: Extend Meta-Data for Text-Lists - Apply to text lists,
+ what has been done for texts before
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1316 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 13 +++++-
+ .../cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp      | 37 +++++++++++++++-
+ .../Massai/cpp/CfgXMgrB/inc/cfgToken.h        |  4 +-
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 13 +++++-
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp   | 41 ++++++++---------
+ .../cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp   | 21 +++++++--
+ .../cpp/CfgXMgrB/src/cfgMetaTextlist.cpp      | 44 +++++++++++++++++--
+ .../Massai/cpp/CfgXMgrB/src/traceLocal.cpp    |  4 +-
+ 8 files changed, 139 insertions(+), 38 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index 6060ac31..7a5928b3 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -532,8 +532,17 @@
+ //! @par     Change:
+ //! - MANTIS 47240: Config service meta data access
+ //! - New services & functions.
+-#define FILE_VER_BIN 2,0,0,0
+-#define FILE_VER_DTS "2.0.0.0"
++// #define FILE_VER_BIN 2,0,0,0
++// #define FILE_VER_DTS "2.0.0.0"
++//
++//! @version 2.1.0
++//! @date    06.02.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 49209: Extend Meta-Data for Text-Lists
++//! - Apply to text lists, what has been done for texts before
++#define FILE_VER_BIN 2,1,0,0
++#define FILE_VER_DTS "2.1.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+index 2b61b57b..32d76efe 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgMetaTextlist.hpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2017 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -42,6 +42,20 @@ class cfgMetaTextlist :
+    **/
+    unsigned     m_min_length;
+ 
++   /**
++    *
++    * Value restriction. A configuration value my not longer.
++    *
++   **/
++   unsigned     m_max_number;
++
++   /**
++    *
++    * Value restriction. A configuration value my not be shorter.
++    *
++   **/
++   unsigned     m_min_number;
++
+    /**
+     *
+     * Value restriction. A configuration value shall follow this rule.
+@@ -85,6 +99,7 @@ public:
+    (
+       std::string const & rights, std::string const & explanation,
+       unsigned max_length, unsigned min_length,
++      unsigned max_number, unsigned min_number,
+       std::string const & regex,
+       unsigned semantic
+    );
+@@ -140,6 +155,26 @@ public:
+       return m_min_length;
+    }
+ 
++   /**
++    *
++    * Return maximum length of text.
++    *
++   **/
++   unsigned getMaxNumber() const
++   {
++      return m_max_number;
++   }
++
++   /**
++    *
++    * Return maximum length of text.
++    *
++   **/
++   unsigned getMinNumber() const
++   {
++      return m_min_number;
++   }
++
+    /**
+     *
+     * Return regex for text.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
+index 8a19d53a..14e16775 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgToken.h
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2017 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -29,6 +29,8 @@
+ #define CFGTOKEN_MAXIMUM        "max"
+ #define CFGTOKEN_MINIMUM        "min"
+ #define CFGTOKEN_META_REF       "mrf"
++#define CFGTOKEN_NUMBER_MAX     "nhi"
++#define CFGTOKEN_NUMBER_MIN     "nlo"
+ #define CFGTOKEN_TYPE           "typ"
+ #define CFGTOKEN_RIGHTS         "acc"
+ #define CFGTOKEN_EXPLANATION    "xpl"
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 372c2001..ffb63958 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -526,8 +526,17 @@
+ //!   - Not change files, just because a previous write failed
+ //!   - Write an opening and closing entry for each file
+ //!   - Create the a directory, if not exists
+-#define FILE_VER_BIN 2,0,1,0
+-#define FILE_VER_DTS "2.0.1.0"
++// #define FILE_VER_BIN 2,0,1,0
++// #define FILE_VER_DTS "2.0.1.0"
++//
++//! @version 2.1.0
++//! @date    06.02.2018
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 49209: Extend Meta-Data for Text-Lists
++//! - Apply to text lists, what has been done for texts before
++#define FILE_VER_BIN 2,1,0,0
++#define FILE_VER_DTS "2.1.0.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+index e75f6459..4408945b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist2.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2017 MATERNA Information & Communications
++ * Copyright (c) 2017-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -75,12 +75,15 @@ class cfgCorba_ServiceTextlist2 :
+       (
+          BasicRuntime_HERE,
+          SCTL2 "create2(%s) Rights:\"%s\" Expl:\"%s\""
+-         " MaxLength:%d MinLength:%d RegEx:\"%s\" Semantic:%d",
++         " MaxLength:%d MinLength:%d "" MaxNumber:%d MinNumber:%d"
++         " RegEx:\"%s\" Semantic:%d",
+          access2Str(acc).c_str(),
+          meta_data.Desc.Rights,
+          meta_data.Desc.Explanation,
+          meta_data.MaxLength,
+          meta_data.MinLength,
++         meta_data.MaxNumber,
++         meta_data.MinNumber,
+          meta_data.RegEx,
+          static_cast<unsigned>( meta_data.Semantic )
+       );
+@@ -93,14 +96,12 @@ class cfgCorba_ServiceTextlist2 :
+                      (
+                         rights,
+                         explanation,
+-#if 1
+                         static_cast<unsigned>( meta_data.MaxLength ),
+                         static_cast<unsigned>( meta_data.MinLength ),
++                        static_cast<unsigned>( meta_data.MaxNumber ),
++                        static_cast<unsigned>( meta_data.MinNumber ),
+                         regex,
+                         static_cast<unsigned>( meta_data.Semantic )
+-#else
+-                        static_cast<unsigned>( meta_data.MaxLength )
+-#endif
+                      );
+             // Read access -> plain text in file.
+ 
+@@ -212,9 +213,10 @@ class cfgCorba_ServiceTextlist2 :
+                   dynamic_cast<cfgMetaTextlist const *>( meta_data_cfg );
+                if( cfg_meta_textlist )
+                {
+-#if 1
+-                  md->MinLength = cfg_meta_textlist->getMinLength();
+                   md->MaxLength = cfg_meta_textlist->getMaxLength();
++                  md->MinLength = cfg_meta_textlist->getMinLength();
++                  md->MaxNumber = cfg_meta_textlist->getMaxNumber();
++                  md->MinNumber = cfg_meta_textlist->getMinNumber();
+                   md->RegEx = CORBA::string_dup
+                                  (
+                                     cfg_meta_textlist->getRegex()
+@@ -223,15 +225,6 @@ class cfgCorba_ServiceTextlist2 :
+                                  (
+                                     cfg_meta_textlist->getSemantic()
+                                  );
+-#else
+-                  md->MinLength = 0;
+-                  md->MaxLength = cfg_meta_textlist->getMaxLength();
+-                  md->RegEx = CORBA::string_dup
+-                                 (
+-                                    "rex"
+-                                 );
+-                  md->Semantic = static_cast<Config::semanticType>(0);
+-#endif
+                }
+                else
+                {
+@@ -266,8 +259,10 @@ class cfgCorba_ServiceTextlist2 :
+                        (
+                           "rl"
+                        );
+-            md->MinLength = 0;
+             md->MaxLength = 0;
++            md->MinLength = 0;
++            md->MaxNumber = 0;
++            md->MinNumber = 0;
+             md->RegEx = CORBA::string_dup( "" );
+             md->Semantic = Config::ST_NONE;
+          }
+@@ -369,12 +364,14 @@ class cfgCorba_ServiceTextlist2 :
+       (
+          BasicRuntime_HERE,
+          SCTL2 "setMeta2(%s) Rights:%s Expl:%s MinL:%d"
+-              " MaxL:%d RegEx:%s Sem:%d",
++              " MaxL:%d MinN:%d MaxN:%d RegEx:%s Sem:%d",
+          access2Str(acc).c_str(),
+          meta_data.Desc.Rights,
+          meta_data.Desc.Explanation,
+          meta_data.MinLength,
+          meta_data.MaxLength,
++         meta_data.MinNumber,
++         meta_data.MaxNumber,
+          meta_data.RegEx,
+          meta_data.Semantic
+       );
+@@ -387,14 +384,12 @@ class cfgCorba_ServiceTextlist2 :
+                      (
+                         rights,
+                         explanation,
+-#if 1
+                         static_cast<unsigned>( meta_data.MaxLength ),
+                         static_cast<unsigned>( meta_data.MinLength ),
++                        static_cast<unsigned>( meta_data.MaxNumber ),
++                        static_cast<unsigned>( meta_data.MinNumber ),
+                         regex,
+                         static_cast<unsigned>( meta_data.Semantic )
+-#else
+-                        static_cast<unsigned>( meta_data.MaxLength )
+-#endif
+                      );
+          M_ConfigEntity->itemSetMeta
+          (
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+index c50e2c7c..95d10de4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgFromXML_Xerces3.cpp
+@@ -1,13 +1,13 @@
+ /**
+  **************************************************************************
+  *
+- * @file cfgFromXML.cpp
++ * @file cfgFromXML_Xerces3.cpp
+  *
+  * Implementation file for cfgFromXML.hpp
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -184,11 +184,26 @@ void document2Meta
+             {
+                std::string NMax;
+                getAttribute( Attribs, CFGTOKEN_MAXIMUM, NMax );
++               std::string NMin;
++               getAttribute( Attribs, CFGTOKEN_MINIMUM, NMin );
++               std::string NumMax;
++               getAttribute( Attribs, CFGTOKEN_NUMBER_MAX, NumMax );
++               std::string NumMin;
++               getAttribute( Attribs, CFGTOKEN_NUMBER_MIN, NumMin );
++               std::string NRex;
++               getAttribute( Attribs, CFGTOKEN_REGEX, NRex );
++               std::string NSem;
++               getAttribute( Attribs, CFGTOKEN_SEMANTIC, NSem );
+                cfgMetaTextlist
+                   Meta
+                   (
+                      NRights, NExpl,
+-                     static_cast<unsigned>( atoi(NMax.c_str()) )
++                     static_cast<unsigned>( atoi( NMax.c_str() ) ),
++                     static_cast<unsigned>( atoi( NMin.c_str() ) ),
++                     static_cast<unsigned>( atoi( NumMax.c_str() ) ),
++                     static_cast<unsigned>( atoi( NumMin.c_str() ) ),
++                     NRex,
++                     static_cast<unsigned>( atoi( NSem.c_str() ) )
+                   );
+                Dst.itemCreate( Meta, 0, 0, false );
+             }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+index 596d93fe..7d0acd9f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgMetaTextlist.cpp
+@@ -8,7 +8,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2017 MATERNA Information & Communications
++ * Copyright (c) 2002-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -38,6 +38,8 @@ cfgMetaTextlist::cfgMetaTextlist( char const * auth ) :
+    cfgMeta( auth ),
+    m_max_length( 0 ),
+    m_min_length( 0 ),
++   m_max_number( 0 ),
++   m_min_number( 0 ),
+    m_regex(),
+    m_semantic( 0 )
+ {
+@@ -58,6 +60,8 @@ cfgMetaTextlist::cfgMetaTextlist
+    cfgMeta( rights, explanation ),
+    m_max_length( max_length ),
+    m_min_length( 0 ),
++   m_max_number( 0 ),
++   m_min_number( 0 ),
+    m_regex(),
+    m_semantic( 0 )
+ {
+@@ -74,12 +78,15 @@ cfgMetaTextlist::cfgMetaTextlist
+ (
+    std::string const & rights, std::string const & explanation,
+    unsigned max_length, unsigned min_length,
++   unsigned max_number, unsigned min_number,
+    std::string const & regex,
+    unsigned semantic
+ ) :
+    cfgMeta( rights, explanation ),
+    m_max_length( max_length ),
+    m_min_length( min_length ),
++   m_max_number( max_number ),
++   m_min_number( min_number ),
+    m_regex( regex ),
+    m_semantic( semantic )
+ {
+@@ -96,6 +103,8 @@ cfgMetaTextlist::cfgMetaTextlist( cfgMetaTextlist const & src ) :
+    cfgMeta( src ),
+    m_max_length( src.m_max_length ),
+    m_min_length( src.m_min_length ),
++   m_max_number( src.m_max_number ),
++   m_min_number( src.m_min_number ),
+    m_regex( src.m_regex ),
+    m_semantic( src.m_semantic )
+ {
+@@ -125,7 +134,14 @@ bool cfgMetaTextlist::operator==( cfgMeta const & Other ) const
+       dynamic_cast<cfgMetaTextlist const *>( &Other );
+    if( pOther )
+    {
+-      if( m_max_length == pOther->m_max_length )
++      if (
++            ( m_max_length == pOther->m_max_length ) &&
++            ( m_min_length == pOther->m_min_length ) &&
++            ( m_max_number == pOther->m_max_number ) &&
++            ( m_min_number == pOther->m_min_number ) &&
++            ( m_regex == pOther->m_regex ) &&
++            ( m_semantic == pOther->m_semantic )
++         )
+       {
+          return cfgMeta::operator==( Other );
+       }
+@@ -161,8 +177,28 @@ void cfgMetaTextlist::save
+ {
+    Dst << Indent << "<" CFGTOKEN_META;
+    cfgMeta::saveCommon( Dst, Ref );
+-   Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length;
+-   Dst << "\"/>" << std::endl;
++   Dst << " " CFGTOKEN_MAXIMUM "=\"" << m_max_length << "\"";
++   if( m_min_length > 0 )
++   {
++      Dst << " " CFGTOKEN_MINIMUM "=\"" << m_min_length << "\"";
++   }
++   if( m_max_number > 0 )
++   {
++      Dst << " " CFGTOKEN_NUMBER_MAX "=\"" << m_max_number << "\"";
++   }
++   if( m_min_number > 0 )
++   {
++      Dst << " " CFGTOKEN_NUMBER_MIN "=\"" << m_min_number << "\"";
++   }
++   if( !m_regex.empty() )
++   {
++      Dst << " " CFGTOKEN_REGEX "=\"" << m_regex << "\"";
++   }
++   if( m_semantic != 0 )
++   {
++      Dst << " " CFGTOKEN_SEMANTIC "=\"" << m_semantic << "\"";
++   }
++   Dst << " />" << std::endl;
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+index 1ef17651..4c91dd83 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/traceLocal.cpp
+@@ -24,8 +24,8 @@
+ #include "tracesAdapter.hpp"
+ 
+ // Common header
++#include "tools/tracesToConsole.hpp"
+ #include "tools/tracesToFileParts.hpp"
+-#include "tools/tracesToFile.hpp"
+ 
+ 
+ 
+@@ -56,7 +56,7 @@ void traceLocal_SetConsole()
+ {
+    // Stop any previous writer
+    traceLocal_Delete();
+-   l_writer = new tracesToFile::writer( "con" );
++   l_writer = new tracesToConsole::writer();
+    tracesAdapter_set( l_writer );
+ }
+ 
+-- 
+2.41.0.windows.1
+

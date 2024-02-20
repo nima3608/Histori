@@ -1,0 +1,125 @@
+From e24bd2f5cb3b66303f3dc373a219330ca9e61b21 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Oct 2016 14:10:11 +0000
+Subject: [PATCH 0802/1076] MANTIS 0027409 bugfix: LogService: pure virtual
+ function call at termination
+
+mcorba.lib
+V1.0.6.25
+
+- after activation a call to _this was used to generate the ior
+- when _default_POA is not overwritten, a call to _this activates the servant in the rootPOA of the default ORB
+- do not use _this
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1101 90b65887-3827-0410-9a23-83215b262276
+---
+ .../generic/massaiCorba/corbasrvr_VC10.h       | 18 ------------------
+ .../generic/massaiCorba/corbasrvr_VC10.hpp     |  2 --
+ .../cpp/MassaiCorba/inc/massaiCORBA_def.h      | 11 +++++++++--
+ .../Massai/cpp/MassaiCorba/src/corbasrvr.cpp   |  4 +++-
+ 4 files changed, 12 insertions(+), 23 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
+index 6912c612..a30e15e1 100644
+--- a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
++++ b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.h
+@@ -25,15 +25,6 @@ PortableServer::Servant corbaChildServant<T>::getServant()
+   return servant;
+ }
+ 
+-template<class T>
+-std::string corbaChildServant<T>::getIOR(CORBA::ORB_ptr orb)
+-{
+-  CORBA::Object_var object = servant->_this();
+-  // Turn your object reference into an IOR string
+-  CORBA::String_var ior = orb->object_to_string(object);
+-  return ior.in();
+-}
+-
+ template<class T>
+ corbaChildServant<T>::corbaChildServant(T& servant, const char* pszServantName):
+   corbaChildServantBase(pszServantName)
+@@ -54,15 +45,6 @@ PortableServer::Servant corbaServantEx<T>::getServant()
+   return servant;
+ }
+ 
+-template<class T>
+-std::string corbaServantEx<T>::getIOR(CORBA::ORB_ptr orb)
+-{
+-  CORBA::Object_var object = servant->_this();
+-  // Turn your object reference into an IOR string
+-  CORBA::String_var ior = orb->object_to_string(object);
+-  return ior.in();
+-}
+-
+ 
+ /** This constructor reads the port from the configuration.
+     \li Configuration item = \b [[MASSAI]] \b [COMPONENTS] \b "pszServantName" = \b (host:)port
+diff --git a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
+index cf12e78d..a2ee98ff 100644
+--- a/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
++++ b/SelfServiceCommon/Interfaces/generic/massaiCorba/corbasrvr_VC10.hpp
+@@ -21,7 +21,6 @@ template<class T> class corbaChildServant: public massaiCorba::corbaChildServant
+     T* servant;
+ 
+     virtual PortableServer::Servant getServant();
+-    virtual std::string getIOR(CORBA::ORB_ptr orb);
+ };
+ 
+ /** Template class for the implementation of (extended) CORBA servants that
+@@ -86,7 +85,6 @@ template<class T> class corbaServantEx: public massaiCorba::corbaServantExBase
+     T *servant;
+ 
+     virtual PortableServer::Servant getServant();
+-    virtual std::string getIOR(CORBA::ORB_ptr orb);
+ };
+ 
+ /** Template class for the implementation of CORBA servants that
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+index c62c53f7..9eed2ae3 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/inc/massaiCORBA_def.h
+@@ -4,15 +4,22 @@
+ 
+ \page mcorba.lib Release Notes - mcorba.lib - Massai CORBA library
+ 
+-@version 1.0.6.24
++@version 1.0.6.25
+ 
+ \section changehistory Change history
+ 
+ mcorba.lib
+ 
++\version 1.0.6.25
++\li 27.10.2016
++\li SteT - bugfix, Mantis 0027409: LogService: pure virtual function call at termination
++- after activation a call to _this was used to generate the ior
++- when _default_POA is not overwritten, a call to _this activates the servant in the rootPOA of the default ORB
++- do not use _this
++
+ \version 1.0.6.24
+ \li 12.09.2016
+-\li SteT - Mantis 0041365: massaiCORBA: allow to activate console traces
++\li SteT - extension, Mantis 0041365: massaiCORBA: allow to activate console traces
+ \li extension: use TraceDelegateWithLevelFromEnv.h
+ - use environment variables to set trace level
+   - mCorba_TRACELEVEL=0-9
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+index c573f6ea..3b2a0952 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbasrvr.cpp
+@@ -35,7 +35,9 @@ namespace massaiCorba
+   {
+     objID = PortableServer::string_to_ObjectId(servantName.c_str());
+     poa->activate_object_with_id(objID.in(), getServant());
+-    m_ior = getIOR(orb);
++
++    CORBA::Object_var object = poa->id_to_reference(objID);
++    m_ior = orb->object_to_string(object);
+     // Get a reference to the IOR Table
+     CORBA::Object_var tableObj = orb->resolve_initial_references("IORTable");
+     IORTable::Table_var table = IORTable::Table::_narrow(tableObj.in());
+-- 
+2.41.0.windows.1
+

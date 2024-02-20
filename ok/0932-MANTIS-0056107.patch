@@ -1,0 +1,903 @@
+From 52ef07350db444f1a2e9371d81b6d43d603d4ceb Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 4 Mar 2020 20:26:00 +0000
+Subject: [PATCH 0932/1000] MANTIS 0056107 extension: PLF MouseHook for
+ entering service mode won't work on Windows 10
+
+massai_systools.lib
+V1.0.0.40
+
+- add windows 8ff windows message codes for analysis
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1560 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysEvent.h       |   1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     |   9 +-
+ .../Massai/cpp/Systools/src/mSysEventW32.cpp  | 800 ++++++++++++++----
+ 3 files changed, 620 insertions(+), 190 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+index 327c2bf1..8a8e1e79 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysEvent.h
+@@ -23,6 +23,7 @@ namespace mSysEvent
+   };
+ 
+   System* createSystem(MASSAI::trace::TraceInterface& trc);
++  const char* getMessageText(unsigned int msg);
+ }
+ 
+ #endif
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index e0bdbc95..55f432ff 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 39);
++VERSION_ID_DT(systools, 1, 0, 0, 40);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 39);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.39
++@version 1.0.0.40
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.40
++\li 04.03.2020
++\li extension - SteT Mantis 0056107: PLF MouseHook for entering service mode won't work on Windows 10
++- add windows 8ff windows message codes for analysis
++
+ \version 1.0.0.39
+ \li 28.01.2020
+ \li change - SteT Mantis 0057134: mstarter: use special text for standard exit code
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+index fabae86a..111f8423 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+@@ -7,6 +7,13 @@
+ #include "mSysDeviceEventW32.h"
+ #include "mSysHotKeyW32.h"
+ #include <windows.h>
++#include <CommCtrl.h>
++#include <Windowsx.h>
++#include <Ime.h>
++#include <RichEdit.h>
++#include <Vfw.h>
++#include <Cpl.h>
++#include <Ras.h>
+ 
+ using Materna::MSSD::AutoMutexCS;
+ using MASSAI::trace::TraceInterface;
+@@ -37,6 +44,30 @@ namespace
+     WM_CALL_LIST = WM_USER,
+   };
+ 
++  enum StandardMessages
++  {
++     WM_POINTERDEVICECHANGE =            0x0238,
++     WM_POINTERDEVICEINRANGE =           0x0239,
++     WM_POINTERDEVICEOUTOFRANGE =        0x023A,
++     WM_NCPOINTERUPDATE =                0x0241,
++     WM_NCPOINTERDOWN =                  0x0242,
++     WM_NCPOINTERUP =                    0x0243,
++     WM_POINTERUPDATE =                  0x0245,
++     WM_POINTERDOWN =                    0x0246,
++     WM_POINTERUP =                      0x0247,
++     WM_POINTERENTER =                   0x0249,
++     WM_POINTERLEAVE =                   0x024A,
++     WM_POINTERACTIVATE =                0x024B,
++     WM_POINTERCAPTURECHANGED =          0x024C,
++     WM_TOUCHHITTESTING =                0x024D,
++     WM_POINTERWHEEL =                   0x024E,
++     WM_POINTERHWHEEL =                  0x024F,
++     WM_POINTERROUTEDTO =                0x0251,
++     WM_POINTERROUTEDAWAY =              0x0252,
++     WM_POINTERROUTEDRELEASED =          0x0253,
++     WM_DPICHANGED =                     0x02E0,
++  };
++
+   const char* windowClassName = "mSysEventCallbackWindow";
+ 
+   LRESULT CALLBACK windowCallback(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+@@ -68,196 +99,592 @@ namespace
+     }
+     return result;
+   }
++}
+ 
++namespace mSysEvent
++{
+   const char* getMessageText(unsigned int msg)
+   {
+     switch(msg)
+     {
+-      case WM_NULL:                   return "WM_NULL";
+-      case WM_CREATE:                 return "WM_CREATE";
+-      case WM_DESTROY:                return "WM_DESTROY";
+-      case WM_MOVE:                   return "WM_MOVE";
+-      case WM_SIZE:                   return "WM_SIZE";
+-      case WM_ACTIVATE:               return "WM_ACTIVATE";
+-      case WM_SETFOCUS:               return "WM_SETFOCUS";
+-      case WM_KILLFOCUS:              return "WM_KILLFOCUS";
+-      case WM_ENABLE:                 return "WM_ENABLE";
+-      case WM_SETREDRAW:              return "WM_SETREDRAW";
+-      case WM_SETTEXT:                return "WM_SETTEXT";
+-      case WM_GETTEXT:                return "WM_GETTEXT";
+-      case WM_GETTEXTLENGTH:          return "WM_GETTEXTLENGTH";
+-      case WM_PAINT:                  return "WM_PAINT";
+-      case WM_CLOSE:                  return "WM_CLOSE";
+-      case WM_QUERYENDSESSION:        return "WM_QUERYENDSESSION";
+-      case WM_QUIT:                   return "WM_QUIT";
+-      case WM_QUERYOPEN:              return "WM_QUERYOPEN";
+-      case WM_ERASEBKGND:             return "WM_ERASEBKGND";
+-      case WM_SYSCOLORCHANGE:         return "WM_SYSCOLORCHANGE";
+-      case WM_ENDSESSION:             return "WM_ENDSESSION";
+-      case WM_SHOWWINDOW:             return "WM_SHOWWINDOW";
+-      case WM_WININICHANGE:           return "WM_WININICHANGE";
+-      case WM_DEVMODECHANGE:          return "WM_DEVMODECHANGE";
+-      case WM_ACTIVATEAPP:            return "WM_ACTIVATEAPP";
+-      case WM_FONTCHANGE:             return "WM_FONTCHANGE";
+-      case WM_TIMECHANGE:             return "WM_TIMECHANGE";
+-      case WM_CANCELMODE:             return "WM_CANCELMODE";
+-      case WM_SETCURSOR:              return "WM_SETCURSOR";
+-      case WM_MOUSEACTIVATE:          return "WM_MOUSEACTIVATE";
+-      case WM_CHILDACTIVATE:          return "WM_CHILDACTIVATE";
+-      case WM_QUEUESYNC:              return "WM_QUEUESYNC";
+-      case WM_GETMINMAXINFO:          return "WM_GETMINMAXINFO";
+-      case WM_PAINTICON:              return "WM_PAINTICON";
+-      case WM_ICONERASEBKGND:         return "WM_ICONERASEBKGND";
+-      case WM_NEXTDLGCTL:             return "WM_NEXTDLGCTL";
+-      case WM_SPOOLERSTATUS:          return "WM_SPOOLERSTATUS";
+-      case WM_DRAWITEM:               return "WM_DRAWITEM";
+-      case WM_MEASUREITEM:            return "WM_MEASUREITEM";
+-      case WM_DELETEITEM:             return "WM_DELETEITEM";
+-      case WM_VKEYTOITEM:             return "WM_VKEYTOITEM";
+-      case WM_CHARTOITEM:             return "WM_CHARTOITEM";
+-      case WM_SETFONT:                return "WM_SETFONT";
+-      case WM_GETFONT:                return "WM_GETFONT";
+-      case WM_SETHOTKEY:              return "WM_SETHOTKEY";
+-      case WM_GETHOTKEY:              return "WM_GETHOTKEY";
+-      case WM_QUERYDRAGICON:          return "WM_QUERYDRAGICON";
+-      case WM_COMPAREITEM:            return "WM_COMPAREITEM";
+-      case WM_COMPACTING:             return "WM_COMPACTING";
+-      case WM_COMMNOTIFY:             return "WM_COMMNOTIFY";
+-      case WM_WINDOWPOSCHANGING:      return "WM_WINDOWPOSCHANGING";
+-      case WM_WINDOWPOSCHANGED:       return "WM_WINDOWPOSCHANGED";
+-      case WM_POWER:                  return "WM_POWER";
+-      case WM_COPYDATA:               return "WM_COPYDATA";
+-      case WM_CANCELJOURNAL:          return "WM_CANCELJOURNAL";
+-      case WM_NOTIFY:                 return "WM_NOTIFY";
+-      case WM_INPUTLANGCHANGEREQUEST: return "WM_INPUTLANGCHANGEREQUEST";
+-      case WM_INPUTLANGCHANGE:        return "WM_INPUTLANGCHANGE";
+-      case WM_TCARD:                  return "WM_TCARD";
+-      case WM_HELP:                   return "WM_HELP";
+-      case WM_USERCHANGED:            return "WM_USERCHANGED";
+-      case WM_NOTIFYFORMAT:           return "WM_NOTIFYFORMAT";
+-      case WM_CONTEXTMENU:            return "WM_CONTEXTMENU";
+-      case WM_STYLECHANGING:          return "WM_STYLECHANGING";
+-      case WM_STYLECHANGED:           return "WM_STYLECHANGED";
+-      case WM_DISPLAYCHANGE:          return "WM_DISPLAYCHANGE";
+-      case WM_GETICON:                return "WM_GETICON";
+-      case WM_SETICON:                return "WM_SETICON";
+-      case WM_NCCREATE:               return "WM_NCCREATE";
+-      case WM_NCDESTROY:              return "WM_NCDESTROY";
+-      case WM_NCCALCSIZE:             return "WM_NCCALCSIZE";
+-      case WM_NCHITTEST:              return "WM_NCHITTEST";
+-      case WM_NCPAINT:                return "WM_NCPAINT";
+-      case WM_NCACTIVATE:             return "WM_NCACTIVATE";
+-      case WM_GETDLGCODE:             return "WM_GETDLGCODE";
+-      case WM_SYNCPAINT:              return "WM_SYNCPAINT";
+-      case WM_NCMOUSEMOVE:            return "WM_NCMOUSEMOVE";
+-      case WM_NCLBUTTONDOWN:          return "WM_NCLBUTTONDOWN";
+-      case WM_NCLBUTTONUP:            return "WM_NCLBUTTONUP";
+-      case WM_NCLBUTTONDBLCLK:        return "WM_NCLBUTTONDBLCLK";
+-      case WM_NCRBUTTONDOWN:          return "WM_NCRBUTTONDOWN";
+-      case WM_NCRBUTTONUP:            return "WM_NCRBUTTONUP";
+-      case WM_NCRBUTTONDBLCLK:        return "WM_NCRBUTTONDBLCLK";
+-      case WM_NCMBUTTONDOWN:          return "WM_NCMBUTTONDOWN";
+-      case WM_NCMBUTTONUP:            return "WM_NCMBUTTONUP";
+-      case WM_NCMBUTTONDBLCLK:        return "WM_NCMBUTTONDBLCLK";
+-      case WM_KEYDOWN:                return "WM_KEYDOWN";
+-      case WM_KEYUP:                  return "WM_KEYUP";
+-      case WM_CHAR:                   return "WM_CHAR";
+-      case WM_DEADCHAR:               return "WM_DEADCHAR";
+-      case WM_SYSKEYDOWN:             return "WM_SYSKEYDOWN";
+-      case WM_SYSKEYUP:               return "WM_SYSKEYUP";
+-      case WM_SYSCHAR:                return "WM_SYSCHAR";
+-      case WM_SYSDEADCHAR:            return "WM_SYSDEADCHAR";
+-      case WM_KEYLAST:                return "WM_KEYLAST";
+-      case WM_IME_STARTCOMPOSITION:   return "WM_IME_STARTCOMPOSITION";
+-      case WM_IME_ENDCOMPOSITION:     return "WM_IME_ENDCOMPOSITION";
+-      case WM_IME_COMPOSITION:        return "WM_IME_COMPOSITION";
+-      case WM_INITDIALOG:             return "WM_INITDIALOG";
+-      case WM_COMMAND:                return "WM_COMMAND";
+-      case WM_SYSCOMMAND:             return "WM_SYSCOMMAND";
+-      case WM_TIMER:                  return "WM_TIMER";
+-      case WM_HSCROLL:                return "WM_HSCROLL";
+-      case WM_VSCROLL:                return "WM_VSCROLL";
+-      case WM_INITMENU:               return "WM_INITMENU";
+-      case WM_INITMENUPOPUP:          return "WM_INITMENUPOPUP";
+-      case WM_MENUSELECT:             return "WM_MENUSELECT";
+-      case WM_MENUCHAR:               return "WM_MENUCHAR";
+-      case WM_ENTERIDLE:              return "WM_ENTERIDLE";
+-      case WM_CTLCOLORMSGBOX:         return "WM_CTLCOLORMSGBOX";
+-      case WM_CTLCOLOREDIT:           return "WM_CTLCOLOREDIT";
+-      case WM_CTLCOLORLISTBOX:        return "WM_CTLCOLORLISTBOX";
+-      case WM_CTLCOLORBTN:            return "WM_CTLCOLORBTN";
+-      case WM_CTLCOLORDLG:            return "WM_CTLCOLORDLG";
+-      case WM_CTLCOLORSCROLLBAR:      return "WM_CTLCOLORSCROLLBAR";
+-      case WM_CTLCOLORSTATIC:         return "WM_CTLCOLORSTATIC";
+-      case WM_MOUSEMOVE:              return "WM_MOUSEMOVE";
+-      case WM_LBUTTONDOWN:            return "WM_LBUTTONDOWN";
+-      case WM_LBUTTONUP:              return "WM_LBUTTONUP";
+-      case WM_LBUTTONDBLCLK:          return "WM_LBUTTONDBLCLK";
+-      case WM_RBUTTONDOWN:            return "WM_RBUTTONDOWN";
+-      case WM_RBUTTONUP:              return "WM_RBUTTONUP";
+-      case WM_RBUTTONDBLCLK:          return "WM_RBUTTONDBLCLK";
+-      case WM_MBUTTONDOWN:            return "WM_MBUTTONDOWN";
+-      case WM_MBUTTONUP:              return "WM_MBUTTONUP";
+-      case WM_MBUTTONDBLCLK:          return "WM_MBUTTONDBLCLK";
+-      case WM_PARENTNOTIFY:           return "WM_PARENTNOTIFY";
+-      case WM_ENTERMENULOOP:          return "WM_ENTERMENULOOP";
+-      case WM_EXITMENULOOP:           return "WM_EXITMENULOOP";
+-      case WM_NEXTMENU:               return "WM_NEXTMENU";
+-      case WM_SIZING:                 return "WM_SIZING";
+-      case WM_CAPTURECHANGED:         return "WM_CAPTURECHANGED";
+-      case WM_MOVING:                 return "WM_MOVING";
+-      case WM_POWERBROADCAST:         return "WM_POWERBROADCAST";
+-      case WM_DEVICECHANGE:           return "WM_DEVICECHANGE";
+-      case WM_MDICREATE:              return "WM_MDICREATE";
+-      case WM_MDIDESTROY:             return "WM_MDIDESTROY";
+-      case WM_MDIACTIVATE:            return "WM_MDIACTIVATE";
+-      case WM_MDIRESTORE:             return "WM_MDIRESTORE";
+-      case WM_MDINEXT:                return "WM_MDINEXT";
+-      case WM_MDIMAXIMIZE:            return "WM_MDIMAXIMIZE";
+-      case WM_MDITILE:                return "WM_MDITILE";
+-      case WM_MDICASCADE:             return "WM_MDICASCADE";
+-      case WM_MDIICONARRANGE:         return "WM_MDIICONARRANGE";
+-      case WM_MDIGETACTIVE:           return "WM_MDIGETACTIVE";
+-      case WM_MDISETMENU:             return "WM_MDISETMENU";
+-      case WM_ENTERSIZEMOVE:          return "WM_ENTERSIZEMOVE";
+-      case WM_EXITSIZEMOVE:           return "WM_EXITSIZEMOVE";
+-      case WM_DROPFILES:              return "WM_DROPFILES";
+-      case WM_MDIREFRESHMENU:         return "WM_MDIREFRESHMENU";
+-      case WM_IME_SETCONTEXT:         return "WM_IME_SETCONTEXT";
+-      case WM_IME_NOTIFY:             return "WM_IME_NOTIFY";
+-      case WM_IME_CONTROL:            return "WM_IME_CONTROL";
+-      case WM_IME_COMPOSITIONFULL:    return "WM_IME_COMPOSITIONFULL";
+-      case WM_IME_SELECT:             return "WM_IME_SELECT";
+-      case WM_IME_CHAR:               return "WM_IME_CHAR";
+-      case WM_IME_KEYDOWN:            return "WM_IME_KEYDOWN";
+-      case WM_IME_KEYUP:              return "WM_IME_KEYUP";
+-      case WM_CUT:                    return "WM_CUT";
+-      case WM_COPY:                   return "WM_COPY";
+-      case WM_PASTE:                  return "WM_PASTE";
+-      case WM_CLEAR:                  return "WM_CLEAR";
+-      case WM_UNDO:                   return "WM_UNDO";
+-      case WM_RENDERFORMAT:           return "WM_RENDERFORMAT";
+-      case WM_RENDERALLFORMATS:       return "WM_RENDERALLFORMATS";
+-      case WM_DESTROYCLIPBOARD:       return "WM_DESTROYCLIPBOARD";
+-      case WM_DRAWCLIPBOARD:          return "WM_DRAWCLIPBOARD";
+-      case WM_PAINTCLIPBOARD:         return "WM_PAINTCLIPBOARD";
+-      case WM_VSCROLLCLIPBOARD:       return "WM_VSCROLLCLIPBOARD";
+-      case WM_SIZECLIPBOARD:          return "WM_SIZECLIPBOARD";
+-      case WM_ASKCBFORMATNAME:        return "WM_ASKCBFORMATNAME";
+-      case WM_CHANGECBCHAIN:          return "WM_CHANGECBCHAIN";
+-      case WM_HSCROLLCLIPBOARD:       return "WM_HSCROLLCLIPBOARD";
+-      case WM_QUERYNEWPALETTE:        return "WM_QUERYNEWPALETTE";
+-      case WM_PALETTEISCHANGING:      return "WM_PALETTEISCHANGING";
+-      case WM_PALETTECHANGED:         return "WM_PALETTECHANGED";
+-      case WM_HOTKEY:                 return "WM_HOTKEY";
+-      case WM_PRINT:                  return "WM_PRINT";
+-      case WM_PRINTCLIENT:            return "WM_PRINTCLIENT";
+-      case WM_HANDHELDFIRST:          return "WM_HANDHELDFIRST";
+-      case WM_HANDHELDLAST:           return "WM_HANDHELDLAST";
+-      case WM_AFXFIRST:               return "WM_AFXFIRST";
+-      case WM_AFXLAST:                return "WM_AFXLAST";
+-      case WM_PENWINFIRST:            return "WM_PENWINFIRST";
+-      case WM_PENWINLAST:             return "WM_PENWINLAST";
++      case WM_NULL:                           return "WM_NULL";
++      case WM_CREATE:                         return "WM_CREATE";
++      case WM_DESTROY:                        return "WM_DESTROY";
++      case WM_MOVE:                           return "WM_MOVE";
++      case WM_SIZE:                           return "WM_SIZE";
++      case WM_ACTIVATE:                       return "WM_ACTIVATE";
++      case WM_SETFOCUS:                       return "WM_SETFOCUS";
++      case WM_KILLFOCUS:                      return "WM_KILLFOCUS";
++      case WM_ENABLE:                         return "WM_ENABLE";
++      case WM_SETREDRAW:                      return "WM_SETREDRAW";
++      case WM_SETTEXT:                        return "WM_SETTEXT";
++      case WM_GETTEXT:                        return "WM_GETTEXT";
++      case WM_GETTEXTLENGTH:                  return "WM_GETTEXTLENGTH";
++      case WM_PAINT:                          return "WM_PAINT";
++      case WM_CLOSE:                          return "WM_CLOSE";
++      case WM_QUERYENDSESSION:                return "WM_QUERYENDSESSION";
++      case WM_QUIT:                           return "WM_QUIT";
++      case WM_QUERYOPEN:                      return "WM_QUERYOPEN";
++      case WM_ERASEBKGND:                     return "WM_ERASEBKGND";
++      case WM_SYSCOLORCHANGE:                 return "WM_SYSCOLORCHANGE";
++      case WM_ENDSESSION:                     return "WM_ENDSESSION";
++      case WM_SHOWWINDOW:                     return "WM_SHOWWINDOW";
++      case WM_CTLCOLOR:                       return "WM_CTLCOLOR";
++      case WM_WININICHANGE:                   return "WM_WININICHANGE";
++      case WM_DEVMODECHANGE:                  return "WM_DEVMODECHANGE";
++      case WM_ACTIVATEAPP:                    return "WM_ACTIVATEAPP";
++      case WM_FONTCHANGE:                     return "WM_FONTCHANGE";
++      case WM_TIMECHANGE:                     return "WM_TIMECHANGE";
++      case WM_CANCELMODE:                     return "WM_CANCELMODE";
++      case WM_SETCURSOR:                      return "WM_SETCURSOR";
++      case WM_MOUSEACTIVATE:                  return "WM_MOUSEACTIVATE";
++      case WM_CHILDACTIVATE:                  return "WM_CHILDACTIVATE";
++      case WM_QUEUESYNC:                      return "WM_QUEUESYNC";
++      case WM_GETMINMAXINFO:                  return "WM_GETMINMAXINFO";
++      case WM_PAINTICON:                      return "WM_PAINTICON";
++      case WM_ICONERASEBKGND:                 return "WM_ICONERASEBKGND";
++      case WM_NEXTDLGCTL:                     return "WM_NEXTDLGCTL";
++      case WM_SPOOLERSTATUS:                  return "WM_SPOOLERSTATUS";
++      case WM_DRAWITEM:                       return "WM_DRAWITEM";
++      case WM_MEASUREITEM:                    return "WM_MEASUREITEM";
++      case WM_DELETEITEM:                     return "WM_DELETEITEM";
++      case WM_VKEYTOITEM:                     return "WM_VKEYTOITEM";
++      case WM_CHARTOITEM:                     return "WM_CHARTOITEM";
++      case WM_SETFONT:                        return "WM_SETFONT";
++      case WM_GETFONT:                        return "WM_GETFONT";
++      case WM_SETHOTKEY:                      return "WM_SETHOTKEY";
++      case WM_GETHOTKEY:                      return "WM_GETHOTKEY";
++      case WM_QUERYDRAGICON:                  return "WM_QUERYDRAGICON";
++      case WM_COMPAREITEM:                    return "WM_COMPAREITEM";
++      case WM_GETOBJECT:                      return "WM_GETOBJECT";
++      case WM_COMPACTING:                     return "WM_COMPACTING";
++      case WM_COMMNOTIFY:                     return "WM_COMMNOTIFY";
++      case WM_WINDOWPOSCHANGING:              return "WM_WINDOWPOSCHANGING";
++      case WM_WINDOWPOSCHANGED:               return "WM_WINDOWPOSCHANGED";
++      case WM_POWER:                          return "WM_POWER";
++//    case WM_COPYGLOBALDATA:                 return "WM_COPYGLOBALDATA";
++      case WM_COPYDATA:                       return "WM_COPYDATA";
++      case WM_CANCELJOURNAL:                  return "WM_CANCELJOURNAL";
++      case WM_NOTIFY:                         return "WM_NOTIFY";
++      case WM_INPUTLANGCHANGEREQUEST:         return "WM_INPUTLANGCHANGEREQUEST";
++      case WM_INPUTLANGCHANGE:                return "WM_INPUTLANGCHANGE";
++      case WM_TCARD:                          return "WM_TCARD";
++      case WM_HELP:                           return "WM_HELP";
++      case WM_USERCHANGED:                    return "WM_USERCHANGED";
++      case WM_NOTIFYFORMAT:                   return "WM_NOTIFYFORMAT";
++      case WM_CONTEXTMENU:                    return "WM_CONTEXTMENU";
++      case WM_STYLECHANGING:                  return "WM_STYLECHANGING";
++      case WM_STYLECHANGED:                   return "WM_STYLECHANGED";
++      case WM_DISPLAYCHANGE:                  return "WM_DISPLAYCHANGE";
++      case WM_GETICON:                        return "WM_GETICON";
++      case WM_SETICON:                        return "WM_SETICON";
++      case WM_NCCREATE:                       return "WM_NCCREATE";
++      case WM_NCDESTROY:                      return "WM_NCDESTROY";
++      case WM_NCCALCSIZE:                     return "WM_NCCALCSIZE";
++      case WM_NCHITTEST:                      return "WM_NCHITTEST";
++      case WM_NCPAINT:                        return "WM_NCPAINT";
++      case WM_NCACTIVATE:                     return "WM_NCACTIVATE";
++      case WM_GETDLGCODE:                     return "WM_GETDLGCODE";
++      case WM_SYNCPAINT:                      return "WM_SYNCPAINT";
++      case WM_NCMOUSEMOVE:                    return "WM_NCMOUSEMOVE";
++      case WM_NCLBUTTONDOWN:                  return "WM_NCLBUTTONDOWN";
++      case WM_NCLBUTTONUP:                    return "WM_NCLBUTTONUP";
++      case WM_NCLBUTTONDBLCLK:                return "WM_NCLBUTTONDBLCLK";
++      case WM_NCRBUTTONDOWN:                  return "WM_NCRBUTTONDOWN";
++      case WM_NCRBUTTONUP:                    return "WM_NCRBUTTONUP";
++      case WM_NCRBUTTONDBLCLK:                return "WM_NCRBUTTONDBLCLK";
++      case WM_NCMBUTTONDOWN:                  return "WM_NCMBUTTONDOWN";
++      case WM_NCMBUTTONUP:                    return "WM_NCMBUTTONUP";
++      case WM_NCMBUTTONDBLCLK:                return "WM_NCMBUTTONDBLCLK";
++      case WM_NCXBUTTONDOWN:                  return "WM_NCXBUTTONDOWN";
++      case WM_NCXBUTTONUP:                    return "WM_NCXBUTTONUP";
++      case WM_NCXBUTTONDBLCLK:                return "WM_NCXBUTTONDBLCLK";
++      case EM_GETSEL:                         return "EM_GETSEL";
++      case EM_SETSEL:                         return "EM_SETSEL";
++      case EM_GETRECT:                        return "EM_GETRECT";
++      case EM_SETRECT:                        return "EM_SETRECT";
++      case EM_SETRECTNP:                      return "EM_SETRECTNP";
++      case EM_SCROLL:                         return "EM_SCROLL";
++      case EM_LINESCROLL:                     return "EM_LINESCROLL";
++      case EM_SCROLLCARET:                    return "EM_SCROLLCARET";
++      case EM_GETMODIFY:                      return "EM_GETMODIFY";
++      case EM_SETMODIFY:                      return "EM_SETMODIFY";
++      case EM_GETLINECOUNT:                   return "EM_GETLINECOUNT";
++      case EM_LINEINDEX:                      return "EM_LINEINDEX";
++      case EM_SETHANDLE:                      return "EM_SETHANDLE";
++      case EM_GETHANDLE:                      return "EM_GETHANDLE";
++      case EM_GETTHUMB:                       return "EM_GETTHUMB";
++      case EM_LINELENGTH:                     return "EM_LINELENGTH";
++      case EM_REPLACESEL:                     return "EM_REPLACESEL";
++//    case EM_SETFONT:                        return "EM_SETFONT";
++      case EM_GETLINE:                        return "EM_GETLINE";
++      case EM_LIMITTEXT:                      return "EM_LIMITTEXT";
++//    case EM_SETLIMITTEXT:                   return "EM_SETLIMITTEXT";
++      case EM_CANUNDO:                        return "EM_CANUNDO";
++      case EM_UNDO:                           return "EM_UNDO";
++      case EM_FMTLINES:                       return "EM_FMTLINES";
++      case EM_LINEFROMCHAR:                   return "EM_LINEFROMCHAR";
++//      case EM_SETWORDBREAK:                   return "EM_SETWORDBREAK";
++      case EM_SETTABSTOPS:                    return "EM_SETTABSTOPS";
++      case EM_SETPASSWORDCHAR:                return "EM_SETPASSWORDCHAR";
++      case EM_EMPTYUNDOBUFFER:                return "EM_EMPTYUNDOBUFFER";
++      case EM_GETFIRSTVISIBLELINE:            return "EM_GETFIRSTVISIBLELINE";
++      case EM_SETREADONLY:                    return "EM_SETREADONLY";
++      case EM_SETWORDBREAKPROC:               return "EM_SETWORDBREAKPROC";
++      case EM_GETWORDBREAKPROC:               return "EM_GETWORDBREAKPROC";
++      case EM_GETPASSWORDCHAR:                return "EM_GETPASSWORDCHAR";
++      case EM_SETMARGINS:                     return "EM_SETMARGINS";
++      case EM_GETMARGINS:                     return "EM_GETMARGINS";
++      case EM_GETLIMITTEXT:                   return "EM_GETLIMITTEXT";
++      case EM_POSFROMCHAR:                    return "EM_POSFROMCHAR";
++      case EM_CHARFROMPOS:                    return "EM_CHARFROMPOS";
++      case EM_SETIMESTATUS:                   return "EM_SETIMESTATUS";
++      case EM_GETIMESTATUS:                   return "EM_GETIMESTATUS";
++      case SBM_SETPOS:                        return "SBM_SETPOS";
++      case SBM_GETPOS:                        return "SBM_GETPOS";
++      case SBM_SETRANGE:                      return "SBM_SETRANGE";
++      case SBM_GETRANGE:                      return "SBM_GETRANGE";
++      case SBM_ENABLE_ARROWS:                 return "SBM_ENABLE_ARROWS";
++      case SBM_SETRANGEREDRAW:                return "SBM_SETRANGEREDRAW";
++      case SBM_SETSCROLLINFO:                 return "SBM_SETSCROLLINFO";
++      case SBM_GETSCROLLINFO:                 return "SBM_GETSCROLLINFO";
++      case SBM_GETSCROLLBARINFO:              return "SBM_GETSCROLLBARINFO";
++      case BM_GETCHECK:                       return "BM_GETCHECK";
++      case BM_SETCHECK:                       return "BM_SETCHECK";
++      case BM_GETSTATE:                       return "BM_GETSTATE";
++      case BM_SETSTATE:                       return "BM_SETSTATE";
++      case BM_SETSTYLE:                       return "BM_SETSTYLE";
++      case BM_CLICK:                          return "BM_CLICK";
++      case BM_GETIMAGE:                       return "BM_GETIMAGE";
++      case BM_SETIMAGE:                       return "BM_SETIMAGE";
++      case BM_SETDONTCLICK:                   return "BM_SETDONTCLICK";
++      case WM_INPUT_DEVICE_CHANGE:            return "WM_INPUT_DEVICE_CHANGE";
++      case WM_INPUT:                          return "WM_INPUT";
++      case WM_KEYDOWN:                        return "WM_KEYDOWN";
++//      case WM_KEYFIRST:                       return "WM_KEYFIRST";
++      case WM_KEYUP:                          return "WM_KEYUP";
++      case WM_CHAR:                           return "WM_CHAR";
++      case WM_DEADCHAR:                       return "WM_DEADCHAR";
++      case WM_SYSKEYDOWN:                     return "WM_SYSKEYDOWN";
++      case WM_SYSKEYUP:                       return "WM_SYSKEYUP";
++      case WM_SYSCHAR:                        return "WM_SYSCHAR";
++      case WM_SYSDEADCHAR:                    return "WM_SYSDEADCHAR";
++      case WM_UNICHAR:                        return "WM_UNICHAR";
++//      case WM_KEYLAST:                        return "WM_KEYLAST";
++//      case WM_WNT_CONVERTREQUESTEX:           return "WM_WNT_CONVERTREQUESTEX";
++      case WM_CONVERTREQUEST:                 return "WM_CONVERTREQUEST";
++      case WM_CONVERTRESULT:                  return "WM_CONVERTRESULT";
++      case WM_INTERIM:                        return "WM_INTERIM";
++      case WM_IME_STARTCOMPOSITION:           return "WM_IME_STARTCOMPOSITION";
++      case WM_IME_ENDCOMPOSITION:             return "WM_IME_ENDCOMPOSITION";
++      case WM_IME_COMPOSITION:                return "WM_IME_COMPOSITION";
++//      case WM_IME_KEYLAST:                    return "WM_IME_KEYLAST";
++      case WM_INITDIALOG:                     return "WM_INITDIALOG";
++      case WM_COMMAND:                        return "WM_COMMAND";
++      case WM_SYSCOMMAND:                     return "WM_SYSCOMMAND";
++      case WM_TIMER:                          return "WM_TIMER";
++      case WM_HSCROLL:                        return "WM_HSCROLL";
++      case WM_VSCROLL:                        return "WM_VSCROLL";
++      case WM_INITMENU:                       return "WM_INITMENU";
++      case WM_INITMENUPOPUP:                  return "WM_INITMENUPOPUP";
++//      case WM_SYSTIMER:                       return "WM_SYSTIMER";
++      case WM_GESTURE:                        return "WM_GESTURE";
++      case WM_GESTURENOTIFY:                  return "WM_GESTURENOTIFY";
++      case WM_MENUSELECT:                     return "WM_MENUSELECT";
++      case WM_MENUCHAR:                       return "WM_MENUCHAR";
++      case WM_ENTERIDLE:                      return "WM_ENTERIDLE";
++      case WM_MENURBUTTONUP:                  return "WM_MENURBUTTONUP";
++      case WM_MENUDRAG:                       return "WM_MENUDRAG";
++      case WM_MENUGETOBJECT:                  return "WM_MENUGETOBJECT";
++      case WM_UNINITMENUPOPUP:                return "WM_UNINITMENUPOPUP";
++      case WM_MENUCOMMAND:                    return "WM_MENUCOMMAND";
++      case WM_CHANGEUISTATE:                  return "WM_CHANGEUISTATE";
++      case WM_UPDATEUISTATE:                  return "WM_UPDATEUISTATE";
++      case WM_QUERYUISTATE:                   return "WM_QUERYUISTATE";
++      case WM_CTLCOLORMSGBOX:                 return "WM_CTLCOLORMSGBOX";
++      case WM_CTLCOLOREDIT:                   return "WM_CTLCOLOREDIT";
++      case WM_CTLCOLORLISTBOX:                return "WM_CTLCOLORLISTBOX";
++      case WM_CTLCOLORBTN:                    return "WM_CTLCOLORBTN";
++      case WM_CTLCOLORDLG:                    return "WM_CTLCOLORDLG";
++      case WM_CTLCOLORSCROLLBAR:              return "WM_CTLCOLORSCROLLBAR";
++      case WM_CTLCOLORSTATIC:                 return "WM_CTLCOLORSTATIC";
++//      case WM_MOUSEFIRST:                     return "WM_MOUSEFIRST";
++      case WM_MOUSEMOVE:                      return "WM_MOUSEMOVE";
++      case WM_LBUTTONDOWN:                    return "WM_LBUTTONDOWN";
++      case WM_LBUTTONUP:                      return "WM_LBUTTONUP";
++      case WM_LBUTTONDBLCLK:                  return "WM_LBUTTONDBLCLK";
++      case WM_RBUTTONDOWN:                    return "WM_RBUTTONDOWN";
++      case WM_RBUTTONUP:                      return "WM_RBUTTONUP";
++      case WM_RBUTTONDBLCLK:                  return "WM_RBUTTONDBLCLK";
++      case WM_MBUTTONDOWN:                    return "WM_MBUTTONDOWN";
++      case WM_MBUTTONUP:                      return "WM_MBUTTONUP";
++      case WM_MBUTTONDBLCLK:                  return "WM_MBUTTONDBLCLK";
++      case WM_MOUSELAST:                      return "WM_MOUSELAST";
++      case WM_MOUSEWHEEL:                     return "WM_MOUSEWHEEL";
++      case WM_XBUTTONDOWN:                    return "WM_XBUTTONDOWN";
++      case WM_XBUTTONUP:                      return "WM_XBUTTONUP";
++      case WM_XBUTTONDBLCLK:                  return "WM_XBUTTONDBLCLK";
++      case WM_PARENTNOTIFY:                   return "WM_PARENTNOTIFY";
++      case WM_ENTERMENULOOP:                  return "WM_ENTERMENULOOP";
++      case WM_EXITMENULOOP:                   return "WM_EXITMENULOOP";
++      case WM_NEXTMENU:                       return "WM_NEXTMENU";
++      case WM_SIZING:                         return "WM_SIZING";
++      case WM_CAPTURECHANGED:                 return "WM_CAPTURECHANGED";
++      case WM_MOVING:                         return "WM_MOVING";
++      case WM_POWERBROADCAST:                 return "WM_POWERBROADCAST";
++      case WM_DEVICECHANGE:                   return "WM_DEVICECHANGE";
++      case WM_MDICREATE:                      return "WM_MDICREATE";
++      case WM_MDIDESTROY:                     return "WM_MDIDESTROY";
++      case WM_MDIACTIVATE:                    return "WM_MDIACTIVATE";
++      case WM_MDIRESTORE:                     return "WM_MDIRESTORE";
++      case WM_MDINEXT:                        return "WM_MDINEXT";
++      case WM_MDIMAXIMIZE:                    return "WM_MDIMAXIMIZE";
++      case WM_MDITILE:                        return "WM_MDITILE";
++      case WM_MDICASCADE:                     return "WM_MDICASCADE";
++      case WM_MDIICONARRANGE:                 return "WM_MDIICONARRANGE";
++      case WM_MDIGETACTIVE:                   return "WM_MDIGETACTIVE";
++      case WM_MDISETMENU:                     return "WM_MDISETMENU";
++      case WM_ENTERSIZEMOVE:                  return "WM_ENTERSIZEMOVE";
++      case WM_EXITSIZEMOVE:                   return "WM_EXITSIZEMOVE";
++      case WM_DROPFILES:                      return "WM_DROPFILES";
++      case WM_MDIREFRESHMENU:                 return "WM_MDIREFRESHMENU";
++      case WM_POINTERDEVICECHANGE:            return "WM_POINTERDEVICECHANGE";
++      case WM_POINTERDEVICEINRANGE:           return "WM_POINTERDEVICEINRANGE";
++      case WM_POINTERDEVICEOUTOFRANGE:        return "WM_POINTERDEVICEOUTOFRANGE";
++      case WM_TOUCH:                          return "WM_TOUCH";
++      case WM_NCPOINTERUPDATE:                return "WM_NCPOINTERUPDATE";
++      case WM_NCPOINTERDOWN:                  return "WM_NCPOINTERDOWN";
++      case WM_NCPOINTERUP:                    return "WM_NCPOINTERUP";
++      case WM_POINTERUPDATE:                  return "WM_POINTERUPDATE";
++      case WM_POINTERDOWN:                    return "WM_POINTERDOWN";
++      case WM_POINTERUP:                      return "WM_POINTERUP";
++      case WM_POINTERENTER:                   return "WM_POINTERENTER";
++      case WM_POINTERLEAVE:                   return "WM_POINTERLEAVE";
++      case WM_POINTERACTIVATE:                return "WM_POINTERACTIVATE";
++      case WM_POINTERCAPTURECHANGED:          return "WM_POINTERCAPTURECHANGED";
++      case WM_TOUCHHITTESTING:                return "WM_TOUCHHITTESTING";
++      case WM_POINTERWHEEL:                   return "WM_POINTERWHEEL";
++      case WM_POINTERHWHEEL:                  return "WM_POINTERHWHEEL";
++      case WM_POINTERROUTEDTO:                return "WM_POINTERROUTEDTO";
++      case WM_POINTERROUTEDAWAY:              return "WM_POINTERROUTEDAWAY";
++      case WM_POINTERROUTEDRELEASED:          return "WM_POINTERROUTEDRELEASED";
++      case WM_IME_REPORT:                     return "WM_IME_REPORT";
++      case WM_IME_SETCONTEXT:                 return "WM_IME_SETCONTEXT";
++      case WM_IME_NOTIFY:                     return "WM_IME_NOTIFY";
++      case WM_IME_CONTROL:                    return "WM_IME_CONTROL";
++      case WM_IME_COMPOSITIONFULL:            return "WM_IME_COMPOSITIONFULL";
++      case WM_IME_SELECT:                     return "WM_IME_SELECT";
++      case WM_IME_CHAR:                       return "WM_IME_CHAR";
++      case WM_IME_REQUEST:                    return "WM_IME_REQUEST";
++      case WM_IMEKEYDOWN:                     return "WM_IMEKEYDOWN";
++      case WM_IMEKEYUP:                       return "WM_IMEKEYUP";
++      case WM_NCMOUSEHOVER:                   return "WM_NCMOUSEHOVER";
++      case WM_MOUSEHOVER:                     return "WM_MOUSEHOVER";
++      case WM_NCMOUSELEAVE:                   return "WM_NCMOUSELEAVE";
++      case WM_MOUSELEAVE:                     return "WM_MOUSELEAVE";
++      case WM_WTSSESSION_CHANGE:              return "WM_WTSSESSION_CHANGE";
++      case WM_TABLET_FIRST:                   return "WM_TABLET_FIRST";
++      case WM_TABLET_LAST:                    return "WM_TABLET_LAST";
++      case WM_DPICHANGED:                     return "WM_DPICHANGED";
++      case WM_CUT:                            return "WM_CUT";
++      case WM_COPY:                           return "WM_COPY";
++      case WM_PASTE:                          return "WM_PASTE";
++      case WM_CLEAR:                          return "WM_CLEAR";
++      case WM_UNDO:                           return "WM_UNDO";
++      case WM_RENDERFORMAT:                   return "WM_RENDERFORMAT";
++      case WM_RENDERALLFORMATS:               return "WM_RENDERALLFORMATS";
++      case WM_DESTROYCLIPBOARD:               return "WM_DESTROYCLIPBOARD";
++      case WM_DRAWCLIPBOARD:                  return "WM_DRAWCLIPBOARD";
++      case WM_PAINTCLIPBOARD:                 return "WM_PAINTCLIPBOARD";
++      case WM_VSCROLLCLIPBOARD:               return "WM_VSCROLLCLIPBOARD";
++      case WM_SIZECLIPBOARD:                  return "WM_SIZECLIPBOARD";
++      case WM_ASKCBFORMATNAME:                return "WM_ASKCBFORMATNAME";
++      case WM_CHANGECBCHAIN:                  return "WM_CHANGECBCHAIN";
++      case WM_HSCROLLCLIPBOARD:               return "WM_HSCROLLCLIPBOARD";
++      case WM_QUERYNEWPALETTE:                return "WM_QUERYNEWPALETTE";
++      case WM_PALETTEISCHANGING:              return "WM_PALETTEISCHANGING";
++      case WM_PALETTECHANGED:                 return "WM_PALETTECHANGED";
++      case WM_HOTKEY:                         return "WM_HOTKEY";
++      case WM_PRINT:                          return "WM_PRINT";
++      case WM_PRINTCLIENT:                    return "WM_PRINTCLIENT";
++      case WM_APPCOMMAND:                     return "WM_APPCOMMAND";
++      case WM_THEMECHANGED:                   return "WM_THEMECHANGED";
++      case WM_CLIPBOARDUPDATE:                return "WM_CLIPBOARDUPDATE";
++      case WM_DWMCOMPOSITIONCHANGED:          return "WM_DWMCOMPOSITIONCHANGED";
++      case WM_DWMNCRENDERINGCHANGED:          return "WM_DWMNCRENDERINGCHANGED";
++      case WM_DWMCOLORIZATIONCOLORCHANGED:    return "WM_DWMCOLORIZATIONCOLORCHANGED";
++      case WM_DWMWINDOWMAXIMIZEDCHANGE:       return "WM_DWMWINDOWMAXIMIZEDCHANGE";
++      case WM_DWMSENDICONICTHUMBNAIL:         return "WM_DWMSENDICONICTHUMBNAIL";
++      case WM_DWMSENDICONICLIVEPREVIEWBITMAP: return "WM_DWMSENDICONICLIVEPREVIEWBITMAP";
++      case WM_GETTITLEBARINFOEX:              return "WM_GETTITLEBARINFOEX";
++      case WM_HANDHELDFIRST:                  return "WM_HANDHELDFIRST";
++      case WM_HANDHELDLAST:                   return "WM_HANDHELDLAST";
++      case WM_AFXFIRST:                       return "WM_AFXFIRST";
++      case WM_AFXLAST:                        return "WM_AFXLAST";
++      case WM_PENWINFIRST:                    return "WM_PENWINFIRST";
++//      case WM_RCRESULT:                       return "WM_RCRESULT";
++//      case WM_HOOKRCRESULT:                   return "WM_HOOKRCRESULT";
++//      case WM_GLOBALRCCHANGE:                 return "WM_GLOBALRCCHANGE";
++//      case WM_PENMISCINFO:                    return "WM_PENMISCINFO";
++//      case WM_SKB:                            return "WM_SKB";
++//      case WM_HEDITCTL:                       return "WM_HEDITCTL";
++//      case WM_PENCTL:                         return "WM_PENCTL";
++//      case WM_PENMISC:                        return "WM_PENMISC";
++//      case WM_CTLINIT:                        return "WM_CTLINIT";
++//      case WM_PENEVENT:                       return "WM_PENEVENT";
++      case WM_PENWINLAST:                     return "WM_PENWINLAST";
++//      case NIN_SELECT:                        return "NIN_SELECT";
++//      case WM_PSD_PAGESETUPDLG:               return "WM_PSD_PAGESETUPDLG";
++      case WM_USER:                           return "WM_USER";
++//      case WM_CHOOSEFONT_GETLOGFONT:          return "WM_CHOOSEFONT_GETLOGFONT";
++//      case WM_PSD_FULLPAGERECT:               return "WM_PSD_FULLPAGERECT";
++//      case WM_PSD_MINMARGINRECT:              return "WM_PSD_MINMARGINRECT";
++//      case WM_PSD_MARGINRECT:                 return "WM_PSD_MARGINRECT";
++      case WM_PSD_GREEKTEXTRECT:              return "WM_PSD_GREEKTEXTRECT";
++      case WM_PSD_ENVSTAMPRECT:               return "WM_PSD_ENVSTAMPRECT";
++      case WM_PSD_YAFULLPAGERECT:             return "WM_PSD_YAFULLPAGERECT";
++      case EM_CANPASTE:                       return "EM_CANPASTE";
++      case EM_DISPLAYBAND:                    return "EM_DISPLAYBAND";
++      case EM_EXGETSEL:                       return "EM_EXGETSEL";
++      case EM_EXLIMITTEXT:                    return "EM_EXLIMITTEXT";
++      case EM_EXLINEFROMCHAR:                 return "EM_EXLINEFROMCHAR";
++      case EM_EXSETSEL:                       return "EM_EXSETSEL";
++      case EM_FINDTEXT:                       return "EM_FINDTEXT";
++      case EM_FORMATRANGE:                    return "EM_FORMATRANGE";
++      case EM_GETCHARFORMAT:                  return "EM_GETCHARFORMAT";
++      case EM_GETEVENTMASK:                   return "EM_GETEVENTMASK";
++      case EM_GETOLEINTERFACE:                return "EM_GETOLEINTERFACE";
++      case EM_GETPARAFORMAT:                  return "EM_GETPARAFORMAT";
++      case EM_GETSELTEXT:                     return "EM_GETSELTEXT";
++      case EM_HIDESELECTION:                  return "EM_HIDESELECTION";
++      case EM_PASTESPECIAL:                   return "EM_PASTESPECIAL";
++      case EM_REQUESTRESIZE:                  return "EM_REQUESTRESIZE";
++      case EM_SELECTIONTYPE:                  return "EM_SELECTIONTYPE";
++      case EM_SETBKGNDCOLOR:                  return "EM_SETBKGNDCOLOR";
++      case EM_SETCHARFORMAT:                  return "EM_SETCHARFORMAT";
++      case EM_SETEVENTMASK:                   return "EM_SETEVENTMASK";
++      case EM_SETOLECALLBACK:                 return "EM_SETOLECALLBACK";
++      case EM_SETPARAFORMAT:                  return "EM_SETPARAFORMAT";
++      case EM_SETTARGETDEVICE:                return "EM_SETTARGETDEVICE";
++      case EM_STREAMIN:                       return "EM_STREAMIN";
++      case EM_STREAMOUT:                      return "EM_STREAMOUT";
++      case EM_GETTEXTRANGE:                   return "EM_GETTEXTRANGE";
++      case EM_FINDWORDBREAK:                  return "EM_FINDWORDBREAK";
++      case EM_SETOPTIONS:                     return "EM_SETOPTIONS";
++      case EM_GETOPTIONS:                     return "EM_GETOPTIONS";
++      case EM_FINDTEXTEX:                     return "EM_FINDTEXTEX";
++      case EM_GETWORDBREAKPROCEX:             return "EM_GETWORDBREAKPROCEX";
++      case EM_SETWORDBREAKPROCEX:             return "EM_SETWORDBREAKPROCEX";
++      case EM_SETUNDOLIMIT:                   return "EM_SETUNDOLIMIT";
++      case EM_REDO:                           return "EM_REDO";
++      case EM_CANREDO:                        return "EM_CANREDO";
++      case EM_GETUNDONAME:                    return "EM_GETUNDONAME";
++      case EM_GETREDONAME:                    return "EM_GETREDONAME";
++      case EM_STOPGROUPTYPING:                return "EM_STOPGROUPTYPING";
++      case EM_SETTEXTMODE:                    return "EM_SETTEXTMODE";
++      case EM_GETTEXTMODE:                    return "EM_GETTEXTMODE";
++      case EM_AUTOURLDETECT:                  return "EM_AUTOURLDETECT";
++      case EM_GETAUTOURLDETECT:               return "EM_GETAUTOURLDETECT";
++      case EM_SETPALETTE:                     return "EM_SETPALETTE";
++      case EM_GETTEXTEX:                      return "EM_GETTEXTEX";
++      case EM_GETTEXTLENGTHEX:                return "EM_GETTEXTLENGTHEX";
++      case EM_SHOWSCROLLBAR:                  return "EM_SHOWSCROLLBAR";
++      case EM_SETTEXTEX:                      return "EM_SETTEXTEX";
++//      case EM_SETPUNCTUATION:                 return "EM_SETPUNCTUATION";
++      case WM_CAP_UNICODE_START:              return "WM_CAP_UNICODE_START";
++//      case EM_GETPUNCTUATION:                 return "EM_GETPUNCTUATION";
++      case WM_CHOOSEFONT_SETLOGFONT:          return "WM_CHOOSEFONT_SETLOGFONT";
++//      case EM_SETWORDWRAPMODE:                return "EM_SETWORDWRAPMODE";
++      case WM_CAP_SET_CALLBACK_ERRORW:        return "WM_CAP_SET_CALLBACK_ERRORW";
++//      case WM_CHOOSEFONT_SETFLAGS:            return "WM_CHOOSEFONT_SETFLAGS";
++//      case EM_GETWORDWRAPMODE:                return "EM_GETWORDWRAPMODE";
++      case WM_CAP_SET_CALLBACK_STATUSW:       return "WM_CAP_SET_CALLBACK_STATUSW";
++      case EM_SETIMECOLOR:                    return "EM_SETIMECOLOR";
++      case EM_GETIMECOLOR:                    return "EM_GETIMECOLOR";
++      case EM_SETIMEOPTIONS:                  return "EM_SETIMEOPTIONS";
++      case EM_GETIMEOPTIONS:                  return "EM_GETIMEOPTIONS";
++      case EM_CONVPOSITION:                   return "EM_CONVPOSITION";
++      case WM_CAP_DRIVER_GET_NAMEW:           return "WM_CAP_DRIVER_GET_NAMEW";
++      case WM_CAP_DRIVER_GET_VERSIONW:        return "WM_CAP_DRIVER_GET_VERSIONW";
++//      case EM_SETLANGOPTIONS:                 return "EM_SETLANGOPTIONS";
++      case WM_CAP_FILE_SET_CAPTURE_FILEW:     return "WM_CAP_FILE_SET_CAPTURE_FILEW";
++//      case EM_GETLANGOPTIONS:                 return "EM_GETLANGOPTIONS";
++      case WM_CAP_FILE_GET_CAPTURE_FILEW:     return "WM_CAP_FILE_GET_CAPTURE_FILEW";
++      case EM_GETIMECOMPMODE:                 return "EM_GETIMECOMPMODE";
++//      case EM_FINDTEXTW:                      return "EM_FINDTEXTW";
++      case WM_CAP_FILE_SAVEASW:               return "WM_CAP_FILE_SAVEASW";
++      case EM_FINDTEXTEXW:                    return "EM_FINDTEXTEXW";
++//      case EM_RECONVERSION:                   return "EM_RECONVERSION";
++      case WM_CAP_FILE_SAVEDIBW:              return "WM_CAP_FILE_SAVEDIBW";
++      case EM_SETIMEMODEBIAS:                 return "EM_SETIMEMODEBIAS";
++      case EM_GETIMEMODEBIAS:                 return "EM_GETIMEMODEBIAS";
++      case DL_BEGINDRAG:                      return "DL_BEGINDRAG";
++      case DL_DRAGGING:                       return "DL_DRAGGING";
++      case DL_DROPPED:                        return "DL_DROPPED";
++      case DL_CANCELDRAG:                     return "DL_CANCELDRAG";
++      case WM_CAP_SET_MCI_DEVICEW:            return "WM_CAP_SET_MCI_DEVICEW";
++      case WM_CAP_GET_MCI_DEVICEW:            return "WM_CAP_GET_MCI_DEVICEW";
++      case WM_CAP_PAL_OPENW:                  return "WM_CAP_PAL_OPENW";
++      case WM_CAP_PAL_SAVEW:                  return "WM_CAP_PAL_SAVEW";
++      case EM_SETBIDIOPTIONS:                 return "EM_SETBIDIOPTIONS";
++      case EM_GETBIDIOPTIONS:                 return "EM_GETBIDIOPTIONS";
++      case EM_SETTYPOGRAPHYOPTIONS:           return "EM_SETTYPOGRAPHYOPTIONS";
++      case EM_GETTYPOGRAPHYOPTIONS:           return "EM_GETTYPOGRAPHYOPTIONS";
++      case EM_SETEDITSTYLE:                   return "EM_SETEDITSTYLE";
++      case EM_GETEDITSTYLE:                   return "EM_GETEDITSTYLE";
++      case EM_OUTLINE:                        return "EM_OUTLINE";
++      case EM_GETSCROLLPOS:                   return "EM_GETSCROLLPOS";
++      case EM_SETSCROLLPOS:                   return "EM_SETSCROLLPOS";
++      case EM_SETFONTSIZE:                    return "EM_SETFONTSIZE";
++      case EM_GETZOOM:                        return "EM_GETZOOM";
++      case EM_SETZOOM:                        return "EM_SETZOOM";
++      case EM_GETVIEWKIND:                    return "EM_GETVIEWKIND";
++      case EM_SETVIEWKIND:                    return "EM_SETVIEWKIND";
++      case EM_GETPAGE:                        return "EM_GETPAGE";
++      case EM_SETPAGE:                        return "EM_SETPAGE";
++      case EM_GETHYPHENATEINFO:               return "EM_GETHYPHENATEINFO";
++      case EM_SETHYPHENATEINFO:               return "EM_SETHYPHENATEINFO";
++      case EM_GETPAGEROTATE:                  return "EM_GETPAGEROTATE";
++      case EM_SETPAGEROTATE:                  return "EM_SETPAGEROTATE";
++      case EM_GETCTFMODEBIAS:                 return "EM_GETCTFMODEBIAS";
++      case EM_SETCTFMODEBIAS:                 return "EM_SETCTFMODEBIAS";
++      case EM_GETCTFOPENSTATUS:               return "EM_GETCTFOPENSTATUS";
++      case EM_SETCTFOPENSTATUS:               return "EM_SETCTFOPENSTATUS";
++      case EM_GETIMECOMPTEXT:                 return "EM_GETIMECOMPTEXT";
++      case EM_ISIME:                          return "EM_ISIME";
++      case EM_GETIMEPROPERTY:                 return "EM_GETIMEPROPERTY";
++      case EM_GETQUERYRTFOBJ:                 return "EM_GETQUERYRTFOBJ";
++      case EM_SETQUERYRTFOBJ:                 return "EM_SETQUERYRTFOBJ";
++      case WM_CPL_LAUNCH:                     return "WM_CPL_LAUNCH";
++      case WM_CPL_LAUNCHED:                   return "WM_CPL_LAUNCHED";
++      case LVM_GETBKCOLOR:                    return "LVM_GETBKCOLOR";
++      case LVM_SETBKCOLOR:                    return "LVM_SETBKCOLOR";
++      case LVM_GETIMAGELIST:                  return "LVM_GETIMAGELIST";
++      case LVM_SETIMAGELIST:                  return "LVM_SETIMAGELIST";
++      case LVM_GETITEMCOUNT:                  return "LVM_GETITEMCOUNT";
++      case LVM_GETITEMA:                      return "LVM_GETITEMA";
++      case LVM_SETITEMA:                      return "LVM_SETITEMA";
++      case LVM_INSERTITEMA:                   return "LVM_INSERTITEMA";
++      case LVM_DELETEITEM:                    return "LVM_DELETEITEM";
++      case LVM_DELETEALLITEMS:                return "LVM_DELETEALLITEMS";
++      case LVM_GETCALLBACKMASK:               return "LVM_GETCALLBACKMASK";
++      case LVM_SETCALLBACKMASK:               return "LVM_SETCALLBACKMASK";
++      case LVM_GETNEXTITEM:                   return "LVM_GETNEXTITEM";
++      case LVM_FINDITEMA:                     return "LVM_FINDITEMA";
++      case LVM_GETITEMRECT:                   return "LVM_GETITEMRECT";
++      case LVM_SETITEMPOSITION:               return "LVM_SETITEMPOSITION";
++      case LVM_GETITEMPOSITION:               return "LVM_GETITEMPOSITION";
++      case LVM_GETSTRINGWIDTHA:               return "LVM_GETSTRINGWIDTHA";
++      case LVM_HITTEST:                       return "LVM_HITTEST";
++      case LVM_ENSUREVISIBLE:                 return "LVM_ENSUREVISIBLE";
++      case LVM_SCROLL:                        return "LVM_SCROLL";
++      case LVM_REDRAWITEMS:                   return "LVM_REDRAWITEMS";
++      case LVM_ARRANGE:                       return "LVM_ARRANGE";
++      case LVM_EDITLABELA:                    return "LVM_EDITLABELA";
++      case LVM_GETEDITCONTROL:                return "LVM_GETEDITCONTROL";
++      case LVM_GETCOLUMNA:                    return "LVM_GETCOLUMNA";
++      case LVM_SETCOLUMNA:                    return "LVM_SETCOLUMNA";
++      case LVM_INSERTCOLUMNA:                 return "LVM_INSERTCOLUMNA";
++      case LVM_DELETECOLUMN:                  return "LVM_DELETECOLUMN";
++      case LVM_GETCOLUMNWIDTH:                return "LVM_GETCOLUMNWIDTH";
++      case LVM_SETCOLUMNWIDTH:                return "LVM_SETCOLUMNWIDTH";
++      case LVM_GETHEADER:                     return "LVM_GETHEADER";
++      case LVM_CREATEDRAGIMAGE:               return "LVM_CREATEDRAGIMAGE";
++      case LVM_GETVIEWRECT:                   return "LVM_GETVIEWRECT";
++      case LVM_GETTEXTCOLOR:                  return "LVM_GETTEXTCOLOR";
++      case LVM_SETTEXTCOLOR:                  return "LVM_SETTEXTCOLOR";
++      case LVM_GETTEXTBKCOLOR:                return "LVM_GETTEXTBKCOLOR";
++      case LVM_SETTEXTBKCOLOR:                return "LVM_SETTEXTBKCOLOR";
++      case LVM_GETTOPINDEX:                   return "LVM_GETTOPINDEX";
++      case LVM_GETCOUNTPERPAGE:               return "LVM_GETCOUNTPERPAGE";
++      case LVM_GETORIGIN:                     return "LVM_GETORIGIN";
++      case LVM_UPDATE:                        return "LVM_UPDATE";
++      case LVM_SETITEMSTATE:                  return "LVM_SETITEMSTATE";
++      case LVM_GETITEMSTATE:                  return "LVM_GETITEMSTATE";
++      case LVM_GETITEMTEXTA:                  return "LVM_GETITEMTEXTA";
++      case LVM_SETITEMTEXTA:                  return "LVM_SETITEMTEXTA";
++      case LVM_SETITEMCOUNT:                  return "LVM_SETITEMCOUNT";
++      case LVM_SORTITEMS:                     return "LVM_SORTITEMS";
++      case LVM_SETITEMPOSITION32:             return "LVM_SETITEMPOSITION32";
++      case LVM_GETSELECTEDCOUNT:              return "LVM_GETSELECTEDCOUNT";
++      case LVM_GETITEMSPACING:                return "LVM_GETITEMSPACING";
++      case LVM_GETISEARCHSTRINGA:             return "LVM_GETISEARCHSTRINGA";
++      case LVM_SETICONSPACING:                return "LVM_SETICONSPACING";
++      case LVM_SETEXTENDEDLISTVIEWSTYLE:      return "LVM_SETEXTENDEDLISTVIEWSTYLE";
++      case LVM_GETEXTENDEDLISTVIEWSTYLE:      return "LVM_GETEXTENDEDLISTVIEWSTYLE";
++      case LVM_GETSUBITEMRECT:                return "LVM_GETSUBITEMRECT";
++      case LVM_SUBITEMHITTEST:                return "LVM_SUBITEMHITTEST";
++      case LVM_SETCOLUMNORDERARRAY:           return "LVM_SETCOLUMNORDERARRAY";
++      case LVM_GETCOLUMNORDERARRAY:           return "LVM_GETCOLUMNORDERARRAY";
++      case LVM_SETHOTITEM:                    return "LVM_SETHOTITEM";
++      case LVM_GETHOTITEM:                    return "LVM_GETHOTITEM";
++      case LVM_SETHOTCURSOR:                  return "LVM_SETHOTCURSOR";
++      case LVM_GETHOTCURSOR:                  return "LVM_GETHOTCURSOR";
++      case LVM_APPROXIMATEVIEWRECT:           return "LVM_APPROXIMATEVIEWRECT";
++      case LVM_SETWORKAREAS:                  return "LVM_SETWORKAREAS";
++      case LVM_GETSELECTIONMARK:              return "LVM_GETSELECTIONMARK";
++      case LVM_SETSELECTIONMARK:              return "LVM_SETSELECTIONMARK";
++      case LVM_SETBKIMAGEA:                   return "LVM_SETBKIMAGEA";
++      case LVM_GETBKIMAGEA:                   return "LVM_GETBKIMAGEA";
++      case LVM_GETWORKAREAS:                  return "LVM_GETWORKAREAS";
++      case LVM_SETHOVERTIME:                  return "LVM_SETHOVERTIME";
++      case LVM_GETHOVERTIME:                  return "LVM_GETHOVERTIME";
++      case LVM_GETNUMBEROFWORKAREAS:          return "LVM_GETNUMBEROFWORKAREAS";
++      case LVM_SETTOOLTIPS:                   return "LVM_SETTOOLTIPS";
++      case LVM_GETITEMW:                      return "LVM_GETITEMW";
++      case LVM_SETITEMW:                      return "LVM_SETITEMW";
++      case LVM_INSERTITEMW:                   return "LVM_INSERTITEMW";
++      case LVM_GETTOOLTIPS:                   return "LVM_GETTOOLTIPS";
++      case LVM_FINDITEMW:                     return "LVM_FINDITEMW";
++      case LVM_GETSTRINGWIDTHW:               return "LVM_GETSTRINGWIDTHW";
++      case LVM_GETCOLUMNW:                    return "LVM_GETCOLUMNW";
++      case LVM_SETCOLUMNW:                    return "LVM_SETCOLUMNW";
++      case LVM_INSERTCOLUMNW:                 return "LVM_INSERTCOLUMNW";
++      case LVM_GETITEMTEXTW:                  return "LVM_GETITEMTEXTW";
++      case LVM_SETITEMTEXTW:                  return "LVM_SETITEMTEXTW";
++      case LVM_GETISEARCHSTRINGW:             return "LVM_GETISEARCHSTRINGW";
++      case LVM_EDITLABELW:                    return "LVM_EDITLABELW";
++      case LVM_GETBKIMAGEW:                   return "LVM_GETBKIMAGEW";
++      case LVM_SETSELECTEDCOLUMN:             return "LVM_SETSELECTEDCOLUMN";
++//      case LVM_SETTILEWIDTH:                  return "LVM_SETTILEWIDTH";
++      case LVM_SETVIEW:                       return "LVM_SETVIEW";
++      case LVM_GETVIEW:                       return "LVM_GETVIEW";
++      case LVM_INSERTGROUP:                   return "LVM_INSERTGROUP";
++      case LVM_SETGROUPINFO:                  return "LVM_SETGROUPINFO";
++      case LVM_GETGROUPINFO:                  return "LVM_GETGROUPINFO";
++      case LVM_REMOVEGROUP:                   return "LVM_REMOVEGROUP";
++      case LVM_MOVEGROUP:                     return "LVM_MOVEGROUP";
++      case LVM_MOVEITEMTOGROUP:               return "LVM_MOVEITEMTOGROUP";
++      case LVM_SETGROUPMETRICS:               return "LVM_SETGROUPMETRICS";
++      case LVM_GETGROUPMETRICS:               return "LVM_GETGROUPMETRICS";
++      case LVM_ENABLEGROUPVIEW:               return "LVM_ENABLEGROUPVIEW";
++      case LVM_SORTGROUPS:                    return "LVM_SORTGROUPS";
++      case LVM_INSERTGROUPSORTED:             return "LVM_INSERTGROUPSORTED";
++      case LVM_REMOVEALLGROUPS:               return "LVM_REMOVEALLGROUPS";
++      case LVM_HASGROUP:                      return "LVM_HASGROUP";
++      case LVM_SETTILEVIEWINFO:               return "LVM_SETTILEVIEWINFO";
++      case LVM_GETTILEVIEWINFO:               return "LVM_GETTILEVIEWINFO";
++      case LVM_SETTILEINFO:                   return "LVM_SETTILEINFO";
++      case LVM_GETTILEINFO:                   return "LVM_GETTILEINFO";
++      case LVM_SETINSERTMARK:                 return "LVM_SETINSERTMARK";
++      case LVM_GETINSERTMARK:                 return "LVM_GETINSERTMARK";
++      case LVM_INSERTMARKHITTEST:             return "LVM_INSERTMARKHITTEST";
++      case LVM_GETINSERTMARKRECT:             return "LVM_GETINSERTMARKRECT";
++      case LVM_SETINSERTMARKCOLOR:            return "LVM_SETINSERTMARKCOLOR";
++      case LVM_GETINSERTMARKCOLOR:            return "LVM_GETINSERTMARKCOLOR";
++      case LVM_SETINFOTIP:                    return "LVM_SETINFOTIP";
++      case LVM_GETSELECTEDCOLUMN:             return "LVM_GETSELECTEDCOLUMN";
++      case LVM_ISGROUPVIEWENABLED:            return "LVM_ISGROUPVIEWENABLED";
++      case LVM_GETOUTLINECOLOR:               return "LVM_GETOUTLINECOLOR";
++      case LVM_SETOUTLINECOLOR:               return "LVM_SETOUTLINECOLOR";
++      case LVM_CANCELEDITLABEL:               return "LVM_CANCELEDITLABEL";
++      case LVM_MAPINDEXTOID:                  return "LVM_MAPINDEXTOID";
++      case LVM_MAPIDTOINDEX:                  return "LVM_MAPIDTOINDEX";
++      case LVM_ISITEMVISIBLE:                 return "LVM_ISITEMVISIBLE";
++      case LVM_SETUNICODEFORMAT:              return "LVM_SETUNICODEFORMAT";
++      case LVM_GETUNICODEFORMAT:              return "LVM_GETUNICODEFORMAT";
++      case WM_APP:                            return "WM_APP";
++      case WM_RASDIALEVENT:                   return "WM_RASDIALEVENT";
+       default:
+         if(msg < WM_USER)
+         {
+@@ -281,10 +708,7 @@ namespace
+         }
+     }
+   }
+-}
+ 
+-namespace mSysEvent
+-{
+   SystemMessageListener::~SystemMessageListener()
+   {}
+ 
+-- 
+2.41.0.windows.1
+

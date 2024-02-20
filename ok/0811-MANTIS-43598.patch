@@ -1,0 +1,1006 @@
+From 04cc9ff68e9b1528650f14d983c6c1241f05c575 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 13 Dec 2016 13:01:30 +0000
+Subject: [PATCH 0811/1076] MANTIS 43598 CfgXMgrB.exe version 1.6.2
+ massaiCfgXB.exe version 1.6.2 - MANTIS 43598: MassaiCfgXB: unexpected
+ termination  - Mutex-protect itemGet/itemSet sequences.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1118 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    |  13 +-
+ .../Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp     |  80 +++---
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h |  13 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Directory.cpp   |  17 +-
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp |   8 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Number.cpp      |  13 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Selection.cpp   |  60 +++--
+ .../Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp |  13 +-
+ .../cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp    |  47 ++--
+ .../Massai/cpp/CfgXMgrB/src/cfgEntity.cpp     | 254 +++++++++---------
+ 10 files changed, 291 insertions(+), 227 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index efcb8cb6..014201cc 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -465,8 +465,17 @@
+ //! @par     Change:
+ //! - MANTIS 39108: Fix traces in Windows event log
+ //! - No longer write to Windopws event log.
+-#define FILE_VER_BIN 1,6,1,0
+-#define FILE_VER_DTS "1.6.1.0"
++// #define FILE_VER_BIN 1,6,1,0
++// #define FILE_VER_DTS "1.6.1.0"
++//
++//! @version 1.6.2
++//! @date    13.12.2016
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 43598: MassaiCfgXB: unexpected termination
++//! - Mutex-protect itemGet/itemSet sequences.
++#define FILE_VER_BIN 1,6,2,0
++#define FILE_VER_DTS "1.6.2.0"
+ //
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+index a31a9707..e618685e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/cfgEntity.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -20,6 +20,7 @@
+ 
+ 
+ #include "tools/mListen.hpp"
++#include "systools/mAutoMutex.hpp"
+ #include "systools/mMutexSem.hpp"
+ #include <string>
+ 
+@@ -457,26 +458,6 @@ public:
+    **/
+    void dump( std::ostream & Dst ) const;
+ 
+-   /**
+-    *
+-    * Return the meta information of an item.
+-    *
+-    * @param Auth:      The authorization string.
+-    *
+-    * @param Purp:      The purpose.
+-    *
+-    * @param Item:      The item name.
+-    *
+-    * @return           A pointer to the meta information.
+-    *
+-   **/
+-   cfgMeta const * getMeta
+-   (
+-      char const *      Auth,
+-      purpose           Purp,
+-      char const *      Item
+-   ) const;
+-
+    /**
+     *
+     * Return the meta information of an item. Meta-reference now is given
+@@ -498,17 +479,6 @@ public:
+       reference         Ref
+    ) const;
+ 
+-   /**
+-    *
+-    * Return the value of an item, do not consult meta configuration.
+-    *
+-    * @param Item:      The item name.
+-    *
+-    * @return           A pointer to the value.
+-    *
+-   **/
+-   cfgValue const * getRaw( char const * Item ) const;
+-
+    /**
+     *
+     * Create a new configuration item.
+@@ -544,6 +514,26 @@ public:
+    **/
+    void itemDelete( char const * Auth, char const * Item );
+ 
++   /**
++    *
++    * Return the meta information of an item.
++    *
++    * @param Auth:      The authorization string.
++    *
++    * @param Purp:      The purpose.
++    *
++    * @param Item:      The item name.
++    *
++    * @return           A pointer to the meta information.
++    *
++   **/
++   cfgMeta const * itemGetMeta
++   (
++      char const *      Auth,
++      purpose           Purp,
++      char const *      Item
++   ) const;
++
+    /**
+     *
+     * Return the value of an item
+@@ -555,11 +545,22 @@ public:
+     * @return           A pointer to the value.
+     *
+    **/
+-   cfgValue const * itemGet
++   cfgValue const * itemGetValue
+    (
+       char const * Auth, char const * Item
+    ) const;
+ 
++   /**
++    *
++    * Return the value of an item, do not consult meta configuration.
++    *
++    * @param Item:      The item name.
++    *
++    * @return           A pointer to the value.
++    *
++   **/
++   cfgValue const * itemGetRawValue( char const * Item ) const;
++
+    /**
+     *
+     * Change the value of the item
+@@ -573,7 +574,7 @@ public:
+     *                   outside and may be deleted by this.
+     *
+    **/
+-   void itemSet
++   void itemSetValue
+    (
+       char const * Auth, char const * Item,
+       cfgValue * Value
+@@ -581,7 +582,7 @@ public:
+ 
+    /**
+     *
+-    * CHange the meta-data of a configuration item.
++    * Change the meta-data of a configuration item.
+     *
+     * @param MetaDate:  The meta data for the item.
+     *
+@@ -594,6 +595,15 @@ public:
+       char const *      Item
+    );
+ 
++   /**
++    *
++    * Get a reference to a mutex protecting the value reference.
++    *
++    * @return:          Mutex reference.
++    *
++   **/
++   Materna::MSSD::mutexSemaphore & valueMutex();
++
+    /**
+     *
+     * Get the rights of an item.
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index e49f556b..c2b5287c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -456,8 +456,17 @@
+ //! @par     Change:
+ //! - MANTIS 39108: Fix traces in Windows event log
+ //! - No longer write to Windopws event log.
+-#define FILE_VER_BIN 1,6,1,0
+-#define FILE_VER_DTS "1.6.1.0"
++// #define FILE_VER_BIN 1,6,1,0
++// #define FILE_VER_DTS "1.6.1.0"
++//
++//! @version 1.6.2
++//! @date    13.12.2016
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 43598: MassaiCfgXB: unexpected termination
++//! - Mutex-protect itemGet/itemSet sequences.
++#define FILE_VER_BIN 1,6,2,0
++#define FILE_VER_DTS "1.6.2.0"
+ //
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+index 47145623..d024e2ba 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Directory.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2010 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -132,23 +132,24 @@ public:
+       Config::Directory::dir * pRet = 0;
+       try
+       {
+-         cfgValueDirectory const * const Value =
++         Materna::MSSD::autoMutex valmux( M_Configuration2->valueMutex() );
++         cfgValueDirectory const * const rawref =
+             dynamic_cast<cfgValueDirectory const *>
+             (
+-               M_Configuration2->getRaw( Acc.Item )
++               M_Configuration2->itemGetRawValue( Acc.Item )
+             );
+-         if( Value )
++         if( rawref )
+          {
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCD "get - is directory of %d.",
+-               Value->get().size()
++               rawref->get().size()
+             );
+-            cfgValueNodes::const_iterator I = Value->get().begin();
+-            cfgValueNodes::const_iterator const End = Value->get().end();
++            cfgValueNodes::const_iterator I = rawref->get().begin();
++            cfgValueNodes::const_iterator const End = rawref->get().end();
+             //
+             pRet = new Config::Directory::dir;
+-            pRet->length( Value->get().size() );
++            pRet->length( rawref->get().size() );
+             //
+             unsigned Ndx = 0;
+             while( I != End )
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
+index e314750b..3e70c907 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Node.cpp
+@@ -107,7 +107,7 @@ void serviceCfg_Node::removeChangeListenerItem
+    )
+ {
+    cfgMeta const * const Meta
+-      = M_Configuration->getMeta
++      = M_Configuration->itemGetMeta
+                            (
+                               Acc.Authorization,
+                               cfgEntity::PURP_DIRGET,
+@@ -190,7 +190,11 @@ char * serviceCfg_Node::getRights( Config::access const & Acc )
+  * Set configuration access rights.
+  *
+ **/
+-void serviceCfg_Node::setRights( Config::access const & Acc, char const * NewRights )
++void serviceCfg_Node::setRights
++   (
++      Config::access const &    Acc,
++      char const *              NewRights
++   )
+ {
+    verifyAccess( SC_N "setRights", Acc );
+    writeTrace
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+index a88aca57..7e2c9d0f 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Number.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -148,14 +148,15 @@ class serviceCfgNumber :
+       );
+       try
+       {
+-         cfgValueNumber const * const Value =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueNumber const * const valref =
+             dynamic_cast<cfgValueNumber const *>
+             (
+-               M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item )
++               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+             );
+-         if( Value )
++         if( valref )
+          {
+-            CORBA::Long const Val = Value->scalar();
++            CORBA::Long const Val = valref->scalar();
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCN "get = %d.",
+@@ -241,7 +242,7 @@ class serviceCfgNumber :
+       );
+       try
+       {
+-         M_ConfigEntity->itemSet
++         M_ConfigEntity->itemSetValue
+                         (
+                            Acc.Authorization,
+                            Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+index 2e80d93c..faf1e5d5 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2012 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -109,15 +109,19 @@ class serviceCfgSelection :
+          //
+          try
+          {
+-            cfgValue const * const Def
+-               = M_ConfigEntity->getRaw( Acc.Item );
+-            if( Def )
++            Materna::MSSD::autoMutex valmux
++               (
++                  M_ConfigEntity->valueMutex()
++               );
++            cfgValue const * const rawref
++               = M_ConfigEntity->itemGetRawValue( Acc.Item );
++            if( rawref )
+             {
+                //
+                // There is a string
+                //
+                cfgValueSelection const * const StrDef =
+-                  dynamic_cast<cfgValueSelection const *>( Def );
++                  dynamic_cast<cfgValueSelection const *>( rawref );
+                if( StrDef )
+                {
+                   char const * const Token = StrDef->c_str();
+@@ -213,13 +217,14 @@ class serviceCfgSelection :
+       );
+       try
+       {
+-         cfgValue const * const AnyValue =
+-            M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item );
+-         cfgValueSelection const * const NdxVal =
+-            dynamic_cast<cfgValueSelection const *>( AnyValue );
+-         if( NdxVal )
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValue const * const valref_any =
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item );
++         cfgValueSelection const * const valref_ndx =
++            dynamic_cast<cfgValueSelection const *>( valref_any );
++         if( valref_ndx )
+          {
+-            CORBA::Long const Ret = NdxVal->scalar();
++            CORBA::Long const Ret = valref_ndx->scalar();
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCS "get = %d.", Ret
+@@ -284,15 +289,16 @@ class serviceCfgSelection :
+       );
+       try
+       {
+-         cfgValue const * const AnyValue =
+-            M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item );
+-         cfgValueSelection const * const NdxVal =
+-            dynamic_cast<cfgValueSelection const *>( AnyValue );
+-         if( NdxVal )
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValue const * const valref_any =
++            M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item );
++         cfgValueSelection const * const valref_ndx =
++            dynamic_cast<cfgValueSelection const *>( valref_any );
++         if( valref_ndx )
+          {
+-            cfgType_Selection_Index const Scalar = NdxVal->scalar();
++            cfgType_Selection_Index const Scalar = valref_ndx->scalar();
+             cfgMeta const * const Meta
+-               = M_ConfigEntity->getMeta
++               = M_ConfigEntity->itemGetMeta
+                   (
+                      Acc.Authorization,
+                      cfgEntity::PURP_VALUESET,
+@@ -371,7 +377,7 @@ class serviceCfgSelection :
+       );
+       try
+       {
+-         M_ConfigEntity->itemSet
++         M_ConfigEntity->itemSetValue
+                         (
+                            Acc.Authorization,
+                            Acc.Item,
+@@ -436,7 +442,7 @@ class serviceCfgSelection :
+       try
+       {
+          cfgMeta const * const Meta
+-            = M_ConfigEntity->getMeta
++            = M_ConfigEntity->itemGetMeta
+                (
+                   Acc.Authorization,
+                   cfgEntity::PURP_VALUESET,
+@@ -449,7 +455,7 @@ class serviceCfgSelection :
+             if( SelMeta )
+             {
+                long const NdxVal = SelMeta->lookupIndex4String( StrVal );
+-               M_ConfigEntity->itemSet
++               M_ConfigEntity->itemSetValue
+                               (
+                                  Acc.Authorization,
+                                  Acc.Item,
+@@ -616,12 +622,16 @@ class serviceCfgSelection :
+          //
+          try
+          {
+-            cfgValue const * const cfg_value
+-               = M_ConfigEntity->getRaw( Acc.Item );
+-            if( cfg_value )
++            Materna::MSSD::autoMutex valmux
++               (
++                  M_ConfigEntity->valueMutex()
++               );
++            cfgValue const * const rawref
++               = M_ConfigEntity->itemGetRawValue( Acc.Item );
++            if( rawref )
+             {
+                cfgValueSelection const * const sel_value =
+-                  dynamic_cast<cfgValueSelection const *>( cfg_value );
++                  dynamic_cast<cfgValueSelection const *>( rawref );
+                if( sel_value )
+                {
+                   //
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+index 44a64b0f..43e82559 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Text.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -163,14 +163,15 @@ class serviceCfgText :
+       );
+       try
+       {
+-         cfgValueText const * const Value =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueText const * const valref =
+             dynamic_cast<cfgValueText const *>
+             (
+-               M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item )
++               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+             );
+-         if( Value )
++         if( valref )
+          {
+-            char const * const Val = Value->c_str();
++            char const * const Val = valref->c_str();
+             writeTrace
+             (
+                SecondaryRuntime_HERE, SCT "get = [%s].",
+@@ -236,7 +237,7 @@ class serviceCfgText :
+       );
+       try
+       {
+-         M_ConfigEntity->itemSet
++         M_ConfigEntity->itemSetValue
+                         (
+                            Acc.Authorization,
+                            Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+index 7d3c0a19..bbe01207 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Textlist.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -80,15 +80,16 @@ class serviceCfgTextlist :
+       try
+       {
+          cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         cfgValueTextlist const * const OldStrings =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueTextlist const * const valref_old =
+             dynamic_cast<cfgValueTextlist const *>
+             (
+-               M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item )
++               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+             );
+-         if( OldStrings )
++         if( valref_old )
+          {
+             cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = OldStrings->textlist();
++               = valref_old->textlist();
+             NewStringsI = OldStringsI;
+          }
+          else
+@@ -96,7 +97,7 @@ class serviceCfgTextlist :
+             throw Config::Node::notFound();
+          }
+          NewStringsI.push_back( std::string( String ) );
+-         M_ConfigEntity->itemSet
++         M_ConfigEntity->itemSetValue
+                         (
+                            Acc.Authorization,
+                            Acc.Item,
+@@ -162,15 +163,16 @@ class serviceCfgTextlist :
+       try
+       {
+          cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         cfgValueTextlist const * const OldStrings =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueTextlist const * const valref_old =
+             dynamic_cast<cfgValueTextlist const *>
+             (
+-               M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item )
++               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+             );
+-         if( OldStrings )
++         if( valref_old )
+          {
+             cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = OldStrings->textlist();
++               = valref_old->textlist();
+             NewStringsI = OldStringsI;
+          }
+          else
+@@ -184,7 +186,7 @@ class serviceCfgTextlist :
+             )
+          {
+            NewStringsI.push_back( std::string( String ) );
+-           M_ConfigEntity->itemSet
++           M_ConfigEntity->itemSetValue
+                           (
+                              Acc.Authorization,
+                              Acc.Item,
+@@ -251,15 +253,16 @@ class serviceCfgTextlist :
+       try
+       {
+          cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         cfgValueTextlist const * const OldStrings =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueTextlist const * const valref_old =
+             dynamic_cast<cfgValueTextlist const *>
+             (
+-               M_ConfigEntity->getRaw( Acc.Item )
++               M_ConfigEntity->itemGetRawValue( Acc.Item )
+             );
+-         if( OldStrings )
++         if( valref_old )
+          {
+             cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = OldStrings->textlist();
++               = valref_old->textlist();
+             NewStringsI = OldStringsI;
+          }
+          NewStringsI.push_back( std::string( String ) );
+@@ -320,15 +323,16 @@ class serviceCfgTextlist :
+       try
+       {
+          cfgValueTextlist::cfgType_Textlist_Value NewStringsI;
+-         cfgValueTextlist const * const OldStrings =
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
++         cfgValueTextlist const * const valref_old =
+             dynamic_cast<cfgValueTextlist const *>
+             (
+-               M_ConfigEntity->getRaw( Acc.Item )
++               M_ConfigEntity->itemGetRawValue( Acc.Item )
+             );
+-         if( OldStrings )
++         if( valref_old )
+          {
+             cfgValueTextlist::cfgType_Textlist_Value const OldStringsI
+-               = OldStrings->textlist();
++               = valref_old->textlist();
+             NewStringsI = OldStringsI;
+          }
+          if (
+@@ -475,10 +479,11 @@ class serviceCfgTextlist :
+       );
+       try
+       {
++         Materna::MSSD::autoMutex valmux( M_ConfigEntity->valueMutex() );
+          cfgValueTextlist const * const Value =
+             dynamic_cast<cfgValueTextlist const *>
+             (
+-               M_ConfigEntity->itemGet( Acc.Authorization, Acc.Item )
++               M_ConfigEntity->itemGetValue( Acc.Authorization, Acc.Item )
+             );
+          if( Value )
+          {
+@@ -588,7 +593,7 @@ class serviceCfgTextlist :
+             );
+             ++LNumber;
+          }
+-         M_ConfigEntity->itemSet
++         M_ConfigEntity->itemSetValue
+                         (
+                            Acc.Authorization,
+                            Acc.Item,
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+index c66f34e8..ebffe135 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgEntity.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2015 MATERNA Information & Communications
++ * Copyright (c) 2002-2016 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -33,7 +33,6 @@
+ #include "Tools/mInFile.hpp"
+ #include "systools/mSysThread.hpp"
+ #include "mWarning.hpp"
+-#include "systools/mAutoMutex.hpp"
+ #include "systools/software_error.h"
+ 
+ #include <fstream>
+@@ -389,6 +388,15 @@ public:
+    **/
+    cfgEntity::reference cevGetRef( char const * Path );
+ 
++   /**
++    *
++    * Mutex reference.
++    *
++    * @return:          The mutex reference.
++    *
++   **/
++   Materna::MSSD::mutexSemaphore & cevMutex();
++   
+    /**
+     *
+     * Save the map to an ostream.
+@@ -1099,6 +1107,13 @@ cfgEntity::reference cfgEntityValue::cevGetRef( char const * Path )
+ 
+ 
+ 
++Materna::MSSD::mutexSemaphore & cfgEntityValue::cevMutex()
++{
++   return M_Mutex;
++}
++
++
++
+ void cfgEntityValue::cevSave
+ (
+    std::ostream &               Dst,
+@@ -1928,42 +1943,6 @@ void cfgEntity::changeIndicationSet( cfgEntity_Indication * Listener )
+ 
+ 
+ 
+-#if 0
+-/**
+- *
+- * Method implementation - see cfgEntity.hpp.
+- *
+-**/
+-void cfgEntity::dump( std::ostream & Dst ) const
+-{
+-   M_Value->allSave( Dst, "   " );
+-}
+-#endif
+-
+-
+-
+-/**
+- *
+- * Method implementation - see cfgEntity.hpp.
+- *
+-**/
+-cfgMeta const * cfgEntity::getMeta
+-(
+-   char const *         Auth,
+-   cfgEntity::purpose   Purp,
+-   char const *         Item
+-) const
+-{
+-   if( !M_Value )
+-   {
+-      return 0;
+-   }
+-   reference const R = M_Value->cevGetRef( Item );
+-   return getMeta( Auth, Purp, R );
+-}
+-
+-
+-
+ /**
+  *
+  * Method implementation - see cfgEntity.hpp.
+@@ -1985,22 +1964,6 @@ cfgMeta const * cfgEntity::getMeta
+ 
+ 
+ 
+-/**
+- *
+- * Method implementation - see cfgEntity.hpp.
+- *
+-**/
+-cfgValue const * cfgEntity::getRaw( char const * Item ) const
+-{
+-   if( !M_Value )
+-   {
+-      return 0;
+-   }
+-   return M_Value->cevGetRaw( Item );
+-}
+-
+-
+-
+ /**
+  *
+  * Method implementation - see cfgEntity.hpp.
+@@ -2067,7 +2030,7 @@ void cfgEntity::itemCreate
+                                          );
+                if( !Meta )
+                {
+-                  //-std::cout << "cfgEntity::itemSet - "
++                  //-std::cout << "cfgEntity::itemSetValue - "
+                   //-          "X:NotFound (no meta)" << std::endl;
+                   throw cfgEntity_NotFound();
+                }
+@@ -2169,21 +2132,19 @@ void cfgEntity::itemDelete
+  * Method implementation - see cfgEntity.hpp.
+  *
+ **/
+-cfgValue const * cfgEntity::itemGet
++cfgMeta const * cfgEntity::itemGetMeta
+ (
+-   char const * Auth,
+-   char const * Item
++   char const *         Auth,
++   cfgEntity::purpose   Purp,
++   char const *         Item
+ ) const
+ {
+    if( !M_Value )
+    {
+-      //-std::cout << "itemGet - no global" << std::endl;
+       return 0;
+    }
+-   //-std::cout << "itemGet(" << Item << ") ..." << std::endl;
+-   cfgValue const * const Ret = M_Value->cevGetNrm( Auth, M_Meta, Item );
+-   //-std::cout << "itemGet(" << Item << ")." << std::endl;
+-   return Ret;
++   reference const R = M_Value->cevGetRef( Item );
++   return getMeta( Auth, Purp, R );
+ }
+ 
+ 
+@@ -2193,63 +2154,37 @@ cfgValue const * cfgEntity::itemGet
+  * Method implementation - see cfgEntity.hpp.
+  *
+ **/
+-void cfgEntity::itemSet
+-(
+-   char const * Auth,
+-   char const * Item,
+-   cfgValue *   Value
+-) throw
+-   (
+-      cfgEntity_IllegalValue,
+-      cfgEntity_NotFound
+-   )
++cfgValue const * cfgEntity::itemGetRawValue( char const * Item ) const
+ {
+-   if( !M_Meta || !M_Value )
+-   {
+-      //-std::cout << "cfgEntity::itemSet - X:NotFound" << std::endl;
+-      throw cfgEntity_NotFound();
+-   }
+-   //-std::cout << "itemSet(" << Item << ") ..." << std::endl;
+-   reference const RefOrig = M_Value->cevGetRef( Item );
+-   if( !RefOrig )
+-   {
+-      //-std::cout << "cfgEntity::itemSet - X:NotFound (no ref)"
+-      //-          << std::endl;
+-      throw cfgEntity_NotFound();
+-   }
+-   //
+-   cfgMeta const * const Meta = M_Meta->cemFromRef
+-                                (
+-                                   Auth, cfgEntity::PURP_VALUESET, RefOrig
+-                                );
+-   if( !Meta )
+-   {
+-      //-std::cout << "cfgEntity::itemSet - X:NotFound (no meta)"
+-      //-          << std::endl;
+-      throw cfgEntity_NotFound();
+-   }
+-   //
+-   // Meta found
+-   //
+-   if( !Meta->valueAllowed( *Value ) )
++   if( !M_Value )
+    {
+-      //-std::cout << "cfgEntity::itemSet - X:IllegalValue"
+-      //-          << std::endl;
+-      throw cfgEntity_IllegalValue();
++      return 0;
+    }
+-   M_Value->cevSetValue( Item, Value );
+-   changeInfo * const Info = new changeInfo( M_IListeners, Item );
+-   if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
++   return M_Value->cevGetRaw( Item );
++}
++
++
++
++/**
++ *
++ * Method implementation - see cfgEntity.hpp.
++ *
++**/
++cfgValue const * cfgEntity::itemGetValue
++(
++   char const * Auth,
++   char const * Item
++) const
++{
++   if( !M_Value )
+    {
+-      // Queue full would lead to a client not getting the change info.
+-      writeTrace
+-         (
+-            SecondaryRuntime_HERE,
+-            CENT "itemSet error: could not queue change indication!"
+-         );
++      //-std::cout << "itemGetValue - no global" << std::endl;
++      return 0;
+    }
+-   allSaveEntity();
+-   //-std::cout << "cfgEntity::itemSet(" << Item << ")." << std::endl;
++   //-std::cout << "itemGetValue(" << Item << ") ..." << std::endl;
++   cfgValue const * const Ret = M_Value->cevGetNrm( Auth, M_Meta, Item );
++   //-std::cout << "itemGetValue(" << Item << ")." << std::endl;
++   return Ret;
+ }
+ 
+ 
+@@ -2325,7 +2260,7 @@ void cfgEntity::itemSetMeta
+                                          );
+                if( !Meta )
+                {
+-                  //-std::cout << "cfgEntity::itemSet - "
++                  //-std::cout << "cfgEntity::itemSetValue - "
+                   //-          "X:NotFound (no meta)" << std::endl;
+                   throw cfgEntity_NotFound();
+                }
+@@ -2367,7 +2302,7 @@ void cfgEntity::itemSetMeta
+          }
+ #endif
+          // Create meta and item data.
+-         reference const Ref = M_Meta->cemFromMeta( MetaData );
++         M_Meta->cemFromMeta( MetaData );
+          //-std::cout << "cfgEntity::itemSetMeta - update" << std::endl;
+          changeInfo * const Info = new changeInfo( M_IListeners, Item );
+          if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
+@@ -2381,9 +2316,6 @@ void cfgEntity::itemSetMeta
+                   " could not queue change indication!"
+                );
+          }
+-#if 0
+-         M_Value->cevUpdate( Item, Ref, ValDef );
+-#endif
+       }
+    }
+    else
+@@ -2397,6 +2329,88 @@ void cfgEntity::itemSetMeta
+ 
+ 
+ 
++/**
++ *
++ * Method implementation - see cfgEntity.hpp.
++ *
++**/
++void cfgEntity::itemSetValue
++(
++   char const * Auth,
++   char const * Item,
++   cfgValue *   Value
++) throw
++   (
++      cfgEntity_IllegalValue,
++      cfgEntity_NotFound
++   )
++{
++   if( !M_Meta || !M_Value )
++   {
++      //-std::cout << "cfgEntity::itemSetValue - X:NotFound" << std::endl;
++      throw cfgEntity_NotFound();
++   }
++   //-std::cout << "itemSetValue(" << Item << ") ..." << std::endl;
++   reference const RefOrig = M_Value->cevGetRef( Item );
++   if( !RefOrig )
++   {
++      //-std::cout << "cfgEntity::itemSetValue - X:NotFound (no ref)"
++      //-          << std::endl;
++      throw cfgEntity_NotFound();
++   }
++   //
++   cfgMeta const * const Meta = M_Meta->cemFromRef
++                                (
++                                   Auth, cfgEntity::PURP_VALUESET, RefOrig
++                                );
++   if( !Meta )
++   {
++      //-std::cout << "cfgEntity::itemSetValue - X:NotFound (no meta)"
++      //-          << std::endl;
++      throw cfgEntity_NotFound();
++   }
++   //
++   // Meta found
++   //
++   if( !Meta->valueAllowed( *Value ) )
++   {
++      //-std::cout << "cfgEntity::itemSetValue - X:IllegalValue"
++      //-          << std::endl;
++      throw cfgEntity_IllegalValue();
++   }
++   M_Value->cevSetValue( Item, Value );
++   changeInfo * const Info = new changeInfo( M_IListeners, Item );
++   if( ChangeQ.write( Info ) != Materna::MSSD::FMTQ_OK )
++   {
++      // Queue full would lead to a client not getting the change info.
++      writeTrace
++         (
++            SecondaryRuntime_HERE,
++            CENT "itemSetValue error: could not queue change indication!"
++         );
++   }
++   allSaveEntity();
++   //-std::cout << "cfgEntity::itemSetValue(" << Item << ")." << std::endl;
++}
++
++
++
++/**
++ *
++ * Method implementation - see cfgEntity.hpp.
++ *
++**/
++Materna::MSSD::mutexSemaphore & cfgEntity::valueMutex()
++{
++   if( !M_Value )
++   {
++      throw cfgEntity_NotFound();
++   }
++   return M_Value->cevMutex();
++}
++
++
++
+ /**
+  *
+  * Method implementation - see cfgEntity.hpp.
+-- 
+2.41.0.windows.1
+

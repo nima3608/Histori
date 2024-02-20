@@ -1,0 +1,506 @@
+From f04272eff0dc086c21bc2a3d5a3845c0e3c18d8b Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 23 Aug 2012 09:07:32 +0000
+Subject: [PATCH 0254/1000] Mantis 22014
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@397 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Controller/inc/mcProcess.hpp   |  19 ++-
+ .../Massai/cpp/Controller/inc/mcontrol_def.h  |   1 +
+ .../Massai/cpp/Controller/src/main.cpp        |  27 ++-
+ .../Massai/cpp/Controller/src/mcProcess.cpp   | 160 ++++++++++++++++--
+ .../Massai/cpp/Controller/src/serverwin.cpp   |  50 +-----
+ 5 files changed, 181 insertions(+), 76 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp b/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
+index ef265cdd..ce6a0d57 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcProcess.hpp
+@@ -64,15 +64,9 @@ private:
+ class mcProcessControl
+ {
+ 
+-   std::string const                    m_application_name;
+-
+-   mSysProcess::child *                 m_child;
+-
+-   mcProcessCallback const              m_logging;
++   class impl;
+ 
+-   mcProcessCallback const              m_stderr;
+-
+-   mcProcessCallback const              m_stdout;
++   impl *                               m_impl;
+ 
+ public:
+ 
+@@ -82,6 +76,13 @@ public:
+          char const * application_name
+       );
+ 
++   mcProcessControl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name,
++         char const * stop_semaphore
++      );
++
+    ~mcProcessControl() throw();
+ 
+    char const * getName() const;
+@@ -90,6 +91,8 @@ public:
+ 
+    void kill();
+ 
++   void signalStop();
++
+ private:
+ 
+     mcProcessControl();
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+index dfb3f051..f97d04b5 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
++++ b/SelfServiceCommon/Massai/cpp/Controller/inc/mcontrol_def.h
+@@ -25,6 +25,7 @@
+  *                   \li - Remove console outputs, no longer useful.
+  *                   \li - Remove the default dependency to "massaiConfig" ("massaiConfig" is no longer used).
+  *                   \li - Remove the deprecated use of "mSysException::standardException".
++ *                   \li - Do not close the stop-semaphore twice - would result in a lock.
+  *
+  *  \date 31.05.2012 \li V1.0.2.4
+  *                   \li bugfix - 0023436: Mcontrol - W7 dialog pops up if the string "update" is found in a name.
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+index 911d3b52..c09e883d 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/main.cpp
+@@ -207,7 +207,12 @@ bool noSNMP()
+  * My main.
+  *
+ **/
+-int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
++int WINAPI commonMain
++   (
++      bool              daemon_called,  // Called as Windows-Service
++      HINSTANCE         hInst,          // Parent
++      char const *      cmdline         // Commandline
++   )
+ {
+ 
+     mMainCommandLine     cmdline_parser( cmdline );
+@@ -237,8 +242,8 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+     signal(SIGILL,  exitHandler);
+     signal(SIGFPE,  exitHandler);
+ 
+-
+-    mDaemon_indInitializing(60000);
++    if( daemon_called )
++      mDaemon_indInitializing(60000);
+ 
+     // try create within the global name space, so that this program also
+     // on terminal server services runs only once 08.01.2004 (AGe)
+@@ -385,7 +390,7 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+     try
+     {
+ 
+-      if( args.option( "SERVER" ) || mDaemon_isService() )
++      if( args.option( "SERVER" ) || ( daemon_called && mDaemon_isService() ) )
+         fServerMode = true;
+ 
+       if( args.option( "NOLOG" ) )
+@@ -400,7 +405,7 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+          TRACE(HERE,"%s started (server mode = %d, as service = %d, noLOG = %d) ...",
+                      szAppName,
+                      fServerMode,
+-                     mDaemon_isService(),
++                     daemon_called && mDaemon_isService(),
+                      noLOG());
+       }
+       else
+@@ -408,7 +413,7 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+          TRACE(HERE,"%s started (server mode = %d, as service = %d, noLOG = %d noNSMP = %d) ...",
+                      szAppName,
+                      fServerMode,
+-                     mDaemon_isService(),
++                     daemon_called && mDaemon_isService(),
+                      noLOG(),
+                      noSNMP());
+       }
+@@ -513,13 +518,16 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+ 
+       ShowWindow(hwnd,SW_SHOW);
+ 
+-      if(mDaemon_isService())
++      if( daemon_called && mDaemon_isService() )
+       {
+         //PostMessage(hwnd,WM_PAINT,0,0);
+         RedrawWindow(hwnd,NULL,NULL,RDW_INTERNALPAINT);
+       }
+ 
+-      mDaemon_indReady(0);
++      if( daemon_called )
++      {
++         mDaemon_indReady(0);
++      }
+ 
+       // delay the start of the platform
+       PostMessage(hwnd,WM_START_DELAY_TIMER, lDelay, 0);
+@@ -616,7 +624,7 @@ int WINAPI commonMain( HINSTANCE hInst, char const * cmdline )
+ 
+ int WINAPI WinMain( HINSTANCE hInst, HINSTANCE, char * CmdLine, int )
+ {
+-   return commonMain( hInst, CmdLine );
++   return commonMain( false, hInst, CmdLine );
+ }
+ 
+ 
+@@ -636,6 +644,7 @@ int mDaemon_main( int argc, char const * const * argv )
+    }
+    int const R = commonMain
+                   (
++                     true,
+                      GetModuleHandle( 0 ),
+                      CommandLine.c_str()
+                   );
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
+index d9b729c3..379d0af5 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/mcProcess.cpp
+@@ -62,6 +62,108 @@ void mcProcessCallback::lineOut( char const * line ) const
+ 
+ 
+ 
++class mcProcessControl::impl
++{
++
++   std::string const                    m_application_name;
++
++   mSysProcess::child *                 m_child;
++
++   mcProcessCallback const              m_logging;
++
++   bool                                 m_started;
++
++   mcProcessCallback const              m_stderr;
++
++   mcProcessCallback const              m_stdout;
++
++   HANDLE                               m_stop_sem_handle;
++
++public:
++
++   impl
++      (
++         mSysProcess::parent & parent,
++         char const * application_name,
++         char const * stop_semaphore
++      ) :
++      m_application_name( application_name ),
++      m_child( 0 ),
++      m_logging( application_name, "mSysProcess" ),
++      m_started( false ),
++      m_stderr( application_name, "STDERR" ),
++      m_stdout( application_name, "STDOUT" ),
++      m_stop_sem_handle( NULL )
++   {
++      if( stop_semaphore )
++      {
++         m_stop_sem_handle =
++            CreateEvent
++               (
++                  NULL,                 // lpEventAttributes
++                  true,                 // bManualReset
++                  false,                // bInitialState
++                  stop_semaphore        // lpName
++               );
++         if( !m_stop_sem_handle )
++         {
++            return;
++         }
++         ResetEvent( m_stop_sem_handle );
++      }
++      parent
++#ifdef DO_MCPROCESS_LOGGING
++         .setLogging( m_logging )
++#endif
++         .setHide()
++         .setStdErr( m_stderr ).setStdOut( m_stdout );
++      m_child = parent.newChild();
++      m_started = true;
++   }
++
++   ~impl() throw()
++   {
++      try
++      {
++         delete m_child;
++      }
++      catch( ... )
++      {
++      }
++   }
++
++   char const * getName() const
++   {
++      return m_application_name.c_str();
++   }
++
++   mSysProcess::status getStatus() const
++   {
++      if( m_started )
++         return m_child->getStatus();
++      else
++         return mSysProcess::STATUS_FAILED;
++   }
++
++   void kill()
++   {
++      m_child->kill();
++   }
++
++   void signalStop()
++   {
++      if( m_stop_sem_handle )
++      {
++         SetEvent( m_stop_sem_handle );
++         CloseHandle( m_stop_sem_handle );
++         m_stop_sem_handle = NULL;
++      }
++   }
++
++}; // class mcProcessControl::impl
++
++
++
+ /*
+  *
+  * Class mcProcessControl method implementation, see "mcProcess.hpp".
+@@ -72,19 +174,33 @@ mcProcessControl::mcProcessControl
+       mSysProcess::parent &     parent,
+       char const *              application_name
+    ) :
+-   m_application_name( application_name ),
+-   m_child( 0 ),
+-   m_logging( application_name, "mSysProcess" ),
+-   m_stderr( application_name, "STDERR" ),
+-   m_stdout( application_name, "STDOUT" )
++   m_impl( new mcProcessControl::impl( parent, application_name, 0 ) )
++{
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++mcProcessControl::mcProcessControl
++   (
++      mSysProcess::parent &     parent,
++      char const *              application_name,
++      char const *              stop_semaphore
++   ) :
++   m_impl
++      (
++         new mcProcessControl::impl
++            (
++               parent,
++               application_name,
++               stop_semaphore
++            )
++      )
+ {
+-   parent
+-#ifdef DO_MCPROCESS_LOGGING
+-      .setLogging( m_logging )
+-#endif
+-      .setHide()
+-      .setStdErr( m_stderr ).setStdOut( m_stdout );
+-   m_child = parent.newChild();
+ }
+ 
+ 
+@@ -98,7 +214,7 @@ mcProcessControl::~mcProcessControl() throw()
+ {
+    try
+    {
+-      delete m_child;
++      delete m_impl;
+    }
+    catch( ... )
+    {
+@@ -114,7 +230,7 @@ mcProcessControl::~mcProcessControl() throw()
+  */
+ char const * mcProcessControl::getName() const
+ {
+-   return m_application_name.c_str();
++   return m_impl->getName();
+ }
+ 
+ 
+@@ -126,7 +242,7 @@ char const * mcProcessControl::getName() const
+  */
+ mSysProcess::status mcProcessControl::getStatus() const
+ {
+-   return m_child->getStatus();
++   return m_impl->getStatus();
+ }
+ 
+ 
+@@ -138,7 +254,19 @@ mSysProcess::status mcProcessControl::getStatus() const
+  */
+ void mcProcessControl::kill()
+ {
+-   m_child->kill();
++   m_impl->kill();
++}
++
++
++
++/*
++ *
++ * Class mcProcessControl method implementation, see "mcProcess.hpp".
++ *
++ */
++void mcProcessControl::signalStop()
++{
++   m_impl->signalStop();
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+index 0dca0395..aa3293f4 100644
+--- a/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
++++ b/SelfServiceCommon/Massai/cpp/Controller/src/serverwin.cpp
+@@ -58,7 +58,6 @@
+ #define OVERLAY_INFO_1 1
+ #define OVERLAY_INFO_2 2
+ 
+-static HANDLE  hSem     = NULL;
+ 
+ using namespace mControl;
+ 
+@@ -259,7 +258,7 @@ list<long>::iterator tmpI;
+       if(hStarter)
+       {
+         TRACE(HERE,"waiting for starter termination ...");
+-
++        hStarter->signalStop();
+         while( hStarter->getStatus() == mSysProcess::STATUS_RUNNING )
+         {
+           for(prI = prList.begin(); prI != prList.end() && prList.size(); tmpI = prI++)
+@@ -382,21 +381,8 @@ char                szProg[256];
+ char                szPath[512];
+ char               *pStr;
+ 
+-    //return(0);
+-
+     hStarter = NULL;
+ 
+-    // create a public event sem ...
+-
+-    hSem = CreateEvent(NULL,true,false,SEM_NAME);
+-
+-    if(!hSem)
+-      return(GetLastError());
+-
+-    // ... and reset initally
+-
+-    ResetEvent(hSem);
+-
+     memset(&si,0,sizeof(STARTUPINFO));
+ 
+     si.cb      = sizeof(STARTUPINFO);
+@@ -419,7 +405,7 @@ char               *pStr;
+ 
+     mSysProcess::parent Parent;
+     Parent.setCommandline( szProg );
+-    hStarter = new mcProcessControl( Parent, STARTER_NAME );
++    hStarter = new mcProcessControl( Parent, STARTER_NAME, SEM_NAME );
+     if( hStarter->getStatus() != mSysProcess::STATUS_FAILED )
+         return 0;
+     else
+@@ -1030,8 +1016,7 @@ INITCOMMONCONTROLSEX iccex;
+                  {
+                     sendAlert(ALERT_E_REBOOT_LOCAL);
+ 
+-                    // process system commads
+-
++                    // execute system commands before shutting down
+                     execSysCmdsShutdown();
+ 
+                     rc = shutdownOS_Now(true);
+@@ -1105,7 +1090,6 @@ INITCOMMONCONTROLSEX iccex;
+             }
+ 
+             // execute system commands before starting platform
+-
+             execSysCmdsStartup();
+ 
+             rc = startAll();
+@@ -1136,18 +1120,11 @@ INITCOMMONCONTROLSEX iccex;
+ 
+             fStarted          = false;
+ 
+-            if(hSem)
+-              SetEvent(hSem);
+-
+-            CloseHandle(hSem);
+-
+             waitForStarterTermination();
+ 
+-           // process system commads
+-
++            // execute system commands after platform stopped
+             execSysCmdsShutdown();
+-         }
+-
++          }
+           return(rc);
+ 
+      case WM_MASSAISTOP_SCHEDULER:
+@@ -1163,15 +1140,9 @@ INITCOMMONCONTROLSEX iccex;
+ 
+             fStarted          = false;
+ 
+-            if(hSem)
+-              SetEvent(hSem);
+-
+-            CloseHandle(hSem);
+-
+             waitForStarterTermination();
+ 
+-            // process system commads
+-
++            // execute system commands after platform stopped
+             execSysCmdsShutdown();
+ 
+             PostMessage(hwnd,WM_MASSAISTART_SCHEDULER,0,0);
+@@ -1229,7 +1200,6 @@ INITCOMMONCONTROLSEX iccex;
+             }
+ 
+             // execute system commands before starting platform
+-
+             execSysCmdsStartup();
+ 
+             if(rc = startAll())
+@@ -1260,15 +1230,9 @@ INITCOMMONCONTROLSEX iccex;
+ 
+           TRACE(HERE,"shutting down controller...");
+ 
+-          if(hSem)
+-            SetEvent(hSem);
+-
+-          CloseHandle(hSem);
+-
+           waitForStarterTermination();
+ 
+-          // process system commads
+-
++          // execute system commands after platform stopped
+           execSysCmdsShutdown();
+ 
+           if(pAlert) delete pAlert;
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,199 @@
+From 5628c4664d05d85003a0b0cee425f011fbcb86f0 Mon Sep 17 00:00:00 2001
+From: mbrinkma <mbrinkma@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Mon, 13 Mar 2017 12:50:06 +0000
+Subject: [PATCH 242/462] Mantis 0044116: put makefile-jenkins under version
+ control
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@376 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/release/makefile-jenkins            | 178 ++++++++++++++++++
+ 1 file changed, 178 insertions(+)
+ create mode 100644 SelfServiceBuild/Build/release/makefile-jenkins
+
+diff --git a/SelfServiceBuild/Build/release/makefile-jenkins b/SelfServiceBuild/Build/release/makefile-jenkins
+new file mode 100644
+index 0000000..d5929da
+--- /dev/null
++++ b/SelfServiceBuild/Build/release/makefile-jenkins
+@@ -0,0 +1,178 @@
++################################################################################
++##
++##  PROJECT:        MASSAI
++##
++##  FILE:           all.mak
++##
++##  DATE:           05.07.2005
++##
++##  EDITOR:         Materna Information & Communications (PtM)
++##
++################################################################################
++
++SELF = makefile
++
++!if "$(BUILD_PATH)_" == "_"
++BUILD_PATH=P:\
++!endif
++
++!if "$(BUILD_WORKDIR)_" == "_"
++BUILD_WORKDIR=Build\cpp
++!endif
++
++!if "$(SVN_ROOT)_" == "_"
++SVN_ROOT=http://subversion.materna.de:7770/svn-repos
++!endif
++
++!if "$(DISTRIBUTE_PATH)_" == "_"
++DISTRIBUTE_PATH=c:\BuildOutput
++!endif
++
++!if "$(LOCALSTORE)_" == "_"
++LOCALSTORE=$(BUILD_PATH)\$(SVN_PROJECT)\$(SVN_TAG)
++!endif
++
++!if "$(RECIPIENTS)_" == "_"
++RECIPIENTS=mbrinkma@materna.de
++!endif
++
++!if "$(B_NAME)_" == "_"
++B_NAME="Nightly Build"
++!endif
++
++DISTRIBUTETARGET=$(DISTRIBUTE_PATH)\$(SVN_PROJECT)\$(SVN_TAG)
++REPO_PATH=$(SVN_ROOT)/$(SVN_PROJECT)/$(SVN_TAG)
++
++TEMP_SUBJECT=temp_subject.txt
++
++ErrorLog=result.log
++
++#===================================================================
++#
++#  Targets
++#
++#===================================================================
++
++all:           init
++
++
++init:          $(SELF)
++               @echo MAKEDIR          = $(MAKEDIR)
++               @echo LOGFILE          = $(LOGFILE)
++               @echo LOCALSTORE       = $(LOCALSTORE)
++               @echo DISTRIBUTETARGET = $(DISTRIBUTETARGET)
++               @echo REPO_PATH        = $(REPO_PATH)
++
++clean:         $(SELF)
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               xmk clean
++
++clean_except_log: $(SELF)
++               @echo clean is done by jenkins
++
++                                                                    
++checkout:      $(SELF)
++               @echo clean is done by jenkins
++
++set_props:     $(SELF)
++               IF EXIST $(PROPERTIES_FILE) ( svn.exe propset svn:externals -F $(PROPERTIES_FILE) $(LOCALSTORE) )
++
++update:        $(SELF)
++               svn up $(LOCALSTORE)
++
++build_java:    $(SELF)
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               xmk java
++
++build_maven:   $(SELF)
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               xmk maven
++
++build_installer:    $(SELF)
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               xmk installer
++               
++build_cpp:     $(SELF)
++               - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\revision_tag.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\revision_tag.pl" --repo="$(LOCALSTORE)" --version=$(BUILD_VERSION) $(RELEASE_FLAG) )
++               - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR) && \
++               setenv.bat && \
++               xmk /I
++
++kidlist:       $(SELF)
++               - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl ( perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\gen_kidlist.pl" --notestfiles --kidlist="$(LOCALSTORE)\SelfServiceBuild\Build\output\KID-List.txt" --outputpath="$(LOCALSTORE)\SelfServiceBuild\Build\output" --listheader="$(B_NAME)"  )
++
++copy:          $(SELF)
++               cmd.exe /c $(MAKEDIR)\distributeFiles.cmd $(LOCALSTORE) $(DISTRIBUTETARGET)
++
++sendMail:      $(SELF)
++               - cd /D $(MAKEDIR) && checkForErrors.cmd $(LOGFILE) $(ErrorLog) $(TEMP_SUBJECT) && \
++               @echo $(B_NAME): $(REPO_PATH) >> $(TEMP_SUBJECT) && \
++               $(MAKEDIR)\blat.exe \
++               -bodyF $(ErrorLog) \
++               -sf $(TEMP_SUBJECT) \
++               -to $(RECIPIENTS) \
++               -f nobody@materna.de \
++               -server mail.materna.de \
++               -attacht $(LOGFILE)
++
++sendMailZip:   $(SELF)
++               - IF EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\checkForErrors.pl ( cd /D $(MAKEDIR) && perl.exe "$(LOCALSTORE)\SelfServiceBuild\Build\scripts\checkForErrors.pl" --logfile="$(LOGFILE).zip" --buildname="$(B_NAME): $(REPO_PATH)" --recipients="$(RECIPIENTS)"  )
++               - IF NOT EXIST $(LOCALSTORE)\SelfServiceBuild\Build\scripts\checkForErrors.pl ( cd /D $(MAKEDIR) && checkForErrors.cmd $(LOGFILE) $(ErrorLog) $(TEMP_SUBJECT) && \
++               @echo $(B_NAME): $(REPO_PATH) >> $(TEMP_SUBJECT) && \
++               zip -u $(LOGFILE).zip $(LOGFILE) && \
++               $(MAKEDIR)\blat.exe \
++               -bodyF $(ErrorLog) \
++               -sf $(TEMP_SUBJECT) \
++               -to $(RECIPIENTS) \
++               -f nobody@materna.de \
++               -server mail.materna.de \
++               -attach $(LOGFILE).zip  )
++
++#===================================================================
++#   Projects
++#===================================================================
++
++create:             init 
++
++build_application:  create build_cpp
++
++nb_application:     build_cpp sendMailZip
++
++nb_Platform:        clean init checkout set_props build_cpp sendMailZip
++nb_Platform_java:   clean init checkout set_props build_java sendMailZip
++nb_Platform_full_nomail:   clean init set_props build_cpp build_java build_maven build_installer kidlist 
++nb_Platform_full:   nb_Platform_full_nomail sendMailZip
++
++build_mavenQBG:     $(SELF)
++                    - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\java && \
++                    mv.cmd && ccc.cmd && \
++                    mvn -fn -e install
++zip_QBG:            $(SELF)             
++                    cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
++                    $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
++                    mv.cmd && ccc.cmd && \
++                    xmk zip /I
++installer_QBG:      $(SELF)             
++                    cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
++                    $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
++                    mv.cmd && ccc.cmd && \
++                    xmk gate-installer /I
++QBG:                clean create build_cpp build_mavenQBG zip_QBG installer_QBG
++QBGMail:            clean create build_cpp build_mavenQBG zip_QBG installer_QBG sendMailZip
++nb_QBG:             QBG copy sendMailZip
++fast_QBG:           init build_cpp build_mavenQBG zip_QBG copy installer_QBG sendMailZip
++
++AirlineApps:        clean create build_cpp msi_AirlineApps
++msi_AirlineApps:    $(SELF)
++                    cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
++                    $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
++                    xmk msi-installer /I
++                     
++
++#===================================================================
++#  End of File
++#===================================================================
+-- 
+2.41.0.windows.1
+

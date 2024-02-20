@@ -1,0 +1,653 @@
+From 72d8038989cf7c10c26768ec78248279cac12c51 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 25 Jan 2016 16:31:44 +0000
+Subject: [PATCH 0719/1076] MANTIS 0039813 extension: Billing Data not
+ available
+
+massai_systools.lib
+V1.0.0.32
+
+- added mSysServiceControl to start/stop a windows service
+- added TestSysServiceControl and TestSysServiceMonitor to test mSysServiceControl/mSysServiceMonitor
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@961 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/systools/mSysServiceControl.h         |  28 ++
+ .../Massai/cpp/Systools/makefile.mak          |  21 +
+ .../Systools/src/TestSysServiceControl.cpp    |  68 ++++
+ .../Systools/src/TestSysServiceMonitor.cpp    |  74 ++++
+ .../Massai/cpp/Systools/src/local_def.cpp     |  10 +-
+ .../Systools/src/mSysServiceControlW32.cpp    | 358 ++++++++++++++++++
+ 6 files changed, 557 insertions(+), 2 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/systools/mSysServiceControl.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceControl.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceMonitor.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceControlW32.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysServiceControl.h b/SelfServiceCommon/Interfaces/inc/systools/mSysServiceControl.h
+new file mode 100644
+index 00000000..73bda8c3
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysServiceControl.h
+@@ -0,0 +1,28 @@
++// control service status
++#pragma once
++
++#include <string>
++#include "systools/mSysServiceMonitor.h"
++#include "tools/TraceInterface.h"
++
++namespace mSysService
++{
++  class serviceControl
++  {
++    public:
++      static serviceControl* createServiceControl
++      (
++        const std::string& serviceName,
++        MASSAI::trace::TraceInterface& trc
++      );
++
++      virtual ~serviceControl();
++      virtual bool stopService();
++      virtual bool startService();
++      virtual serviceStatus getStatus() const;
++      virtual std::string getStatusText(serviceStatus status) const;
++
++    protected:
++      serviceControl();
++  };
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 22ab46e3..309cc0c6 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -44,6 +44,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mMutexCSW32.obj \
+                         $(_OBJ)\mSysWindowW32.obj \
+                         $(_OBJ)\mSysServiceMonitorW32.obj \
++                        $(_OBJ)\mSysServiceControlW32.obj \
+                         $(_OBJ)\mSysProcessTreeW32.obj \
+                         $(_OBJ)\mSysDeviceEventW32.obj \
+                         $(_OBJ)\mSysEventW32.obj \
+@@ -178,5 +179,25 @@ MY_BIN13_LINKLIBS =     User32.lib setupapi.lib
+ 
+ MY_BIN13_OBJS =         $(_OBJ)\TestSysFindKeyboardFilter.obj
+ 
++######################################################################
++
++MY_BIN14 =              $(_BIN)\TestSysServiceMonitor.exe
++
++MY_BIN14_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++
++MY_BIN14_LINKLIBS =     
++
++MY_BIN14_OBJS =         $(_OBJ)\TestSysServiceMonitor.obj
++
++######################################################################
++
++MY_BIN15 =              $(_BIN)\TestSysServiceControl.exe
++
++MY_BIN15_USER_LIBS =    $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT)
++
++MY_BIN15_LINKLIBS =     
++
++MY_BIN15_OBJS =         $(_OBJ)\TestSysServiceControl.obj
++
+ ######################################################################
+ !include $(BUILDROOT)\Build\cpp\makefile.rules.mak
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceControl.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceControl.cpp
+new file mode 100644
+index 00000000..f7611f85
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceControl.cpp
+@@ -0,0 +1,68 @@
++// Test mSysServiceControl
++
++#include "tools/TraceLocal.h"
++#include "text/textTools.h"
++#include "systools/mSysException.hpp"
++#include "systools/mSysServiceControl.h"
++#include <iostream>
++
++using MASSAI::trace::TraceLocal;
++using mSysException::standardException;
++
++namespace
++{
++  void usage()
++  {
++    std::cout << "Usage: TestSysServiceControl [start|stop|restart] <servicename>" << std::endl;
++  }
++}
++
++int main(int argc, char **argv)
++{
++  TraceLocal trc("TestSysServiceMonitor");
++  standardException guard;
++  try
++  {
++    if(argc != 3)
++    {
++      usage();
++    }
++    else
++    {
++      mSysService::serviceControl* control = mSysService::serviceControl::createServiceControl(argv[2], trc);
++      std::string command = MASSAI::text::toLower(argv[1]);
++      trc.writeTrace(BasicRuntime_HERE, "status: %s", control->getStatusText(control->getStatus()).c_str());
++      if(command == "start")
++      {
++        control->startService();
++        trc.writeTrace(BasicRuntime_HERE, "status: %s", control->getStatusText(control->getStatus()).c_str());
++      }
++      else if(command == "stop")
++      {
++        control->stopService();
++        trc.writeTrace(BasicRuntime_HERE, "status: %s", control->getStatusText(control->getStatus()).c_str());
++      }
++      else if(command == "restart")
++      {
++        control->stopService();
++        trc.writeTrace(BasicRuntime_HERE, "status: %s", control->getStatusText(control->getStatus()).c_str());
++        control->startService();
++        trc.writeTrace(BasicRuntime_HERE, "status: %s", control->getStatusText(control->getStatus()).c_str());
++      }
++      else
++      {
++        usage();
++      }
++      delete control;
++    }
++  }
++  catch(const std::exception& x)
++  {
++    trc.writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceMonitor.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceMonitor.cpp
+new file mode 100644
+index 00000000..1abd86f9
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysServiceMonitor.cpp
+@@ -0,0 +1,74 @@
++// Test mSysServiceMonitor
++
++#include "tools/TraceLocal.h"
++#include "systools/mEventSem.hpp"
++#include "systools/mSysException.hpp"
++#include "systools/mSysProcessTerminate.h"
++#include "systools/mSysServiceMonitor.h"
++#include <iostream>
++
++using MASSAI::trace::TraceLocal;
++using MASSAI::trace::TraceInterface;
++using mSysException::standardException;
++using Materna::MSSD::eventSemaphore;
++using Materna::MSSD::eventSemaphore_Exception;
++
++namespace
++{
++  class serviceListenerImpl: public mSysService::serviceListener
++  {
++    public:
++      serviceListenerImpl(TraceInterface& trc):
++        m_trc(trc)
++      {}
++
++      ~serviceListenerImpl()
++      {}
++
++      void statusChanged(const std::string& serviceName, mSysService::serviceStatus status)
++      {
++        m_trc.writeTrace(BasicRuntime_HERE, "statusChanged (%s)=>(%s)", serviceName.c_str(), getStatusText(status).c_str());
++      }
++
++    private:
++      TraceInterface& m_trc;
++  };
++}
++
++int main(int argc, char **argv)
++{
++  eventSemaphore terminate;
++  TraceLocal trc("TestSysServiceMonitor");
++  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_LATE, &terminate, &trc);
++  standardException guard;
++  try
++  {
++    if(argc != 2)
++    {
++      std::cout << "Usage: TestSysServiceMonitor <servicename>" << std::endl;
++    }
++    else
++    {
++      serviceListenerImpl listener(trc);
++      mSysService::serviceMonitor* monitor = mSysService::serviceMonitor::createServiceMonitor(argv[1], listener, trc);
++      monitor->startMonitor();
++      terminate.wait();
++      monitor->stopMonitor();
++      delete monitor;
++    }
++  }
++  catch(const eventSemaphore_Exception&)
++  {
++    trc.writeTrace(MajorError_HERE, "open semaphore failed");
++  }
++  catch(const std::exception& x)
++  {
++    trc.writeTrace(MajorError_HERE, x.what());
++  }
++  catch(...)
++  {
++    trc.writeTrace(MajorError_HERE, "unknown exception");
++  }
++  mSysProcessTerminate::resetShutdownHook();
++  return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index a0339bb4..b3cf6c06 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 31);
++VERSION_ID_DT(systools, 1, 0, 0, 32);
+ 
+ /*!
+ \file
+@@ -8,12 +8,18 @@ VERSION_ID_DT(systools, 1, 0, 0, 31);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.31
++@version 1.0.0.32
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.32
++\li 25.01.2016
++\li extension SteT Mantis 0039813: Billing Data not available
++- added mSysServiceControl to start/stop a windows service
++- added TestSysServiceControl and TestSysServiceMonitor to test mSysServiceControl/mSysServiceMonitor
++
+ \version 1.0.0.31
+ \li 07.12.2015
+ \li bugfix SteT Mantis 0032431
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceControlW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceControlW32.cpp
+new file mode 100644
+index 00000000..20e9c4d7
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysServiceControlW32.cpp
+@@ -0,0 +1,358 @@
++// control service status
++
++#include "sysTools/mSysServiceControl.h"
++#include "sysTools/mSysThread.hpp"
++#include "mSysErrorW32.h"
++#include <windows.h>
++
++using mSysThread::thread;
++using MASSAI::trace::TraceInterface;
++using namespace mSysService;
++using namespace mSysError;
++
++namespace
++{
++  enum Constants
++  {
++    PollingTime = 200,
++  };
++}
++
++namespace
++{
++  class serviceControlImpl: public serviceControl
++  {
++    public:
++      serviceControlImpl
++      (
++        const std::string& serviceName,
++        TraceInterface& trc
++      );
++      virtual ~serviceControlImpl();
++      virtual bool stopService();
++      virtual bool startService();
++      virtual serviceStatus getStatus() const;
++
++    private:
++      serviceStatus convert(DWORD status) const;
++      DWORD waitForStatus(SC_HANDLE service, DWORD target, DWORD pending, const char* text);
++      bool stopService(SC_HANDLE serviceControlManager, const char* serviceName);
++      bool stopDependent(SC_HANDLE serviceControlManager, SC_HANDLE service);
++
++      std::string m_serviceName;
++      TraceInterface& m_trc;
++  };
++}
++
++namespace
++{
++  serviceControlImpl::serviceControlImpl
++  (
++    const std::string& serviceName,
++    TraceInterface& trc
++  ):
++    serviceControl(),
++    m_serviceName(serviceName),
++    m_trc(trc)
++  {}
++
++  serviceControlImpl::~serviceControlImpl()
++  {}
++
++  bool serviceControlImpl::stopService()
++  {
++    bool result = false;
++    SC_HANDLE serviceControlManager = OpenSCManager(0, 0, SC_MANAGER_CONNECT);
++    if(!serviceControlManager)
++    {
++      traceLastError(m_trc, MajorError_HERE, "OpenSCManager", GetLastError());
++    }
++    else
++    {
++      result = stopService(serviceControlManager, m_serviceName.c_str());
++    }
++    return result;
++  }
++
++  bool serviceControlImpl::stopService(SC_HANDLE serviceControlManager, const char* serviceName)
++  {
++    bool result = false;
++    SC_HANDLE service = OpenService(serviceControlManager, serviceName, SERVICE_QUERY_STATUS | SERVICE_STOP | SERVICE_ENUMERATE_DEPENDENTS);
++    if(!service)
++    {
++      traceLastError(m_trc, MajorError_HERE, "OpenService", GetLastError());
++    }
++    else
++    {
++      DWORD status = waitForStatus(service, SERVICE_STOPPED, SERVICE_STOP_PENDING, "stopping");
++      if(status ==  SERVICE_STOPPED)
++      {
++        result = true;
++      }
++      else
++      {
++        if(stopDependent(serviceControlManager, service))
++        {
++          SERVICE_STATUS serviceStatus;
++          if(!ControlService(service, SERVICE_CONTROL_STOP, &serviceStatus))
++          {
++            traceLastError(m_trc, MajorError_HERE, "ControlService SERVICE_CONTROL_STOP", GetLastError());
++          }
++          else
++          {
++            status = waitForStatus(service, SERVICE_STOPPED, SERVICE_STOP_PENDING, "stopping");
++            result = status == SERVICE_STOPPED;
++          }
++        }
++      }
++      if(!CloseServiceHandle(service))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle service", GetLastError());
++      }
++    }
++    return result;
++  }
++
++  bool serviceControlImpl::stopDependent(SC_HANDLE serviceControlManager, SC_HANDLE service)
++  {
++    bool result = false;
++    LPENUM_SERVICE_STATUS dependencies = 0;
++    DWORD size;
++    DWORD count;
++    if(EnumDependentServices(service, SERVICE_ACTIVE, dependencies, 0, &size, &count))
++    {
++      result = true;
++    }
++    else
++    {
++      DWORD errorCode = GetLastError();
++      if(errorCode != ERROR_MORE_DATA)
++      {
++        traceLastError(m_trc, MajorError_HERE, "EnumDependentServices", errorCode);
++      }
++      else
++      {
++        dependencies = reinterpret_cast<LPENUM_SERVICE_STATUS>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size));
++        if(!dependencies)
++        {
++          m_trc.writeTrace(MajorError_HERE, "HeapAlloc failed");
++        }
++        else
++        {
++          if(!EnumDependentServices(service, SERVICE_ACTIVE, dependencies, size, &size, &count))
++          {
++            traceLastError(m_trc, MajorError_HERE, "EnumDependentServices", errorCode);
++          }
++          else
++          {
++            for(DWORD i = 0; i < count; i++)
++            {
++              stopService(serviceControlManager, dependencies[i].lpServiceName);
++            }
++          }
++          HeapFree(GetProcessHeap(), 0, dependencies);
++        }
++      }
++    }
++    return result;
++  }
++
++  bool serviceControlImpl::startService()
++  {
++    bool result = false;
++    SC_HANDLE serviceControlManager = OpenSCManager(0, 0, SC_MANAGER_CONNECT);
++    if(!serviceControlManager)
++    {
++      traceLastError(m_trc, MajorError_HERE, "OpenSCManager", GetLastError());
++    }
++    else
++    {
++      SC_HANDLE service = OpenService(serviceControlManager, m_serviceName.c_str(), SERVICE_QUERY_STATUS | SERVICE_START);
++      if(!service)
++      {
++        traceLastError(m_trc, MajorError_HERE, "OpenService", GetLastError());
++      }
++      else
++      {
++        DWORD status = waitForStatus(service, SERVICE_STOPPED, SERVICE_STOP_PENDING, "stopping");
++        if(status == SERVICE_STOPPED)
++        {
++          if(!StartService(service, 0, 0))
++          {
++            traceLastError(m_trc, MajorError_HERE, "StartService", GetLastError());
++          }
++          else
++          {
++            status = waitForStatus(service, SERVICE_RUNNING, SERVICE_START_PENDING, "starting");
++            result = status == SERVICE_RUNNING;
++          }
++        }
++        if(!CloseServiceHandle(service))
++        {
++          traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle service", GetLastError());
++        }
++      }
++      if(!CloseServiceHandle(serviceControlManager))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle serviceControlManager", GetLastError());
++      }
++    }
++    return result;
++  }
++
++  DWORD serviceControlImpl::waitForStatus(SC_HANDLE service, DWORD target, DWORD pending, const char* text)
++  {
++    DWORD status = 0;
++    DWORD size;
++    SERVICE_STATUS_PROCESS serviceStatus;
++    if(!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&serviceStatus), sizeof(SERVICE_STATUS_PROCESS), &size))
++    {
++      traceLastError(m_trc, MajorError_HERE, "QueryServiceStatusEx", GetLastError());
++    }
++    else if(serviceStatus.dwCurrentState != target && serviceStatus.dwCurrentState != pending)
++    {
++      status = serviceStatus.dwCurrentState;
++      m_trc.writeTrace(BasicRuntime_HERE, "not %s", text);
++    }
++    else
++    {
++      status = serviceStatus.dwCurrentState;
++      DWORD startTimestamp = GetTickCount();
++      DWORD startCheckPoint = serviceStatus.dwCheckPoint;
++      while(serviceStatus.dwCurrentState == pending)
++      {
++        DWORD wait = min(10000, max(1000, serviceStatus.dwWaitHint / 10));
++        Sleep(wait);
++        if(!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&serviceStatus), sizeof(SERVICE_STATUS_PROCESS), &size))
++        {
++          status = 0;
++          traceLastError(m_trc, MajorError_HERE, "QueryServiceStatusEx", GetLastError());
++          break;
++        }
++        else
++        {
++          status = serviceStatus.dwCurrentState;
++          if(serviceStatus.dwCheckPoint > startCheckPoint)
++          {
++            startTimestamp = GetTickCount();
++            startCheckPoint = serviceStatus.dwCheckPoint;
++          }
++          else if(status == target)
++          {
++            break;
++          }
++          else if(GetTickCount() - startTimestamp > serviceStatus.dwWaitHint)
++          {
++            m_trc.writeTrace(BasicRuntime_HERE, "Timeout waiting for service %s", text);
++            break;
++          }
++        }
++      }
++    }
++    return status;
++  }
++
++  serviceStatus serviceControlImpl::getStatus() const
++  {
++    serviceStatus result = SVC_UNKNOWN;
++    SC_HANDLE serviceControlManager = OpenSCManager(0, 0, SC_MANAGER_ENUMERATE_SERVICE);
++    if(!serviceControlManager)
++    {
++      traceLastError(m_trc, MajorError_HERE, "OpenSCManager", GetLastError());
++    }
++    else
++    {
++      SC_HANDLE service = OpenService(serviceControlManager, m_serviceName.c_str(), SERVICE_QUERY_STATUS);
++      if(!service)
++      {
++        traceLastError(m_trc, MajorError_HERE, "OpenService", GetLastError());
++      }
++      else
++      {
++        SERVICE_STATUS_PROCESS serviceStatus;
++        DWORD size;
++        if(!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&serviceStatus), sizeof(SERVICE_STATUS_PROCESS), &size))
++        {
++          traceLastError(m_trc, MajorError_HERE, "QueryServiceStatusEx", GetLastError());
++        }
++        else
++        {
++          result = convert(serviceStatus.dwCurrentState);
++        }
++        if(!CloseServiceHandle(service))
++        {
++          traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle service", GetLastError());
++        }
++      }
++      if(!CloseServiceHandle(serviceControlManager))
++      {
++        traceLastError(m_trc, MajorError_HERE, "CloseServiceHandle serviceControlManager", GetLastError());
++      }
++    }
++    return result;
++  }
++
++  serviceStatus serviceControlImpl::convert(DWORD status) const
++  {
++    switch(status)
++    {
++      case SERVICE_STOPPED:          return SVC_STOPPED;
++      case SERVICE_START_PENDING:    return SVC_START_PENDING;
++      case SERVICE_STOP_PENDING:     return SVC_STOP_PENDING;
++      case SERVICE_RUNNING:          return SVC_RUNNING;
++      case SERVICE_CONTINUE_PENDING: return SVC_CONTINUE_PENDING;
++      case SERVICE_PAUSE_PENDING:    return SVC_PAUSE_PENDING;
++      case SERVICE_PAUSED:           return SVC_PAUSED;
++      default:                       return SVC_UNKNOWN;
++    }
++  }
++}
++
++namespace mSysService
++{
++  serviceControl* serviceControl::createServiceControl
++  (
++    const std::string& serviceName,
++    TraceInterface& trc
++  )
++  {
++    serviceControlImpl* result = new serviceControlImpl(serviceName, trc);
++    return result;
++  }
++
++  serviceControl::~serviceControl()
++  {}
++
++  serviceStatus serviceControl::getStatus() const
++  {
++    return SVC_UNKNOWN;
++  }
++
++  serviceControl::serviceControl()
++  {}
++
++  bool serviceControl::stopService()
++  {
++    return false;
++  }
++
++  bool serviceControl::startService()
++  {
++    return false;
++  }
++
++  std::string serviceControl::getStatusText(serviceStatus status) const
++  {
++    switch(status)
++    {
++      case SVC_STOPPED:          return "STOPPED";
++      case SVC_START_PENDING:    return "START_PENDING";
++      case SVC_RUNNING:          return "RUNNING";
++      case SVC_PAUSE_PENDING:    return "PAUSE_PENDING";
++      case SVC_PAUSED:           return "PAUSED";
++      case SVC_CONTINUE_PENDING: return "CONTINUE_PENDING";
++      case SVC_STOP_PENDING:     return "STOP_PENDING";
++      default:                   return "UNKNOWN";
++    }
++  }
++}
+-- 
+2.41.0.windows.1
+

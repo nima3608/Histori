@@ -1,0 +1,216 @@
+From 86b3b4b1b78e3e2b5b333488bae5daaf72e7b634 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 23 Aug 2016 10:31:02 +0000
+Subject: [PATCH 0784/1077] MANTIS 0032431 -corrected the initialisation of the
+ Scheduled-Task and error-management
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1072 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/ScheduledTask.h      |  2 +-
+ .../Massai/cpp/Tools/src/ScheduledTask.cpp    | 93 ++++++++++---------
+ .../cpp/Tools/src/SchedulerInterface.cpp      | 22 +----
+ 3 files changed, 49 insertions(+), 68 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h b/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
+index 59f66632..47d4f256 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/ScheduledTask.h
+@@ -79,7 +79,7 @@ namespace MASSAI
+         *                               If it is empty, the task is scheduled dayliy
+         *   @param task:                The task to schedule
+         */
+-        ScheduledTask(long hour, long minutes, long delay, std::string scheduleFrequency, Task* task);
++        ScheduledTask(long hour, long minutes, long delay, std::string scheduleFrequency, Task* task) throw (std::invalid_argument);
+ 
+ 
+         /**
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+index 94b1781d..66fd0192 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/ScheduledTask.cpp
+@@ -39,7 +39,7 @@ namespace MASSAI
+     }
+ 
+ 
+-    ScheduledTask::ScheduledTask(long hour, long minutes, long delay, std::string scheduleFrequency, Task* task) :        
++    ScheduledTask::ScheduledTask(long hour, long minutes, long delay, std::string scheduleFrequency, Task* task) throw (std::invalid_argument) :
+         m_task(task),
+         m_scheduleMonthly( -1 ),
+         m_scheduleWeekly( -1 ),
+@@ -49,11 +49,14 @@ namespace MASSAI
+       if( hour >= 0 && hour <=23 &&
+           minutes >= 0 && minutes <=59 )
+       {
+-        m_executionTime = boost::posix_time::time_duration( hour,minutes,0,0 );
++        m_executionTime = boost::posix_time::time_duration(hour, minutes, 0, 0);
+       }
+       else
+       { 
+-        m_executionTime = boost::posix_time::time_duration(boost::posix_time::not_a_date_time);
++        stringstream execeptionInfo("");
++        execeptionInfo << "Time is out of the valid range! Hour=" << hour << ", Minutes=" << minutes;
++
++        throw std::invalid_argument(execeptionInfo.str().c_str());
+       }
+     
+     
+@@ -72,8 +75,6 @@ namespace MASSAI
+ 
+                 if( actualDate != NULL )
+                 {
+-                  TRACE(HERE, "Actual system date: %d.%d.%d", actualDate->year(), actualDate->month(), actualDate->day());
+-                
+                   m_scheduleMonthly = actualDate->end_of_month().day();
+                 }
+                 else
+@@ -95,32 +96,48 @@ namespace MASSAI
+               //a day of month
+               try
+               {
+-                  //if(scheduleFrequency.back() == '.')
+-                  //  scheduleFrequency.substr (0, scheduleFrequency.size() - 1);
+-              
+                   m_scheduleMonthly = stoi (scheduleFrequency);
+-                  ssScheduleInfo  << "every " << m_scheduleMonthly << "." << "of month";
+               }
+               catch (const std::invalid_argument& ia) 
+               {
+-                  TRACE(MajorWarning_HERE, "WARNING: INVALID ARGUMENT - %s. argument=[%s]", ia.what(), scheduleFrequency.c_str());
+-                  m_scheduleMonthly = -1;
+-                  
+-                  //a day of weak [mon;|tue;|wed;|thu;|fri;|sat;|sun;]
+-                  day = MASSAI::DateTimeTools::getDayOfWeekAsNumber(scheduleFrequency);
+-
+-                  if( day != -1 )
+-                  {
+-                    m_scheduleWeekly = day;
+-                    ssScheduleInfo  << "every " << MASSAI::DateTimeTools::getDayOfWeekAsString(m_scheduleWeekly);
+-                  }
+-                  else
+-                  {
+-                    TRACE(MajorWarning_HERE, "WARNING: Could not get the right schedule Information. Default set to daily");
+-                    m_scheduleDaily = true;
+-                    ssScheduleInfo << "every day";
+-                  }
++                m_scheduleMonthly = -2;
+               } 
++
++
++              //Check if is a day of week or a day of month
++              if (m_scheduleMonthly == -2)
++              {
++                m_scheduleMonthly = -1;
++
++                //a day of weak [mon;|tue;|wed;|thu;|fri;|sat;|sun;]
++                day = MASSAI::DateTimeTools::getDayOfWeekAsNumber(scheduleFrequency);
++
++                if (day != -1)
++                {
++                  m_scheduleWeekly = day;
++                  ssScheduleInfo << "every " << MASSAI::DateTimeTools::getDayOfWeekAsString(m_scheduleWeekly);
++                }
++                else
++                {
++                  TRACE(MajorWarning_HERE, "WARNING: Could not get the right schedule Information. Default set to daily");
++                  m_scheduleDaily = true;
++                  ssScheduleInfo << "every day";
++                }
++              }
++              else
++              {
++                if (m_scheduleMonthly < 1 || m_scheduleMonthly > 31)
++                {
++                  stringstream execeptionInfo("");
++                  execeptionInfo << "The day for scheduling it out of range: day=" << m_scheduleMonthly;
++
++                  throw std::invalid_argument(execeptionInfo.str().c_str());
++                }
++                else
++                {
++                  ssScheduleInfo << "every " << m_scheduleMonthly << "." << "of month";
++                } 
++              }
+           }
+       }
+       else
+@@ -181,22 +198,13 @@ namespace MASSAI
+         delay_hours   = minutes_of_execution_time / 60;
+         delay_minutes = minutes_of_execution_time % 60; 
+       }
+-
+-      TRACE(HERE, "\nDelay[%d], Random-Delay[%d], Delay-Hour[%d], Delay-Minutes[%d], Hour[%d], Minutes[%d], Minutes-of-Execution[%d]",
+-        delay,
+-        randomDelay,
+-        delay_hours,
+-        delay_minutes,
+-        hour,
+-        minutes,
+-        minutes_of_execution_time);
+         
+       if( delay_hours >= 0 && delay_hours <=23 &&
+           delay_minutes >= 0 && delay_minutes <=59 )
+       {
+         m_delayExecutionTime = boost::posix_time::time_duration(delay_hours, delay_minutes, 0, 0);
+         
+-        TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d], DelayTime[%02d:%02d], Frequency[%s], Task-Command[%s], Task-User[%s]\n",
++        TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d], DelayTime[%02d:%02d], Frequency[%s], Task-Command[%s], Task-User[%s]",
+           m_executionTime.hours(), 
+           m_executionTime.minutes(),
+           m_delayExecutionTime.hours(), 
+@@ -208,17 +216,10 @@ namespace MASSAI
+       }
+       else
+       {
+-        TRACE(MajorWarning_HERE, "WARNING: Hour or Minute out of range");
+-      
+-        m_delayExecutionTime = boost::posix_time::time_duration(boost::posix_time::not_a_date_time);
++        stringstream execeptionInfo("");
++        execeptionInfo << "Delayed-Time is out of the valid range! Hour=" << delay_hours << ", delay_minutes=" << minutes;
+ 
+-        TRACE( BasicRuntime_HERE,"New ScheduledTask: Time[%02d:%02d], Frequency[%s], Task-Command[%s], Task-User[%s]\n",
+-          m_executionTime.hours(), 
+-          m_executionTime.minutes(),
+-          m_scheduleInfo.c_str(),
+-          m_task->getCmd().c_str(),
+-          m_task->getUserAccount().c_str()
+-        );
++        throw std::invalid_argument(execeptionInfo.str().c_str());
+       }
+     }
+   }
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+index b297ab3e..10c9d1d0 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/SchedulerInterface.cpp
+@@ -163,27 +163,7 @@ namespace MASSAI
+           {
+             TRACE(MajorWarning_HERE, "WARNING: Task can't be executet. NULLPOINTER at actual systeme date-time");
+           }
+-            
+-            //TODO:delete
+-          /*TRACE(HERE, "minutes_of_now[%d], minutes_to_schedule[%d], minutes_of_task[%d], Delay-Hour[%d], Delay-Minutes[%d], Hour[%d], Minutes[%d], ScheduleMonthly[%d], ScheduleWeekly[%d], ScheduleDaily[%d], CurrentDay[%d], CurrentDayofWeek[%d],scheduleToday[%d], scheduleNow[%d], !isOldSchedule[%d], Cmd[%s]",
+-            minutes_of_now,
+-            minutes_to_schedule,
+-            minutes_of_task,
+-            (*taskIterator)->getDelayTime().hours(),
+-            (*taskIterator)->getDelayTime().minutes(),
+-            (*taskIterator)->getDelayTime().hours(),
+-            (*taskIterator)->getDelayTime().minutes(),
+-            (*taskIterator)->getScheduleMonthly(),
+-            (*taskIterator)->getScheduleWeekly(),
+-            (*taskIterator)->getScheduleDaily(),
+-            currentDate.year_month_day().day,
+-            currentDate.day_of_week(), 
+-            scheduleToday,
+-            scheduleNow,
+-            !isOldSchedule,
+-            (*taskIterator)->getTask()->getCmd().c_str());
+-            */
+-            
++
+           //Schedule the task if all conditions are correct
+           if( scheduleToday && scheduleNow && !isOldSchedule)
+           {
+-- 
+2.41.0.windows.1
+

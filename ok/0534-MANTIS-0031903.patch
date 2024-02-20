@@ -1,0 +1,182 @@
+From 70b65b38cfa6f0963fc1799ded4a2f047d7f1b6d Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 14 Apr 2014 08:30:11 +0000
+Subject: [PATCH 0534/1076] MANTIS 0031903 Platformsetup: Check for Imagemagick
+ in path before installation
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@665 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/MConfig_CustomAction_def.h            |  4 +-
+ .../cpp/Installer_CustomAction/makefile.mak   |  3 +-
+ .../src/MConfig_CustomAction.cpp              | 95 ++++++++++++++++++-
+ .../src/MConfig_CustomAction.def              |  2 +
+ 4 files changed, 99 insertions(+), 5 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+index 8b26caf2..327c57c7 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/inc/MConfig_CustomAction_def.h
+@@ -1,6 +1,6 @@
+ 
+-#define FILE_VER_BIN     1,0,0,6
+-#define FILE_VER_STR     "FileVersion", "1.0.0.6\0"
++#define FILE_VER_BIN     1,0,0,7
++#define FILE_VER_STR     "FileVersion", "1.0.0.7\0"
+ 
+ #define FILEDESCRIPTION  "FileDescription"  ,"MConfig_CustomActio\0"
+ #define INTERNALNAME     "InternalName"     ,"MConfig_CustomActio\0"
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
+index 88925f43..ecfe252a 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/makefile.mak
+@@ -40,7 +40,8 @@ MY_DLL1_LINKLIBS = \
+     Winspool.lib \
+     Version.lib \
+     Comdlg32.lib \
+-    ws2_32.lib
++    ws2_32.lib \
++    Shlwapi.lib
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+index dce5887d..e90ca7e2 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.cpp
+@@ -2,7 +2,6 @@
+ //
+ 
+ #pragma warning(disable : 4995)
+-#define _CRT_SECURE_NO_WARNINGS
+ #include <winsock2.h>
+ #include "targetver.h"
+ 
+@@ -12,8 +11,8 @@
+ #include <winspool.h>
+ 
+ #include <locale>
+-
+ #include <Commdlg.h>
++#include <Shlwapi.h>
+ 
+ #include <msi.h>
+ #include <msiquery.h>
+@@ -46,6 +45,24 @@ typedef std::set<std::wstring> TUNIQUESET;
+ #define  SET_ADDLISTUNIQUE_FILE_NAME "set_addlistunique_cfg.txt"
+ #define  SET_FILE_NAME "set_cfg.txt"
+ 
++
++class wstrBuff
++{
++        wstrBuff(const wstrBuff& other);
++        wstrBuff& operator=(const wstrBuff& other);
++        wchar_t* internal_; 
++
++    public:
++        explicit wstrBuff( const std::wstring& toCopy) : internal_(new wchar_t[toCopy.size()+1]) 
++        {
++            std::copy(toCopy.begin(),toCopy.end(),internal_);
++            internal_[toCopy.size()]=0;
++        }
++        ~wstrBuff() { delete[] internal_; }
++        wchar_t* str_buf() const { return internal_; }
++        const wchar_t* c_str()  const { return internal_; }
++};
++
+ BOOL __stdcall WcaIsPropertySetW(__in LPCWSTR szProperty)
+ {
+     DWORD cchProperty = 0;
+@@ -851,6 +868,80 @@ LExit:
+   return WcaFinalize(er);
+ }
+ 
++extern "C" _declspec(dllexport) UINT __stdcall CA_CheckFileInPath(MSIHANDLE hInstall)
++{
++#define CHECKFILEINPATH_PROP_NAME L"CHECKFILEINPATH_PROP"
++  std::wstringstream dbstrs;
++
++  std::string tmp_params;
++  std::wstring check_file_name;
++  std::wstring propertyName;
++  
++  LPWSTR pwzPropertyValue = NULL;
++
++  HRESULT hr = S_OK;
++  UINT er = ERROR_SUCCESS;
++  hr = WcaInitialize(hInstall, "CA_CheckFileInPath");
++  dbstrs << L"CA_CheckFileInPath: WcaInitialize " << std::hex << (int)hr << std::endl;
++  Log_Str(dbstrs);
++  ExitOnFailure(hr, "Failed to initialize");
++
++  if( WcaIsPropertySet("CustomActionData") && (hr = WcaGetProperty( L"CustomActionData", &pwzPropertyValue)) == S_OK && pwzPropertyValue && *pwzPropertyValue)
++  {
++    dbstrs << "MSI SETUP CA_CheckFileInPath CustomActionData:" << std::wstring(pwzPropertyValue).c_str() << std::endl;
++    Log_Str(dbstrs);
++  } else
++  {
++    hr = WcaGetProperty(CHECKFILEINPATH_PROP_NAME, &pwzPropertyValue);
++    dbstrs << "MSI SETUP CA_CheckFileInPath: Read CHECKFILEINPATH_PROP [" << std::wstring(pwzPropertyValue).c_str() << "]";
++    Log_Str(dbstrs);
++  }
++  ExitOnFailure(hr, "Failed to get CHECKFILEINPATH_PROP property value or CustomActionData");  
++ 
++  tmp_params.assign(ToNarrow(pwzPropertyValue));
++  size_t cutPos = tmp_params.find(';');
++  if(cutPos!=std::string::npos)
++  {
++    check_file_name=ToWiden(tmp_params.substr(0,cutPos).c_str());
++    propertyName=ToWiden(tmp_params.substr(cutPos+1).c_str());
++  } else
++  {
++    hr = E_UNEXPECTED;
++    dbstrs << "MSI SETUP CA_CheckFileInPath wrong format of CHECKFILEINPATH_PROP:" << pwzPropertyValue << std::endl;
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " wrong format of CHECKFILEINPATH_PROP");
++  }
++
++  if( check_file_name.size() && propertyName.size() )
++  {
++    wchar_t buff[MAX_PATH]; buff[MAX_PATH]=0;
++    wcsncpy(buff,check_file_name.c_str(),MAX_PATH);
++    if(PathFindOnPath(buff,NULL))
++    {
++      hr = WcaSetProperty(propertyName.c_str(), L"FOUND");
++    } else
++    {
++      hr = WcaSetProperty(propertyName.c_str(), L"");
++    }
++    ExitOnFailure(hr, "Failed to set [CHECKFILEINPATH_PROP] property value");    
++    dbstrs << "MSI SETUP CA_CheckFileInPath: " << check_file_name.c_str() << " -> " << propertyName.c_str();
++    Log_Str(dbstrs);
++  } else
++  {
++    hr = S_FALSE;
++    dbstrs << "MSI SETUP CA_CheckFileInPath missing File_Name or PropertyName in CHECKFILEINPATH_PROP";
++    Log_Str(dbstrs);
++    ExitOnFailure(hr, " missing File_Name or PropertyName in CHECKFILEINPATH_PROP");
++  }
++
++LExit:
++  if(pwzPropertyValue) ReleaseStr(pwzPropertyValue);
++  er = (SUCCEEDED(hr)) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
++dbstrs << "MSI SETUP CA_CheckFileInPath: er = " << er << " " << ((er == ERROR_SUCCESS ) ? L"ERROR_SUCCESS" : L"ERROR_INSTALL_FAILURE" );
++Log_Str(dbstrs);
++  return WcaFinalize(er);
++}
++
+ extern "C" _declspec(dllexport) UINT __stdcall CA_DirBrowser(MSIHANDLE hInstall)
+ {
+   std::wstringstream dbstrs;
+diff --git a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+index cea43551..76496f3b 100644
+--- a/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
++++ b/SelfServiceCommon/Massai/cpp/Installer_CustomAction/src/MConfig_CustomAction.def
+@@ -20,3 +20,5 @@ EXPORTS
+   CA_ReplaceTextInFile
+   CA_ReplaceBSlash
+   CA_AppendToFile
++  CA_CheckFileInPath
++
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,370 @@
+From e372ad4d1b3ff4b11b755ae8e2dd47564a501541 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 7 Dec 2011 10:43:38 +0000
+Subject: [PATCH 0225/1076] Mantis 21743: Undo previous change for VC10
+ compatibility. Replace it by a solution without "mutable" and "const_cast".
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@276 90b65887-3827-0410-9a23-83215b262276
+---
+ .../generic/fsm/mStateMachineDoc.hpp          | 185 ++++++++++--------
+ 1 file changed, 104 insertions(+), 81 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
+index 90a793e5..26157bdb 100644
+--- a/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
++++ b/SelfServiceCommon/Interfaces/generic/fsm/mStateMachineDoc.hpp
+@@ -21,6 +21,7 @@
+ #include <iostream>
+ #include <list>
+ #include <set>
++#include <vector>
+ 
+ 
+ 
+@@ -166,7 +167,7 @@ namespace StateMachine
+       void addNode( const char * node )
+       {
+          M_Nodes.push_back(node);
+-	  }
++      }
+ 
+       /**
+        *
+@@ -206,10 +207,10 @@ namespace StateMachine
+    {
+ 
+       //! First string.
+-      const std::string M_S1;
++      std::string const M_S1;
+ 
+       //! Second string.
+-      const std::string M_S2;
++      std::string const M_S2;
+ 
+       //! Event.
+       EVT const         M_Evt;
+@@ -227,7 +228,7 @@ namespace StateMachine
+        * @param Evt:            Event.
+        *
+       **/
+-      graphDocSet( const char* const  S1, const char* const S2, const EVT& Evt ) :
++      graphDocSet( char const * S1, char const * S2, EVT const & Evt ) :
+          M_S1( S1 ),
+          M_S2( S2 ),
+          M_Evt( Evt )
+@@ -243,7 +244,7 @@ namespace StateMachine
+        * @return equality.
+        *
+       **/
+-      bool isEqual( const graphDocSet<EVT> & Other ) const
++      bool isEqual( graphDocSet<EVT> const & Other ) const
+       {
+          if( M_S1 != Other.M_S1 )
+             return false;
+@@ -263,6 +264,7 @@ namespace StateMachine
+ 
+ 
+    /**
++    *
+     * Compare 2 graphDocSet objects.
+     *
+     * @param A:         The first object.
+@@ -272,7 +274,11 @@ namespace StateMachine
+     * @return equality.
+     *
+    **/
+-   template <class EVT> bool operator==( const graphDocSet<EVT>& A, const graphDocSet<EVT>& B )      
++   template <class EVT> bool operator==
++      (
++         graphDocSet<EVT> const & A,
++         graphDocSet<EVT> const & B
++      )
+    {
+       return A.isEqual( B );
+    }
+@@ -286,14 +292,14 @@ namespace StateMachine
+    **/
+    enum graphDocRelation
+    {
+-      REL_NONE,                 //!< 0 no relation
+-      REL_SOURCE,               //!< 1 link into the graph
+-      REL_TARGET,               //!< 2 link from the graph
+-      REL_TARGET_SOURCE,        //!< 3 both
+-      REL_SELECTED,             //!< 4 part of the graph
+-      REL_CLUSTER = 8,          //!< 8 is a cluster
+-      REL_SGRAPH_BACK,          //!< subgraph background
+-      REL_SGRAPH_NODE           //!< subgraph node
++      REL_NONE = 0,             //!< No relation
++      REL_SOURCE = 1,           //!< Link into the graph
++      REL_TARGET = 2,           //!< Link from the graph
++      REL_TARGET_SOURCE = 3,    //!< Line both
++      REL_SELECTED = 4,         //!< Part of the graph
++      REL_CLUSTER = 8,          //!< Is a cluster
++      REL_SGRAPH_BACK = 9,      //!< Subgraph background
++      REL_SGRAPH_NODE = 10      //!< Subgraph node
+    };
+ 
+ 
+@@ -310,13 +316,13 @@ namespace StateMachine
+       std::string       M_Label;
+ 
+       //! Already printed?
+-      mutable bool      M_Printed;
++      bool              M_Printed;
+ 
+       //! Is the place a reference?
+-      mutable bool M_Reference;
++      bool              M_Reference;
+ 
+       //! Place relation.
+-      mutable graphDocRelation  M_Relation;
++      graphDocRelation  M_Relation;
+ 
+    public:
+ 
+@@ -327,7 +333,7 @@ namespace StateMachine
+        * @param Label:          Place label.
+        *
+       **/
+-      placeFlags( const char* const Label ) :
++      placeFlags( char const * Label ) :
+          M_Label( Label ),
+          M_Printed( false ),
+          M_Reference( false ),
+@@ -342,7 +348,7 @@ namespace StateMachine
+        * @param Src:            Source object.
+        *
+       **/
+-      placeFlags( const placeFlags& Src ) :
++      placeFlags( placeFlags const & Src ) :
+          M_Label( Src.M_Label ),
+          M_Printed( Src.M_Printed ),
+          M_Reference( Src.M_Reference ),
+@@ -357,7 +363,7 @@ namespace StateMachine
+        * @return The label.
+        *
+       **/
+-      const std::string& label() const
++      std::string const & label() const
+       {
+          return M_Label;
+       }
+@@ -391,7 +397,7 @@ namespace StateMachine
+        * Set "printed" attribute.
+        *
+       **/
+-      void toPrinted() const
++      void toPrinted()
+       {
+          M_Printed = true;
+       }
+@@ -401,7 +407,7 @@ namespace StateMachine
+        * Set "is a reference" attribute.
+        *
+       **/
+-      void toReference() const
++      void toReference()
+       {
+          M_Reference = true;
+       }
+@@ -411,7 +417,7 @@ namespace StateMachine
+        * Set relation.
+        *
+       **/
+-      void relate( graphDocRelation Relation ) const
++      void relate( graphDocRelation Relation )
+       {
+          /* Emumeration bit-set */
+          unsigned Temp = static_cast<unsigned>( M_Relation );
+@@ -438,36 +444,6 @@ namespace StateMachine
+ 
+    };
+ 
+-   /**
+-    *
+-    * Compare a placeFlags objects to a string.
+-    *
+-   **/
+-   bool operator==( const placeFlags  & A, const char* const X )
+-   {
+-      return ( A.label() == X );
+-   }
+-
+-   /**
+-    *
+-    * Compare two placeFlags objects.
+-    *
+-   **/
+-   bool operator==( const placeFlags & A, const placeFlags & B )
+-   {
+-      return ( A.label() == B.label() );
+-   }
+-
+-   /**
+-    *
+-    * Compare two placeFlags objects.
+-    *
+-   **/
+-   bool operator<( const placeFlags  & A, const placeFlags & B )
+-   {
+-      return ( A.label() < B.label() );
+-   }
+-
+ 
+ 
+    /**
+@@ -498,11 +474,68 @@ namespace StateMachine
+       //! Do we print just one cluster?
+       bool                              M_OnlySet;
+ 
+-      //! The place attributes already printed.
+-      typedef std::set<mutable placeFlags>      placesFlags;
++      //! The place processing attributes.
++      //! This class basically operates like a set. We cannot
++      //! use std:set, because it may not allow to modify its
++      //! elements in-place (MSVC10 compiler) .
++      class placesFlags
++      {
++         //
++         std::vector<placeFlags *>              M_Vec;
++         //
++      public:
++         //
++         placesFlags() :
++            M_Vec()
++         {
++         }
++         //
++         placeFlags const * get( unsigned Offset ) const
++         {
++            if( Offset < M_Vec.size() )
++               return M_Vec[Offset];
++            return 0;
++         }
++         //
++         placeFlags * insert( placeFlags const & Flags )
++         {
++            unsigned const Size = M_Vec.size();
++            for( unsigned Off = 0; Off < Size; ++Off )
++            {
++               placeFlags * F = M_Vec[Off];
++               if( F->label() == Flags.label() )
++               {
++                  return F;
++               }
++            }
++            placeFlags * FNew = new placeFlags( Flags );
++            M_Vec.push_back( FNew );
++            return FNew;
++         }
++         //
++         bool labelIsReference( char const * Place ) const
++         {
++            unsigned const Size = M_Vec.size();
++            for( unsigned Off = 0; Off < Size; ++Off )
++            {
++               placeFlags * F = M_Vec[Off];
++               if( F->label() == Place )
++               {
++                  return F->isReference();
++               }
++            }
++            return false;
++         }
++         //
++      private:
++         //
++         placesFlags( placesFlags const & Src );
++         placesFlags & operator=( placesFlags const & Src );
++         //
++      };
+ 
+       //! The place attributes already printed.
+-      mutable placesFlags                       M_PlacesFlags;
++      placesFlags                       M_PlacesFlags;
+ 
+       //! The places already printed.
+       std::set<docState const *>        M_PlacesSeen;
+@@ -635,10 +668,7 @@ namespace StateMachine
+       **/
+       bool labelIsReference( char const * Place ) const
+       {
+-         placesFlags::const_iterator FoundIt = M_PlacesFlags.find( Place );
+-         if( FoundIt != M_PlacesFlags.end() )
+-            return FoundIt->isReference();
+-         return false;
++         return M_PlacesFlags.labelIsReference( Place );
+       }
+ 
+       /**
+@@ -646,9 +676,9 @@ namespace StateMachine
+        * Place label reference.
+        *
+       **/
+-      placesFlags::iterator labelFlags( char const * Place )
++      placeFlags * labelFlags( char const * Place )
+       {
+-         return M_PlacesFlags.insert( placeFlags( Place ) ).first;
++         return M_PlacesFlags.insert( placeFlags( Place ) );
+       }
+ 
+       /**
+@@ -740,23 +770,14 @@ namespace StateMachine
+                {
+                   if( M_Only.match( StaName ) )
+                   {
+-					const placeFlags& PlSta = *labelFlags( StaClusterName );
+-                     /*labelFlags( StaClusterName )*/const_cast<placeFlags*>(&PlSta)->relate( REL_SELECTED );
+-                     //placesFlags::iterator itp = labelFlags( TgtName );
+-					const placeFlags& PlTgt = *labelFlags( TgtName );
++                     labelFlags( StaClusterName )->relate( REL_SELECTED );
+                      if( M_Only.match( TgtName ) )
+-                        //itp->relate( REL_SELECTED );
+-						const_cast<placeFlags*>( &PlTgt )->relate( REL_SELECTED );
++                        labelFlags( TgtName )->relate( REL_SELECTED );
+                      else
+-                        //itp->relate( REL_TARGET );
+-						const_cast<placeFlags*>( &PlTgt )->relate( REL_TARGET );
++                        labelFlags( TgtName )->relate( REL_TARGET );
+                   }
+                   else
+-				  {
+-					const placeFlags& PlSta = *labelFlags( StaClusterName );
+-						 /*labelFlags( StaClusterName )*/
+-					const_cast<placeFlags*>(&PlSta)->relate( REL_SOURCE );
+-				  }					 
++                     labelFlags( StaClusterName )->relate( REL_SOURCE );
+                }
+                else
+                {
+@@ -1060,19 +1081,21 @@ namespace StateMachine
+          if( M_GAttrib.size() )
+             OS << M_GAttrib.c_str() << std::endl;
+          print( OS, M_Init, M_LAttrib );
+-         placesFlags::const_iterator FoundIt = M_PlacesFlags.begin();
+-         while( FoundIt != M_PlacesFlags.end() )
++         unsigned Off = 0;
++         placeFlags const * F = M_PlacesFlags.get( Off );
++         while( F )
+          {
+-            if( FoundIt->isPrinted() )
++            if( F->isPrinted() )
+             {
+                printAttribute
+                   (
+                      OS,
+-                     FoundIt->label().c_str(),
+-                     FoundIt->relate()
++                     F->label().c_str(),
++                     F->relate()
+                   );
+             }
+-            ++FoundIt;
++            Off += 1;
++            F = M_PlacesFlags.get( Off );
+          }
+          printSubgraphs(OS);
+          OS << "}" << std::endl;
+-- 
+2.41.0.windows.1
+

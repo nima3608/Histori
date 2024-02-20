@@ -1,0 +1,192 @@
+From 039035f3985394faf6820e79aa630595329339e3 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 14 Jul 2022 10:45:17 +0000
+Subject: [PATCH 1070/1077] MANTIS 62824 Mantis 62824: Platform Devicehandlers
+ with VC19 SelfServiceCommon build with VC19
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1739 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/Tools/TraceDelegateWithLevelFromEnv.h |  1 +
+ .../Massai/cpp/Systools/src/mSysEventW32.cpp  |  3 +++
+ .../Systools/src/mSysProcessTerminateW32.cpp  |  3 +++
+ .../cpp/Systools/src/mSysThreadPoolW32.cpp    | 20 +++++++++++++++++++
+ .../Massai/cpp/Text/src/mMainCommandLine.cpp  |  2 +-
+ .../Massai/cpp/Tools/src/TraceSystem.cpp      |  4 ++++
+ .../Massai/cpp/Tools/src/otrcstream.cpp       |  5 -----
+ 7 files changed, 32 insertions(+), 6 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
+index 3dde0244..c503a9a3 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/TraceDelegateWithLevelFromEnv.h
+@@ -8,6 +8,7 @@
+ #pragma once
+ 
+ #include "tools/TraceDelegate.h"
++#include <string>
+ 
+ namespace MASSAI
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+index 111f8423..880ea63a 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysEventW32.cpp
+@@ -44,6 +44,8 @@ namespace
+     WM_CALL_LIST = WM_USER,
+   };
+ 
++#ifndef WM_POINTERDEVICECHANGE
++  // More recent SDK does already contain WM_POINTER... definitions
+   enum StandardMessages
+   {
+      WM_POINTERDEVICECHANGE =            0x0238,
+@@ -67,6 +69,7 @@ namespace
+      WM_POINTERROUTEDRELEASED =          0x0253,
+      WM_DPICHANGED =                     0x02E0,
+   };
++#endif
+ 
+   const char* windowClassName = "mSysEventCallbackWindow";
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
+index babc02d1..b82b302e 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessTerminateW32.cpp
+@@ -394,6 +394,8 @@ namespace mSysProcessTerminate
+       }
+     }
+ 
++#ifndef WM_POINTERDEVICECHANGE
++    // More recent SDK does already contain WM_POINTER... definitions
+     enum StandardMessages
+     {
+        WM_POINTERDEVICECHANGE =            0x0238,
+@@ -417,6 +419,7 @@ namespace mSysProcessTerminate
+        WM_POINTERROUTEDRELEASED =          0x0253,
+        WM_DPICHANGED =                     0x02E0,
+     };
++#endif
+ 
+     const char* getMessageText(unsigned int msg)
+     {
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
+index 4f5c6348..3c23889c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadPoolW32.cpp
+@@ -10,6 +10,7 @@
+ #include <set>
+ #include <vector>
+ #include <functional>
++#include <memory>
+ 
+ using MASSAI::trace::TraceInterface;
+ using Materna::MSSD::eventSemaphore;
+@@ -27,7 +28,12 @@ namespace
+     TERMINATE_WAIT_TIME_IN_MS = 500,
+   };
+ 
++#ifdef CUSS2
++  // auto_ptr is deprecated
++  typedef std::unique_ptr<Job> JobPtr;
++#else
+   typedef std::auto_ptr<Job> JobPtr;
++#endif
+ 
+   class JobCompare
+   {
+@@ -117,7 +123,11 @@ namespace
+     thread(exceptionHandler, traceWriter, 0, stacksize),
+     m_terminate(false),
+     m_pOwner(pOwner),
++#ifdef CUSS2
++    m_pJob(nullptr)
++#else
+     m_pJob(0)
++#endif
+   {
+     m_pOwner->trc().writeTrace(BasicRuntime_HERE, "Thread created (%p)", this);
+   }
+@@ -149,8 +159,12 @@ namespace
+         m_notify.reset();
+         if(m_pJob.get())
+         {
++#ifdef CUSS2
++          pJob = std::move(m_pJob);
++#else
+           pJob= m_pJob;
+           m_pJob= JobPtr(0);
++#endif
+         }
+       }
+       if(pJob.get() && !m_terminate)
+@@ -286,7 +300,10 @@ namespace
+       if(pThread && pThread->call(pExecute))
+       {
+         m_trc.writeTrace(BasicRuntime_HERE, "Thread called (%p)", pThread);
++#ifdef CUSS2
++#else
+         m_jobs.top().release();
++#endif
+         m_jobs.pop();
+         m_idle.erase(pThread);
+         m_active.insert(pThread);
+@@ -303,7 +320,10 @@ namespace
+       Job* pJob= m_jobs.top().get();
+       if(pThread->call(pJob))
+       {
++#ifdef CUSS2
++#else
+         m_jobs.top().release();
++#endif
+         m_jobs.pop();
+         m_trc.writeTrace(BasicRuntime_HERE, "Thread called (%p)", pThread);
+       }
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+index 298da25d..df90d39f 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+@@ -17,7 +17,7 @@
+ 
+ #include "text/mMainCommandLine.hpp"
+ 
+-
++#include <string>
+ 
+ namespace
+ {
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceSystem.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSystem.cpp
+index cf9d4f68..dfff7097 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceSystem.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceSystem.cpp
+@@ -21,7 +21,11 @@ namespace
+     public:
+       virtual void traceLine(const std::string& head, const std::string& data) const
+       {
++#ifdef CUSS2
++        OutputDebugStringA((head + data + "\n").c_str());
++#else
+         OutputDebugString((head + data + "\n").c_str());
++#endif
+       }
+   };
+   SystemTrace* pTrace= 0;
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/otrcstream.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/otrcstream.cpp
+index 0f7aef38..1c4cbf8d 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/otrcstream.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/otrcstream.cpp
+@@ -79,12 +79,7 @@ ostream& trc::newl( ostream& os)
+         otrcstream& trcostr = dynamic_cast<otrcstream&>(os);
+         trcostr.writeTrace();
+     }
+-    catch(bad_cast&)
+-    {// cast did not work
+-        os << os;
+-    }
+     catch(...)
+     {}
+-
+     return os;
+ }
+-- 
+2.41.0.windows.1
+

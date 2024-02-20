@@ -1,0 +1,390 @@
+From 8b1fdb08112136b531b2b53fb16b2810161b6283 Mon Sep 17 00:00:00 2001
+From: mduffe <mduffe@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 25 Aug 2017 08:29:02 +0000
+Subject: [PATCH 0868/1077] MANTIS 0043779 Set Error Messages
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1243 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Build/setup/SetKioskData/SetKioskData.iss | 220 +++++++++++++++---
+ 1 file changed, 190 insertions(+), 30 deletions(-)
+
+diff --git a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+index 2a0d6089..c68ece70 100644
+--- a/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
++++ b/SelfServiceCommon/Build/setup/SetKioskData/SetKioskData.iss
+@@ -43,11 +43,11 @@ AlwaysRestart=True
+ #define REG_GATE_DATA_KEY 'installDir'
+ 
+ [Files]
+-Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigNetwork(); Check: CheckRunScript('IPV4');
+-Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigHostname(); Check: CheckRunHostconfig();
+-Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunJoinDomain(); Check: CheckRunScript('ADD2DOMAIN');
+-Source: "configAutologon.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigAutologon(); Check: CheckRunScript('AUTOLOGON');
+-Source: "configPlatform.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunConfigPlatform(); Check: CheckRunConfigPlatform();
++Source: "configNetwork.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall;
++Source: "configHostname.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; 
++Source: "joinDom.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; 
++Source: "configAutologon.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall; 
++Source: "configPlatform.cmd"; DestDir: "{tmp}"; Flags: deleteafterinstall;
+ Source: "{code:GetMIPSUserDir}\Start MIPS.lnk"; DestDir: "{userstartup}"; Flags: external skipifsourcedoesntexist
+ Source: "C:\Users\Public\Desktop\START.lnk"; DestDir: "{commonstartup}"; Flags: external skipifsourcedoesntexist
+ 
+@@ -241,7 +241,7 @@ begin
+     end;
+ end;
+ 
+-procedure RunCommand(cmd: String; params: String; WorkingDir: String);
++function RunCommand(cmd: String; params: String; WorkingDir: String):Integer;
+ var
+     ResultCode : Integer;
+     ExecRun : Boolean;
+@@ -280,6 +280,7 @@ begin
+         CancelWoP := true;
+         WizardForm.Close;
+     end;
++    Result := ResultCode;
+ end;
+ 
+ function SetMIPSDir(Path, InstallKey, DataKey: String): Boolean;
+@@ -300,7 +301,7 @@ begin
+     end;
+ end;
+ 
+-procedure RunSetConfigItem(ItemName, ItemType, ItemValue, RegKey, CfgValuesFlags: String);
++function RunSetConfigItem(ItemName, ItemType, ItemValue, RegKey, CfgValuesFlags: String) :Integer;
+ var
+     params : String;
+ begin
+@@ -313,7 +314,7 @@ begin
+     params := params + '"' + RegKey + '"';
+     params := params + '"' + CfgValuesFlags + '"';
+     
+-    RunCommand('{tmp}\configPlatform.cmd', params, '{tmp}');
++    Result := RunCommand('{tmp}\configPlatform.cmd', params, '{tmp}');
+ end;
+ 
+ { ----------------------------------------------------------------------------------------------- }
+@@ -429,7 +430,7 @@ end;
+ { ----------------------------------------------------------------------------------------------- }
+ { Run script section }
+ 
+-procedure ProcessInterfaces(cmd: String; WorkingDir: String);
++function ProcessInterfaces(cmd: String; WorkingDir: String): Integer;
+ var
+     i          : Integer;
+     l          : Integer;
+@@ -449,12 +450,12 @@ begin
+             params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4Subnet') + '" ';
+             params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4Gateway') + '" ';
+             params := params + '"' + GetPageData('IPV4_' + LANInterfaces[i], 'IPv4DNS') + '" ';
+-            RunCommand(cmd, params, WorkingDir);
++            Result := RunCommand(cmd, params, WorkingDir);
+         end;
+     end;
+ end;
+ 
+-procedure ProcessConfiguration();
++function ProcessConfiguration():Integer;
+ var
+     i          : Integer;
+     j          : Integer;
+@@ -463,6 +464,8 @@ var
+     params     : String;
+     PageName   : String;
+     Page       : TPageData;
++    errorCode       : Integer;
++    returnErrorCode : Integer;
+ begin
+     GroupLen := GetArrayLength(ConfigGroups);
+     if GroupLen > 0 then
+@@ -479,25 +482,30 @@ begin
+                 for j := 0 to FieldLen - 1 do
+                 begin
+                     LOG('Process config field ' + PageName + ': ' + Page.Fields[j].Name);
+-                    RunSetConfigItem(
++                    errorCode :=  RunSetConfigItem(
+                         GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'ItemName', '', IniFilename),
+                         GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'ItemType', 'TEXT', IniFilename),
+                         GetPageData(PageName, Page.Fields[j].Name),
+                         GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'RegKey', '', IniFilename),
+                         GetIniString('CONFIG_ITEM_' + Page.Fields[j].Name, 'CfgValuesFlags', '', IniFilename)
+                     );
++                    if not ( errorCode = 0) then 
++                    begin
++                      returnErrorCode := errorCode;
++                    end;
+                 end;
+             end;
+         end;
+     end;
++    Result := returnErrorCode;
+ end;
+ 
+-procedure RunConfigNetwork();
++function RunConfigNetwork(): Integer;
+ begin
+-    ProcessInterfaces('{tmp}\configNetwork.cmd', '{tmp}');
++     Result := ProcessInterfaces('{tmp}\configNetwork.cmd', '{tmp}');
+ end;
+ 
+-procedure RunConfigHostname();
++function RunConfigHostname(): Integer;
+ var
+     params : String;
+ begin
+@@ -506,10 +514,10 @@ begin
+     params := params + '"' + ExpandConstant('{log}') + '" ';
+     params := params + '"' + GetKioskName() + '"';
+     
+-    RunCommand('{tmp}\configHostname.cmd', params, '{tmp}');
++    Result := RunCommand('{tmp}\configHostname.cmd', params, '{tmp}');
+ end;
+ 
+-procedure RunJoinDomain();
++function RunJoinDomain(): Integer;
+ var
+     params : String;
+ begin
+@@ -521,10 +529,10 @@ begin
+     params := params + '"' + GetDomainUser() + '" ';
+     params := params + '"' + GetOperationUnit() + '" ';
+     
+-    RunCommand('{tmp}\joinDom.cmd', params, '{tmp}');
++    Result := RunCommand('{tmp}\joinDom.cmd', params, '{tmp}');
+ end;
+ 
+-procedure RunConfigAutologon();
++function RunConfigAutologon(): Integer; 
+ var
+     params : String;
+ begin
+@@ -536,14 +544,16 @@ begin
+     params := params + '"' + GetLogonPassword() + '" ';
+     params := params + '"' + GetAddToAdmin() + '"';
+      
+-    RunCommand('{tmp}\configAutologon.cmd', params, '{tmp}');
++    Result := RunCommand('{tmp}\configAutologon.cmd', params, '{tmp}');
+ end;
+ 
+-procedure RunConfigEnvironment();
++function RunConfigEnvironment():Integer;
+ var
+-    params : String;
++    params : String;    returnErrorCode : Integer;
++    errorCode : Integer;
+ begin
+-    RunSetConfigItem(
++    returnErrorCode := 0;
++    errorCode := RunSetConfigItem(
+         'ENVIRONMENT.LEVEL.Airport_Code',
+         'TEXT',
+         GetAirport(),
+@@ -551,7 +561,12 @@ begin
+         '-autoinitial'
+     );
+     
+-    RunSetConfigItem(
++    if not ( errorCode = 0) then 
++    begin
++     returnErrorCode := errorCode;
++    end;
++
++    errorCode := RunSetConfigItem(
+         'ENVIRONMENT.LEVEL.Terminal',
+         'TEXT',
+         GetTerminal(),
+@@ -559,34 +574,66 @@ begin
+         '-autoinitial'
+     );
+     
+-    RunSetConfigItem(
++    if not ( errorCode = 0) then 
++    begin
++     returnErrorCode := errorCode;
++    end;
++
++    errorCode := RunSetConfigItem(
+         'ENVIRONMENT.LEVEL.Area',
+         'TEXT',
+         GetArea(),
+         'KIOSKDATA_AREA',
+         '-autoinitial'
+     );
+-    
+-    RunSetConfigItem(
++     
++    if not ( errorCode = 0) then 
++    begin
++     returnErrorCode := errorCode;
++    end;
++
++    errorCode := RunSetConfigItem(
+         'ENVIRONMENT.LEVEL.Kiosk_Name',
+         'TEXT',
+         GetKioskName(),
+         'KIOSKDATA_KIOSK_NAME',
+         '-autoinitial'
+     );
++
++
++    if not ( errorCode = 0) then 
++    begin
++     returnErrorCode := errorCode;
++    end;
++
++Result := returnErrorCode;
++
+ end;
+ 
+-procedure RunConfigPlatform();
++function RunConfigPlatform(): Integer;
++var
++  returnErrorCode : Integer ;
++  errorCode       : Integer;
+ begin
++   returnErrorCode := 0;
+     if  CheckRunScript('KIOSKDATA') then
+     begin 
+-        RunConfigEnvironment();
++        errorCode :=  RunConfigEnvironment();
++        if not (errorCode = 0) then
++        begin
++          returnErrorCode := errorCode;
++        end;
+     end;
+     
+     if CheckRunScript('CONFIGURATION') then
+     begin
+-        ProcessConfiguration();
++        errorCode :=  ProcessConfiguration();
++        if not (errorCode = 0) then
++        begin
++          returnErrorCode := errorCode;
++        end;
+     end;
++     Result:= returnErrorCode;
+ end;
+ 
+ { ----------------------------------------------------------------------------------------------- }
+@@ -987,4 +1034,117 @@ begin
+     
+     ExtractTemporaryFiles('{tmp}\*.cmd');
+     
++end;
++
++function NextButtonClick(CurPageID: Integer): Boolean;
++
++var 
++    i           : Integer;
++    errorCode   : Integer;
++    isValid : Boolean;
++begin
++  isValid := true;
++
++ for i := 0 to GetArrayLength(MIPSPages) - 1 do
++  begin
++    
++ 
++
++  if (MIPSPages[i].Page.ID = CurPageID ) then
++        begin
++          
++          
++           if Pos(MIPSPages[i].Page.Name, 'KIOSKDATA') = 1 then
++        begin
++        
++         errorCode := RunConfigHostname();
++         if not (errorCode = 0) then
++         begin
++          isValid := false;
++          end; 
++
++		  MsgBox(
++            'Pos(Screens[i], KIOSKDATA)errorCode '+ IntToStr(errorCode), 
++            mbCriticalError,
++            MB_OK
++        );
++           
++        end
++        else if Pos(MIPSPages[i].Page.Name, 'ADD2DOMAIN') = 1 then
++        begin
++    
++         errorCode := RunJoinDomain();
++         if not (errorCode = 0) then
++         begin
++          isValid := false;
++          end; 
++
++		MsgBox(
++            'Pos(Screens[i], ADD2DOMAIN) errorCode '+ IntToStr(errorCode), 
++            mbCriticalError,
++            MB_OK
++        );
++          
++        end
++        else if Pos(MIPSPages[i].Page.Name, 'AUTOLOGON') = 1 then
++        begin
++
++        errorCode := RunConfigAutologon();
++         if not (errorCode = 0) then
++         begin
++          isValid := false;
++          end; 
++		MsgBox(
++            'Pos(Screens[i], AUTOLOGON)errorCode '+ IntToStr(errorCode), 
++            mbCriticalError,
++            MB_OK
++        );
++           
++        end
++        else if Pos(MIPSPages[i].Page.Name, 'IPV4_Local_Area_Connection') = 1 then
++        begin
++         errorCode := RunConfigNetwork();
++         if not (errorCode = 0) then
++         begin
++          isValid := false;
++          end; 
++		MsgBox(
++            'Pos(Screens[i], IPV4) errorCode '+ IntToStr(errorCode) , 
++            mbCriticalError,
++            MB_OK
++        );
++           
++        end
++        else if Pos(MIPSPages[i].Page.Name, 'CONFIGURATION') = 1 then
++        begin
++
++         errorCode := RunConfigPlatform();
++         if not (errorCode = 0) then
++         begin
++          isValid := false;
++          end; 
++
++		MsgBox(
++            'Pos(Screens[i], CONFIGURATION)'+ IntToStr(errorCode), 
++            mbCriticalError,
++            MB_OK
++        );
++            
++        end;
++
++          
++          
++            
++    //     MsgBox(
++    //        'same ID '+ MIPSPages[i].Page.NAME, 
++    //        mbCriticalError,
++    //        MB_OK
++    //    );
++
++         end;
++       
++
++         end;
++        
++ Result:= isValid;
+ end;
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,463 @@
+From 3b4650b4cd5c2d8a14d0a5a837e5f9dfd2916223 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 27 Jun 2013 19:29:06 +0000
+Subject: [PATCH 0417/1076] texttools.lib V1.0.0.2 Mantis 0026902: Internet
+ Explorer Process doesn't close readEnv added   read environment variables  
+ read configuration entry     PLATFORM.ENVIRONMENT.Variables     type: text
+ list     description: substitution variables; format variablename=value    
+ default: TerminationExclusion=ctfmon.exe
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@512 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/text/cEnvSubst.hpp         |   7 +-
+ .../Interfaces/inc/text/readEnv.h             |  27 +++
+ .../Interfaces/inc/text/textTools.h           |  13 +-
+ .../Massai/cpp/Text/makefile.mak              |   3 +-
+ .../Massai/cpp/Text/src/cEnvSubst.cpp         |  24 +--
+ .../Massai/cpp/Text/src/local_def.cpp         |  31 ++--
+ .../Massai/cpp/Text/src/readEnv.cpp           | 162 ++++++++++++++++++
+ .../Massai/cpp/Text/src/textTools.cpp         |  18 +-
+ 8 files changed, 239 insertions(+), 46 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/text/readEnv.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+index ddae7701..18fb2e98 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
++++ b/SelfServiceCommon/Interfaces/inc/text/cEnvSubst.hpp
+@@ -39,9 +39,8 @@ public:
+   void SetEnvVars(const std::map<std::string,std::string> setEnv);
+   void ClearEnvVars();
+ 
+-  std::string SubstEnvVars(const char* str);
+-  std::string SubstEnvVars(const std::string& str);
+-  std::list<std::string> substEnvList(const std::list<std::string>& el);
+-
++  std::string SubstEnvVars(const char* str) const;
++  std::string SubstEnvVars(const std::string& str) const;
++  std::list<std::string> substEnvList(const std::list<std::string>& el) const;
+ };
+ #endif
+diff --git a/SelfServiceCommon/Interfaces/inc/text/readEnv.h b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+new file mode 100644
+index 00000000..23d3ab23
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/text/readEnv.h
+@@ -0,0 +1,27 @@
++// read values for CEnvSubst
++#ifndef READENV_H
++#define READENV_H
++#ifdef SHOW_INCLUDE_FILES
++#pragma message("including: " __FILE__)
++#endif
++
++#include <string>
++#include <map>
++#include "tools/TraceInterface.h"
++
++namespace mText
++{
++  typedef std::map<std::string, std::string> Environment;
++
++  class ReadEnvironment
++  {
++    public:
++      virtual ~ReadEnvironment();
++      virtual Environment getEnv() = 0;
++  };
++
++  ReadEnvironment* getConfigReader(const std::string& authentification, MASSAI::trace::TraceInterface& trc);
++  ReadEnvironment* getEnvironmentVariablesReader(MASSAI::trace::TraceInterface& trc);
++}
++
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/text/textTools.h b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+index 9dc835b5..8ba0806b 100644
+--- a/SelfServiceCommon/Interfaces/inc/text/textTools.h
++++ b/SelfServiceCommon/Interfaces/inc/text/textTools.h
+@@ -1,12 +1,5 @@
+-/**
+- **************************************************************************
+- *
+- * @file textTools.h
+- *
+- *
+- *
+- **************************************************************************
+-**/
++// text tools
++
+ #ifndef INCLUDE_TEXTTOOLS_H
+ #define INCLUDE_TEXTTOOLS_H
+ #ifdef SHOW_INCLUDE_FILES
+@@ -23,6 +16,7 @@ namespace MASSAI
+   {
+     typedef std::list<std::string> TextList;
+     typedef std::vector<char> CharVector;
++
+     /*
+       split the input string around the delimiter
+       split(":aa;bb;cc;", ";:", partList, delimiterList)
+@@ -30,6 +24,7 @@ namespace MASSAI
+           partList:      "",  "aa", "bb", "cc", ""
+           delimiterList: ":", ";",  ";",  ";"
+     */
++    void split(const std::string& input, const std::string& delimiter, TextList& partList);
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList);
+ 
+     std::string fromHex(const std::string& hexdata);
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 307742a1..4fa2e168 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -22,7 +22,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\textTools.obj \
+                         $(_OBJ)\timeOfTrace.obj \
+                         $(_OBJ)\cEnvSubst.obj \
+-                        $(_OBJ)\stoupper.obj
++                        $(_OBJ)\stoupper.obj \
++                        $(_OBJ)\readEnv.obj
+ 
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+index 6d7bc40c..6c5f59dc 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/cEnvSubst.cpp
+@@ -36,14 +36,14 @@ void CEnvSubst::SetBaseEnvVars()
+   try
+   {
+     boost::regex ReplaceStr1( "\\\\",
+-           boost::regex::normal | boost::regbase::icase 
++           boost::regex::normal | boost::regbase::icase
+ #ifndef _BOOST_144
+ 		   | boost::regbase::escape_in_lists
+-#endif		   
++#endif
+ 		   );
+     boost::regex ReplaceStr2( "\\$",
+-           boost::regex::normal | boost::regbase::icase 
+-#ifndef _BOOST_144		   
++           boost::regex::normal | boost::regbase::icase
++#ifndef _BOOST_144
+ 		   | boost::regbase::escape_in_lists
+ #endif
+ 		);
+@@ -81,13 +81,13 @@ void CEnvSubst::SetEnvVars(const std::map<std::string,std::string> setEnv)
+   {
+     boost::regex ReplaceStr1( "\\\\",
+            boost::regex::normal | boost::regbase::icase
+-#ifndef _BOOST_144		   		   
++#ifndef _BOOST_144
+ 		   | boost::regbase::escape_in_lists
+ #endif
+ 		   );
+     boost::regex ReplaceStr2( "\\$",
+-           boost::regex::normal | boost::regbase::icase 
+-#ifndef _BOOST_144		   		   
++           boost::regex::normal | boost::regbase::icase
++#ifndef _BOOST_144
+ 		   | boost::regbase::escape_in_lists
+ #endif
+ 		   );
+@@ -118,15 +118,15 @@ void CEnvSubst::ClearEnvVars()
+   env.clear();
+ }
+ 
+-std::string CEnvSubst::SubstEnvVars(const char* str)
++std::string CEnvSubst::SubstEnvVars(const char* str) const
+ {
+   return SubstEnvVars(std::string(str));
+ }
+ 
+-std::string CEnvSubst::SubstEnvVars(const std::string& str)
++std::string CEnvSubst::SubstEnvVars(const std::string& str) const
+ {
+   TRACE(HERE_8,"Substitution constants:");
+-  for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++  for(std::map<std::string, std::string>::const_iterator it=env.begin(); it !=env.end(); ++it)
+   {
+     TRACE(HERE_8,"\t%s->%s",(std::string("$")+(*it).first).c_str(),(*it).second.c_str());
+   }
+@@ -134,7 +134,7 @@ std::string CEnvSubst::SubstEnvVars(const std::string& str)
+   std::string dummy(str);
+   try
+   {
+-    for(std::map<std::string, std::string>::iterator it=env.begin(); it !=env.end(); ++it)
++    for(std::map<std::string, std::string>::const_iterator it=env.begin(); it !=env.end(); ++it)
+     {
+       boost::regex ReplaceStr( (std::string("$")+ (*it).first).c_str(),
+              boost::regex::icase | boost::regex::literal);
+@@ -149,7 +149,7 @@ std::string CEnvSubst::SubstEnvVars(const std::string& str)
+   return dummy;
+ }
+ 
+-std::list<std::string> CEnvSubst::substEnvList(const std::list<std::string>& el)
++std::list<std::string> CEnvSubst::substEnvList(const std::list<std::string>& el) const
+ {
+   std::list<std::string> buff;
+   TRACE(HERE_5,"substEnvList:");
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+index 34b80fd0..033504fb 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/local_def.cpp
+@@ -1,14 +1,23 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+ /*! \page texttools.lib; text tools library - Release Notes
+- *
+- *
+- *  \date 19.11.2010 \li V1.0.0.1
+- *                   \li SteT textTools added
+- *
+- *  \date 19.10.2010 \li V1.0.0.0
+- *                   \li SteT Initial Version
+- *
+- */
+-
+-VERSION_ID_DT(text, 1, 0, 0, 1);
++
++\date 27.06.2013
++\li V1.0.0.2
++\li SteT Mantis 0026902: Internet Explorer Process doesn't close
++readEnv added
++  read environment variables
++  read configuration entry
++    PLATFORM.ENVIRONMENT.Variables
++    type: text list
++    description: substitution variables; format variablename=value
++    default: TerminationExclusion=ctfmon.exe
++
++\date 19.11.2010 \li V1.0.0.1
++                 \li SteT textTools added
++
++\date 19.10.2010 \li V1.0.0.0
++                 \li SteT Initial Version
++*/
++
++VERSION_ID_DT(text, 1, 0, 0, 2);
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+new file mode 100644
+index 00000000..dc5f5646
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Text/src/readEnv.cpp
+@@ -0,0 +1,162 @@
++// read values for CEnvSubst
++
++#include "text/readEnv.h"
++#include "cfgclnt/nConfigTextList.hpp"
++#include <windows.h>
++
++using nConfig::gcTextList;
++using MASSAI::trace::TraceInterface;
++using namespace mText;
++
++
++namespace
++{
++  typedef std::list<std::string> TextList;
++
++  class EnvironmentConfiguration: public gcTextList
++  {
++    public:
++      EnvironmentConfiguration(const std::string& authentification);
++      virtual void create(const char*& rights, const char*& explanation,
++        std::list<std::string>& defaultValue);
++  };
++
++  class ReadConfig: public ReadEnvironment
++  {
++    public:
++      ReadConfig(const std::string& authentification, TraceInterface& trc);
++      virtual ~ReadConfig();
++      virtual Environment getEnv();
++    private:
++      EnvironmentConfiguration m_env;
++      TraceInterface& m_trc;
++  };
++
++  class ReadEnvVariables: public ReadEnvironment
++  {
++    public:
++      ReadEnvVariables(TraceInterface& trc);
++      void init();
++      virtual ~ReadEnvVariables();
++      virtual Environment getEnv();
++
++    private:
++      Environment m_env;
++      TraceInterface& m_trc;
++  };
++
++  void add(Environment& env, const std::string& variable, TraceInterface& trc, const char* what);
++
++  EnvironmentConfiguration::EnvironmentConfiguration(const std::string& authentification):
++   gcTextList("PLATFORM.ENVIRONMENT.Variables", authentification.c_str())
++  {}
++
++  void EnvironmentConfiguration::create(const char*& rights, const char*& explanation,
++    std::list<std::string>& defaultValue)
++  {
++    explanation = "substitution variables; format variablename=value";
++    defaultValue.push_back("TerminationExclusion=ctfmon.exe");
++  }
++
++  ReadConfig::ReadConfig(const std::string& authentification, TraceInterface& trc):
++    m_env(authentification),
++    m_trc(trc)
++  {}
++
++  ReadConfig::~ReadConfig()
++  {}
++
++  Environment ReadConfig::getEnv()
++  {
++    Environment result;
++    try
++    {
++      TextList env = m_env.get();
++      TextList::const_iterator it = env.begin();
++      TextList::const_iterator end = env.end();
++      for(; it != end; it++)
++      {
++        add(result, *it, m_trc, "config");
++      }
++    }
++    catch(const nConfig::exception& e)
++    {
++      m_trc.writeTrace(MajorError_HERE, "read env variables from config failed: (%s)", e.what());
++    }
++    return result;
++  }
++
++  ReadEnvVariables::ReadEnvVariables(TraceInterface& trc):
++    m_env(),
++    m_trc(trc)
++  {}
++
++  ReadEnvVariables::~ReadEnvVariables()
++  {}
++
++  void ReadEnvVariables::init()
++  {
++    // Var1=Value1\0
++    //  ...
++    // VarN=ValueN\0\0
++    char* env = GetEnvironmentStrings();
++    const char* var = env;
++    while(var)
++    {
++      size_t length = strlen(var);
++      if(length == 0)
++      {
++        var = 0;
++      }
++      else
++      {
++        add(m_env, std::string(var, length), m_trc, "env");
++        var += length + 1;
++      }
++    }
++    FreeEnvironmentStrings(env);
++  }
++
++  Environment ReadEnvVariables::getEnv()
++  {
++    return m_env;
++  }
++
++  void add(Environment& env, const std::string& variable, TraceInterface& trc, const char* what)
++  {
++    size_t delimiter = variable.find('=');
++    if(delimiter != std::string::npos)
++    {
++      std::string key = std::string(variable, 0, delimiter);
++      std::string value = std::string(variable, delimiter + 1);
++      env[key] = value;
++      trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->(%.1000s)", what, key.c_str(), value.c_str());
++    }
++    else
++    {
++      env[variable] = "";
++      trc.writeTrace(SecondaryRuntime_HERE, "(%s): (%.100s)->()", what, variable.c_str());
++    }
++  }
++
++}
++
++namespace mText
++{
++  // typedef std::map<std::string, std::string> Environment;
++  ReadEnvironment::~ReadEnvironment()
++  {}
++
++  ReadEnvironment* getConfigReader(const std::string& authentification, TraceInterface& trc)
++  {
++    ReadConfig* result = new ReadConfig(authentification, trc);
++    return result;
++  }
++
++  ReadEnvironment* getEnvironmentVariablesReader(TraceInterface& trc)
++  {
++    ReadEnvVariables* result = new ReadEnvVariables(trc);
++    result->init();
++    return result;
++  }
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+index 5ea901f7..bff088bc 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/textTools.cpp
+@@ -1,11 +1,4 @@
+-/****************************************************************************
+- *
+- * @file textTools.cpp
+- *
+- *
+- *
+- *
+- ****************************************************************************/
++// text tools
+ 
+ #pragma warning (disable:4786)
+ 
+@@ -48,6 +41,7 @@ namespace
+     }
+     return false;
+   }
++
+   int _fromHex(char in)
+   {
+     switch(in)
+@@ -91,6 +85,12 @@ namespace MASSAI
+           partList:      "",  "aa", "bb", "cc", ""
+           delimiterList: ":", ";",  ";",  ";"
+     */
++    void split(const std::string& input, const std::string& delimiter, TextList& partList)
++    {
++      TextList delimiterList;
++      split(input, delimiter, partList, delimiterList);
++    }
++
+     void split(const std::string& input, const std::string& delimiter, TextList& partList, TextList& delimiterList)
+     {
+       size_t start= 0;
+@@ -115,6 +115,7 @@ namespace MASSAI
+         }
+       }
+     }
++
+     std::string fromHex(const std::string& hexdata)
+     {
+       std::string result;
+@@ -166,7 +167,6 @@ namespace MASSAI
+       std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+       return result;
+     }
+-
+   }
+ }
+ 
+-- 
+2.41.0.windows.1
+

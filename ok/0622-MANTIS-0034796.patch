@@ -1,0 +1,341 @@
+From eea0d39c91073ea508105c8b4f66520c7034405f Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 26 Nov 2014 19:22:59 +0000
+Subject: [PATCH 0622/1077] MANTIS 0034796 extension: appControl: log
+ application performance data at desktop switch
+
+massai_systools.lib
+V1.0.0.25
+
+- added void ApplicationList::log(const std::string& group);
+- added std::string child::getShortProcessInformation() const;
+- format:
+  - "log" group "PID" pid "PPID" parent-pid
+  - "user" user-mode-time "kernel" kernel-mode-tiem "start" gmt-creation-time "stop" gmt-termination-time
+  - "total" current-total-memory-usage "ws" current-working-set "paged" current-paged-pool-usage "nonpaged" current-non-paged-pool-usage
+  - "max total" peak-total-memory-usage "max ws" peak-working-set "max paged" peak-paged-pool-usage "max nonpaged" peak-non-paged-pool-usage
+  - "fault" page-faults
+  - "R Op" read-operations "W Op" write-operations "O Op" other-operations
+  - "R Byte" read-byte "W Byte" write-byte "O Byte" other-byte
+  - state
+  - program
+
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@783 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcess.hpp   |  1 +
+ .../Interfaces/inc/systools/mSysProcessList.h |  1 +
+ .../Massai/cpp/Systools/src/local_def.cpp     | 20 +++-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 36 +++++++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       | 91 ++++++++++++++++++-
+ 5 files changed, 145 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+index ed359301..00abf53f 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcess.hpp
+@@ -163,6 +163,7 @@ namespace mSysProcess
+        *
+       **/
+       virtual std::string getProcessInformation() const = 0;
++      virtual std::string getShortProcessInformation() const = 0;
+ 
+       /**
+        *
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index eaa110ea..3a961bd1 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -126,6 +126,7 @@ namespace mSysProcess
+       ApplicationList(const WatchdogSettings& settings, const TextList& terminationExlusionList, MASSAI::trace::TraceInterface& trc);
+       ~ApplicationList();
+       void start(const PropertyList& processes);
++      void log(const std::string& group);
+       void stop(const std::string& group);
+       void stopAll();
+       mSysWindow::WindowList findWinByTitleClassName(const std::string& group);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 864c5f30..5afcb0c9 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 24);
++VERSION_ID_DT(systools, 1, 0, 0, 25);
+ 
+ /*!
+ \file
+@@ -8,12 +8,28 @@ VERSION_ID_DT(systools, 1, 0, 0, 24);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.24
++@version 1.0.0.25
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.25
++\li 26.11.20014
++\li extension SteT Mantis 0034796: appControl: log application performance data at desktop switch
++- added void ApplicationList::log(const std::string& group);
++- added std::string child::getShortProcessInformation() const;
++- format:
++  - "log" group "PID" pid "PPID" parent-pid
++  - "user" user-mode-time "kernel" kernel-mode-tiem "start" gmt-creation-time "stop" gmt-termination-time
++  - "total" current-total-memory-usage "ws" current-working-set "paged" current-paged-pool-usage "nonpaged" current-non-paged-pool-usage
++  - "max total" peak-total-memory-usage "max ws" peak-working-set "max paged" peak-paged-pool-usage "max nonpaged" peak-non-paged-pool-usage
++  - "fault" page-faults
++  - "R Op" read-operations "W Op" write-operations "O Op" other-operations
++  - "R Byte" read-byte "W Byte" write-byte "O Byte" other-byte
++  - state
++  - program
++
+ \version 1.0.0.24
+ \li 18.11.20014
+ \li extension SteT Mantis 0034570 GPPDev: FD Phoenix Protocol
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index c678bb48..55ab5396 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -148,13 +148,13 @@ namespace
+ 
+       std::string getProcessId() const;
+       std::string getProgram() const;
++      std::string getGroup() const;
+ 
+       bool match(TerminationPhase phase) const;
+ 
+     private:
+       typedef std::auto_ptr<child> ChildPtr;
+ 
+-      std::string getGroup() const;
+ 
+       ChildPtr m_pProcess;
+       ProcessStart* m_pStarter;
+@@ -257,6 +257,7 @@ namespace
+ 
+       void stop(const std::string& group);
+       std::map<std::string, std::list<child*>> getProcessMap();
++      void log(const std::string& group);
+ 
+     private:
+       virtual void notify(ProcessStart& process);
+@@ -279,6 +280,7 @@ namespace
+       void kill(ProcessHolderSet& processSet);
+       void wait(ProcessHolderSet& processSet);
+       void stop(ProcessStartSet& processSet);
++      void log(ProcessStartSet& processSet);
+ 
+       PropertySet getPropertySet(const PropertyList& list);
+       PropertySet getPropertySet(const ProcessStartPtrList& list);
+@@ -1167,6 +1169,11 @@ namespace
+     stop(getProcessStartSet(group));
+   }
+ 
++  void ProcessListImpl::log(const std::string& group)
++  {
++    log(getProcessStartSet(group));
++  }
++
+   WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch,
+     WindowSearchType search, ProcessStartSet& startSet)
+   {
+@@ -1364,6 +1371,22 @@ namespace
+     wait(all);
+   }
+ 
++  void ProcessListImpl::log(ProcessStartSet& processSet)
++  {
++    refreshProcessList(processSet);
++    ProcessHolderSet all;
++    getProcessList(processSet, all);
++    ProcessHolderSet::iterator it = all.begin();
++    ProcessHolderSet::iterator end = all.end();
++    for(; it != end; it++)
++    {
++      m_trc.writeTrace(BasicRuntime_HERE,
++        "log\t%s\t%s",
++        (*it)->getGroup().c_str(),
++        (*it)->getProcess()->getShortProcessInformation().c_str());
++    }
++  }
++
+   PropertySet ProcessListImpl::getPropertySet(const PropertyList& list)
+   {
+     PropertySet result;
+@@ -1488,6 +1511,7 @@ namespace mSysProcess
+       void start(const PropertyList& processes);
+       void stop(const std::string& group);
+       void stopAll();
++      void log(const std::string& group);
+       WindowList findWinByTitleClassName(const std::string& group);
+       WindowList findVisibleWin(const std::string& group);
+       Time checkForTerminatedProcesses();
+@@ -1668,6 +1692,11 @@ namespace mSysProcess
+     ProcessListImpl::stop(group);
+   }
+ 
++  void ApplicationList::Impl::log(const std::string& group)
++  {
++    ProcessListImpl::log(group);
++  }
++
+   void ApplicationList::Impl::stopAll()
+   {
+     PropertyList emptyList;
+@@ -1888,6 +1917,11 @@ namespace mSysProcess
+     m_pImpl->stop(group);
+   }
+ 
++  void ApplicationList::log(const std::string& group)
++  {
++    m_pImpl->log(group);
++  }
++
+   void ApplicationList::stopAll()
+   {
+     m_pImpl->stopAll();
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index 43412c62..bc530894 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -357,6 +357,7 @@ namespace
+       bool sendCtrlC();
+ 
+       std::string getProcessInformation() const;
++      std::string getShortProcessInformation() const;
+       std::string getProcessId() const;
+       std::string getParentProcessId() const;
+       std::string getProgram() const;
+@@ -368,6 +369,8 @@ namespace
+       void printState(std::ostream& out, mSysProcess::status state) const;
+       void printTime(std::ostream& out, mSysProcess::status state) const;
+       void printCounters(std::ostream& out) const;
++      void printShortTime(std::ostream& out, mSysProcess::status state) const;
++      void printShortCounters(std::ostream& out) const;
+       bool sendEvent(DWORD event);
+ 
+       unsigned long getProcessIoUsage() const;
+@@ -848,7 +851,7 @@ namespace
+       unsigned long exitCode= getExitCode();
+       out << "result\t";
+       out << exitCode << "\t";
+-      out << std::hex << exitCode << "\t";
++      out << "0x" << std::hex << exitCode << "\t";
+       if(mSysError::isSystemError(exitCode))
+       {
+         out << mSysError::getErrorText(exitCode).c_str();
+@@ -887,6 +890,34 @@ namespace
+     }
+   }
+ 
++  void myChild::printShortTime(std::ostream& out, mSysProcess::status state) const
++  {
++    FILETIME creation;
++    FILETIME exit;
++    FILETIME kernel;
++    FILETIME user;
++    if(GetProcessTimes(M_HandleProcess, &creation, &exit, &kernel, &user))
++    {
++      out << std::dec;
++      out << "user\t"   << mSysTime::getDuration(user)      << "\t";
++      out << "kernel\t" << mSysTime::getDuration(kernel)    << "\t";
++      out << "start\t"  << mSysTime::getTimestamp(creation) << "\t";
++      if(state != mSysProcess::STATUS_RUNNING)
++      {
++        out << "stop\t" << mSysTime::getTimestamp(exit)     << "\t";
++      }
++      else
++      {
++        out << "\t\t";
++      }
++    }
++    else
++    {
++      out << "\t\t\t\t\t\t\t\t";
++      logLastError(M_Logging, "GetProcessTimes");
++    }
++  }
++
+ 
+   /**
+    *
+@@ -935,6 +966,45 @@ namespace
+     }
+   }
+ 
++  void myChild::printShortCounters(std::ostream& out) const
++  {
++    PROCESS_MEMORY_COUNTERS memoryCounters;
++    if(GetProcessMemoryInfo(M_HandleProcess, &memoryCounters, sizeof(memoryCounters)))
++    {
++      out << std::dec;
++      out << "total\t"        << memoryCounters.PagefileUsage              << "\t";
++      out << "ws\t"           << memoryCounters.WorkingSetSize             << "\t";
++      out << "paged\t"        << memoryCounters.QuotaPagedPoolUsage        << "\t";
++      out << "nonpaged\t"     << memoryCounters.QuotaNonPagedPoolUsage     << "\t";
++      out << "max total\t"    << memoryCounters.PeakPagefileUsage          << "\t";
++      out << "max ws\t"       << memoryCounters.PeakWorkingSetSize         << "\t";
++      out << "max paged\t"    << memoryCounters.QuotaPeakPagedPoolUsage    << "\t";
++      out << "max nonpaged\t" << memoryCounters.QuotaPeakNonPagedPoolUsage << "\t";
++      out << "fault\t"        << memoryCounters.PageFaultCount             << "\t";
++    }
++    else
++    {
++      out << "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
++      logLastError(M_Logging, "GetProcessMemoryInfo");
++    }
++    IO_COUNTERS ioCounters;
++    if(GetProcessIoCounters(M_HandleProcess, &ioCounters))
++    {
++      out << std::dec;
++      out << "R Op\t" << ioCounters.ReadOperationCount   << "\t";
++      out << "W Op\t" << ioCounters.WriteOperationCount  << "\t";
++      out << "O Op\t" << ioCounters.OtherOperationCount  << "\t";
++      out << "R Byte\t" << ioCounters.ReadTransferCount  << "\t";
++      out << "W Byte\t" << ioCounters.WriteTransferCount << "\t";
++      out << "O Byte\t" << ioCounters.OtherTransferCount << "\t";
++    }
++    else
++    {
++      out << "\t\t\t\t\t\t\t\t\t\t\t\t";
++      logLastError(M_Logging, "GetProcessIoCounters");
++    }
++  }
++
+ 
+   /**
+    *
+@@ -957,6 +1027,25 @@ namespace
+     return out.str();
+   }
+ 
++  std::string myChild::getShortProcessInformation() const
++  {
++    mSysProcess::status state= getStatus();
++    std::ostringstream out;
++    out << "PID\t" << M_ProcessId << "\tPPID\t" << M_Parent << "\t";
++    if(state != mSysProcess::STATUS_FAILED)
++    {
++      printShortTime(out, state);
++      printShortCounters(out);
++    }
++    else
++    {
++      out << "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
++    }
++    out << getStatusText(state).c_str() << "\t";
++    out << M_Commandline.data();
++    return out.str();
++  }
++
+ 
+   /**
+    *
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,221 @@
+From 1db29abd3f4fb44c9fdf07f7ef856c25594b484c Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 25 Apr 2012 11:33:00 +0000
+Subject: [PATCH 0275/1077] Mantis 0021667 - Bugfix in nConfig::wrapMap for
+ GCI4 client
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@329 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/cfgclnt/nConfigCache.hpp   |  7 +-
+ .../Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp | 71 ++++++++++++++++++-
+ 2 files changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigCache.hpp b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigCache.hpp
+index caf77c29..6bf6dafa 100644
+--- a/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigCache.hpp
++++ b/SelfServiceCommon/Interfaces/inc/cfgclnt/nConfigCache.hpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2006-2008 MATERNA Information & Communications
++ * Copyright (c) 2006-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -92,9 +92,11 @@ namespace nConfig
+       {
+          if( !M_Good )
+          {
++            // Stored value might is not good, fetch it now.
+             try
+             {
+                M_Value = uncached();
++               // Fetch succeeded (no exception), stored value is good.
+                M_Good = true;
+             }
+             catch( ... )
+@@ -112,7 +114,8 @@ namespace nConfig
+       **/
+       void valueChanged()
+       {
+-         M_Value = uncached();
++         // Mark the stored value as "ungood".
++         M_Good = false;
+       }
+ 
+    private:
+diff --git a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
+index 7531120a..2fafade4 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgClnt/src/nConfigWrapMap.cpp
+@@ -29,9 +29,19 @@ namespace
+ {
+ 
+ 
++   //! The separator between tuple parts.
+    char const C_Sep = ':';
+ 
+ 
++   /**
++    *
++    * Extract the first part of a tuple.
++    *
++    * @param Str:       The tuple stored in a string.
++    *
++    * @return:          The tuple.first.
++    *
++   **/
+    std::string tupFirst( std::string const & Str )
+    {
+       unsigned Off = Str.find( C_Sep );
+@@ -39,6 +49,15 @@ namespace
+    }
+ 
+ 
++   /**
++    *
++    * Extract the second part of a tuple.
++    *
++    * @param Str:       The tuple stored in a string.
++    *
++    * @return:          The tuple.second.
++    *
++   **/
+    std::string tupSecond( std::string const & Str )
+    {
+       unsigned const Off1 = Str.find( C_Sep );
+@@ -72,14 +91,26 @@ namespace
+ 
+ 
+ 
++/**
++ *
++ * Class nConfig::wrapMap implementation class.
++ *
++**/
+ class nConfig::wrapMap::impl :
+       public nConfig::cache<std::list<std::string>,nConfig::gclTextList>
+ {
+ 
+-   stringList        M_Default;
++   //! The default object - an empty textlist.
++   stringList const     M_Default;
+ 
+-   std::string const M_Explanation;
++   //! Explanation object, set from constructor.
++   std::string const    M_Explanation;
+ 
++   /**
++    *
++    * This virtual method is called to create a configuration item.
++    *
++   **/
+    void create
+       (
+          char const * &              Rights,
+@@ -96,6 +127,11 @@ class nConfig::wrapMap::impl :
+ 
+ public:
+ 
++   /**
++    *
++    * Constructor.
++    *
++   **/
+    impl
+       (
+          char const * Client,
+@@ -111,6 +147,11 @@ public:
+    {
+    }
+ 
++   /**
++    *
++    * Get the value from the configuration service.
++    *
++   **/
+    std::list<std::string> uncached()
+    {
+       return get();
+@@ -118,16 +159,24 @@ public:
+ 
+ private:
+ 
++   //! Default constructor - intentionally not implemented.
+    impl();
+ 
++   //! Copy constructor - intentionally not implemented.
+    impl( impl const & Src );
+ 
++   //! Assignment - intentionally not implemented.
+    impl & operator=( impl const & Src );
+ 
+ };
+ 
+ 
+ 
++/*
++ *
++ * Class nConfig::wrapMap method - see "nConfigWrapMap.hpp".
++ *
++ */
+ nConfig::wrapMap::wrapMap
+    (
+       char const * Client,
+@@ -140,6 +189,11 @@ nConfig::wrapMap::wrapMap
+ 
+ 
+ 
++/*
++ *
++ * Class nConfig::wrapMap method - see "nConfigWrapMap.hpp".
++ *
++ */
+ nConfig::wrapMap::~wrapMap() throw()
+ {
+    try
+@@ -153,6 +207,11 @@ nConfig::wrapMap::~wrapMap() throw()
+ 
+ 
+ 
++/*
++ *
++ * Class nConfig::wrapMap method - see "nConfigWrapMap.hpp".
++ *
++ */
+ std::string nConfig::wrapMap::get( char const * First )
+ {
+    stringList const List = M_Impl->cached();
+@@ -176,6 +235,11 @@ std::string nConfig::wrapMap::get( char const * First )
+ 
+ 
+ 
++/*
++ *
++ * Class nConfig::wrapMap method - see "nConfigWrapMap.hpp".
++ *
++ */
+ void nConfig::wrapMap::set( char const * First, char const * Second )
+ {
+    stringList List = M_Impl->cached();
+@@ -185,7 +249,7 @@ void nConfig::wrapMap::set( char const * First, char const * Second )
+    {
+       if( tupFirst( *It ) == First )
+       {
+-         List.erase( It );
++         It = List.erase( It );
+          Found = true;
+       }
+       else
+@@ -198,6 +262,7 @@ void nConfig::wrapMap::set( char const * First, char const * Second )
+    NewStr += Second;
+    List.insert( It, NewStr );
+    M_Impl->set( List );
++   M_Impl->valueChanged();
+ }
+ 
+ 
+-- 
+2.41.0.windows.1
+

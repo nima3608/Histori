@@ -1,0 +1,94 @@
+From b7c6536bf73dcbba24b3e0b87cba021e7e19d312 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 24 Feb 2022 20:57:27 +0000
+Subject: [PATCH 1060/1077] MANTIS 0062369 extension: Reporting/Monitoring PLC
+ data (manual count)
+
+platform.idl
+V5.8
+
+add ConveyorOperationMode, DispatchResult, BaggageData, DispatchInfo, LoggingDispatchData
+add PlatformIF.logDispatch
+for forwarding BaggageDispatchInfo from Device to Platform
+
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1710 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/platform.idl            | 47 ++++++++++++++++++-
+ 1 file changed, 46 insertions(+), 1 deletion(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/platform.idl b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+index 04638ed1..dfe9585f 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/platform.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/platform.idl
+@@ -27,7 +27,7 @@
+ 
+ module PlatformManagement
+ {
+-    const string interface_version = "5.7";
++    const string interface_version = "5.8";
+ 
+     /** Platform interface for the device components. Via this interface the device
+         components communicate with the platform manager internally. */
+@@ -290,6 +290,50 @@ module PlatformManagement
+       string reason;
+     };
+ 
++   enum ConveyorOperationMode
++   {
++      MODE_AUTO,
++      MODE_MANUAL,
++      MODE_FORCEBAG,
++      MODE_PERFORMANCE_TEST
++   };
++
++   enum DispatchResult
++   {
++      ERR_NONE,                     /**< No error */
++      ERR_HARDWARE,                 /**< Hardware error */
++      ERR_PIECE_NOT_DETECTED,       /**< Piece has not been detected,
++                                         e.g. customer has removed bag
++                                         or a jam has occured. */
++      ERR_TRANSPORT_FAILED,         /**< piece transport failed. */
++      ERR_EMERGENCY_STOP,           /**< Conveyor emergency stop button pressed */
++      ERR_INTRUSION,                /**< Safety intrusions of unknown kind. */
++      ERR_THERMAL_OVERLOAD          /**< Too hot to work. */
++   };
++
++    struct BaggageData
++    {
++      string lpn;
++      long weight;
++      long length;
++    };
++
++    struct DispatchInfo
++    {
++      string id;
++      DispatchResult result;
++    };
++
++    struct LoggingDispatchData
++    {
++      string unitId;
++      LoggingClass unitClass;
++      ConveyorOperationMode mode;
++      BaggageData baggage;
++      DispatchInfo dispatchInfo;
++      boolean finished;
++    };
++
+     // Scanner statistics - scanner devices, which have reported the data
+     typedef sequence<string> ReaderIds;
+     struct ReaderOutput
+@@ -364,6 +408,7 @@ module PlatformManagement
+         void initLogging(in string realComponentName, in LoggingComponentDataList init);
+         void logCounter(in LoggingCounterData lcd);
+         void logCommand(in LoggingCommandData command);
++        void logDispatch(in LoggingDispatchData dispatch);
+         void logCounterFailure(in string unitId, in LoggingClass unitClass, in long numberOfFailed);
+         void updateMediaCount(in string compRef, in long mediaCount);
+         void logCounterSuccess(in string unitId, in LoggingClass unitClass, in long numberOfSuccesfullDocs);
+-- 
+2.41.0.windows.1
+

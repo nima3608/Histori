@@ -1,0 +1,189 @@
+From f923e15b8b0266763e6180888aafa9bb1ca5e2d4 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 7 Feb 2018 07:24:10 +0000
+Subject: [PATCH 0901/1077] MANTIS 49209 Mantis 49209: Extend Meta-Data for
+ Text-Lists - implement options -maxnumber -minnumber for textlist meta data.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1317 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgMeta_def.h     | 12 ++++-
+ .../Massai/cpp/CfgTools/src/CfgMeta.cpp       | 54 ++++++++++++-------
+ 2 files changed, 46 insertions(+), 20 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
+index b035082f..762eb721 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgMeta_def.h
+@@ -10,8 +10,16 @@
+ // Versions
+ //
+ //
+-#define FILE_VER_BIN 1,0,0,0
+-#define FILE_VER_DTS "1.0.0.0\0"
++// #define FILE_VER_BIN 1,0,0,0
++// #define FILE_VER_DTS "1.0.0.0\0"
++//
++// 06.02.2018  JK
++// Mantis 49209: Extend Meta-Data for Text-Lists
++// - implement options -maxnumber -minnumber
++//   for textlist meta data.
++//
++#define FILE_VER_BIN 1,0,1,0
++#define FILE_VER_DTS "1.0.1.0\0"
+ //
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+index e5026ddd..0eeb1a5e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2017 MATERNA Information & Communications
++ * Copyright (c) 2017-2018 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -166,11 +166,11 @@ namespace
+                << std::endl;
+             bool changed_meta = false;
+             //
+-            char const * new_expl = arg_scan.option( "SET-EXPLANATION" );
+-            if( new_expl )
++            char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
++            if( new_xpl )
+             {
+                changed_meta = true;
+-               md->Desc.Explanation = CORBA::string_dup( new_expl );
++               md->Desc.Explanation = CORBA::string_dup( new_xpl );
+                std::cout << "\t-> changed explanation" << std::endl;
+             }
+             //
+@@ -250,11 +250,11 @@ namespace
+                   << std::endl;
+                bool changed_meta = false;
+                //
+-               char const * new_expl = arg_scan.option( "SET-EXPLANATION" );
+-               if( new_expl )
++               char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
++               if( new_xpl )
+                {
+                   changed_meta = true;
+-                  md->Desc.Explanation = CORBA::string_dup( new_expl );
++                  md->Desc.Explanation = CORBA::string_dup( new_xpl );
+                   std::cout << "\t-> changed explanation" << std::endl;
+                }
+                //
+@@ -286,14 +286,14 @@ namespace
+                   std::cout << "\t-> changed RegEx" << std::endl;
+                }
+                //
+-               char const * new_semantic = arg_scan.option( "SET-SEMANTIC" );
+-               if( new_semantic )
++               char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
++               if( new_sem )
+                {
+                   semanticDump const * ptr = l_semantic_dump;
+                   bool found = false;
+                   while( !found && ptr->stt )
+                   {
+-                     if( !strcmp( ptr->stt, new_semantic ) )
++                     if( !strcmp( ptr->stt, new_sem ) )
+                      {
+                         found = true;
+                         changed_meta = true;
+@@ -306,7 +306,7 @@ namespace
+                   {
+                      std::cout
+                         << "\t-> unknown semantic \""
+-                        << new_semantic << "\""
++                        << new_sem << "\""
+                         << std::endl;
+                   }
+                }
+@@ -376,11 +376,11 @@ namespace
+                }
+                bool changed_meta = false;
+                //
+-               char const * new_expl = arg_scan.option( "SET-EXPLANATION" );
+-               if( new_expl )
++               char const * new_xpl = arg_scan.option( "SET-EXPLANATION" );
++               if( new_xpl )
+                {
+                   changed_meta = true;
+-                  md->Desc.Explanation = CORBA::string_dup( new_expl );
++                  md->Desc.Explanation = CORBA::string_dup( new_xpl );
+                   std::cout << "\t-> changed explanation" << std::endl;
+                }
+                //
+@@ -404,6 +404,18 @@ namespace
+                      arg_scan, "SET-MINLENGTH"
+                   );
+                //
++               condChangeInt
++                  (
++                     md->MaxNumber, changed_meta,
++                     arg_scan, "SET-MAXNUMBER"
++                  );
++               //
++               condChangeInt
++                  (
++                     md->MinNumber, changed_meta,
++                     arg_scan, "SET-MINNUMBER"
++                  );
++               //
+                char const * new_regex = arg_scan.option( "SET-REGEX" );
+                if( new_regex )
+                {
+@@ -412,14 +424,14 @@ namespace
+                   std::cout << "\t-> changed RegEx" << std::endl;
+                }
+                //
+-               char const * new_semantic = arg_scan.option( "SET-SEMANTIC" );
+-               if( new_semantic )
++               char const * new_sem = arg_scan.option( "SET-SEMANTIC" );
++               if( new_sem )
+                {
+                   semanticDump const * ptr = l_semantic_dump;
+                   bool found = false;
+                   while( !found && ptr->stt )
+                   {
+-                     if( !strcmp( ptr->stt, new_semantic ) )
++                     if( !strcmp( ptr->stt, new_sem ) )
+                      {
+                         found = true;
+                         changed_meta = true;
+@@ -432,7 +444,7 @@ namespace
+                   {
+                      std::cout
+                         << "\t-> unknown semantic \""
+-                        << new_semantic << "\""
++                        << new_sem << "\""
+                         << std::endl;
+                   }
+                }
+@@ -447,6 +459,8 @@ namespace
+                      "\n\tRights = \"" << md->Desc.Rights << "\""
+                      "\n\tMaxLength = " << md->MaxLength
+                   << "\n\tMinLength = " << md->MinLength
++                  << "\n\tMaxNumber = " << md->MaxNumber
++                  << "\n\tMinNumber = " << md->MinNumber
+                   << "\n\tRegEx = \"" << md->RegEx << "\""
+                      "\n\tSemantic = " << c_str( md->Semantic )
+                   << std::endl;
+@@ -528,6 +542,10 @@ int main( int argc, char ** argv )
+                HINDENT2 "[-set-rights:<new rights>]\n"
+                HINDENT2 "[-set-maxlength:<new maximum text length>]\n"
+                HINDENT2 "[-set-minlength:<new minimum text length>]\n"
++               HINDENT2
++               "[-set-maxnumber:<new maximum number of list elements>]\n"
++               HINDENT2
++               "[-set-minnumber:<new minimum number of list elements>]\n"
+                HINDENT2 "[-set-maxvalue:<new maximum value>]\n"
+                HINDENT2 "[-set-minvalue:<new minimum value>]\n"
+                HINDENT2 "[-set-regex:<new regular expression>]\n"
+-- 
+2.41.0.windows.1
+

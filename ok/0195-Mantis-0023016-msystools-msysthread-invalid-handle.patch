@@ -1,0 +1,76 @@
+From 90fc77df6aff6428e6f933e7fe60e85c2e27ee19 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 18 Apr 2012 19:27:44 +0000
+Subject: [PATCH 0195/1000] Mantis 0023016: msystools: msysthread invalid
+ handle massai_systools.lib; V1.0.0.2
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@325 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp     |  7 +++--
+ .../Massai/cpp/Systools/src/mSysThreadW32.cpp | 26 ++++++++++++-------
+ 2 files changed, 22 insertions(+), 11 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index b5fc9c03..bafd7b8c 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,7 +1,11 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-/*! \page systools systools - Release Notes
++VERSION_ID_DT(systools, 1, 0, 0, 2);
++
++/*! \page massai_systools.lib, massai_systools.lib - Release Notes
+  *
++ *  \date 18.04.2012 \li V1.0.0.2
++ *                   \li SteT Mantis 0023016: msystools: msysthread invalid handle
+  *
+  *  \date 03.11.2011 \li V1.0.0.1
+  *                   \li SteT added
+@@ -19,4 +23,3 @@
+  *
+  */
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 1);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+index afc7ddee..16850e24 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysThreadW32.cpp
+@@ -722,17 +722,25 @@ public:
+    mSysThread::RC waitTerminated( long Time )
+    {
+       traceNormal( "waitTerminated() ..." );
+-      switch( WaitForSingleObject( MH_Handle, Time ) )
++      if( MH_Handle != C_ThreadhandleInitial )
+       {
+-      default:
+-         traceError( "waitTerminated() - error." );
++         switch( WaitForSingleObject( MH_Handle, Time ) )
++         {
++         default:
++            traceError( "waitTerminated() - error." );
++            return mSysThread::RC_ERROR;
++         case WAIT_TIMEOUT:
++            traceError( "waitTerminated() - timeout." );
++            return mSysThread::RC_TIMEOUT;
++         case ERROR_SUCCESS:
++            traceNormal( "waitTerminated()." );
++            return mSysThread::RC_OK;
++         }
++      }
++      else
++      {
++         traceError( "waitTerminated() - error. thread not started." );
+          return mSysThread::RC_ERROR;
+-      case WAIT_TIMEOUT:
+-         traceError( "waitTerminated() - timeout." );
+-         return mSysThread::RC_TIMEOUT;
+-      case ERROR_SUCCESS:
+-         traceNormal( "waitTerminated()." );
+-         return mSysThread::RC_OK;
+       }
+    }
+ 
+-- 
+2.41.0.windows.1
+

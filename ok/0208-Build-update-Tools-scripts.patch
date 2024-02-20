@@ -1,0 +1,148 @@
+From 2aa603ea8978e73b6963359305d07cb31167c80a Mon Sep 17 00:00:00 2001
+From: kkluge <kkluge@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Wed, 27 Jul 2016 09:52:49 +0000
+Subject: [PATCH 208/462] Build: update Tools scripts
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@317 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/release/QBG Trunk Console.cmd       |  6 ++--
+ SelfServiceBuild/Build/release/ccc.cmd        | 29 ++++++++++++++++++-
+ SelfServiceBuild/Build/release/makefile-svn   | 13 +++------
+ .../release/mk_Platform_NightlyBuild.cmd      |  2 +-
+ ...mk_Platform_NightlyBuild_3.10_Swedavia.cmd |  2 +-
+ .../Build/release/mk_QBG_nb_trunk.cmd         |  4 +++
+ 6 files changed, 41 insertions(+), 15 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/release/QBG Trunk Console.cmd b/SelfServiceBuild/Build/release/QBG Trunk Console.cmd
+index 16643f1..c962c10 100644
+--- a/SelfServiceBuild/Build/release/QBG Trunk Console.cmd	
++++ b/SelfServiceBuild/Build/release/QBG Trunk Console.cmd	
+@@ -1,5 +1,5 @@
+ d:
+-cd D:\Subversion\SecureGate\nightlyBuild\SelfServiceQBG
+-call cc.cmd
++cd L:\SecureGate\nightlyBuild-trunk\SelfServiceQBG
++call ccc.cmd
+ call mv.cmd
+-cd D:\Subversion\SecureGate\nightlyBuild\SelfServiceQBG\Build
++cd L:\SecureGate\nightlyBuild-trunk\SelfServiceQBG\Build
+diff --git a/SelfServiceBuild/Build/release/ccc.cmd b/SelfServiceBuild/Build/release/ccc.cmd
+index 89479f3..eb20233 100644
+--- a/SelfServiceBuild/Build/release/ccc.cmd
++++ b/SelfServiceBuild/Build/release/ccc.cmd
+@@ -1,5 +1,32 @@
++set VC_COMPILER_VERSION=VC10
+ call c:\Subversion\startup.cmd
+ @echo off
+ set USE_PRIVATE_ENV=1
+ rem call cc.cmd
+-set PATH=%PATH%;c:\Tools;%BIN_WIX%;
+\ No newline at end of file
++set PATH=%PATH%;c:\Tools;%BIN_WIX%;
++
++if not (%VC_COMPILER_VERSION%)==(VC10) goto USE_VC6__
++call "c:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\Bin\VCVARS32.BAT"
++goto END_USE_VC6__
++:USE_VC6__
++call "c:\Program Files (x86)\Microsoft Visual Studio\VC98\Bin\VCVARS32.BAT"
++:END_USE_VC6__
++
++set JAVA_HOME=c:\Program Files (x86)\java\jdk1.7.0_21
++
++if not (%M2_HOME%)==() goto M2_HOME_SET
++set M2_HOME=C:\Maven
++:M2_HOME_SET
++
++set root=%~d0\
++set ORIGPATH=%CD%
++
++:search
++set CCSTREAMPATH=%CD%
++if %cd%==%root% goto error
++cd ..
++if exist SelfServiceBuild (GOTO startpath) else goto search
++
++:startpath
++if exist SelfServiceQBG (call %CCSTREAMPATH%\..\SelfServiceQBG\Build\cpp\setenv.bat) else (call %CCSTREAMPATH%\..\SelfServiceBuild\Build\scripts\setenv.bat)
++cd %ORIGPATH%
+\ No newline at end of file
+diff --git a/SelfServiceBuild/Build/release/makefile-svn b/SelfServiceBuild/Build/release/makefile-svn
+index ce7598b..9940aa2 100644
+--- a/SelfServiceBuild/Build/release/makefile-svn
++++ b/SelfServiceBuild/Build/release/makefile-svn
+@@ -164,27 +164,22 @@ build_application:  create build_cpp
+ nb_application:     build_cpp sendMailZip
+ 
+ nb_Platform:        clean init checkout set_props update build_cpp sendMailZip
++nb_Platform_java:   clean init checkout set_props update build_java sendMailZip
+ nb_Platform_full:   clean init checkout set_props update build_cpp build_java build_maven build_installer kidlist sendMailZip
+ 
+ build_mavenQBG:     $(SELF)
+                     - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\java && \
+-                    mv.cmd && cc.cmd && \
+-                    mvn -fn -e install
+-                    - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\java\adminApp && \
+-                    mv.cmd && cc.cmd && \
+-                    mvn -fn -e install
+-                    - cd /D $(LOCALSTORE)\$(BUILD_STREAM)\Massai\flex && \
+-                    mv.cmd && cc.cmd && \
++                    mv.cmd && ccc.cmd && \
+                     mvn -fn -e install
+ zip_QBG:            $(SELF)             
+                     cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
+                     $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
+-                    mv.cmd && cc.cmd && \
++                    mv.cmd && ccc.cmd && \
+                     xmk zip /I
+ installer_QBG:      $(SELF)             
+                     cd /d $(LOCALSTORE)\$(BUILD_STREAM)\Build && \
+                     $(LOCALSTORE)\$(BUILD_STREAM)\$(BUILD_WORKDIR)\setenv.bat && \
+-                    mv.cmd && cc.cmd && \
++                    mv.cmd && ccc.cmd && \
+                     xmk gate-installer /I
+ QBG:                clean create build_cpp build_mavenQBG zip_QBG installer_QBG
+ QBGMail:            clean create build_cpp build_mavenQBG zip_QBG installer_QBG sendMailZip
+diff --git a/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild.cmd b/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild.cmd
+index 201db4b..c89053d 100644
+--- a/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild.cmd
++++ b/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild.cmd
+@@ -26,7 +26,7 @@ set LOGFILE=NightlyBuild_Platform.log
+ set BUILD_STREAM=SelfServicePlatform
+ set LOCALSTORE=L:\Platform\NightlyBuild
+ 
+-set RECIPIENTS=Thomas.Meinke@materna.de,thomas.geisler@materna.de,thomas.stegemann@materna.de,nils.schmick@materna.de,kadir.boeluekbasi@materna.de,nino.schindler@materna.de,maximilian.otten@materna.de,michael.freitag@materna.de,hans-gerald.sobottka@materna.de,detlef.meier@materna.de
++set RECIPIENTS=Thomas.Meinke@materna.de,thomas.geisler@materna.de,thomas.stegemann@materna.de,nils.schmick@materna.de,nino.schindler@materna.de,maximilian.otten@materna.de,michael.freitag@materna.de,hans-gerald.sobottka@materna.de,detlef.meier@materna.de,denny.weber@materna.de
+ 
+ set SVN_PROJECT=SelfServicePlatform
+ set SVN_TAG=trunk
+diff --git a/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild_3.10_Swedavia.cmd b/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild_3.10_Swedavia.cmd
+index cb28557..3b2597f 100644
+--- a/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild_3.10_Swedavia.cmd
++++ b/SelfServiceBuild/Build/release/mk_Platform_NightlyBuild_3.10_Swedavia.cmd
+@@ -20,7 +20,7 @@ set M2_HOME=C:\Maven
+ :M2_HOME_SET
+ 
+ @echo on
+-set BUILD_VERSION=3.10_Swedavia
++set BUILD_VERSION=3.10.00_Swedavia
+ set B_NAME=Platform Nightly Build 3.10_Swedavia
+ set LOGFILE=NightlyBuild_Platform-3.10_Swedavia.log
+ set BUILD_STREAM=SelfServicePlatform
+diff --git a/SelfServiceBuild/Build/release/mk_QBG_nb_trunk.cmd b/SelfServiceBuild/Build/release/mk_QBG_nb_trunk.cmd
+index d8632c2..39b4cfe 100644
+--- a/SelfServiceBuild/Build/release/mk_QBG_nb_trunk.cmd
++++ b/SelfServiceBuild/Build/release/mk_QBG_nb_trunk.cmd
+@@ -20,6 +20,10 @@ if not (%M2_HOME%)==() goto M2_HOME_SET
+ set M2_HOME=C:\Maven
+ :M2_HOME_SET
+ 
++rem 16.01.2016: write subversion revision into Global_def.h
++set BUILD_VERSION=0.0.0
++rem set RELEASE_FLAG=--release
++
+ set B_NAME=Nightly Build
+ set LOGFILE=QBG_nightlyBuild-trunk.log
+ set BUILD_STREAM=SelfServiceQBG
+-- 
+2.41.0.windows.1
+

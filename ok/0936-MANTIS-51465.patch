@@ -1,0 +1,148 @@
+From 2d9a3ba979d3ffc859d23b9f162130be68d527df Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 9 Jan 2019 13:10:38 +0000
+Subject: [PATCH 0936/1077] MANTIS 51465 massaiCfgXB.exe version 2.3.2 - MANTIS
+ 51465: Configuration: invalid value in PrinterStatus selection - Fix
+ setMeta() to take original scalar value before destroying the value. -
+ Increase time announced to initialize from 5 to 15 seconds.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1412 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h    | 15 ++++++++++--
+ .../Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h | 15 ++++++++++--
+ .../cpp/CfgXMgrB/src/cfgCorba_Selection.cpp   | 23 ++++++++-----------
+ .../Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp   |  6 ++---
+ 4 files changed, 38 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+index f7f6dfd1..98a09562 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/CfgXMgrB_def.h
+@@ -572,8 +572,19 @@
+ //! - MANTIS 50037: Changes to the payment configuration for ZVT ...
+ //! - Bugfix: Creating crypto items now can be setInitial'ed
+ //!   only in plain form.
+-#define FILE_VER_BIN 2,3,1,0
+-#define FILE_VER_DTS "2.3.1.0"
++// #define FILE_VER_BIN 2,3,1,0
++// #define FILE_VER_DTS "2.3.1.0"
++//
++//! @version 2.3.2
++//! @date    09.01.2019
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 51465: Configuration: invalid value in PrinterStatus selection
++//! - Fix setMeta() to take original scalar value before destroying
++//!   the value.
++//! - Increase time announced to initialize from 5 to 15 seconds.
++#define FILE_VER_BIN 2,3,2,0
++#define FILE_VER_DTS "2.3.2.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+index 0ef9e789..63c5122b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/inc/massaiCfgXB_def.h
+@@ -566,8 +566,19 @@
+ //! - MANTIS 50037: Changes to the payment configuration for ZVT ...
+ //! - Bugfix: Creating crypto items now can be setInitial'ed
+ //!   only in plain form.
+-#define FILE_VER_BIN 2,3,1,0
+-#define FILE_VER_DTS "2.3.1.0"
++// #define FILE_VER_BIN 2,3,1,0
++// #define FILE_VER_DTS "2.3.1.0"
++//
++//! @version 2.3.2
++//! @date    09.01.2019
++//! @author  JK
++//! @par     Change:
++//! - MANTIS 51465: Configuration: invalid value in PrinterStatus selection
++//! - Fix setMeta() to take original scalar value before destroying
++//!   the value.
++//! - Increase time announced to initialize from 5 to 15 seconds.
++#define FILE_VER_BIN 2,3,2,0
++#define FILE_VER_DTS "2.3.2.0"
+ 
+ 
+ //-------------------------------------------------------------------------
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+index 502eec8b..a761bc1e 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/cfgCorba_Selection.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2002-2017 MATERNA Information & Communications
++ * Copyright (c) 2002-2019 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -634,30 +634,25 @@ class serviceCfgSelection :
+                   dynamic_cast<cfgValueSelection const *>( rawref );
+                if( sel_value )
+                {
++                  CORBA::Long const old_scalar = sel_value->scalar();
+                   //
+                   // Configured selection value found.
+                   //
+-                  // Replace the given default
+-                  writeTrace
+-                  (
+-                     SecondaryRuntime_HERE, SCS "setMeta - replace ..."
+-                  );
+                   M_ConfigEntity->itemDelete
+                                  (
+                                     Acc.Authorization, Acc.Item
+                                  );
+-                  writeTrace
+-                  (
+-                     SecondaryRuntime_HERE, SCS "setMeta - replace."
+-                  );
+                   M_ConfigEntity->itemCreate
+                                  (
+                                     SelMeta, Acc.Item,
+-                                    new cfgValueSelection
+-                                       (
+-                                          sel_value->scalar()
+-                                       )
++                                    new cfgValueSelection( old_scalar )
+                                  );
++                  writeTrace
++                  (
++                     SecondaryRuntime_HERE,
++                     SCS "setMeta - replace scalar=%d.",
++                     old_scalar
++                  );
+                }
+             }
+          }
+diff --git a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+index d9619154..bb983e4c 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgXMgrB/src/massaiCfgXB.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2003-2018 MATERNA Information & Communications
++ * Copyright (c) 2003-2019 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -128,9 +128,9 @@ int main( int argc, char ** argv )
+ int mDaemon_main( int argc, char const * const * argv )
+ {
+    //
+-   // Signal "I need some time"
++   // Signal "I need some time" (15 seconds max).
+    //
+-   if( mDaemon_indInitializing( 5000 ) )
++   if( mDaemon_indInitializing( 15000 ) )
+       return 1;
+ 
+    //
+-- 
+2.41.0.windows.1
+

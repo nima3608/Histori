@@ -1,0 +1,312 @@
+From a7372c17d5475859b86b96e4673fa876519b218e Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 9 Dec 2010 20:25:20 +0000
+Subject: [PATCH 0069/1076] moved Console.h, Console.cpp from AEAParser to
+ systools
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@87 90b65887-3827-0410-9a23-83215b262276
+---
+ SelfServiceCommon/Interfaces/inc/Console.h    |  9 +++
+ .../Interfaces/inc/graphic/barcode39.h        |  7 +++
+ .../inc => Interfaces/inc/systools}/Console.h | 56 ++++++++++---------
+ .../Massai/cpp/AEAParser/makefile.mak         |  2 +-
+ .../Massai/cpp/Systools/makefile.mak          |  3 +-
+ .../{AEAParser => Systools}/src/Console.cpp   | 34 ++++++-----
+ 6 files changed, 67 insertions(+), 44 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Console.h
+ rename SelfServiceCommon/{Massai/cpp/AEAParser/inc => Interfaces/inc/systools}/Console.h (79%)
+ rename SelfServiceCommon/Massai/cpp/{AEAParser => Systools}/src/Console.cpp (83%)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Console.h b/SelfServiceCommon/Interfaces/inc/Console.h
+new file mode 100644
+index 00000000..540cd060
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Console.h
+@@ -0,0 +1,9 @@
++#if defined(SHOW_INCLUDE_FILES)
++#pragma message("including: " __FILE__)
++#endif
++#if defined(IGNORE_DEPRECATED_MASSAI_HEADER)
++#error "Console.h" is deprecated, use "systools/Console.h" instead.
++#else
++// #pragma message ("Warning: \"Console.h\" is deprecated, use \"systools/Console.h\" instead.")
++#include "systools/Console.h"
++#endif
+diff --git a/SelfServiceCommon/Interfaces/inc/graphic/barcode39.h b/SelfServiceCommon/Interfaces/inc/graphic/barcode39.h
+index a92c3967..fc34e2b6 100644
+--- a/SelfServiceCommon/Interfaces/inc/graphic/barcode39.h
++++ b/SelfServiceCommon/Interfaces/inc/graphic/barcode39.h
+@@ -20,6 +20,13 @@ namespace MASSAI
+ {
+   namespace Barcode
+   {
++    /*
++      Note that the maximum value (based on the Code 39 specification) for intercharacterBlockSize is 5.3*narrowBlockSize
++      for narrowBlockSize less than 10 mils (a mil is 1/1000 inch)
++      If narrowBlockSize is 10 mils or greater, the value of I is 3X or 53 mils, whichever is greater.
++      However, for good quality printers, intercharacterBlockSize often equals narrowBlockSize.
++      strictly speaking, equals narrowBlockSize-t where t is the print tolerance in mils.
++    */
+     struct Barcode39Settings
+     {
+       size_t narrowBlockSize;
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/inc/Console.h b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+similarity index 79%
+rename from SelfServiceCommon/Massai/cpp/AEAParser/inc/Console.h
+rename to SelfServiceCommon/Interfaces/inc/systools/Console.h
+index bf591aef..ec2c273a 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/inc/Console.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/Console.h
+@@ -20,27 +20,6 @@ namespace Console
+   {
+     MAX_PARAMETER_COUNT= 10
+   };
+-  enum InputType
+-  {
+-    IT_IGNORE,
+-    IT_INPUT,
+-    IT_FILENAME
+-  };
+-  struct Input
+-  {
+-    public:
+-      InputType type;
+-      const char* pPrompt;
+-  };
+-  typedef Input InputList[MAX_PARAMETER_COUNT];
+-  struct Input_
+-  {
+-    public:
+-      Input_(InputType type, const std::string& prompt);
+-      InputType type;
+-      std::string prompt;
+-  };
+-  typedef std::list<Input_> InputList_;
+   typedef std::vector<std::string> Strings;
+ 
+   enum ResultCode
+@@ -58,6 +37,20 @@ namespace Console
+       virtual ResultCode execute(char selector, int parameter, const Strings& parameterList);
+   };
+ 
++
++  enum InputType
++  {
++    IT_IGNORE,
++    IT_INPUT,
++    IT_FILENAME
++  };
++  struct Input
++  {
++    public:
++      InputType type;
++      const char* pPrompt;
++  };
++  typedef Input InputList[MAX_PARAMETER_COUNT];
+   struct Selection
+   {
+     public:
+@@ -69,13 +62,21 @@ namespace Console
+   };
+ 
+ 
+-  struct Selection_: public SelectionCommandBase
++  struct InputStore
++  {
++    public:
++      InputStore(InputType type, const std::string& prompt);
++      InputType type;
++      std::string prompt;
++  };
++  typedef std::list<InputStore> InputStoreList;
++  struct SelectionStore: public SelectionCommandBase
+   {
+     public:
+       SelectionCommandBase* pCmd;
+       std::string           selector;
+       std::string           help;
+-      InputList_            parameterList;
++      InputStoreList        parameterList;
+       int                   parameter;
+   };
+   class ConsoleSelection: public SelectionCommandBase
+@@ -89,21 +90,22 @@ namespace Console
+ 
+       ConsoleSelection();
+       ~ConsoleSelection();
+-      void add(const Selection_& command);
++      void add(const SelectionStore& command);
+       void add(const Selection& command);
+-      void add(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputList_& parameterList, int parameter= 0);
++      void add(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputStoreList& parameterList, int parameter= 0);
+       void addSimple(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, int parameter= 0);
+       void addInput(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputList& input, int parameter= 0);
+       ResultCode select() const;
+       void loop() const;
+       void printHelp() const;
++      void quit();
+     private:
+       ResultCode execute(char selector, int parameter, const Strings& parameterList);
+       char readChar() const;
+       std::string getLine(const std::string& help) const;
+-      const Selection_* getCommand(char c) const;
++      const SelectionStore* getCommand(char c) const;
+ 
+-      typedef std::list<Selection_> SelectionList;
++      typedef std::list<SelectionStore> SelectionList;
+       SelectionList m_selectionList;
+       bool mutable m_quit;
+   };
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+index ae3e25f7..4f54878f 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/makefile.mak
+@@ -37,7 +37,7 @@ MY_BIN1 =               $(_BIN)\TestAEASimulator.exe
+ 
+ MY_BIN1_USER_LIBS =     $(_LIB)\aeaParser.lib $(LIB_TRACE) $(LIB_TOOLS) $(LIB_SYSTOOLS)
+ 
+-MY_BIN1_OBJS =          $(_OBJ)\Console.obj $(_OBJ)\TestAEASimulator.obj
++MY_BIN1_OBJS =          $(_OBJ)\TestAEASimulator.obj
+ 
+ ######################################################################
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index 0dec3643..bd1a7800 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -30,7 +30,8 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\software_error.obj \
+                         $(_OBJ)\threadException.obj \
+                         $(_OBJ)\tRex.obj \
+-                        $(_OBJ)\tRexLookupComport.obj
++                        $(_OBJ)\tRexLookupComport.obj \
++                        $(_OBJ)\Console.obj
+ 
+ MY_LIB1_LIBS =          $(SYS_ADVAPI32)
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/Console.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+similarity index 83%
+rename from SelfServiceCommon/Massai/cpp/AEAParser/src/Console.cpp
+rename to SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+index ea4207fa..271675d5 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/Console.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/Console.cpp
+@@ -12,8 +12,8 @@
+ #pragma warning (disable:4786)
+ 
+ #include "Console.h"
+-#include <conio.h>
+ #include "mInFile.hpp"
++#include <conio.h>
+ #include <iostream>
+ 
+ 
+@@ -64,7 +64,7 @@ namespace Console
+    return is;
+   }
+ 
+-  Input_::Input_(InputType type, const std::string& prompt):
++  InputStore::InputStore(InputType type, const std::string& prompt):
+     type(type),
+     prompt(prompt)
+   {}
+@@ -84,7 +84,7 @@ namespace Console
+   {}
+   ConsoleSelection::~ConsoleSelection()
+   {}
+-  void ConsoleSelection::add(const Selection_& command)
++  void ConsoleSelection::add(const SelectionStore& command)
+   {
+     m_selectionList.push_back(command);
+   }
+@@ -92,9 +92,9 @@ namespace Console
+   {
+     addInput(command.pCmd, command.selector, command.help, command.parameterList, command.parameter);
+   }
+-  void ConsoleSelection::add(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputList_& parameterList, int parameter)
++  void ConsoleSelection::add(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputStoreList& parameterList, int parameter)
+   {
+-    Selection_ selection;
++    SelectionStore selection;
+     selection.pCmd= pCmd;
+     selection.selector= selector;
+     selection.help= help;
+@@ -104,17 +104,17 @@ namespace Console
+   }
+   void ConsoleSelection::addSimple(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, int parameter)
+   {
+-    InputList_ parameterList;
++    InputStoreList parameterList;
+     add(pCmd, selector, help, parameterList, parameter);
+   }
+   void ConsoleSelection::addInput(SelectionCommandBase* pCmd, const std::string& selector, const std::string& help, const InputList& input, int parameter)
+   {
+-    InputList_ parameterList;
++    InputStoreList parameterList;
+     for(int i= 0; i < MAX_PARAMETER_COUNT; i++)
+     {
+       if(input[i].type != IT_IGNORE && input[i].pPrompt != 0)
+       {
+-        Input_ in(input[i].type, input[i].pPrompt);
++        InputStore in(input[i].type, input[i].pPrompt);
+         parameterList.push_back(in);
+       }
+     }
+@@ -136,18 +136,18 @@ namespace Console
+   {
+     ResultCode result= RC_NOT_FOUND;
+     char c= readChar();
+-    const Selection_* pSelect= getCommand(c);
++    const SelectionStore* pSelect= getCommand(c);
+     if(pSelect != 0)
+     {
+       int size= pSelect->parameterList.size();
+       Strings parameterList(size);
+ 
+       std::cout << pSelect->help << std::endl;
+-      InputList_::const_iterator it= pSelect->parameterList.begin();
+-      InputList_::const_iterator end= pSelect->parameterList.end();
++      InputStoreList::const_iterator it= pSelect->parameterList.begin();
++      InputStoreList::const_iterator end= pSelect->parameterList.end();
+       for(int i= 0; (it != end) && (i < size); it++, i++)
+       {
+-        const Input_& input= *it;
++        const InputStore& input= *it;
+         std::string command= getLine(input.prompt);
+         if(input.type == IT_FILENAME)
+         {
+@@ -179,7 +179,7 @@ namespace Console
+   {
+     if(parameter == P_QUIT)
+     {
+-      m_quit= true;
++      quit();
+     }
+     else
+     {
+@@ -187,6 +187,10 @@ namespace Console
+     }
+     return RC_SUCCESS;
+   }
++  void ConsoleSelection::quit()
++  {
++    m_quit= true;
++  }
+   void ConsoleSelection::printHelp() const
+   {
+     SelectionList::const_iterator it= m_selectionList.begin();
+@@ -212,9 +216,9 @@ namespace Console
+     std::cout << c << std::endl;
+     return c;
+   }
+-  const Selection_* ConsoleSelection::getCommand(char c) const
++  const SelectionStore* ConsoleSelection::getCommand(char c) const
+   {
+-    const Selection_* result= 0;
++    const SelectionStore* result= 0;
+     SelectionList::const_iterator it= m_selectionList.begin();
+     SelectionList::const_iterator end= m_selectionList.end();
+     for(; it != end; it++)
+-- 
+2.41.0.windows.1
+

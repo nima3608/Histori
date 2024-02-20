@@ -1,0 +1,630 @@
+From 655deeabfd51499081ff4e3d4de6aacc8fcd6f41 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 14 Jan 2015 10:52:21 +0000
+Subject: [PATCH 0635/1076] MANTIS 35110 Mantis 35110: MassaiCfgxB: generates
+ huge trace files - add tracesToFileParts
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@808 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/Tools/tracesToFileParts.hpp           | 123 +++++++++++++
+ .../Massai/cpp/Tools/makefile.mak             |   1 +
+ .../Massai/cpp/Tools/src/tracesFiler.cpp      | 158 ++++++++--------
+ .../cpp/Tools/src/tracesToFileParts.cpp       | 170 ++++++++++++++++++
+ 4 files changed, 381 insertions(+), 71 deletions(-)
+ create mode 100644 SelfServiceCommon/Interfaces/inc/Tools/tracesToFileParts.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/tracesToFileParts.cpp
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/tracesToFileParts.hpp b/SelfServiceCommon/Interfaces/inc/Tools/tracesToFileParts.hpp
+new file mode 100644
+index 00000000..72955bc8
+--- /dev/null
++++ b/SelfServiceCommon/Interfaces/inc/Tools/tracesToFileParts.hpp
+@@ -0,0 +1,123 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToFileParts.hpp
++ *
++ ' Contains class tracesToFileParts::writer.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACESTOFILEPARTS_HPP
++#define TRACESTOFILEPARTS_HPP
++
++
++#include "tools/traces.hpp"
++
++
++namespace tracesToFileParts
++{
++
++   /**
++    *
++    * Trace writer implementation. By overloading the "writer" interface
++    * class it defines and implements the write() and currentLevel()
++    * methods.
++    *
++    * This class is used to write traces to a files, which in turn are
++    * limited in size. Reching the maximum file size a new "generation" is
++    * written to. Trace file names are of this form:
++    * <name>_YYYYMMDD_HHMMSS.trc
++    * where YYYY = year, MM = month, DD = day, HH = hour, MM = minute,
++    * and SS = second of the file creation.
++    *
++    * All trace files are written to a directory given by the "path"
++    * argument.
++    *
++   **/
++   class writer : public traces::writer
++   {
++
++      //! Implementation class.
++      class impl;
++
++      //! Implementation object reference.
++      impl * const      m_impl;
++
++   public:
++
++      /**
++       *
++       * Constructor.
++       *
++       * @param path:           Path to the trace directory.
++       *
++       * @param name:           Trace file base name.
++       *
++       * @param max_file_size:  When to begin a new trace file.
++       *
++       * @param trace_level:    Trace entry threshold.
++       *
++      **/
++      writer
++         (
++            char const *        path,
++            char const *        name,
++            unsigned            max_file_size
++                                = 10000000,
++            traces::level       trace_level
++                                = traces::Lvl_SecondaryFrequent
++         );
++
++      /**
++       *
++       * Destructor.
++       *
++      **/
++      virtual ~writer() throw();
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      traces::level currentLevel() const;
++
++      /**
++       *
++       * Implements virtual base class method.
++       *
++      **/
++      void write
++         (
++            traces::meta const &        meta,
++            char const *                text
++         );
++
++   private:
++
++      //! Default constructor - intentionally not implemented.
++      writer();
++
++      //! Copy constructor - intentionally not implemented.
++      writer( writer const & src );
++
++      //! Assignment - intentionally not implemented.
++      writer& operator=( writer const & src );
++
++   };
++
++} // namespace tracesToFileParts
++
++
++#endif // #ifndef TRACESTOFILEPARTS_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 6c7dcb73..a6020a6c 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -36,6 +36,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\tracesFiler.obj \
+                         $(_OBJ)\tracesMetaLFL.obj \
+                         $(_OBJ)\tracesToFile.obj \
++                        $(_OBJ)\tracesToFileParts.obj \
+                         $(_OBJ)\tracesToLocal.obj \
+                         $(_OBJ)\tracesToTrc.obj \
+                         $(_OBJ)\tracesToTraceInterface.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+index 06570607..a1e0ebd2 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesFiler.cpp
+@@ -5,7 +5,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2010 MATERNA Information & Communications
++ * Copyright (c) 2010-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -28,29 +28,29 @@ namespace
+ {
+ 
+ 
+-   void createDir( char const * pszPath )
++   void createDir( char const * target_path )
+    {
+-      char  szPath[1024];
+-      char *pEnd = szPath;
++      char  path_buf[1024];
++      char *path_ptr = path_buf;
+       char del= 0;
+-      if( !pszPath )
++      if( !target_path )
+          return;
+-      strcpy( szPath, pszPath );
++      strcpy( path_buf, target_path );
+       do
+       {
+-         while( *pEnd != 0 && *pEnd != '/' && *pEnd != '\\' )
+-            ++pEnd;
+-         del = *pEnd;
+-         *pEnd = 0;
++         while( *path_ptr != 0 && *path_ptr != '/' && *path_ptr != '\\' )
++            ++path_ptr;
++         del = *path_ptr;
++         *path_ptr = 0;
+          // Ok, if it already exists. Other errors are ignored.
+-         (void)_mkdir(szPath);
+-         *pEnd = del;
+-         ++pEnd;
++         (void)_mkdir(path_buf);
++         *path_ptr = del;
++         ++path_ptr;
+        } while( del != 0 );
+    }
+ 
+ 
+-}
++} // namespace
+ 
+ 
+ 
+@@ -66,26 +66,26 @@ namespace traces
+    class filer::impl
+    {
+ 
+-      //! Save constructor parameter "BaseFilename".
+-      std::string const         M_BaseFilename;
++      //! Save constructor parameter "base_file_name".
++      std::string const         m_base_file_name;
+ 
+-      //! Save constructor parameter "MaxFilesize".
+-      unsigned int const        M_MaxFilesize;
++      //! Save constructor parameter "max_file_size".
++      unsigned int const        m_max_file_size;
+ 
+       //! Has a file already been opened?
+-      bool                      M_Open;
++      bool                      m_open;
+ 
+       //! The day of the month, when the file has been opened.
+-      unsigned int              M_OpenDay;
++      unsigned int              m_open_day;
+ 
+       //! Trace file output stream.
+-      std::ofstream             M_OStream;
++      std::ofstream             m_ostream;
+ 
+-      //! Save constructor parameter "Path".
+-      std::string const         M_Path;
++      //! Save constructor parameter "path".
++      std::string const         m_path;
+ 
+       //! Do we create trace subdirectories?
+-      subdirMode const          M_SubdirMode;
++      subdirMode const          m_sub_dir_mode;
+ 
+    public:
+ 
+@@ -93,34 +93,34 @@ namespace traces
+        *
+        * Constructor.
+        *
+-       * @param BaseFilename:           The name of the trace file, which
++       * @param base_file_name:           The name of the trace file, which
+        *                                will be extended for different
+        *                                generations. Do not provide an
+        *                                extension like e.g. ".trc".
+        *
+-       * @param Path:                   Traces root path. The actual path
++       * @param path:                   Traces root path. The actual path
+        *                                will be extended with date info.
+        *
+-       * @param SubdirMode:             Do we use trace sub-directories?
++       * @param sub_dir_mode:             Do we use trace sub-directories?
+        *
+-       * @param MaxFilesize:            The maximum size a trace file is
++       * @param max_file_size:            The maximum size a trace file is
+        *                                to grow, before a new file is used.
+        *
+       **/
+       impl
+          (
+-            char const *        BaseFilename,
+-            char const *        Path,
+-            subdirMode          SubdirMode,
+-            unsigned int        MaxFilesize
++            char const *        base_file_name,
++            char const *        path,
++            subdirMode          sub_dir_mode,
++            unsigned int        max_file_size
+          ) :
+-         M_BaseFilename( BaseFilename ),
+-         M_MaxFilesize( MaxFilesize ),
+-         M_Open( false ),
+-         M_OpenDay( 0 ),
+-         M_OStream(),
+-         M_Path( Path ),
+-         M_SubdirMode( SubdirMode )
++         m_base_file_name( base_file_name ),
++         m_max_file_size( max_file_size ),
++         m_open( false ),
++         m_open_day( 0 ),
++         m_ostream(),
++         m_path( path ),
++         m_sub_dir_mode( sub_dir_mode )
+       {
+       }
+ 
+@@ -133,14 +133,14 @@ namespace traces
+       **/
+       void openNewFile( SYSTEMTIME const & T )
+       {
+-         std::string Filename = M_Path;
+-         if( M_SubdirMode != Subdir_None )
++         std::string Filename = m_path;
++         if( m_sub_dir_mode != Subdir_None )
+          {
+             Filename += "\\";
+             char MmDd[10];
+-            if( M_SubdirMode == Subdir_MM_DD )
++            if( m_sub_dir_mode == Subdir_MM_DD )
+             {
+-               // Make subdirectory "MM_DD"
++               // Make subdirectory "Mm_DD"
+                sprintf
+                (
+                   MmDd,
+@@ -162,51 +162,67 @@ namespace traces
+             createDir( Filename.c_str() );
+          }
+          Filename += "\\";
+-         Filename += M_BaseFilename;
+-         char Hms[18];
+-         sprintf
+-         (
+-            Hms, ".%02d%02d%02d.trc",
+-            T.wHour, T.wMinute, T.wSecond
+-         );
+-         Filename += Hms;
+-         M_OStream.open( Filename.c_str() );
+-         M_OpenDay = T.wDay;
++         Filename += m_base_file_name;
++         char file_time[32];
++         if( m_sub_dir_mode != Subdir_None )
++         {
++            // The subdirectory contain already the date
++            // -> put hhmmss in filename
++            sprintf
++            (
++               file_time, "_%02d%02d%02d.trc",
++               T.wHour, T.wMinute, T.wSecond
++            );
++         }
++         else
++         {
++            // No subdirectory
++            // -> put yyyymmddhhmmss in filename
++            sprintf
++            (
++               file_time, "_%04d%02d%02d_%02d%02d%02d.trc",
++               T.wYear, T.wMonth, T.wDay,
++               T.wHour, T.wMinute, T.wSecond
++            );
++         }
++         Filename += file_time;
++         m_ostream.open( Filename.c_str() );
++         m_open_day = T.wDay;
+       }
+ 
+       /**
+        *
+        * Write a trace entry.
+        *
+-       * @param Entry:          The string to write.
++       * @param entry:          The string to write.
+        *
+       **/
+-      void write( char const * Entry ) throw()
++      void write( char const * entry ) throw()
+       {
+          try
+          {
+             SYSTEMTIME T;
+             GetLocalTime( &T );
+-            if( !M_Open )
++            if( !m_open )
+             {
+                // First call to write - open a new trace file.
+                openNewFile( T );
+-               M_Open = true;
++               m_open = true;
+             }
+             else if
+                (
+-                  static_cast<unsigned int>( M_OStream.tellp() ) >
+-                  M_MaxFilesize
++                  static_cast<unsigned int>( m_ostream.tellp() ) >
++                  m_max_file_size
+                )
+             {
+                // File size exceeds maximum allowed - new trace file.
+-               M_OStream.close();
++               m_ostream.close();
+                openNewFile( T );
+             }
+-            else if( T.wDay != M_OpenDay )
++            else if( T.wDay != m_open_day )
+             {
+                // Date changed - new trace file.
+-               M_OStream.close();
++               m_ostream.close();
+                openNewFile( T );
+             }
+             char Timestamp[20];
+@@ -215,7 +231,7 @@ namespace traces
+                   Timestamp, "%02d:%02d:%02d.%1d ",
+                   T.wHour, T.wMinute, T.wSecond, T.wMilliseconds / 100
+                );
+-            M_OStream << Timestamp << Entry << std::endl;
++            m_ostream << Timestamp << entry << std::endl;
+          }
+          catch( ... )
+          {
+@@ -241,17 +257,17 @@ namespace traces
+  */
+ traces::filer::filer
+    (
+-      char const * BaseFilename,
+-      char const * Path,
+-      subdirMode   SubdirMode,
+-      unsigned int MaxFilesize
++      char const * base_file_name,
++      char const * path,
++      subdirMode   sub_dir_mode,
++      unsigned int max_file_size
+    ) :
+    M_Impl
+       (
+          new traces::filer::impl
+             (
+-               BaseFilename, Path, SubdirMode,
+-               MaxFilesize
++               base_file_name, path, sub_dir_mode,
++               max_file_size
+             )
+       )
+ {
+@@ -282,9 +298,9 @@ traces::filer::~filer() throw()
+  * Method implementation, see "tracesFiler.hpp".
+  *
+  */
+-void traces::filer::write( char const * Entry ) throw()
++void traces::filer::write( char const * entry ) throw()
+ {
+-   M_Impl->write( Entry );
++   M_Impl->write( entry );
+ }
+ 
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToFileParts.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToFileParts.cpp
+new file mode 100644
+index 00000000..9de162bd
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToFileParts.cpp
+@@ -0,0 +1,170 @@
++/**
++ **************************************************************************
++ *
++ * @file tracesToFileParts.cpp
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2015 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "tools/tracesToFileParts.hpp"
++
++#include "systools/mAutoMutex.hpp"
++
++#include "tools/tracesMac.hpp"
++#include "Tools/tracesFiler.hpp"
++
++#include <iostream>
++#include <string>
++
++
++
++/**
++ *
++ * Writer implementation class.
++ *
++**/
++class tracesToFileParts::writer::impl
++{
++
++   //! Protect filer.
++   Materna::MSSD::mutexSemaphore        M_Mutex;
++
++   //! Trace level configuration object.
++   traces::level const                  M_TraceLevel;
++
++#ifdef TOCONSOLE
++   //! Trace to console configuration object.
++   cfgTraceToConsole                    M_TraceToConsole;
++#endif
++
++   //! Trace file control.
++   traces::filer                        M_Filer;
++
++public:
++
++   //! Constructor.
++   explicit impl
++      (
++         char const *   path,
++         char const *   name,
++         unsigned       max_file_size,
++         traces::level  trace_level
++      ) :
++      M_Mutex(),
++      M_TraceLevel( trace_level ),
++#ifdef TOCONSOLE
++      M_TraceToConsole( Name, M_APrefix + "To console" ),
++#endif
++      M_Filer
++         (
++            name,
++            path,
++            traces::filer::Subdir_None,
++            max_file_size
++         )
++   {
++   }
++
++   ~impl()
++   {
++   }
++
++   //! Implementation class method - like interface class method.
++   traces::level currentLevel()
++   {
++      return M_TraceLevel;
++   }
++
++   //! Implementation class method - like interface class method.
++   void write( char const * Entry ) throw()
++   {
++      try
++      {
++#ifdef TOCONSOLE
++         if( M_TraceToConsole.cached() )
++         {
++            // Do not re-enter.
++            Materna::MSSD::autoMutex AutoMutex( M_Mutex );
++            std::cout << Entry << std::endl;
++         }
++#endif
++         M_Filer.write( Entry );
++      }
++      catch( ... )
++      {
++      }
++   }
++
++private:
++
++   //! Default constructor - intentionally not implemented.
++   impl();
++
++};
++
++
++
++// Method implementation - see "gciTrace.hpp"
++traces::level tracesToFileParts::writer::currentLevel() const
++{
++   return m_impl->currentLevel();
++}
++
++
++
++// Method implementation, see "tracesToFileParts.hpp".
++void tracesToFileParts::writer::write
++   (
++      traces::meta const &      meta,
++      char const *              text
++   )
++{
++   // Source-file-line information
++   std::string TraceBuffer = meta.getFormatted();
++   // Trace entry
++   TraceBuffer += text;
++   m_impl->write( TraceBuffer.c_str() );
++}
++
++
++
++// Method implementation, see "tracesToFileParts.hpp".
++tracesToFileParts::writer::writer
++   (
++      char const *              path,
++      char const *              name,
++      unsigned                  max_file_size,
++      traces::level             trace_level
++   ) :
++   m_impl( new impl( path, name, max_file_size, trace_level ) )
++{
++}
++
++
++
++// Method implementation, see "tracesToFileParts.hpp".
++tracesToFileParts::writer::~writer() throw()
++{
++   try
++   {
++      delete m_impl;
++   }
++   catch( ... )
++   {
++   }
++}
++
++
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+-- 
+2.41.0.windows.1
+

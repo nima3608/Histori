@@ -1,0 +1,185 @@
+From 8665e3fb86225f60260d60b8db6097dadf73a5e5 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 13 Mar 2015 16:27:25 +0000
+Subject: [PATCH 0649/1077] MANTIS 34527 Mantis 34527: CATSA gate - Trace lines
+ have the source trace-level in it. With this wrapper it always was the
+ constant "5" - this is hereby fixed.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@830 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/src/tracesToTrc.cpp      | 74 ++++++++++---------
+ 1 file changed, 40 insertions(+), 34 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+index 3b5176f4..35c0bf35 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2011-2012 MATERNA Information & Communications
++ * Copyright (c) 2011-2015 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -34,16 +34,17 @@ namespace
+ {
+ 
+ 
+-   MASSAI::trace::TraceHandle * L_TraceHandle = 0;
++   //! Stic variable for external access to the trace handler.
++   MASSAI::trace::TraceHandle * l_trc_handle = 0;
+ 
+ 
+-}
++} // namespace
+ 
+ 
+ 
+ MASSAI::trace::TraceInterface * getTraceInterface()
+ {
+-   return L_TraceHandle;
++   return l_trc_handle;
+ }
+ 
+ 
+@@ -56,24 +57,17 @@ MASSAI::trace::TraceInterface * getTraceInterface()
+ class tracesToTrc::writer::impl
+ {
+ 
+-   //! Holds the complete configuration path prefix.
+-   std::string const                    M_APrefix;
+-
+-   trcHandle                            M_TrcHdl;
++   trcHandle                            m_trc_handle;
+ 
+ public:
+ 
+    //! Constructor.
+-   explicit impl( char const * Name ) :
+-      M_APrefix
+-         (
+-            std::string( Name ) + ".Trace control."
+-         ),
+-      M_TrcHdl( openTraceHandle( Name ) )
++   explicit impl( char const * trace_file_name ) :
++      m_trc_handle( openTraceHandle( trace_file_name ) )
+    {
+-      if( !L_TraceHandle )
++      if( !l_trc_handle )
+       {
+-         L_TraceHandle = new MASSAI::trace::TraceHandle( M_TrcHdl );
++         l_trc_handle = new MASSAI::trace::TraceHandle( m_trc_handle );
+       }
+    }
+ 
+@@ -81,9 +75,9 @@ public:
+    {
+       try
+       {
+-         delete L_TraceHandle;
+-         L_TraceHandle = 0;
+-         closeTrace( M_TrcHdl );
++         delete l_trc_handle;
++         l_trc_handle = 0;
++         closeTrace( m_trc_handle );
+       }
+       catch( ... )
+       {
+@@ -97,7 +91,7 @@ public:
+       // TODO For VC6 we do not have the getTraceLevel() function
+       return traces::Lvl_SecondaryFrequent;
+ #else
+-      long const lev = getTraceLevel( M_TrcHdl );
++      long const lev = getTraceLevel( m_trc_handle );
+       switch( lev )
+       {
+       case 0: return traces::Lvl_None;
+@@ -113,20 +107,32 @@ public:
+ #endif
+    }
+ 
+-   //! Implementation class method - like interface class method.
+-   void write( char const * Entry ) throw()
++   /**
++    *
++    * Implementation class method.
++    * Write a trace-line.
++    *
++    * @param in_level:          The level of the trace entry. This has
++    *                           been taken from the static meta data.
++    *
++    * @param trace_text:        The trace text payload.
++    *
++   **/
++   void write( traces::level in_level, char const * trace_text ) throw()
+    {
+       try
+       {
++         char const out_level = '0' + static_cast<char>( in_level );
+          writeTraceCooked
+             (
+-               M_TrcHdl,
++               m_trc_handle,
+                (
++                  // Cooked trace line,
+                   TraceFormat::dateTime( mSysTime::getTimestamp() ) +
+                   TraceFormat::separator() +
+                   TraceFormat::threadId( mSysThread::id() ) +
+-                  TraceFormat::separator() + "5" +
+-                  TraceFormat::separator() + Entry
++                  TraceFormat::separator() + out_level +
++                  TraceFormat::separator() + trace_text
+                ).c_str()
+             );
+       }
+@@ -141,10 +147,10 @@ private:
+    impl();
+ 
+    //! Copy constructor - intentionally not implemented.
+-   impl( impl const & Src );
++   impl( impl const & src );
+ 
+    //! Assignment - intentionally not implemented.
+-   impl & operator=( impl const & Src );
++   impl & operator=( impl const & src );
+ 
+ };
+ 
+@@ -161,15 +167,15 @@ traces::level tracesToTrc::writer::currentLevel() const
+ // Method implementation, see "tracesToTrc.hpp".
+ void tracesToTrc::writer::write
+    (
+-      traces::meta const &      Meta,
+-      char const *              Text
++      traces::meta const &      traces_meta,
++      char const *              trace_text
+    )
+ {
+    // Source-file-line information
+-   std::string TraceBuffer = Meta.getFormatted();
++   std::string TraceBuffer = traces_meta.getFormatted();
+    // Trace entry
+-   TraceBuffer += Text;
+-   M_Impl->write( TraceBuffer.c_str() );
++   TraceBuffer += trace_text;
++   M_Impl->write( traces_meta.getLevel(), TraceBuffer.c_str() );
+ }
+ 
+ 
+@@ -177,9 +183,9 @@ void tracesToTrc::writer::write
+ // Method implementation, see "tracesToTrc.hpp".
+ tracesToTrc::writer::writer
+    (
+-      char const *              Filename
++      char const *              trace_file_name
+    ) :
+-   M_Impl( new impl( Filename ) )
++   M_Impl( new impl( trace_file_name ) )
+ {
+ }
+ 
+-- 
+2.41.0.windows.1
+

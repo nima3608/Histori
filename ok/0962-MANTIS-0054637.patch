@@ -1,0 +1,230 @@
+From 877e95764eec85b5c5ccade1358be7045a68cf47 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 7 Jun 2019 16:06:01 +0000
+Subject: [PATCH 0962/1077] MANTIS 0054637 tools/Enumeration.hpp
+
+added enumerationValueEntry and enumerationValue for enumeration with generic values
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1457 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/generic/tools/Enumeration.h    |  40 +++++
+ .../Interfaces/generic/tools/Enumeration.hpp  | 154 ++++++++++++++++++
+ 2 files changed, 194 insertions(+)
+
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+index 9fff2ebe..52fdce0f 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.h
+@@ -73,6 +73,46 @@ namespace mipsTools
+       std::string getDescription(E code) const;
+   };
+ 
++  template<class E, class N> class enumerationValueEntry
++  {
++    public:
++      enumerationValueEntry();
++      enumerationValueEntry(E code);
++      enumerationValueEntry(E code, const N& value, const std::string& description);
++
++      void setCode(E code);
++      void setValue(const N& value);
++
++      E getCode() const;
++      N getValue() const;
++      std::string getDescription() const;
++      std::string getText() const;
++
++      bool operator<(const enumerationValueEntry<E, N>& cmp) const;
++      bool operator>(const enumerationValueEntry<E, N>& cmp) const;
++      bool operator<=(const enumerationValueEntry<E, N>& cmp) const;
++      bool operator>=(const enumerationValueEntry<E, N>& cmp) const;
++      bool operator==(const enumerationValueEntry<E, N>& cmp) const;
++
++    private:
++      E code;
++      N value;
++      std::string description;
++  };
++
++  template<class E, class N> class enumerationValue: public enumerationBase<E, N, enumerationValueEntry<E, N> >
++  {
++    public:
++      enumerationValue(E defaultCode, const N& defaultValue, const std::string& defaultDescription);
++      ~enumerationValue();
++
++      void add(E code, const N& value, const std::string& description);
++      void add(E code, const std::string& description);
++
++      std::string getDescription(E code) const;
++  };
++
++
+   template<class E>
+   std::ostream& operator<<(std::ostream& out, const enumerationEntry<E>& data);
+ }
+diff --git a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+index 7cff1fcb..0ee2495e 100644
+--- a/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
++++ b/SelfServiceCommon/Interfaces/generic/tools/Enumeration.hpp
+@@ -199,4 +199,158 @@ namespace mipsTools
+         << data.getDescription();
+     return out;
+   }
++
++
++  template<class E, class N>
++  enumerationValueEntry<E, N>::enumerationValueEntry():
++    code(),
++    value(),
++    description()
++  {}
++
++  template<class E, class N>
++  enumerationValueEntry<E, N>::enumerationValueEntry(E code):
++    code(code),
++    value(),
++    description()
++  {}
++
++  template<class E, class N>
++  enumerationValueEntry<E, N>::enumerationValueEntry(E code, const N& value, const std::string& description):
++    code(code),
++    value(value),
++    description(description)
++  {}
++
++  template<class E, class N>
++  void enumerationValueEntry<E, N>::setCode(E code)
++  {
++    this->code = code;
++  }
++
++  template<class E, class N>
++  void enumerationValueEntry<E, N>::setValue(const N& value)
++  {
++    this->value = value;
++  }
++
++  template<class E, class N>
++  E enumerationValueEntry<E, N>::getCode() const
++  {
++    return code;
++  }
++
++  template<class E, class N>
++  N enumerationValueEntry<E, N>::getValue() const
++  {
++    return value;
++  }
++
++  template<class E, class N>
++  std::string enumerationValueEntry<E, N>::getDescription() const
++  {
++    return description;
++  }
++
++  template<class E, class N>
++  std::string enumerationValueEntry<E, N>::getText() const
++  {
++    std::ostringstream out;
++    out << *this;
++    return out.str();
++  }
++
++  template<class E, class N>
++  bool enumerationValueEntry<E, N>::operator<(const enumerationValueEntry<E, N>& cmp) const
++  {
++    return code < cmp.code
++      || (code == cmp.code
++        && (value < cmp.value
++          || (value == cmp.value
++            && description < cmp.description)));
++  }
++
++  template<class E, class N>
++  bool enumerationValueEntry<E, N>::operator>(const enumerationValueEntry<E, N>& cmp) const
++  {
++    return cmp < *this;
++  }
++
++  template<class E, class N>
++  bool enumerationValueEntry<E, N>::operator<=(const enumerationValueEntry<E, N>& cmp) const
++  {
++    return !(*this > cmp);
++  }
++
++  template<class E, class N>
++  bool enumerationValueEntry<E, N>::operator>=(const enumerationValueEntry<E, N>& cmp) const
++  {
++    return !(*this < cmp);
++  }
++
++  template<class E, class N>
++  bool enumerationValueEntry<E, N>::operator==(const enumerationValueEntry<E, N>& cmp) const
++  {
++    return code == cmp.code
++      && value == cmp.value
++      && description == cmp.description;
++  }
++
++
++  template<class E, class N>
++  enumerationValue<E, N>::enumerationValue(E defaultCode, const N& defaultValue, const std::string& defaultDescription):
++    enumerationBase<E, N, enumerationValueEntry<E, N> >(enumerationValueEntry<E, N>(defaultCode, defaultValue, defaultDescription))
++  {}
++
++  template<class E, class N>
++  enumerationValue<E, N>::~enumerationValue()
++  {}
++
++  template<class E, class N>
++  void enumerationValue<E, N>::add(E code, const N& value, const std::string& description)
++  {
++    enumerationValueEntry<E, N> entry(code, value, description);
++    addEntry(entry);
++  }
++
++  template<class E, class N>
++  void enumerationValue<E, N>::add(E code, const std::string& description)
++  {
++    enumerationValueEntry<E, N> entry(code, static_cast<N>(code), description);
++    addEntry(entry);
++  }
++
++  template<class E, class N>
++  std::string enumerationValue<E, N>::getDescription(E code) const
++  {
++    return getEntry(code).getDescription();
++  }
++
++
++  template<class E>
++  std::ostream& operator<<(std::ostream& out, const enumerationValueEntry<E, unsigned char>& data)
++  {
++    out << static_cast<int>(data.getCode()) << "/"
++        << static_cast<int>(data.getValue()) << "/"
++        << data.getDescription();
++    return out;
++  }
++
++  template<class E>
++  std::ostream& operator<<(std::ostream& out, const enumerationValueEntry<E, signed char>& data)
++  {
++    out << static_cast<int>(data.getCode()) << "/"
++        << static_cast<int>(data.getValue()) << "/"
++        << data.getDescription();
++    return out;
++  }
++
++  template<class E, class N>
++  std::ostream& operator<<(std::ostream& out, const enumerationValueEntry<E, N>& data)
++  {
++    out << static_cast<int>(data.getCode()) << "/"
++        << data.getValue() << "/"
++        << data.getDescription();
++    return out;
++  }
+ }
+-- 
+2.41.0.windows.1
+

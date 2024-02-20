@@ -1,0 +1,365 @@
+From acb0483679f15221152146ef63079580b9978aff Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 26 Oct 2012 08:26:49 +0000
+Subject: [PATCH 0362/1076] Mantis 6875
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@431 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Tools/inc/TraceFormat.hpp      | 65 +++++++++++++
+ .../Massai/cpp/Tools/makefile.mak             | 11 +++
+ .../Massai/cpp/Tools/src/TestTracesToTrc.cpp  | 34 +++++++
+ .../Massai/cpp/Tools/src/TraceFormat.cpp      | 94 +++++++++++++++++++
+ .../Massai/cpp/Tools/src/TraceFormatCB.cpp    | 20 ++--
+ .../Massai/cpp/Tools/src/tracesToTrc.cpp      | 27 +++---
+ 6 files changed, 223 insertions(+), 28 deletions(-)
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/inc/TraceFormat.hpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TestTracesToTrc.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/Tools/src/TraceFormat.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/inc/TraceFormat.hpp b/SelfServiceCommon/Massai/cpp/Tools/inc/TraceFormat.hpp
+new file mode 100644
+index 00000000..96b661d4
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/inc/TraceFormat.hpp
+@@ -0,0 +1,65 @@
++/**
++ **************************************************************************
++ *
++ * @file TraceFormat.hpp
++ *
++ * Contains namespace "TraceFormat" function prototypes.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#ifndef TRACEFORMAT_HPP
++#define TRACEFORMAT_HPP
++
++
++#include "systools/mSysTime.h"
++#include <string>
++
++
++namespace TraceFormat
++{
++
++   /**
++    *
++    * Trace elements are separated by this.
++    *
++   **/
++   char const * separator();
++
++   /**
++    *
++    * Convert a timestamp to a string representation for traces.
++    *
++    * @param timestamp:         The date/time to convert.
++    *
++    * @return:                  A string headinge trace items.
++    *
++   **/
++   std::string dateTime( mSysTime::Timestamp const & timestamp );
++
++   /**
++    *
++    * Convert a thread-id to a string representation for traces.
++    *
++    * @param id:                The thread id.
++    *
++    * @return:                  A string for trace items.
++    *
++   **/
++   std::string threadId( unsigned long id );
++
++} // namespace TraceFormat
++
++
++#endif // #ifndef TRACEFORMAT_HPP
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
++
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+index 7b61011c..4e59e538 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Tools/makefile.mak
+@@ -23,6 +23,7 @@ MY_LIB1_OBJS =          $(_OBJ)\mHRTimerW32.obj \
+                         $(_OBJ)\stringbuffer.obj \
+                         $(_OBJ)\log.obj \
+                         $(_OBJ)\TraceInterface.obj \
++                        $(_OBJ)\TraceFormat.obj \
+                         $(_OBJ)\TraceFormatCB.obj \
+                         $(_OBJ)\TraceCallback.obj \
+                         $(_OBJ)\TraceSystem.obj \
+@@ -50,6 +51,16 @@ MY_BIN1_USER_LIBS =     $(LIB_TOOLS)
+ 
+ MY_BIN1_OBJS =          $(_OBJ)\TestDateProperties.obj
+ 
++######################################################################
++
++MY_BIN2 =               $(_BIN)\TestTracesToTrc.exe
++
++MY_BIN2_USER_LIBS =     $(LIB_TRACEHDL) $(LIB_TRACE) $(LIB_SYSTOOLS) $(LIB_TOOLS) 
++
++MY_BIN2_OBJS =          $(_OBJ)\TestTracesToTrc.obj
++
++######################################################################
++
+ ######################################################################
+ #
+ #MY_BIN2 =               $(_BIN)\TestBitArray.exe
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TestTracesToTrc.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TestTracesToTrc.cpp
+new file mode 100644
+index 00000000..3afbf845
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TestTracesToTrc.cpp
+@@ -0,0 +1,34 @@
++#include "tools/tracesMac.hpp"
++#include "tools/tracesToTrc.hpp"
++
++#include "systools/mSysThread.hpp"
++
++#include "trc/TraceClt.h"
++
++int main()
++{
++   openTrace( "TestTracesToTrc" );
++   tracesToTrc::writer TracesWriter( "TestTracesToTrc" );
++   traces::writer & Trc = TracesWriter;
++   int More = 30000;
++   int N = 0;
++   std::string String;
++   while( More-- )
++   {
++      //mSysThread::sleep( 10 );
++      N += 1;
++      if( N % 10 )
++         String += ".";
++      else if( N % 100 )
++         String += "-";
++      else if( N % 1000 )
++         String += "+";
++      else if( N % 10000 )
++         String += "*";
++      else
++         String += "|";
++      TRC_BASIC_RUN( "Trace [" << String << "] = " << N );
++   }
++   mSysThread::sleep( 100 );
++   return 0;
++}
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormat.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormat.cpp
+new file mode 100644
+index 00000000..111febe8
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormat.cpp
+@@ -0,0 +1,94 @@
++/**
++ **************************************************************************
++ *
++ * @file TraceFormat.cpp
++ *
++ * Implements namespace "TraceFormat" functions.
++ *
++ * @author Juergen Kreierhoff
++ *
++ * Copyright (c) 2012 MATERNA Information & Communications
++ *
++ **************************************************************************
++**/
++#include "TraceFormat.hpp"
++
++#define USE_BOOST_FORMAT
++
++#ifdef USE_BOOST_FORMAT
++#include "boost/format.hpp"
++#endif
++
++
++#define FIELD_SEP "\t"
++
++
++
++/*
++ *
++ * Public function, see "TraceFormat.hpp".
++ *
++ */
++std::string TraceFormat::dateTime( mSysTime::Timestamp const & timestamp )
++{
++    // date time threadid tracelevel/topic file line
++#ifdef USE_BOOST_FORMAT
++   return
++      (
++         boost::format
++            (
++               "%02d.%02d.%04d" FIELD_SEP "%02d:%02d:%02d,%03d"
++            )
++            % timestamp.day % timestamp.month % timestamp.year
++            % timestamp.hour % timestamp.minute % timestamp.second
++            % timestamp.milliseconds
++      ).str();
++#else
++    char buffer[64] = "";
++    sprintf(buffer, "%02d.%02d.%04d" FIELD_SEP "%02d:%02d:%02d,%03d",
++      timestamp.day, timestamp.month, timestamp.year,
++      timestamp.hour, timestamp.minute, timestamp.second,
++      timestamp.milliseconds);
++    return std::string( buffer );
++#endif
++}
++
++
++
++/*
++ *
++ * Public function, see "TraceFormat.hpp".
++ *
++ */
++std::string TraceFormat::threadId( unsigned long id )
++{
++#ifdef USE_BOOST_FORMAT
++   return ( boost::format( "%02d") % id ).str();
++#else
++   char buffer[16] = "";
++   sprintf(buffer, "%02d", id);
++   return std::string( buffer );
++#endif
++}
++
++
++
++/*
++ *
++ * Public function, see "TraceFormat.hpp".
++ *
++ */
++char const * TraceFormat::separator()
++{
++   return FIELD_SEP;
++}
++
++
++
++/**
++ **************************************************************************
++ *
++ * End of file
++ *
++ **************************************************************************
++**/
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormatCB.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormatCB.cpp
+index 976306a6..6225aaac 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormatCB.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/TraceFormatCB.cpp
+@@ -12,6 +12,7 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "Tools/TraceFormatCB.h"
++#include "TraceFormat.hpp"
+ #include <sstream>
+ #include <iostream>
+ #include <iomanip>
+@@ -41,32 +42,27 @@ namespace
+   {
+     const char* fileTruncated= truncate(file);
+     // date time threadid tracelevel/topic file line
+-    char buffer[100] = "";
+-    sprintf(buffer, "%02d.%02d.%04d\t%02d:%02d:%02d,%03d\t%02d\t",
+-      timestamp.day, timestamp.month, timestamp.year,
+-      timestamp.hour, timestamp.minute, timestamp.second,
+-      timestamp.milliseconds,
+-      threadId);
+-    out << buffer;
+-
++    out << TraceFormat::dateTime(timestamp)
++        << TraceFormat::separator()
++        << TraceFormat::threadId(threadId);
+     // tracelevel/topic
+     if(traceLevel != -1)
+     {
+       out << std::right << std::setfill('0') << std::dec;
+       out << std::setw(1) << traceLevel;
+     }
+-    else if(topic != "")
++    else if(topic)
+     {
+       out << std::left << std::setfill(' ');
+       out << std::setw(8) << topic;
+     }
+-    out << "\t";
++    out << TraceFormat::separator();
+     // file
+     out << std::left << std::setfill(' ');
+-    out << std::setw(20) << fileTruncated << "\t";
++    out << std::setw(20) << fileTruncated << TraceFormat::separator();
+     // line
+     out << std::right << std::setfill('0') << std::dec;
+-    out << "(" << std::setw(4) << line << ")\t";
++    out << "(" << std::setw(4) << line << ")" << TraceFormat::separator();
+   }
+   void dumptoCB(Callback& cb, ThreadId threadId, const mSysTime::Timestamp& timestamp,
+     long traceLevel, const char* topic, const char* file, long line,
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+index c57d9854..46e076ed 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/tracesToTrc.cpp
+@@ -17,14 +17,13 @@
+ 
+ // From SelfServiceCommon
+ #include "systools/mAutoMutex.hpp"
++#include "systools/mSysThread.hpp"
++#include "TraceFormat.hpp"
+ // For "MASSAI::trace::TraceHandle"
+ #include "Tools/TraceHandle.h"
+ #include "trc/TrcHdlClt.h"
+ #include "trc/TrcHdlLevel.h"
+ 
+-// For SYSTEMTIME
+-#include <windows.h>
+-
+ // Compiler lib
+ #include <iostream>
+ #include <string>
+@@ -114,21 +113,17 @@ public:
+    {
+       try
+       {
+-         //
+-         SYSTEMTIME T;
+-         GetLocalTime( &T );
+-         char Timestamp[32];
+-         sprintf
++         writeTraceCooked
+             (
+-               Timestamp, "%02d.%02d.%04d %02d:%02d:%02d.%02d ",
+-               T.wDay, T.wMonth, T.wYear,
+-               T.wHour, T.wMinute, T.wSecond, T.wMilliseconds / 10
++               M_TrcHdl,
++               (
++                  TraceFormat::dateTime( mSysTime::getTimestamp() ) +
++                  TraceFormat::separator() +
++                  TraceFormat::threadId( mSysThread::id() ) +
++                  TraceFormat::separator() + "5" +
++                  TraceFormat::separator() + Entry
++               ).c_str()
+             );
+-         //
+-         std::string AllEntry = Timestamp;
+-         AllEntry += Entry;
+-         //
+-         writeTraceCooked( M_TrcHdl, AllEntry.c_str() );
+       }
+       catch( ... )
+       {
+-- 
+2.41.0.windows.1
+

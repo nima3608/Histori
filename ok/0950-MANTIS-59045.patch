@@ -1,0 +1,197 @@
+From 4c7578430263af484250ffde1846b9f1c2f8e7a9 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 29 Sep 2020 08:31:18 +0000
+Subject: [PATCH 0950/1000] MANTIS 59045 CfgValues*.exe 1.2.2 Retry with
+ setInitial only in case of notFound exception
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1592 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/inc/CfgValues_def.h   | 25 +++++++-----
+ .../Massai/cpp/CfgTools/src/CfgValues.cpp     | 38 +++++++++++++------
+ 2 files changed, 42 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+index 6954b5f8..5944effc 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/inc/CfgValues_def.h
+@@ -79,28 +79,33 @@
+ //                        if syntax of single item config is wrong
+ //                      - Generate a line-break warning, if one is detected
+ //                        within an input record.
+-//#define FILE_VER_BIN 1,1,6,0
+-//#define FILE_VER_DTS "1.1.6.0\0"
++// #define FILE_VER_BIN 1,1,6,0
++// #define FILE_VER_DTS "1.1.6.0\0"
+ //
+ // 24.10.2017  GiT      - Mantis 0048136: CfgValues: command REMOVEFROMLIST does not remove values if escaped chars are included
+ //
+-//#define FILE_VER_BIN 1,2,0,0
+-//#define FILE_VER_DTS "1.2.0.0\0"
++// #define FILE_VER_BIN 1,2,0,0
++// #define FILE_VER_DTS "1.2.0.0\0"
+ //
+ // 06.07.2018  Sven     - Mantis 0044960: Extend CfgValuesS by list operations through configuration file (and more)
+ //
+-//#define FILE_VER_BIN 1,2,1,0
+-//#define FILE_VER_DTS "1.2.1.0\0"
++// #define FILE_VER_BIN 1,2,1,0
++// #define FILE_VER_DTS "1.2.1.0\0"
+ //
+ // 29.10.2018  GiT     - Mantis 0052260: CfgValues: Bugfix removefromlist willfull ignored more than one operation
+ //
+-//#define FILE_VER_BIN 1,2,1,1
+-//#define FILE_VER_DTS "1.2.1.1\0"
++// #define FILE_VER_BIN 1,2,1,1
++// #define FILE_VER_DTS "1.2.1.1\0"
+ //
+ // 12.12.2019  GiT     - Mantis 0056855: CfgValues: add PORT commandline parameter
+ //
+-#define FILE_VER_BIN 1,2,1,1
+-#define FILE_VER_DTS "1.2.1.1\0"
++// #define FILE_VER_BIN 1,2,1,1
++// #define FILE_VER_DTS "1.2.1.1\0"
++//
++// 29.Sep.2020  JK      - Mantis 59045: Config service returns "alreadyExists" exception on wrong SELECTION values
++//                      - Retry with setInitial only in case of notFound exception
++#define FILE_VER_BIN 1,2,2,0
++#define FILE_VER_DTS "1.2.2.0\0"
+ 
+ //-------------------------------------------------------------------------
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+index 6f6bea42..7f128ed5 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgValues.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2004-2017 MATERNA Information & Communications
++ * Copyright (c) 2004-2020 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -796,12 +796,12 @@ int removeFromList(char const * Host, long Port,
+                     << std::endl;
+                 return c_exit_connection_failed;
+             }
+-        } 
++        }
+         else
+         {
+             std::cout << DSPLLIN "Listitem [" << RemValue << "]"
+                     " not found in List - ignored." << std::endl;
+-        }            
++        }
+         }
+     }
+     catch( Config::Node::notFound & )
+@@ -809,7 +809,7 @@ int removeFromList(char const * Host, long Port,
+         std::cout << DSPLERR "REMOVEFROMLIST item [" << RemItem << "]"
+         " not found - ignored." << std::endl;
+     }
+-    return c_exit_good;         
++    return c_exit_good;
+ }
+ 
+ /**
+@@ -844,19 +844,19 @@ int main( int argc, char ** argv )
+           {
+             std::cout << DSPLERR " Port can't be 0, the default port " << CFGMGR_PORT << " is used"<< std::endl;
+             Port = CFGMGR_PORT;
+-          }          
++          }
+          }
+          catch( ... )
+          {
+             std::cout << DSPLERR " Port argument error, value ignored - the default port " << CFGMGR_PORT << " is used"<< std::endl;
+             Port = CFGMGR_PORT;
+-         }          
++         }
+       }
+       else
+       {
+          Port = CFGMGR_PORT;
+       }
+-      
++
+       //
+       // First try, if the READ-option is given
+       //
+@@ -1154,7 +1154,7 @@ int main( int argc, char ** argv )
+                         {
+                            TextProxy->set( SAcc, ValString.c_str() );
+                         }
+-                        catch( ... )
++                        catch( Config::Node::notFound & )
+                         {
+                            TextProxy->setInitial
+                                        (
+@@ -1162,6 +1162,10 @@ int main( int argc, char ** argv )
+                                           ValString.c_str()
+                                        );
+                         }
++                        catch( ... )
++                        {
++                           throw;
++                        }
+                      }
+                      else
+                      {
+@@ -1319,7 +1323,7 @@ int main( int argc, char ** argv )
+                            {
+                               TextlistProxy->set( SAcc, ValStrings );
+                            }
+-                           catch( ... )
++                           catch( Config::Node::notFound & )
+                            {
+                               TextlistProxy->setInitial
+                                              (
+@@ -1327,6 +1331,10 @@ int main( int argc, char ** argv )
+                                                 ValStrings
+                                              );
+                            }
++                           catch( ... )
++                           {
++                              throw;
++                           }
+                         }
+                         else
+                         {
+@@ -1394,11 +1402,15 @@ int main( int argc, char ** argv )
+                         {
+                            NumberProxy->set( SAcc, atoi( FVal.c_str() ) );
+                         }
+-                        catch( ... )
++                        catch( Config::Node::notFound & )
+                         {
+                            NumberProxy->
+                               setInitial( SAcc, atoi( FVal.c_str() ) );
+                         }
++                        catch( ... )
++                        {
++                           throw;
++                        }
+                      }
+                      else
+                      {
+@@ -1473,11 +1485,15 @@ int main( int argc, char ** argv )
+                         {
+                            SelectionProxy->setString( SAcc, FVal.c_str() );
+                         }
+-                        catch( ... )
++                        catch( Config::Node::notFound & )
+                         {
+                            SelectionProxy->
+                               setInitialString( SAcc, FVal.c_str() );
+                         }
++                        catch( ... )
++                        {
++                           throw;
++                        }
+                      }
+                      else
+                      {
+-- 
+2.41.0.windows.1
+

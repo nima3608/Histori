@@ -1,0 +1,1271 @@
+From 561279788ca371336329ade4418a5c913eaec73c Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Mon, 17 Jun 2013 18:19:36 +0000
+Subject: [PATCH 0414/1076] massai_systools.lib V1.0.0.5 Mantis 0026902:
+ Internet Explorer Process doesn't close formatting
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@508 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/systools/mSysProcessList.h |  39 ++--
+ .../Interfaces/inc/systools/mSysWindow.h      |  30 +--
+ .../Massai/cpp/Systools/src/local_def.cpp     |   6 +-
+ .../cpp/Systools/src/mSysProcessListW32.cpp   | 177 +++++++++++-------
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  79 +++++---
+ 5 files changed, 193 insertions(+), 138 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+index 62e499bf..edb45ce8 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysProcessList.h
+@@ -1,6 +1,4 @@
+-/**
+- * control list of child processes
+-**/
++// control list of child processes
+ 
+ #ifndef MSYSPROCESSLIST_H_INCLUDED
+ #define MSYSPROCESSLIST_H_INCLUDED
+@@ -24,9 +22,8 @@ namespace mSysProcess
+     HIDE,
+     MINIMIZED
+   };
+-  /*
+-    settings for a process
+-  */
++
++  // settings for a process
+   class ProcessProperties
+   {
+     public:
+@@ -43,28 +40,20 @@ namespace mSysProcess
+   };
+   typedef std::list<ProcessProperties> PropertyList;
+ 
+-  /*
+-    settings for Watchdog
+-  */
++  // settings for Watchdog
+   class WatchdogSettings
+   {
+     public:
+-      /*
+-        wait for termination
+-      */
++      // wait for termination
+       unsigned long waitTimeout;
+-      /*
+-        watchdog timeout: adaptive time parameter
+-      */
++      // watchdog timeout: adaptive time parameter
+       bool useWatchDog;
+       unsigned long resetMin;
+       unsigned long resetMax;
+       unsigned long resetRecover;
+   };
+ 
+-  /*
+-    settings for ProcessList
+-  */
++  // settings for ProcessList
+   class ProcessListSettings
+   {
+     public:
+@@ -72,9 +61,7 @@ namespace mSysProcess
+       virtual PropertyList getProcessList() const= 0;
+   };
+ 
+-  /*
+-    watch ProcessList actions
+-  */
++  // watch ProcessList actions
+   class ProcessListCallback
+   {
+     public:
+@@ -84,9 +71,8 @@ namespace mSysProcess
+       virtual void started(const ProcessProperties& process)= 0;
+       virtual void terminated(const ProcessProperties& process)= 0;
+   };
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   class ProcessList
+   {
+     public:
+@@ -105,9 +91,8 @@ namespace mSysProcess
+ 
+       pImplPtr<Impl> m_pImpl;
+   };
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   class ApplicationList
+   {
+     public:
+diff --git a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+index 436d9cfb..2e157d78 100644
+--- a/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
++++ b/SelfServiceCommon/Interfaces/inc/systools/mSysWindow.h
+@@ -1,6 +1,4 @@
+-/**
+- * control windows of other processes
+-**/
++//  control windows of other processes
+ 
+ #ifndef MSYSWINDOW_H_INCLUDED
+ #define MSYSWINDOW_H_INCLUDED
+@@ -17,9 +15,7 @@
+ 
+ namespace mSysWindow
+ {
+-  /*
+-   * control a window
+-   */
++  // control a window
+   class Window
+   {
+     public:
+@@ -35,9 +31,8 @@ namespace mSysWindow
+       //   to get the right to activate the window
+       virtual bool isActive()= 0;
+   };
+-  /*
+-   *  process (window owner)
+-   */
++
++  //  process (window owner)
+   class Process
+   {
+     public:
+@@ -49,10 +44,8 @@ namespace mSysWindow
+   };
+ 
+   typedef std::set<Process*> ProcessSet;
+-  /*
+-   * define a windows search
+-   *   use desktop, processid
+-   */
++  //  define a windows search
++  //    use desktop, processid
+   class WindowSearchData
+   {
+     public:
+@@ -63,10 +56,9 @@ namespace mSysWindow
+       std::string desktop;
+       bool useDesktop;
+   };
+-  /*
+-   *  user defined check
+-   *    for windows search
+-   */
++
++  // user defined check
++  //    for windows search
+   class WindowSearchMatch
+   {
+     public:
+@@ -77,9 +69,7 @@ namespace mSysWindow
+   typedef boost::shared_ptr<Window> WindowPtr;
+   typedef std::list<WindowPtr> WindowList;
+ 
+-  /*
+-   * invoke windows search
+-   */
++  // invoke windows search
+   class WindowSearch
+   {
+     public:
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 4ed461de..4ee38cd0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,10 +1,14 @@
+ #include "Tools/VERSIONLIB.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 4);
++VERSION_ID_DT(systools, 1, 0, 0, 5);
+ 
+ /*!
+ \page massai_systools.lib, massai_systools.lib - Release Notes
+ 
++\date 17.06.2013
++\li V1.0.0.5
++\li Mantis 0026902: Internet Explorer Process doesn't close
++
+ \date 05.02.2013 \li V1.0.0.4
+                  \li Mantis 0025897: GPPDev: NCR K8 workaround for crash of printer driver
+                      add serviceMonitor to systools (monitor status of windows services)
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 414a2eaf..c2b04df0 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -1,6 +1,4 @@
+-/**
+- * control list of child processes
+-**/
++// control list of child processes
+ 
+ #pragma warning (disable: 4786)
+ 
+@@ -55,9 +53,7 @@ namespace
+     WND_VISIBLE,
+     WND_ALL,
+   };
+-  /*
+-    callback for Process notification
+-  */
++  // callback for Process notification
+   class Process;
+   class ProcessCallback
+   {
+@@ -67,9 +63,8 @@ namespace
+       virtual void notify(Process& process)= 0;
+       virtual void match(Process& process)= 0;
+   };
+-  /*
+-    control child process
+-  */
++
++  // control child process
+   class Process:
+     public mSysWindow::Process,
+     public WaitNotification,
+@@ -107,19 +102,16 @@ namespace
+       bool m_watchDog;
+       WindowSearchType m_search;
+   };
++
+   typedef std::set<Process*> ProcessSet;
+   typedef boost::shared_ptr<Process> ProcessPtr;
+   typedef std::list<ProcessPtr> ProcessPtrList;
+ 
+-  /*
+-    store search result for a group (in ApplicationList)
+-  */
++  // store search result for a group (in ApplicationList)
+   typedef boost::shared_ptr<WindowSearch> WindowSearchPtr;
+   typedef std::map<std::string, WindowSearchPtr> WindowSearchMap;
+ 
+-  /*
+-    control list of child processes
+-  */
++  // control list of child processes
+   class ProcessListImpl:
+     private WaitListener,
+     private ProcessCallback
+@@ -177,15 +169,10 @@ namespace
+       WatchdogSettings m_settings;
+   };
+ 
+-
+-  /*
+-    store windows of a process group (in ApplicationList)
+-  */
++  // store windows of a process group (in ApplicationList)
+   typedef std::map<std::string, WindowList> WindowMap;
+ 
+-  /*
+-    state of ProcessList::Impl
+-  */
++  // state of ProcessList::Impl
+   enum State
+   {
+     INIT,
+@@ -194,6 +181,7 @@ namespace
+     STOPPING,
+     STOPPED,
+   };
++
+   std::string getStateText(State state)
+   {
+     switch(state)
+@@ -207,17 +195,15 @@ namespace
+     }
+   }
+ 
+-  /*
+-    callback for Process notification
+-  */
++  // callback for Process notification
+   ProcessCallback::ProcessCallback()
+   {}
++
+   ProcessCallback::~ProcessCallback()
+   {}
+-  /*
+-   *  user defined check
+-   *    for windows search
+-   */
++
++  //  user defined check
++  //    for windows search
+   class WindowMatch: public WindowSearchMatch
+   {
+     public:
+@@ -228,7 +214,6 @@ namespace
+ 
+   WindowMatch windowMatch;
+ 
+-
+   std::string showText(Show show)
+   {
+     switch(show)
+@@ -240,9 +225,7 @@ namespace
+     }
+   }
+ 
+-  /*
+-    control child process
+-  */
++  // control child process
+   Process::Process(ProcessCallback& cb, ProcessProperties properties, TraceInterface& trc, const WatchdogSettings& settings):
+     m_cb(cb),
+     m_pProcess(),
+@@ -255,20 +238,25 @@ namespace
+   {
+     start();
+   }
++
+   Process::~Process()
+   {}
++
+   child* Process::getProcess()
+   {
+     return m_pProcess.get();
+   }
++
+   std::string Process::getDesktop()
+   {
+     return m_properties.desktop;
+   }
++
+   const Internal& Process::getInternal() const
+   {
+     return m_pProcess.get()->getInternal();
+   }
++
+   void Process::notify()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE,
+@@ -285,14 +273,17 @@ namespace
+     }
+     m_cb.notify(*this);
+   }
++
+   Time Process::getResetTime() const
+   {
+     return m_reset.getResetTime();
+   }
++
+   void Process::lineOut(const char* line) const
+   {
+     m_trc.writeTraceText(MajorWarning_HERE, line);
+   }
++
+   bool Process::match(Window& window)
+   {
+     bool result = false;
+@@ -348,6 +339,7 @@ namespace
+     }
+     return result;
+   }
++
+   void Process::start()
+   {
+     parent factory;
+@@ -400,14 +392,17 @@ namespace
+       m_properties.timeout
+     );
+   }
++
+   void Process::setStopping()
+   {
+     m_stopping = true;
+   }
++
+   void Process::setWindowSearch(WindowSearchType search)
+   {
+     m_search = search;
+   }
++
+   bool Process::sendBreak()
+   {
+     bool result = true;
+@@ -423,6 +418,7 @@ namespace
+     }
+     return result;
+   }
++
+   bool Process::sendCtrlC()
+   {
+     bool result = true;
+@@ -438,6 +434,7 @@ namespace
+     }
+     return result;
+   }
++
+   bool Process::kill()
+   {
+     bool result = true;
+@@ -453,26 +450,30 @@ namespace
+     }
+     return result;
+   }
++
+   bool Process::isStopped() const
+   {
+     return m_pProcess->getStatus() == STATUS_TERMINATED;
+   }
++
+   bool Process::needsReset() const
+   {
+     return m_watchDog && !m_stopping && isStopped();
+   }
++
+   const ProcessProperties& Process::getProperties() const
+   {
+     return m_properties;
+   }
+-  /*
+-   *  user defined check
+-   *    for windows search
+-   */
++
++  //  user defined check
++  //    for windows search
+   WindowMatch::WindowMatch()
+   {}
++
+   WindowMatch::~WindowMatch()
+   {}
++
+   bool WindowMatch::match(Window& window, mSysWindow::Process* pProcess)
+   {
+     bool result = false;
+@@ -482,9 +483,8 @@ namespace
+     }
+     return result;
+   }
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   ProcessListImpl::ProcessListImpl(TraceInterface& trc, const WatchdogSettings& settings):
+     WaitListener(),
+     m_pListener(0),
+@@ -497,20 +497,24 @@ namespace
+     m_windowSearch(),
+     m_settings(settings)
+   {}
++
+   void ProcessListImpl::setListener(ProcessListCallback* pListener)
+   {
+     AutoMutexCS mx(m_accessListener);
+     m_pListener= pListener;
+   }
++
+   ProcessListCallback* ProcessListImpl::getListener()
+   {
+     AutoMutexCS mx(m_accessListener);
+     return m_pListener;
+   }
++
+   void ProcessListImpl::notify(WaitNotification* pNotification)
+   {
+     WaitListener::notify(pNotification);
+   }
++
+   void ProcessListImpl::notify(Process& process)
+   {
+     ProcessListCallback* pListener= getListener();
+@@ -519,24 +523,29 @@ namespace
+       pListener->terminated(process.getProperties());
+     }
+   }
++
+   void ProcessListImpl::cancelStart()
+   {
+     m_stop = true;
+     m_break.post();
+   }
++
+   void ProcessListImpl::startWatchdog()
+   {
+     m_processWatchdog.setListener(this);
+     m_processWatchdog.startWait();
+   }
++
+   void ProcessListImpl::stopWatchdog()
+   {
+     m_processWatchdog.cancelWait();
+   }
++
+   TraceInterface& ProcessListImpl::getTrc()
+   {
+     return m_trc;
+   }
++
+   void ProcessListImpl::start(const PropertyList& propertyList)
+   {
+     ProcessListCallback* pListener= getListener();
+@@ -578,6 +587,7 @@ namespace
+       }
+     }
+   }
++
+   void ProcessListImpl::update(const PropertyList& propertyList)
+   {
+     ProcessSet oldProcessSet = getDiff(m_processPtrList, propertyList);
+@@ -585,6 +595,7 @@ namespace
+     stop(oldProcessSet);
+     start(newPropertyList);
+   }
++
+   Time ProcessListImpl::checkTerminated()
+   {
+     ProcessListCallback* pListener= getListener();
+@@ -624,6 +635,7 @@ namespace
+     }
+     return wait;
+   }
++
+   void ProcessListImpl::closeWindows(const WindowList& winList)
+   {
+     if(winList.size() > 0)
+@@ -636,6 +648,7 @@ namespace
+       }
+     }
+   }
++
+   void ProcessListImpl::stoppingProcesses(const ProcessSet& processSet)
+   {
+     ProcessSet::const_iterator it = processSet.begin();
+@@ -645,6 +658,7 @@ namespace
+       (*it)->setStopping();
+     }
+   }
++
+   ProcessSet ProcessListImpl::getProcessSet(const std::string& group)
+   {
+     ProcessPtrList::iterator it =  m_processPtrList.begin();
+@@ -660,14 +674,17 @@ namespace
+     }
+     return result;
+   }
++
+   WindowSearchPtr ProcessListImpl::searchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, const std::string& group)
+   {
+     return prepareSearchWindows(oldsearch, search, getProcessSet(group));
+   }
++
+   void ProcessListImpl::stop(const std::string& group)
+   {
+     stop(getProcessSet(group));
+   }
++
+   WindowSearchPtr ProcessListImpl::prepareSearchWindows(const WindowSearchPtr oldsearch, WindowSearchType search, ProcessSet& processSet)
+   {
+     WindowSearchData data;
+@@ -690,6 +707,7 @@ namespace
+       return WindowSearchPtr(new WindowSearch(data, windowMatch, m_trc));
+     }
+   }
++
+   WindowList ProcessListImpl::searchWindows(WindowSearchType search, ProcessSet& processSet)
+   {
+     WindowSearchPtr searchWindow = prepareSearchWindows(WindowSearchPtr(), search, processSet);
+@@ -697,6 +715,7 @@ namespace
+     processSet = m_windowSearch;
+     return searchWindow->getList();
+   }
++
+   void ProcessListImpl::sendBreak(ProcessSet& processSet)
+   {
+     ProcessSet::iterator it = processSet.begin();
+@@ -712,6 +731,7 @@ namespace
+       it= next;
+     }
+   }
++
+   void ProcessListImpl::sendCtrlC(ProcessSet& processSet)
+   {
+     ProcessSet::iterator it = processSet.begin();
+@@ -727,6 +747,7 @@ namespace
+       it= next;
+     }
+   }
++
+   void ProcessListImpl::kill(const ProcessSet& processSet)
+   {
+     ProcessSet::const_iterator it = processSet.begin();
+@@ -736,6 +757,7 @@ namespace
+       (*it)->kill();
+     }
+   }
++
+   void ProcessListImpl::wait(const ProcessSet& processSet)
+   {
+     int terminationTime = m_settings.waitTimeout;
+@@ -765,10 +787,12 @@ namespace
+       }
+     }
+   }
++
+   void ProcessListImpl::match(Process& process)
+   {
+     m_windowSearch.erase(&process);
+   }
++
+   /*
+     - send WM_CLOSE to windows found by title/class
+     - send Ctrl-Break to remaining processes
+@@ -801,6 +825,7 @@ namespace
+     kill(processSet);
+     wait(processSet);
+   }
++
+   PropertySet ProcessListImpl::getPropertySet(const PropertyList& list)
+   {
+     PropertySet result;
+@@ -812,6 +837,7 @@ namespace
+     }
+     return result;
+   }
++
+   PropertySet ProcessListImpl::getPropertySet(const ProcessPtrList& list)
+   {
+     PropertySet result;
+@@ -823,6 +849,7 @@ namespace
+     }
+     return result;
+   }
++
+   PropertyList ProcessListImpl::getDiff(const PropertyList& minuend, const ProcessPtrList& subtrahend)
+   {
+     PropertySet set = getPropertySet(subtrahend);
+@@ -839,6 +866,7 @@ namespace
+     }
+     return result;
+   }
++
+   ProcessSet ProcessListImpl::getDiff(const ProcessPtrList& minuend, const PropertyList& subtrahend)
+   {
+     PropertySet set = getPropertySet(subtrahend);
+@@ -859,9 +887,7 @@ namespace
+ 
+ namespace mSysProcess
+ {
+-  /*
+-    control list of child processes
+-  */
++  // control list of child processes
+   class ProcessList::Impl:
+     private mSysThread::thread,
+     private ProcessListImpl
+@@ -890,9 +916,8 @@ namespace mSysProcess
+       bool m_processTerminated;
+       Time m_waitTime;
+   };
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   class ApplicationList::Impl:
+     private ProcessListImpl
+   {
+@@ -910,9 +935,7 @@ namespace mSysProcess
+       WindowSearchMap m_searchMap;
+   };
+ 
+-  /*
+-    control list of child processes
+-  */
++  // control list of child processes
+   ProcessList::Impl::Impl(TraceInterface& trc, const WatchdogSettings& settings):
+     thread(0),
+     ProcessListImpl(trc, settings),
+@@ -924,10 +947,12 @@ namespace mSysProcess
+     m_processTerminated(false),
+     m_waitTime(0)
+   {}
++
+   void ProcessList::Impl::setListener(ProcessListCallback* pListener)
+   {
+     ProcessListImpl::setListener(pListener);
+   }
++
+   void ProcessList::Impl::checkProcessList()
+   {
+     AutoMutexCS mx(m_access);
+@@ -937,17 +962,20 @@ namespace mSysProcess
+       m_settingsChanged = true;
+     }
+   }
++
+   void ProcessList::Impl::start(ProcessListSettings* pSettings)
+   {
+     m_pSettings = pSettings;
+     thread::start();
+   }
++
+   void ProcessList::Impl::stop()
+   {
+     cancelStart();
+     setState(STOPPING);
+     waitTerminated();
+   }
++
+   void ProcessList::Impl::notify(WaitNotification* pNotification)
+   {
+     ProcessListImpl::notify(pNotification);
+@@ -955,6 +983,7 @@ namespace mSysProcess
+     setState(PROCESS);
+     m_processTerminated = true;
+   }
++
+   void ProcessList::Impl::function()
+   {
+     standardException guard;
+@@ -997,6 +1026,7 @@ namespace mSysProcess
+       getTrc().writeTraceText(MajorError_HERE, x.what());
+     }
+   }
++
+   void ProcessList::Impl::setState(State state)
+   {
+     AutoMutexCS mx(m_access);
+@@ -1007,6 +1037,7 @@ namespace mSysProcess
+       stateChanged();
+     }
+   }
++
+   void ProcessList::Impl::stateChanged()
+   {
+     AutoMutexCS mx(m_access);
+@@ -1015,6 +1046,7 @@ namespace mSysProcess
+       "processor state changed (%d, %s)",
+       m_state, getStateText(m_state).c_str());
+   }
++
+   State ProcessList::Impl::getState()
+   {
+     AutoMutexCS mx(m_access);
+@@ -1022,6 +1054,7 @@ namespace mSysProcess
+     m_event.reset();
+     return state;
+   }
++
+   void ProcessList::Impl::process()
+   {
+     bool configChanged = false;
+@@ -1049,36 +1082,41 @@ namespace mSysProcess
+       m_waitTime = checkTerminated();
+     }
+   }
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   ApplicationList::Impl::Impl(TraceInterface& trc, const WatchdogSettings& settings):
+     ProcessListImpl(trc, settings),
+     m_searchMap()
+   {
+     startWatchdog();
+   }
++
+   ApplicationList::Impl::~Impl()
+   {
+     stopWatchdog();
+   }
++
+   void ApplicationList::Impl::start(const PropertyList& processes)
+   {
+     ProcessListImpl::start(processes);
+   }
++
+   void ApplicationList::Impl::stop(const std::string& group)
+   {
+     ProcessListImpl::stop(group);
+   }
++
+   void ApplicationList::Impl::stopAll()
+   {
+     PropertyList emptyList;
+     update(emptyList);
+   }
++
+   Time ApplicationList::Impl::checkForTerminatedProcesses()
+   {
+     return checkTerminated();
+   }
++
+   WindowList ApplicationList::Impl::findWinByTitleClassName(const std::string& group)
+   {
+     WindowSearchPtr& search = m_searchMap[group];
+@@ -1086,15 +1124,15 @@ namespace mSysProcess
+     search->search();
+     return search->getList();
+   }
++
+   WindowList ApplicationList::Impl::findVisibleWin(const std::string& group)
+   {
+     WindowSearchPtr search = searchWindows(WindowSearchPtr(), WND_VISIBLE, group);
+     search->search();
+     return search->getList();
+   }
+-  /*
+-    settings for a process
+-  */
++
++  // settings for a process
+   ProcessProperties::ProcessProperties():
+     group(),
+     commandLine(),
+@@ -1105,6 +1143,7 @@ namespace mSysProcess
+     timeout(0),
+     desktop()
+   {}
++
+   bool ProcessProperties::operator<(const ProcessProperties& cmp) const
+   {
+     return group < cmp.group
+@@ -1121,68 +1160,78 @@ namespace mSysProcess
+                          || (desktop == cmp.desktop
+                              && (show < cmp.show)))))))))));
+   }
+-  /*
+-    settings for ProcessList
+-  */
++
++  // settings for ProcessList
+   ProcessListSettings::~ProcessListSettings()
+   {}
+-  /*
+-    control list of child processes
+-  */
++
++  // control list of child processes
+   ProcessList::ProcessList(TraceInterface& trc, const WatchdogSettings& settings):
+     m_pImpl(new Impl(trc, settings))
+   {}
++
+   ProcessList::~ProcessList()
+   {}
++
+   void ProcessList::start(ProcessListSettings* settings)
+   {
+     m_pImpl->start(settings);
+   }
++
+   void ProcessList::stop()
+   {
+     m_pImpl->stop();
+   }
++
+   void ProcessList::checkProcessList()
+   {
+     m_pImpl->checkProcessList();
+   }
++
+   void ProcessList::setListener(ProcessListCallback* pListener)
+   {
+     m_pImpl->setListener(pListener);
+   }
++
+   ProcessListCallback::ProcessListCallback()
+   {}
++
+   ProcessListCallback::~ProcessListCallback()
+   {}
+ 
+-  /*
+-    control list of child processes
+-  */
++  // control list of child processes
+   ApplicationList::ApplicationList(TraceInterface& trc, const WatchdogSettings& settings):
+     m_pImpl(new Impl(trc, settings))
+   {}
++
+   ApplicationList::~ApplicationList()
+   {}
++
+   void ApplicationList::start(const PropertyList& processes)
+   {
+     m_pImpl->start(processes);
+   }
++
+   void ApplicationList::stop(const std::string& group)
+   {
+     m_pImpl->stop(group);
+   }
++
+   void ApplicationList::stopAll()
+   {
+     m_pImpl->stopAll();
+   }
++
+   Time ApplicationList::checkForTerminatedProcesses()
+   {
+     return m_pImpl->checkForTerminatedProcesses();
+   }
++
+   WindowList ApplicationList::findWinByTitleClassName(const std::string& group)
+   {
+     return m_pImpl->findWinByTitleClassName(group);
+   }
++
+   WindowList ApplicationList::findVisibleWin(const std::string& group)
+   {
+     return m_pImpl->findVisibleWin(group);
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index a40ef7c3..cfab5ee2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -85,8 +85,10 @@ namespace
+   {
+     readProcessId();
+   }
++
+   WindowW32::~WindowW32()
+   {}
++
+   void WindowW32::traceLastError
+   (
+     long lTraceLevel,
+@@ -101,6 +103,7 @@ namespace
+       "(%.200s) failed: handle(%d) (%d), (%.1000s)",
+       where, m_hwnd, errorCode, mSysError::getErrorText(errorCode).c_str());
+   }
++
+   bool WindowW32::isMaximized()
+   {
+     WINDOWPLACEMENT placement;
+@@ -119,14 +122,17 @@ namespace
+     }
+     return result;
+   }
++
+   void WindowW32::maximize()
+   {
+     ShowWindow(m_hwnd, SW_MAXIMIZE);
+   }
++
+   bool WindowW32::isTopMost()
+   {
+     return (GetWindowLong(m_hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+   }
++
+   void WindowW32::setTopMost()
+   {
+     if(!SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE))
+@@ -134,6 +140,7 @@ namespace
+       traceLastError(MinorError_HERE, "SetWindowPos", mSysError::getErrorCode());
+     }
+   }
++
+   bool WindowW32::switchToWindow()
+   {
+     bool result = true;
+@@ -144,6 +151,7 @@ namespace
+     }
+     return result;
+   }
++
+   bool WindowW32::setForeGroundWindow()
+   {
+     bool result = true;
+@@ -154,6 +162,7 @@ namespace
+     }
+     return result;
+   }
++
+   void WindowW32::simulateInput()
+   {
+     const KEYBDINPUT pressF5   = {VK_F5, 0,               0, 0, 0};
+@@ -172,6 +181,7 @@ namespace
+       traceLastError(MinorError_HERE, "SendInput", mSysError::getErrorCode());
+     }
+   }
++
+   void WindowW32::activate()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "activate (%d)(%s)", m_hwnd, m_title.c_str());
+@@ -192,6 +202,7 @@ namespace
+       }
+     }
+   }
++
+   void WindowW32::show()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "show (%d)(%s)", m_hwnd, m_title.c_str());
+@@ -201,11 +212,13 @@ namespace
+       setTopMost();
+     }
+   }
++
+   void WindowW32::hide()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "hide (%d)(%s)", m_hwnd, m_title.c_str());
+     ShowWindow(m_hwnd, SW_HIDE);
+   }
++
+   void WindowW32::close()
+   {
+     m_trc.writeTrace(BasicRuntime_HERE, "close (%d)(%s)", m_hwnd, m_title.c_str());
+@@ -214,18 +227,22 @@ namespace
+       traceLastError(MinorError_HERE, "PostMessage", mSysError::getErrorCode());
+     }
+   }
++
+   DWORD WindowW32::getProcessId() const
+   {
+     return m_processId;
+   }
++
+   bool WindowW32::isVisible()
+   {
+     return IsWindowVisible(m_hwnd) != 0;
+   }
++
+   bool WindowW32::isActive()
+   {
+     return GetForegroundWindow() == m_hwnd;
+   }
++
+   std::string WindowW32::getClass()
+   {
+     char buffer[CLASS_BUFFER_SIZE];
+@@ -246,6 +263,7 @@ namespace
+     }
+     return buffer;
+   }
++
+   std::string WindowW32::getTitle()
+   {
+     std::string oldTitle = m_title;
+@@ -258,6 +276,7 @@ namespace
+     }
+     return m_title;
+   }
++
+   void WindowW32::readTitle()
+   {
+     char buffer[TITLE_BUFFER_SIZE];
+@@ -278,11 +297,13 @@ namespace
+       }
+     }
+   }
++
+   void WindowW32::readProcessId()
+   {
+     m_threadId = GetWindowThreadProcessId(m_hwnd, &m_processId);
+   }
+ }
++
+ namespace
+ {
+   typedef std::map<DWORD, Process*> ProcessMap;
+@@ -291,15 +312,12 @@ namespace
+ 
+ namespace mSysWindow
+ {
+-  /*
+-   * control a window
+-   */
++  // control a window
+   Window::~Window()
+   {}
+-  /*
+-   * class WindowSearch::Impl
+-   *   invoke windows search
+-   */
++
++  // class WindowSearch::Impl
++  //   invoke windows search
+   class WindowSearch::Impl
+   {
+     public:
+@@ -332,6 +350,7 @@ namespace mSysWindow
+       std::string m_desktop;
+   };
+ }
++
+ namespace
+ {
+   BOOL CALLBACK windowSearchCallback(HWND hwnd, LPARAM lParam)
+@@ -345,20 +364,18 @@ namespace
+     return result;
+   }
+ }
++
+ namespace mSysWindow
+ {
+-  /*
+-   *  process (window owner)
+-   */
++  // process (window owner)
+   Process::Process()
+   {}
++
+   Process::~Process()
+   {}
+ 
+-  /*
+-   * define a windows search
+-   *   use desktop, title, processid
+-   */
++  // define a windows search
++  //   use desktop, title, processid
+   WindowSearchData::WindowSearchData():
+     processSet(),
+     useProcessId(false),
+@@ -366,17 +383,14 @@ namespace mSysWindow
+     desktop(),
+     useDesktop(false)
+   {}
+-  /*
+-   *  user defined check
+-   *    for windows search
+-   */
++
++  //  user defined check
++  //    for windows search
+   WindowSearchMatch::~WindowSearchMatch()
+   {}
+ 
+-  /*
+-   * class WindowSearch::Impl
+-   *   invoke windows search
+-   */
++  // class WindowSearch::Impl
++  //   invoke windows search
+   WindowSearch::Impl::Impl(const WindowSearchData& data, WindowSearchMatch& match,
+     MASSAI::trace::TraceInterface& trc):
+     m_data(data),
+@@ -389,6 +403,7 @@ namespace mSysWindow
+   {
+     init();
+   }
++
+   WindowSearch::Impl::Impl(const Impl& search, const WindowSearchData& data, WindowSearchMatch& match,
+     MASSAI::trace::TraceInterface& trc):
+     m_data(data),
+@@ -401,6 +416,7 @@ namespace mSysWindow
+   {
+     init();
+   }
++
+   void WindowSearch::Impl::init()
+   {
+     if(m_data.useProcessId)
+@@ -429,6 +445,7 @@ namespace mSysWindow
+ 
+   WindowSearch::Impl::~Impl()
+   {}
++
+   void WindowSearch::Impl::addProcess(Process* pProcess)
+   {
+     if(pProcess != 0)
+@@ -440,6 +457,7 @@ namespace mSysWindow
+       }
+     }
+   }
++
+   void WindowSearch::Impl::addDesktop(Process* pProcess)
+   {
+     if(pProcess != 0)
+@@ -447,6 +465,7 @@ namespace mSysWindow
+       m_desktopSet.insert(pProcess->getDesktop());
+     }
+   }
++
+   void WindowSearch::Impl::searchDesktop(const std::string& desktopName)
+   {
+     m_desktop = desktopName;
+@@ -475,6 +494,7 @@ namespace mSysWindow
+       EnumWindows(&windowSearchCallback, reinterpret_cast<LPARAM>(this));
+     }
+   }
++
+   void WindowSearch::Impl::search()
+   {
+     m_match.clear();
+@@ -492,14 +512,17 @@ namespace mSysWindow
+       searchDesktop("");
+     }
+   }
++
+   const WindowList& WindowSearch::Impl::getList() const
+   {
+     return m_match;
+   }
++
+   WindowList& WindowSearch::Impl::getList()
+   {
+     return m_match;
+   }
++
+   WindowW32& WindowSearch::Impl::getWindow(HWND hwnd)
+   {
+     WindowMap::iterator it = m_found.find(hwnd);
+@@ -513,6 +536,7 @@ namespace mSysWindow
+       return it->second;
+     }
+   }
++
+   void WindowSearch::Impl::found(HWND hwnd, WindowW32& win, DWORD id, Process* pProcess)
+   {
+     if(m_test.match(win, pProcess))
+@@ -520,6 +544,7 @@ namespace mSysWindow
+       m_match.push_back(WindowPtr(new WindowW32(win)));
+     }
+   }
++
+   BOOL WindowSearch::Impl::found(HWND hwnd)
+   {
+     WindowW32& win = getWindow(hwnd);
+@@ -542,14 +567,13 @@ namespace mSysWindow
+     return true;
+   }
+ 
+-  /*
+-   * class WindowSearch
+-   *   invoke windows search
+-   */
++  // class WindowSearch
++  //   invoke windows search
+   WindowSearch::WindowSearch(const WindowSearchData& data, WindowSearchMatch& match,
+     MASSAI::trace::TraceInterface& trc):
+     m_pImpl(new Impl(data, match, trc))
+   {}
++
+   WindowSearch::WindowSearch(const WindowSearch& search, const WindowSearchData& data,
+     WindowSearchMatch& match, MASSAI::trace::TraceInterface& trc):
+     m_pImpl(new Impl(*search.m_pImpl, data, match, trc))
+@@ -557,14 +581,17 @@ namespace mSysWindow
+ 
+   WindowSearch::~WindowSearch()
+   {}
++
+   void WindowSearch::search()
+   {
+     m_pImpl->search();
+   }
++
+   const WindowList& WindowSearch::getList() const
+   {
+     return m_pImpl->getList();
+   }
++
+   WindowList& WindowSearch::getList()
+   {
+     return m_pImpl->getList();
+-- 
+2.41.0.windows.1
+

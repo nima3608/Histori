@@ -1,0 +1,244 @@
+From 364034904f6ed44d6cf9b0e5273952c7b04cefcb Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 21 Aug 2012 14:44:55 +0000
+Subject: [PATCH 0328/1076] Mantis 22014, make mMainCommandLine public in
+ "text"
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@395 90b65887-3827-0410-9a23-83215b262276
+---
+ .../inc/text}/mMainCommandLine.hpp            |  0
+ .../Massai/cpp/Systools/makefile.mak          | 31 ++++++----
+ .../Massai/cpp/Systools/src/TestChild.cpp     | 60 ++++++++++++++++---
+ .../Massai/cpp/Systools/src/TestSysMain.cpp   |  4 --
+ .../Massai/cpp/Systools/src/matDaemonW32.cpp  |  4 +-
+ .../Massai/cpp/Text/makefile.mak              |  1 +
+ .../src/TestMainCommandline.cpp               |  0
+ .../src/mMainCommandLine.cpp                  |  2 +-
+ 8 files changed, 75 insertions(+), 27 deletions(-)
+ rename SelfServiceCommon/{Massai/cpp/Systools/inc => Interfaces/inc/text}/mMainCommandLine.hpp (100%)
+ rename SelfServiceCommon/Massai/cpp/{Systools => Text}/src/TestMainCommandline.cpp (100%)
+ rename SelfServiceCommon/Massai/cpp/{Systools => Text}/src/mMainCommandLine.cpp (94%)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp b/SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp
+similarity index 100%
+rename from SelfServiceCommon/Massai/cpp/Systools/inc/mMainCommandLine.hpp
+rename to SelfServiceCommon/Interfaces/inc/text/mMainCommandLine.hpp
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+index fa87962d..2953c3dd 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Systools/makefile.mak
+@@ -16,7 +16,6 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\matDaemonW32.obj \
+                         $(_OBJ)\matThreadW32.obj \
+                         $(_OBJ)\mEventSemW32.obj \
+-                        $(_OBJ)\mMainCommandLine.obj \
+                         $(_OBJ)\mMutexSemW32.obj \
+                         $(_OBJ)\mSysDebugW32.obj \
+                         $(_OBJ)\mSysTimeW32.obj \
+@@ -45,37 +44,45 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+ 
+ ######################################################################
+ 
+-MY_BIN1 =               $(_BIN)\TestSysException.exe
++MY_BIN1 =               $(_BIN)\TestChild.exe
+ 
+-MY_BIN1_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
++MY_BIN1_OBJS =          $(_OBJ)\TestChild.obj
+ 
+-MY_BIN1_OBJS =          $(_OBJ)\testcaseException.obj \
+-                        $(_OBJ)\TestSysException.obj
++MY_BIN1_USER_LIBS =     $(LIB_SYSTOOLS)
+ 
+ ######################################################################
+ 
+-MY_BIN2 =               $(_BIN)\TestSysMain.exe
++MY_BIN2 =               $(_BIN)\TestSysException.exe
+ 
+ MY_BIN2_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+ MY_BIN2_OBJS =          $(_OBJ)\testcaseException.obj \
+-                        $(_OBJ)\TestSysMain.obj
++                        $(_OBJ)\TestSysException.obj
+ 
+ ######################################################################
+ 
+-MY_BIN3 =               $(_BIN)\TestSysProcess.exe
++MY_BIN3 =               $(_BIN)\TestSysMain.exe
+ 
+ MY_BIN3_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
+ 
+-MY_BIN3_OBJS =          $(_OBJ)\TestSysProcess.obj
++MY_BIN3_OBJS =          $(_OBJ)\testcaseException.obj \
++                        $(_OBJ)\TestSysMain.obj
++
++######################################################################
++
++MY_BIN4 =               $(_BIN)\TestSysProcess.exe
++
++MY_BIN4_USER_LIBS =     $(LIB_SYSTOOLS) $(LIB_TOOLS) $(LIB_TEXT) $(LIB_PSAPI)
++
++MY_BIN4_OBJS =          $(_OBJ)\TestSysProcess.obj
+ 
+ ######################################################################
+ 
+-MY_BIN4 =               $(_BIN)\TestSysThread.exe
++MY_BIN5 =               $(_BIN)\TestSysThread.exe
+ 
+-MY_BIN4_USER_LIBS =     $(LIB_SYSTOOLS)
++MY_BIN5_USER_LIBS =     $(LIB_SYSTOOLS)
+ 
+-MY_BIN4_OBJS =          $(_OBJ)\testcaseException.obj \
++MY_BIN5_OBJS =          $(_OBJ)\testcaseException.obj \
+                         $(_OBJ)\TestSysThread.obj
+ 
+ ######################################################################
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestChild.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestChild.cpp
+index 6c650e57..c08d5726 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestChild.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestChild.cpp
+@@ -8,21 +8,65 @@
+  **************************************************************************
+ **/
+ 
++#include "systools/mSysSignal.hpp"
++#include "systools/mSysThread.hpp"
++
+ #include <iostream>
+ #include <string>
+ using namespace std;
+ 
+ 
+-int main()
++int main( int argc, char ** argv )
+ {
+-   cout << "Entry? (use \"bye\" to terminate this)" << endl;
+-   string Input;
+-   int Loopcount = 0;
+-   while( Input != "bye" )
++   cout << "TestChild";
++   bool checkinput( true );
++   bool repeatoutput( false );
++   bool quitnow( false );
++   for( int index=1; index < argc; ++index )
++   {
++      cout << " " << argv[index];
++      if( !strcmp( argv[index], "noinput" ) )
++      {
++         checkinput = false;
++      }
++      if( !strcmp( argv[index], "repeatoutput" ) )
++      {
++         repeatoutput = true;
++      }
++      if( !strcmp( argv[index], "terminate" ) )
++      {
++         quitnow = true;
++      }
++   }
++   cout << endl;
++   if( quitnow )
++   {
++      cout << " terminating" << endl;
++      return 42;
++   }
++   if( repeatoutput )
++   {
++      for(;;)
++      {
++         mSysThread::sleep( 1000 );
++         cout << "repeating output" << endl;
++      }
++   }
++   if( checkinput )
++   {
++      cout << "\nEntry? (use \"bye\" to terminate this)" << endl;
++      string Input;
++      int Loopcount = 0;
++      while( Input != "bye" )
++      {
++         cin >> Input;
++         cout << " -> Entry(" << Loopcount++ << ")=[" << Input << "]" << endl;
++      }
++   }
++   else
+    {
+-      cin >> Input;
+-      cout << "Entry=[" << Input << "]" << endl;
+-      cerr << "Loop " << Loopcount++ << endl;
++      Materna::MSSD::sysSignal sig;
++      sig.wait();
+    }
+    return 0;
+ }
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
+index 29a88792..59c350d6 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/TestSysMain.cpp
+@@ -33,10 +33,6 @@ class myException : public threadException
+       {
+          cout << " ... catch std ref:" << X.what() << endl;
+       }
+-      catch( std::exception * X )
+-      {
+-         cout << " ... catch std ptr:" << X->what() << endl;
+-      }
+       catch( ... )
+       {
+          cout << " ... catch" << endl;
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+index bed408e5..85cf2929 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/matDaemonW32.cpp
+@@ -7,7 +7,7 @@
+  *
+  * @author Juergen Kreierhoff
+  *
+- * Copyright (c) 2001-2010 MATERNA Information & Communications
++ * Copyright (c) 2001-2012 MATERNA Information & Communications
+  *
+  **************************************************************************
+ **/
+@@ -15,7 +15,7 @@
+ #include "systools/matDaemon.h"
+ 
+ #include "text/mArgScan.hpp"
+-#include "mMainCommandLine.hpp"
++#include "text/mMainCommandLine.hpp"
+ 
+ #include <iostream>
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Text/makefile.mak b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+index 5b4cb939..307742a1 100644
+--- a/SelfServiceCommon/Massai/cpp/Text/makefile.mak
++++ b/SelfServiceCommon/Massai/cpp/Text/makefile.mak
+@@ -16,6 +16,7 @@ MY_LIB1_OBJS =          $(_OBJ)\local_def.obj \
+                         $(_OBJ)\mArgScan.obj \
+                         $(_OBJ)\mHex.obj \
+                         $(_OBJ)\mHexString.obj \
++                        $(_OBJ)\mMainCommandLine.obj \
+                         $(_OBJ)\mSearchAndReplace.obj \
+                         $(_OBJ)\textTemplate.obj \
+                         $(_OBJ)\textTools.obj \
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp b/SelfServiceCommon/Massai/cpp/Text/src/TestMainCommandline.cpp
+similarity index 100%
+rename from SelfServiceCommon/Massai/cpp/Systools/src/TestMainCommandline.cpp
+rename to SelfServiceCommon/Massai/cpp/Text/src/TestMainCommandline.cpp
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+similarity index 94%
+rename from SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp
+rename to SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+index 3b8bf7eb..b77c17a8 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mMainCommandLine.cpp
++++ b/SelfServiceCommon/Massai/cpp/Text/src/mMainCommandLine.cpp
+@@ -15,7 +15,7 @@
+  **************************************************************************
+ **/
+ 
+-#include "mMainCommandLine.hpp"
++#include "text/mMainCommandLine.hpp"
+ 
+ 
+ 
+-- 
+2.41.0.windows.1
+

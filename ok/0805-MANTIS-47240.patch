@@ -1,0 +1,415 @@
+From 06755524d58bc711fed2ca4bd92e7a0116ec7cbd Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 19 Sep 2017 08:52:32 +0000
+Subject: [PATCH 0805/1000] MANTIS 47240 Mantis 47240: Config service meta data
+ access - Extend "CfgMeta.exe"
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1262 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/CfgTools/src/CfgMeta.cpp       | 307 ++++++++++++++++--
+ 1 file changed, 286 insertions(+), 21 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+index 02754645..83c4cb5b 100644
+--- a/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
++++ b/SelfServiceCommon/Massai/cpp/CfgTools/src/CfgMeta.cpp
+@@ -29,7 +29,7 @@
+ #define DSPLLIN "CfgMeta: "
+ 
+ #define HINDENT1 "          "
+-#define HINDENT2 "                           "
++#define HINDENT2 "                         "
+ 
+ 
+ 
+@@ -84,6 +84,31 @@ namespace
+    }
+ 
+ 
++   void condChangeInt
++      (
++         CORBA::Long & dst,
++         bool & changed_meta,
++         argScan & arg_scan,
++         char const * arg_option
++      )
++   {
++      char const * new_value = arg_scan.option( arg_option );
++      if( new_value )
++      {
++         changed_meta = true;
++         dst = atoi( new_value );
++         std::string allo = arg_option;
++         std::transform
++            (
++               allo.begin(), allo.end(),
++               allo.begin(),
++               ::tolower
++            );
++         std::cout << "\t-> changed " << allo << std::endl;
++      }
++   }
++
++
+    std::string plain( char const * src )
+    {
+       std::string r;
+@@ -107,6 +132,88 @@ namespace
+    }
+ 
+ 
++   bool handleNumberMeta
++      (
++         argScan & arg_scan,
++         char const * cfg_host,
++         char const * auth,
++         char const * item_name
++      )
++   {
++      Config::Number2 *         cfg_proxy = 0;
++      Config::access            acc;
++      acc.Authorization = CORBA::string_dup( auth );
++      acc.Item = CORBA::string_dup( item_name );
++      corbaClient<Config::Number2> * cfg_client =
++         new corbaClient<Config::Number2>
++         ( cfg_host, CFGMGR_PORT, CFGMGR_SRVNAME_NUMBER2 );
++      cfg_proxy = cfg_client->proxy();
++      if( !cfg_proxy )
++                  {
++                     std::cout
++                        << DSPLERR "Could not connect the NUMBER servant."
++                        << std::endl;
++                     return false;
++                  }
++      {
++         try
++         {
++            Config::Number2::metaData_var md;
++            int const val = cfg_proxy->getWithMeta( acc, md );
++            std::cout
++               << DSPLLIN "getWithMeta(" << item_name << ") "
++               << "= \"" << val << "\""
++               << std::endl;
++            bool changed_meta = false;
++            //
++            char const * new_expl = arg_scan.option( "EXPLANATION" );
++            if( new_expl )
++            {
++               changed_meta = true;
++               md->Desc.Explanation = CORBA::string_dup( new_expl );
++               std::cout << "\t-> changed explanation" << std::endl;
++            }
++            //
++            char const * new_rights = arg_scan.option( "RIGHTS" );
++            if( new_rights )
++            {
++               changed_meta = true;
++               md->Desc.Rights = CORBA::string_dup( new_rights );
++               std::cout << "\t-> changed rights" << std::endl;
++            }
++            //
++            condChangeInt
++               (
++                  md->MaxValue, changed_meta,
++                  arg_scan, "MAXVALUE"
++               );
++            //
++            condChangeInt
++               (
++                  md->MinValue, changed_meta,
++                  arg_scan, "MINVALUE"
++               );
++            //
++            if( changed_meta )
++            {
++               cfg_proxy->setMeta2( acc, md );
++            }
++            std::cout
++               << "\tExplanation = \"" << plain( md->Desc.Explanation )
++               << "\"\n\tRights = \"" << md->Desc.Rights
++               << "\"\n\tMin = " << md->MinValue
++               << "\n\tMax = " << md->MaxValue
++               << std::endl;
++         }
++         catch( Config::Node::notFound & )
++         {
++            return false;
++         }
++      }
++      return true;
++   } // bool handleNumberMeta()
++
++
+    bool handleTextMeta
+       (
+          argScan & arg_scan,
+@@ -115,8 +222,8 @@ namespace
+          char const * item_name
+       )
+    {
+-      Config::Text2 *        cfg_proxy = 0;
+-      Config::access         acc;
++      Config::Text2 *           cfg_proxy = 0;
++      Config::access            acc;
+       acc.Authorization = CORBA::string_dup( auth );
+       acc.Item = CORBA::string_dup( item_name );
+       corbaClient<Config::Text2> * cfg_client =
+@@ -142,13 +249,35 @@ namespace
+                   << "= \"" << val << "\""
+                   << std::endl;
+                bool changed_meta = false;
++               //
+                char const * new_expl = arg_scan.option( "EXPLANATION" );
+                if( new_expl )
+                {
+                   changed_meta = true;
+                   md->Desc.Explanation = CORBA::string_dup( new_expl );
+-                  std::cout << "\t-> changed Explanation" << std::endl;
++                  std::cout << "\t-> changed explanation" << std::endl;
+                }
++               //
++               char const * new_rights = arg_scan.option( "RIGHTS" );
++               if( new_rights )
++               {
++                  changed_meta = true;
++                  md->Desc.Rights = CORBA::string_dup( new_rights );
++                  std::cout << "\t-> changed rights" << std::endl;
++               }
++               //
++               condChangeInt
++                  (
++                     md->MaxLength, changed_meta,
++                     arg_scan, "MAXLENGTH"
++                  );
++               //
++               condChangeInt
++                  (
++                     md->MinLength, changed_meta,
++                     arg_scan, "MINLENGTH"
++                  );
++               //
+                char const * new_regex = arg_scan.option( "REGEX" );
+                if( new_regex )
+                {
+@@ -156,6 +285,7 @@ namespace
+                   md->RegEx = CORBA::string_dup( new_regex );
+                   std::cout << "\t-> changed RegEx" << std::endl;
+                }
++               //
+                char const * new_semantic = arg_scan.option( "SEMANTIC" );
+                if( new_semantic )
+                {
+@@ -180,17 +310,19 @@ namespace
+                         << std::endl;
+                   }
+                }
++               //
+                if( changed_meta )
+                {
+                   cfg_proxy->setMeta2( acc, md );
+                }
+                std::cout
+-                  << "\tExplanation = \"" << plain( md->Desc.Explanation )
+-                  << "\"\n\tRights = \"" << md->Desc.Rights
+-                  << "\"\n\tMinLength = " << md->MinLength
+-                  << "\n\tMaxLength = " << md->MaxLength
+-                  << "\n\tRegEx = \"" << md->RegEx
+-                  << "\"\n\tSemantic = " << c_str( md->Semantic )
++                  << "\tExplanation = "
++                     "\"" << plain( md->Desc.Explanation ) << "\""
++                     "\n\tRights = \"" << md->Desc.Rights << "\""
++                     "\n\tMaxLength = " << md->MaxLength
++                  << "\n\tMinLength = " << md->MinLength
++                  << "\n\tRegEx = \"" << md->RegEx << "\""
++                     "\n\tSemantic = " << c_str( md->Semantic )
+                   << std::endl;
+             }
+          }
+@@ -200,7 +332,133 @@ namespace
+          }
+       }
+       return true;
+-   }
++   } // bool handleTextMeta()
++
++
++   bool handleTextlistMeta
++      (
++         argScan & arg_scan,
++         char const * cfg_host,
++         char const * auth,
++         char const * item_name
++      )
++   {
++      Config::Textlist2 *       cfg_proxy = 0;
++      Config::access            acc;
++      acc.Authorization = CORBA::string_dup( auth );
++      acc.Item = CORBA::string_dup( item_name );
++      corbaClient<Config::Textlist2> * cfg_client =
++         new corbaClient<Config::Textlist2>
++         ( cfg_host, CFGMGR_PORT, CFGMGR_SRVNAME_TEXTLIST2 );
++      cfg_proxy = cfg_client->proxy();
++      if( !cfg_proxy )
++      {
++         std::cout
++            << DSPLERR "Could not connect the TEXTLIST servant."
++            << std::endl;
++         return false;
++      }
++      {
++         try
++         {
++            Config::Textlist2::metaData_var md;
++            Config::Textlist::strings const * val =
++               cfg_proxy->getWithMeta( acc, md );
++            if( val )
++            {
++               std::cout
++                  << DSPLLIN "getWithMeta(" << item_name << ") ="
++                  << std::endl;
++               unsigned const Length = val->length();
++               for( unsigned Idx = 0; Idx < Length; ++Idx )
++               {
++                  std::cout << HINDENT1 << (*val)[Idx].in() << std::endl;
++               }
++               bool changed_meta = false;
++               //
++               char const * new_expl = arg_scan.option( "EXPLANATION" );
++               if( new_expl )
++               {
++                  changed_meta = true;
++                  md->Desc.Explanation = CORBA::string_dup( new_expl );
++                  std::cout << "\t-> changed explanation" << std::endl;
++               }
++               //
++               char const * new_rights = arg_scan.option( "RIGHTS" );
++               if( new_rights )
++               {
++                  changed_meta = true;
++                  md->Desc.Rights = CORBA::string_dup( new_rights );
++                  std::cout << "\t-> changed rights" << std::endl;
++               }
++               //
++               condChangeInt
++                  (
++                     md->MaxLength, changed_meta,
++                     arg_scan, "MAXLENGTH"
++                  );
++               //
++               condChangeInt
++                  (
++                     md->MinLength, changed_meta,
++                     arg_scan, "MINLENGTH"
++                  );
++               //
++               char const * new_regex = arg_scan.option( "REGEX" );
++               if( new_regex )
++               {
++                  changed_meta = true;
++                  md->RegEx = CORBA::string_dup( new_regex );
++                  std::cout << "\t-> changed RegEx" << std::endl;
++               }
++               //
++               char const * new_semantic = arg_scan.option( "SEMANTIC" );
++               if( new_semantic )
++               {
++                  semanticDump const * ptr = l_semantic_dump;
++                  bool found = false;
++                  while( !found && ptr->stt )
++                  {
++                     if( !strcmp( ptr->stt, new_semantic ) )
++                     {
++                        found = true;
++                        changed_meta = true;
++                        md->Semantic = ptr->stc;
++                        std::cout << "\t-> changed Semantic" << std::endl;
++                     }
++                     ptr += 1;
++                  }
++                  if( !found )
++                  {
++                     std::cout
++                        << "\t-> unknown semantic \""
++                        << new_semantic << "\""
++                        << std::endl;
++                  }
++               }
++               //
++               if( changed_meta )
++               {
++                  cfg_proxy->setMeta2( acc, md );
++               }
++               std::cout
++                  << "\tExplanation = "
++                     "\"" << plain( md->Desc.Explanation ) << "\""
++                     "\n\tRights = \"" << md->Desc.Rights << "\""
++                     "\n\tMaxLength = " << md->MaxLength
++                  << "\n\tMinLength = " << md->MinLength
++                  << "\n\tRegEx = \"" << md->RegEx << "\""
++                     "\n\tSemantic = " << c_str( md->Semantic )
++                  << std::endl;
++            }
++         }
++         catch( Config::Node::notFound & )
++         {
++            return false;
++         }
++      }
++      return true;
++   } // bool handleTextlistMeta()
+ 
+ 
+ } // namspace
+@@ -232,23 +490,22 @@ int main( int argc, char ** argv )
+          //
+          // Item is specified
+          //
+-         if( handleTextMeta( arg_scan, cfg_host, argv[0], item_name ) )
++         if( handleNumberMeta( arg_scan, cfg_host, argv[0], item_name ) )
+          {
+             return 0;
+          }
+-#if 0
+-         //TODO
+-         if( handleTextlistMeta( arg_scan, cfg_host, argv[0], item_name ) )
++         if( handleTextMeta( arg_scan, cfg_host, argv[0], item_name ) )
+          {
+             return 0;
+          }
+-         //TODO
+-         if( handleNumberMeta( arg_scan, cfg_host, argv[0], item_name ) )
++         if( handleTextlistMeta( arg_scan, cfg_host, argv[0], item_name ) )
+          {
+             return 0;
+          }
+-#endif
+-         std::cout << DSPLERR "Unknown value type" << std::endl;
++         std::cout
++            << DSPLERR "Unknown item \"" << item_name << "\""
++            " or unhandled item type!"
++            << std::endl;
+       }
+       else
+       {
+@@ -260,8 +517,16 @@ int main( int argc, char ** argv )
+             << HINDENT1
+                "Copyright (c) 2017 MATERNA Information & Communications\n"
+             << HINDENT1 "usage:"
+-               " CfgMeta"
+-               " [-host:<Config-host>] <item>\n"
++               " CfgMeta [-host:<Config-host>] <item>\n"
++               HINDENT2 "[-explanation:<new explanation>]\n"
++               HINDENT2 "[-rights:<new rights>]\n"
++               HINDENT2 "[-maxlength:<new maximum text length>]\n"
++               HINDENT2 "[-minlength:<new minimum text length>]\n"
++               HINDENT2 "[-maxvalue:<new maximum value>]\n"
++               HINDENT2 "[-minvalue:<new minimum value>]\n"
++               HINDENT2 "[-regex:<new regular expression>]\n"
++               HINDENT2
++               "[-semantic:[NONE|PASSWORD|URL|HOSTNAME|IP_ADDRESS]]\n"
+             << std::endl;
+       }
+       return 0;
+-- 
+2.41.0.windows.1
+

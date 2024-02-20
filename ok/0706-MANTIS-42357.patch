@@ -1,0 +1,108 @@
+From b12054496d5bb26d3db1b0ff935bd619fcb4e4f1 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 19 Aug 2016 13:21:42 +0000
+Subject: [PATCH 0706/1000] MANTIS 42357 - Mantis 42357: Allow no
+ alpha-numerics as PECTAB replacement character. - Mantis 42358: Allow max 12
+ positions in PECTAB magstripes.
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1071 90b65887-3827-0410-9a23-83215b262276
+---
+ .../AEAParser/src/aeaBoardingPassPectab.cpp   | 29 +++++++++++++++++--
+ 1 file changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
+index 6f582ea3..4f8f6b34 100644
+--- a/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
++++ b/SelfServiceCommon/Massai/cpp/AEAParser/src/aeaBoardingPassPectab.cpp
+@@ -21,6 +21,7 @@ namespace
+ {
+   const char* PECTAB_LOAD= "PT";
+   const char  PECTAB_BARCODE_ID= 'B';
++  const char  PECTAB_BARCODE_X_ID= 'X';
+   const char* LAST_FIELD= "ZZ";
+   const char* FIRST_FIELD= "01";
+ }
+@@ -81,15 +82,18 @@ namespace MASSAI
+           {
+             trace.writeTrace(SecondaryRuntime_HERE, "position (%.1000s)", std::string(readBegin, inBegin).c_str());
+             m_position= Tokenizer::digit(readBegin, inBegin);
+-            /* accept invalid track/block/position, values are not used
+             if(1 <= m_track && m_track <= 4
+               && 1 <= m_block && m_block <= 3
+               && 1 <= m_position && (m_position + fieldLength - 1 <= 40 || (m_position + fieldLength - 1 <= 60 && m_block < 3)))
+-            */
+             {
++              trace.writeTrace(SecondaryRuntime_HERE, "readPectabMagStripePosition - ok");
+               result= true;
+               outEnd= inBegin;
+             }
++            else
++            {
++              trace.writeTrace(SecondaryRuntime_HERE, "readPectabMagStripePosition - invalid position");
++            }
+           }
+         }
+       }
+@@ -312,6 +316,7 @@ namespace MASSAI
+       bool result= false;
+       std::string::const_iterator readBegin;
+       outBegin= inBegin;
++      m_elementId= std::string(inBegin, inBegin + 2);       // Make sure to always have a (perhaps wrong) element-id
+       if(Tokenizer::readFieldId(inBegin, inEnd, readBegin, inBegin))
+       {
+         trace.writeTrace(SecondaryRuntime_HERE, "fieldId (%.1000s)", std::string(readBegin, inBegin).c_str());
+@@ -329,10 +334,22 @@ namespace MASSAI
+             if(printPosition.readPectabPrintPosition(inBegin, inEnd, readBegin, inBegin, trace))
+             {
+               m_printPositions.push_back(printPosition);
++              if( m_printPositions.size() > 10 )
++              {
++                result= false;
++                trace.writeTrace(SecondaryRuntime_HERE, "max # print positions exceeded");
++                break;
++              }
+             }
+             else if(magStripePosition.readPectabMagStripePosition(m_maximumLength, inBegin, inEnd, readBegin, inBegin, trace))
+             {
+               m_magStripePositions.push_back(magStripePosition);
++              if( m_magStripePositions.size() > 12 )
++              {
++                result= false;
++                trace.writeTrace(SecondaryRuntime_HERE, "max # magstripe positions exceeded");
++                break;
++              }
+             }
+             else if(readFont(inBegin, inEnd, readBegin, inBegin, trace))
+             {
+@@ -345,7 +362,11 @@ namespace MASSAI
+             }
+           }
+         }
+-        else if(Tokenizer::readChar(PECTAB_BARCODE_ID, inBegin, inEnd, readBegin, inBegin))
++        else if
++            (
++              (Tokenizer::readChar(PECTAB_BARCODE_ID, inBegin, inEnd, readBegin, inBegin)) ||
++              (Tokenizer::readChar(PECTAB_BARCODE_X_ID, inBegin, inEnd, readBegin, inBegin))
++            )
+         {
+           trace.writeTrace(SecondaryRuntime_HERE, "barcode (%.c)", *inBegin);
+           m_font= PT_FONT_BARCODE;
+@@ -520,6 +541,7 @@ namespace MASSAI
+ 
+           if(!Tokenizer::readChar(it, end, readBegin, it)) break; // character for unreadable data
+           trace.writeTrace(SecondaryRuntime_HERE, "Unreadable (%.1000s)", std::string(readBegin, it).c_str());
++          if(isalpha(*readBegin)||isdigit(*readBegin)) break;
+           m_unreadable= *readBegin;
+ 
+           if(!Tokenizer::readPectab(it, end, readBegin, it)) break; // pectab id
+@@ -601,6 +623,7 @@ namespace MASSAI
+               }
+               else
+               {
++                fieldId= field.getId(); // Supply wrong field for error response
+                 success= false;
+                 break;
+               }
+-- 
+2.41.0.windows.1
+

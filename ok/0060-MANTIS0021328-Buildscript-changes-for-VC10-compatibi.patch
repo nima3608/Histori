@@ -1,0 +1,142 @@
+From 6aaf2da3954a271c10a2999ad294d2eb6e419e5a Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@2eb42a87-3827-0410-b767-dc15055982e4>
+Date: Fri, 11 Nov 2011 12:59:00 +0000
+Subject: [PATCH 060/462] MANTIS0021328: Buildscript changes for VC10
+ compatibility
+
+git-svn-id: svn://localhost/SelfServiceBuild/trunk@84 2eb42a87-3827-0410-b767-dc15055982e4
+---
+ .../Build/cpp/makefile.common.mak             | 19 ++++++++++++-
+ SelfServiceBuild/Build/scripts/setenv.bat     | 27 +++++++++++++++++--
+ 2 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/SelfServiceBuild/Build/cpp/makefile.common.mak b/SelfServiceBuild/Build/cpp/makefile.common.mak
+index 7d0563a..9d43948 100644
+--- a/SelfServiceBuild/Build/cpp/makefile.common.mak
++++ b/SelfServiceBuild/Build/cpp/makefile.common.mak
+@@ -30,6 +30,17 @@ PERL             = perl.exe
+ # Standard ab Version 1.2.0
+ #---------------------------------------------------------------------
+ 
++######################################################################
++# MFC
++######################################################################
++MFC_INC_DIR=$(MFC_ROOT)\inc\mfc42\ 
++ATL_INC_DIR=$(MFC_ROOT)\inc\atl71\
++!if "$(VC_COMPILER_VERSION)" == "VC10" 
++INC_MFC = -I$(ATL_INC_DIR) -I$(MFC_INC_DIR)
++!else
++INC_MFC = 
++!endif
++
+ TAO_DEFINES      = -D_TAO_
+ IDLC             = $(TAO_ROOT)\bin\tao_idl.exe
+ INC_ACETAO       = -I$(TAO_ROOT)\include
+@@ -140,7 +151,10 @@ COMMONIDLFLAGS   = $(INC_COMMON_MASSAI_IDL) \
+ IDLFLAGS         = $(COMMONIDLFLAGS) -t $(_GEN) -Cw
+ 
+ TAO_DEFINES  = $(TAO_DEFINES) -D_TAO_2_0_
++!endif
+ 
++!if "$(BOOST_VERSION)" == "1.44"
++BOOST_DEFINES=-D_BOOST_144
+ !endif
+ 
+ 
+@@ -201,15 +215,17 @@ STDDEFINES       = -DWIN32 -DWINNT $(TAO_DEFINES) -DMSYSTHREAD_USE_SEH
+ 
+ !if "$(VC_COMPILER_VERSION)" == "VC10"
+ STDCFLAGS        = -nologo -c -MD -W3 -GR -EHsc -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
+-STDDEFINES       = $(STDDEFINES) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NON_CONFORMING_SWPRINTFS
++STDDEFINES       = $(STDDEFINES) $(BOOST_DEFINES) -D_CRT_SECURE_NO_WARNINGS -D_CRT_NON_CONFORMING_SWPRINTFS
+ # to decide optimization level 
+ MY_CFLAGS_1 	  = -GR -Gy 
+ MY_CFLAGS_2      = -GR
++MY_CFLAGS_3      = -GR
+ !endif
+ !if "$(VC_COMPILER_VERSION)" == ""
+ STDCFLAGS        = -nologo -c -MD -W3 -GR -GX -Zi -Od $(STDDEFINES) -I$(_INC) -I$(_GEN)
+ MY_CFLAGS_1 	  = -Gi -GR -G5 -Gy
+ MY_CFLAGS_2      = -GR -G5
++MY_CFLAGS_3      = -GR -Gi
+ !endif
+ 
+ STDBINFLAGS      = -nologo -incremental:no -debug -map $(GRACEFULLCRASH) $(LIB_DBGHELP)
+@@ -217,6 +233,7 @@ STDDLLFLAGS      = -nologo -incremental:no -debug -dll -map $(LIB_DBGHELP)
+ STDLIBFLAGS      = -nologo
+ STDRCFLAGS       = -I$(_INC) $(INC_APPLICATION_INTER) $(INC_CUSS_INTER) $(INC_PLATFORM_INTER) $(INC_COMMON_INTER)
+ INC_INTERFACES   = $(INC_APPLICATION_INTER) $(INC_CUSS_INTER) $(INC_PLATFORM_INTER) $(INC_COMMON_INTER)
++#MY_LDFLAGS = /LIBPATH:$(MFC_ROOT)/lib/Mfc/i386 /LIBPATH:$(MFC_ROOT)/lib/Atl/i386
+ 
+ ######################################################################
+ # Lint Flags
+diff --git a/SelfServiceBuild/Build/scripts/setenv.bat b/SelfServiceBuild/Build/scripts/setenv.bat
+index ddf69aa..b827d19 100644
+--- a/SelfServiceBuild/Build/scripts/setenv.bat
++++ b/SelfServiceBuild/Build/scripts/setenv.bat
+@@ -57,7 +57,7 @@ set TAO_ROOT=%ACE_ROOT%
+ goto END_USE_ACE_TAO_2_0
+ :USE_ACE_TAO_2_0
+ set TAO_VERSION=2.0.0
+-set ACE_VERSION=6.0.4
++set ACE_VERSION=6.0.5
+ set ACE_ROOT=%DIR_GLOBALSLIB%\acetao\%ACE_VERSION%\ACE_wrappers
+ set TAO_ROOT=%ACE_ROOT%\TAO
+ :END_USE_ACE_TAO_2_0
+@@ -67,13 +67,27 @@ rem ######################################################################
+ rem # ThirdParty-Software
+ rem ######################################################################
+ 
++if NOT "%VC_COMPILER_VERSION%"=="VC10" goto OLD_MFC
++set MFC_ROOT=c:\WinDDK\7600.16385.1
++set DIR_MFC=%MFC_ROOT%\lib\Mfc\i386
++set LIB_MFC=%DIR_MFC%\mfcs42.lib %DIR_MFC%\mfc42.lib
++:OLD_MFC
++
+ set DIR_AUTH=%DIR_GLOBALSLIB%\authenticator\0.9.9.9\win32
+ set INC_AUTH=-I%DIR_AUTH%\include
+ set LIB_AUTH=%DIR_AUTH%\lib\au_sdk.lib
+ 
++if "%VC_COMPILER_VERSION%"=="VC10" goto USE_BOOST_1_44
+ set DIR_BOOST=%DIR_GLOBALSLIB%\boost\1.31.0-STL-Threadsafe\win32
+ set INC_BOOST=-I%DIR_BOOST%\include
+ set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc6-mt-1_31.lib %DIR_BOOST%\lib\libboost_filesystem-vc6-mt-1_31.lib
++goto END_USE_BOOST_1_44
++:USE_BOOST_1_44
++set BOOST_VERSION=1.44
++set DIR_BOOST=%DIR_GLOBALSLIB%\boost\boost_1_44
++set INC_BOOST=-I%DIR_BOOST%
++set LIB_BOOST=%DIR_BOOST%\lib\libboost_regex-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_filesystem-vc100-mt-1_44.lib %DIR_BOOST%\lib\libboost_system-vc100-mt-1_44.lib
++:END_USE_BOOST_1_44
+ 
+ rem set DIR_REGEX=%DIR_GLOBALSLIB%\regex\0.9.9.9\win32
+ rem set INC_REGEX=-I%DIR_REGEX%\include
+@@ -134,8 +148,14 @@ set LIB_QTSDK=%DIR_QTSDK%\libraries\qtmlclient.lib
+ set DIR_SED=%DIR_GLOBALSLIB%\sed\0.9.9.9\win32
+ set SED=%DIR_SED%\bin\sed.exe
+ 
++if "%VC_COMPILER_VERSION%"=="VC10" goto USE_BOOST_SPIRIT
+ set DIR_SPIRIT=%DIR_GLOBALSLIB%\spirit\1.6.1
+ set INC_SPIRIT=-I%DIR_SPIRIT%\include
++goto END_USE_BOOST_SPIRIT
++:USE_BOOST_SPIRIT
++set DIR_SPIRIT=%DIR_BOOST%\boost\spirit
++set INC_SPIRIT=-I%DIR_SPIRIT%\include -I%DIR_SPIRIT%
++:END_USE_BOOST_SPIRIT
+ 
+ set DIR_TINYXML=%DIR_GLOBALSLIB%\tinyxml\2.3.1\win32
+ set INC_TINYXML=-I%DIR_TINYXML%\inc
+@@ -290,6 +310,9 @@ echo _GEN           = %_GEN%
+ echo TAO_VERSION    = %TAO_VERSION%
+ echo ACE_ROOT       = %ACE_ROOT%
+ echo TAO_ROOT       = %TAO_ROOT%
++echo MFC_ROOT       = %MFC_ROOT%__MFC
++echo BOOST_VERSION  = %BOOST_VERSION%__BOST
++echo INC_SPIRIT     = %INC_SPIRIT%__SPIRIT
+ echo JAVA_HOME      = %JAVA_HOME%
+-
++echo LIB_MFC		= %LIB_MFC%__LIB_MFC
+ set ENVIRONMENT_CALLED=1
+-- 
+2.41.0.windows.1
+

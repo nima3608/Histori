@@ -1,0 +1,99 @@
+From fa67398e7987c29c0a13a645ecc69a98abceadf6 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 6 Nov 2013 20:15:25 +0000
+Subject: [PATCH 0493/1077] bugfix Mantis 0029686: mstarter: processes are not
+ restarted massai_systools.lib V1.0.0.14 do not check for isFinished for
+ calling setError; isFinished is set later
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@610 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/Systools/src/local_def.cpp         |  9 +++++++--
+ .../cpp/Systools/src/mSysProcessListW32.cpp       | 15 +++++++++------
+ 2 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+index 4354bb88..7bf86eb2 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/local_def.cpp
+@@ -1,6 +1,6 @@
+ #include "tools/versionlib.h"
+ 
+-VERSION_ID_DT(systools, 1, 0, 0, 13);
++VERSION_ID_DT(systools, 1, 0, 0, 14);
+ 
+ /*!
+ \file
+@@ -8,12 +8,17 @@ VERSION_ID_DT(systools, 1, 0, 0, 13);
+ 
+ \page massai_systools.lib Release Notes - massai_systools.lib
+ 
+-@version 1.0.0.3
++@version 1.0.0.14
+ 
+ \section changehistory Change history
+ 
+ massai_systools.lib
+ 
++\version 1.0.0.14
++\li 06.11.2013
++\li bugfix SteT Mantis 0029686: mstarter: processes are not restarted
++\li do not check for isFinished for calling setError; isFinished is set later
++
+ \version 1.0.0.13
+ \li 25.09.2013
+ \li Mantis 0028892: PLF: SAM-Hotkey not working
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+index 9ff1e951..34587557 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessListW32.cpp
+@@ -177,6 +177,7 @@ namespace
+       void start();
+       const ProcessProperties& getProperties() const;
+ 
++      bool isRootStopped() const;
+       bool isStopped() const;
+       bool isRunning() const;
+ 
+@@ -551,6 +552,11 @@ namespace
+     return result;
+   }
+ 
++  bool ProcessStart::isRootStopped() const
++  {
++    return m_pFirst->isStopped();
++  }
++
+   bool ProcessStart::isStopped() const
+   {
+     bool result = true;
+@@ -894,16 +900,13 @@ namespace
+       "#####################",
+       m_properties.group.c_str(),
+       m_properties.commandLine.c_str());
+-    if(needsReset())
+-    {
+-      m_reset.setError();
+-    }
++    m_reset.setError();
+     m_cb.notify(*this);
+   }
+ 
+   bool ProcessStart::needsReset() const
+   {
+-    return m_watchDog && !m_stopping && isStopped();
++    return m_watchDog && !m_stopping && isRootStopped();
+   }
+ 
+   const ProcessProperties& ProcessStart::getProperties() const
+@@ -1055,7 +1058,7 @@ namespace
+       ProcessStartPtrList::iterator next = it;
+       next++;
+       ProcessStart* process = (*it).get();
+-      if(process->isStopped())
++      if(process->isRootStopped())
+       {
+         if(process->needsReset())
+         {
+-- 
+2.41.0.windows.1
+

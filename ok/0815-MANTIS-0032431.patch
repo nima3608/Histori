@@ -1,0 +1,135 @@
+From bda2d5f8891adf4aaeee8da5094b5420d03c44b6 Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Wed, 11 Jan 2017 13:22:47 +0000
+Subject: [PATCH 0815/1077] MANTIS 0032431 mcontrol version  1.1.1.4   \li
+ 13.12.2016   \li adaptation / extension - MOt Mantis 0032431   -added a
+ worker-thread in the MCCPortableStarter to solve blue-screen problems  
+ -added new Notification 'WindowsNotification' to the Tools-lib   -adapted the
+ waiting for the shutdown of processes in mSysProcessW32.cpp
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1136 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/Tools/Notification.h       | 46 ++++++++++++++++++-
+ .../cpp/Systools/src/mSysProcessW32.cpp       |  6 +--
+ .../Massai/cpp/Tools/src/Notification.cpp     |  4 ++
+ 3 files changed, 52 insertions(+), 4 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/Tools/Notification.h b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+index 35f84d13..c0b44402 100644
+--- a/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
++++ b/SelfServiceCommon/Interfaces/inc/Tools/Notification.h
+@@ -66,6 +66,9 @@ namespace MASSAI
+ 
+     } MCONTROL_MSG;
+ 
++    /*
++    * Class for sending thread specific notifications
++    */
+     template <typename tempMsg>
+     class ThreadNotification : public Poco::Notification 
+     {
+@@ -78,7 +81,7 @@ namespace MASSAI
+           m_parentID(pID),
+           m_msg(msg)
+         {
+-          TRACE(HERE,"Create Notification: ParentID[%s], Msg[%d], MsgInfo[%s]", pID.c_str(), msg, info.c_str());
++          TRACE(HERE,"Create ThreadNotification: ParentID[%s], Msg[%d], MsgInfo[%s]", pID.c_str(), msg, info.c_str());
+         }
+         
+         /**
+@@ -96,6 +99,47 @@ namespace MASSAI
+         
+         typename tempMsg  m_msg;
+     };
++
++
++    //Class for forwarding windows notifications
++    template <typename tempMsg>
++    class WindowsNotification : public Poco::Notification
++    {
++    public:
++      /*
++      * Constructor
++      */
++      WindowsNotification<tempMsg>(std::string info, std::string pID, tempMsg msg, WPARAM wParam, LPARAM lParam) :
++        m_info(info),
++        m_parentID(pID),
++        m_msg(msg),
++        m_wParam(wParam),
++        m_lParam(lParam)
++      {
++        TRACE(HERE, "Create WindowsNotification: ParentID[%s], Msg[%d], MsgInfo[%s]", pID.c_str(), msg, info.c_str());
++      }
++
++      /**
++      * getter Methods
++      */
++      std::string       getInfo() { return m_info; }
++      std::string       getId() { return m_parentID; }
++      typename tempMsg  getMsg() { return m_msg; }
++      WPARAM            getWParam() { return m_wParam; }
++      LPARAM            getLParam() { return m_lParam; }
++
++
++    private:
++      std::string       m_info;
++
++      std::string       m_parentID;
++
++      typename tempMsg  m_msg;
++
++      WPARAM            m_wParam;
++
++      LPARAM            m_lParam;
++    };
+   }
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+index bc70b4bc..8b1ea3f7 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysProcessW32.cpp
+@@ -1497,7 +1497,7 @@ namespace
+ 
+       this->sendBreak();
+ 
+-      this->waitForTermination(1);
++      this->waitForTermination(20);
+ 
+       if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+       {
+@@ -1508,7 +1508,7 @@ namespace
+ 
+         this->sendCtrlC();
+ 
+-        this->waitForTermination(1);
++        this->waitForTermination(20);
+ 
+         if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+         {
+@@ -1519,7 +1519,7 @@ namespace
+ 
+           this->kill();
+ 
+-          this->waitForTermination(1);
++          this->waitForTermination(20);
+ 
+           if (this->getStatus() == mSysProcess::STATUS_RUNNING)
+           {
+diff --git a/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp b/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
+index 81e436c5..4c7fb414 100644
+--- a/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
++++ b/SelfServiceCommon/Massai/cpp/Tools/src/Notification.cpp
+@@ -22,5 +22,9 @@ namespace MASSAI
+ {
+   namespace Notification
+   {
++    /*
++    * Note: ThreadNotification and WindowsNotification are implemented in the header 'tools/Notifications.h, 
++    * because they are template classes
++    */
+   }
+ }
+-- 
+2.41.0.windows.1
+

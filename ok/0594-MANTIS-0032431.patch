@@ -1,0 +1,906 @@
+From 6d241281d82e25f423a000e87fc414b1b750979e Mon Sep 17 00:00:00 2001
+From: motten <motten@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 28 Oct 2014 13:41:13 +0000
+Subject: [PATCH 0594/1077] MANTIS 0032431 -added a worker class, which should
+ handle WM_* Messages -removed impl class -added some config Attributes in the
+ GlobalConfig class
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@745 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/mControl/inc/mControl_config.h |  82 ++++---
+ .../Massai/cpp/mControl/inc/mControl_impl.h   |  53 -----
+ .../Massai/cpp/mControl/inc/mControl_worker.h |  50 +++++
+ .../cpp/mControl/src/mControl_config.cpp      | 210 +++++++++++++++---
+ .../Massai/cpp/mControl/src/mControl_impl.cpp |  38 ----
+ .../cpp/mControl/src/mControl_worker.cpp      | 139 ++++++++++++
+ 6 files changed, 424 insertions(+), 148 deletions(-)
+ delete mode 100644 SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+ create mode 100644 SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+ delete mode 100644 SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+ create mode 100644 SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+index 4c6192d6..b1757726 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_config.h
+@@ -22,12 +22,10 @@
+ #include "cfgclnt/nConfigTextList.hpp"
+ 
+ 
+-//Windows includes
+-#include <windows.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <tchar.h>
+-#include <list>
++#include "logging/alert.h"
++#include "logging/alertDef.h"
++#include "systools/mEventSem.hpp"
++
+ 
+ #include "poco\ThreadPool.h"
+ 
+@@ -35,7 +33,7 @@ using Poco::ThreadPool;
+ 
+ namespace mControl
+ {
+-    class MControlProcessConfig
++    class GlobalConfig
+     {
+     private:
+         bool        m_serverMode;
+@@ -43,13 +41,22 @@ namespace mControl
+         bool        m_noSNMP;
+         bool        m_portableMCC;
+         bool        m_isRunningAsUserShell;
++        bool        m_started;
++
++        long        m_allProcesses;
++        long        m_currentProcesses;
++        long        m_currLoadPercent;
++        float       m_tmp;
+ 
++        ThreadPool  m_threadPool;
++
++        alert*      m_alert;
+ 
+         CEnvSubst   m_EnvS;
+ 
+     public:
+-        MControlProcessConfig();
+-        ~MControlProcessConfig();
++        GlobalConfig();
++        ~GlobalConfig();
+ 
+ 
+ 
+@@ -61,6 +68,17 @@ namespace mControl
+         bool noSNMPActive(){ return m_noSNMP; }
+         bool noPortableMCCActive(){ return m_portableMCC; }
+         bool isRunningAsUserShell(){ return m_isRunningAsUserShell; }
++        bool isStarted(){ return m_started; }
++
++        long getCurrentProcesses(){ return m_currentProcesses; }
++        long getCurrLoadPercent(){ return m_currLoadPercent; }
++        long getAllProcesses(){ return m_allProcesses; }
++        
++        float getTmp(){ return m_tmp; }
++        
++        alert* getAlert(){ return m_alert; }
++
++        ThreadPool& getThreadPool(){ return m_threadPool; }
+         CEnvSubst& getEnvS(){ return m_EnvS; }
+ 
+ 
+@@ -72,13 +90,19 @@ namespace mControl
+         void setNoLog(bool flag){ m_noLog = flag; }
+         void setNoSNMP(bool flag){ m_noSNMP = flag; }
+         void setPortableMCC(bool flag){ m_portableMCC = flag; }
+-        void setRunningAsUserShell(bool flag){ m_isRunningAsUserShell = flag; }     
++        void setRunningAsUserShell(bool flag){ m_isRunningAsUserShell = flag; } 
++        void setStarted(bool flag){ m_started = flag; }
++        void setCurrentProcesses(long processes){  m_currentProcesses = processes; }
++        void setCurrLoadPercent(long percent){  m_currLoadPercent = percent; }
++        void setAllProcesses(long processes){  m_allProcesses = processes; }
++        void setTmp(float t){ m_tmp = t; }
++        void setAlert(alert* a){ m_alert = a; }
+     };
+ 
+-	class MControlWindowConfig
++	class WindowConfig
+     {
+     private:
+-        MControlProcessConfig& m_config;
++        GlobalConfig& m_globalConfig;
+ 
+         WNDCLASSEX      m_Wcex;
+ 
+@@ -100,43 +124,50 @@ namespace mControl
+                         m_hWndInfo_2;
+ 
+ 
+-
+     protected:
+-        // returns a pointer the window (stored as the WindowLong)
+-        inline static MControlWindowConfig *GetObjectFromWindow(HWND hWnd)
++        /**
++        *   returns a pointer the window (stored as the WindowLong)
++        */
++        inline static WindowConfig *GetObjectFromWindow(HWND hWnd)
+         {
+-            return (MControlWindowConfig *)GetWindowLong(hWnd, GWL_USERDATA);
++            return (WindowConfig *)GetWindowLong(hWnd, GWL_USERDATA);
+         }
+ 
+     public:
++        /**
++        *   this Method is the main WindowProc-Method, which is called from windows.
++        *   It passes all the incomming Messages to the wndProc
++        */
+         static LRESULT CALLBACK startUPWndProc(HWND hWnd, UINT msg, WPARAM w, LPARAM l); 
++
++
++        /**
++        *   Basic WindowProc-Method. It handles the Messages to build and edit the Window.
++        */
+         LRESULT CALLBACK wndProc(HWND, UINT, WPARAM, LPARAM);
+ 
++
+         /**
+         * Initializes the WNDCLASSEX Object and calls the RegisterWindow() Method of the Windows API.
+         */
+         int registerWindow();
+-
+-        
++                
+ 
+         /**
+         * Initializes the HWDW Object and calls the CreateWindow() Method of the Windows API.
+         */
+         int createWindow();
+ 
+-            
+ 
+         /**
+         * Calls the ShowWindow() Method of the Window API, with the correct Parameters.
+         */
+         void showWindow(int cmd);
+-
+-
++        
+ 
+         //Constructor
+-        MControlWindowConfig(HINSTANCE hInst, MControlProcessConfig& config);
+-
+-
++        WindowConfig(HINSTANCE hInst, GlobalConfig& config);
++        
+ 
+         /**
+         * Attribut getter Methods
+@@ -150,9 +181,10 @@ namespace mControl
+         HWND getHwndInfo2(){ return m_hWndInfo_2; }
+         HINSTANCE getInstance(){ return m_Wcex.hInstance; }
+         LPCTSTR getClassName() const;
+-        MControlProcessConfig& getConfig(){ return m_config; }
++        GlobalConfig& getConfig(){ return m_globalConfig; }
+         WNDCLASSEX& getWndClassex(){ return m_Wcex; }
+ 
++
+         /**
+         * Attribut setter Methods
+         */
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
+deleted file mode 100644
+index 225b8ac7..00000000
+--- a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_impl.h
++++ /dev/null
+@@ -1,53 +0,0 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mControl_impl.h
+-//
+-//  purpose:    class definition: mControl_Impl
+-//
+-//  date:       01.09.2014
+-//
+-//  author:     Materna Information & Communications (MOt)
+-//
+-//---------------------------------------------------------------------------
+-
+-#ifndef MCONTROL_IMPL_H
+-#define MCONTROL_IMPL_H
+-
+-#include "mControl_kioskReboot.h"
+-#include "mControl_config.h"
+-#include "mControl_scheduler.h"
+-#include "mControl_servant.h"
+-#include "mControl_dialog.h"
+-#include "Poco/NotificationQueue.h"
+-
+-namespace mControl
+-{
+-    class mControl_Impl
+-    {
+-        private:
+-            NotificationQueue   m_notificationQueue;
+-            Scheduler           m_scheduledTasks;
+-            KioskReboot         m_kioskRebooter;
+-            Dialog              m_Dialog;
+-            //MControlServant*    m_servant;
+-            MControlProcessConfig      m_config;
+-          
+-        public:
+-            /**
+-            * getter Methods
+-            */
+-            Scheduler&          getScheduler();
+-            KioskReboot&        getRebooter();
+-            Dialog&             getDialog();
+-            NotificationQueue&  getQueue();
+-            MControlProcessConfig&     getConfig();
+-
+-
+-
+-          //Constructor
+-          mControl_Impl(HINSTANCE hInst);
+-          //Destructor
+-          ~mControl_Impl();
+-    };
+-}
+-#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+new file mode 100644
+index 00000000..46259701
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/mControl/inc/mControl_worker.h
+@@ -0,0 +1,50 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_worker.h
++//
++//  purpose:    class definition: Worker
++//
++//  date:       23.10.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#ifndef WORKER_H
++#define WORKER_H
++
++#include "..\inc\mControl_def.h"
++#include "..\inc\mControl_tools.h"
++#include "..\inc\mControl_dialog.h"
++
++
++#include "Poco/NotificationQueue.h"
++#include "Poco/Runnable.h"
++
++using Poco::Runnable;
++using Poco::NotificationQueue;
++
++namespace mControl
++{
++    class Worker : public Runnable
++    {
++    private:
++        NotificationQueue &         m_notificationQueue; 
++        GlobalConfig&               m_globalConfig;
++        Dialog&                     m_dialog;
++        Tools                       m_tools;
++
++    public:
++        Worker(NotificationQueue & queue, GlobalConfig& config, Dialog& dialog);
++
++        NotificationQueue& getNotificationQueue(){ return m_notificationQueue; }
++
++        /**
++        * Needs to be implemented from the Runnable interface.
++        * Here the kiosk is rebooted once per day
++        */
++        void run();
++    };
++}
++
++#endif
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+index 47b5af45..3b08dbea 100644
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_config.cpp
+@@ -9,20 +9,20 @@
+ //  author:     Materna Information & Communications (MOt)
+ //
+ //---------------------------------------------------------------------------
+-#include "..\inc\mControl_tools.h"
+ 
+-#include <Windows.h>
++#include "..\inc\mControl_tools.h"
+ 
+-#include "..\inc\mControl_config.h"
+ #include "..\inc\mControl_dialog.h"
+ 
+-
+ #include <Commctrl.h>
+ #include <iostream>
+ 
+ #include "trc/trace.h"
+ 
+-
++// AkA: go in service trigger
++#include "controller.h"
++#include "massaiCorba/corbaclnt.h"
++#include "tao/SystemException.h"
+ 
+ namespace mControl
+ {
+@@ -30,17 +30,19 @@ namespace mControl
+ * MConrolConfig implementation
+ */
+ 
+-    MControlProcessConfig::MControlProcessConfig() : 
++    GlobalConfig::GlobalConfig() : 
+         m_serverMode(false),
+         m_noLog(false),
+         m_noSNMP(false),
+         m_portableMCC(false),
+         m_isRunningAsUserShell(false),
++        m_threadPool(),
++        m_alert(NULL),
+         m_EnvS()
+     {
+     }
+ 
+-    MControlProcessConfig::~MControlProcessConfig()
++    GlobalConfig::~GlobalConfig()
+     {
+     }
+ 
+@@ -48,8 +50,8 @@ namespace mControl
+ /*******************************************************************************************************
+ * MConrolWindowConfig implementation
+ */
+-    MControlWindowConfig::MControlWindowConfig(HINSTANCE hInst, MControlProcessConfig& config) :
+-        m_config(config),
++    WindowConfig::WindowConfig(HINSTANCE hInst, GlobalConfig& config) :
++        m_globalConfig(config),
+         m_Wcex(),
+         m_title(szAppName),
+         m_hWnd(), 
+@@ -65,7 +67,7 @@ namespace mControl
+ 
+ 
+ 
+-    int MControlWindowConfig::registerWindow()
++    int WindowConfig::registerWindow()
+     {
+         m_Wcex.cbSize           = sizeof(WNDCLASSEX);
+         m_Wcex.style            = CS_HREDRAW | CS_VREDRAW;
+@@ -92,7 +94,7 @@ namespace mControl
+         return 1;
+     }
+ 
+-    int MControlWindowConfig::createWindow()
++    int WindowConfig::createWindow()
+     {
+         
+         int xSize, ySize;
+@@ -164,7 +166,7 @@ namespace mControl
+         }
+     }
+ 
+-    void MControlWindowConfig::showWindow(int cmd)
++    void WindowConfig::showWindow(int cmd)
+     {
+         // The parameters to ShowWindow explained:
+         // hWnd: the value returned from CreateWindow
+@@ -173,9 +175,9 @@ namespace mControl
+         UpdateWindow(m_hWnd);
+     }
+ 
+-    LRESULT CALLBACK MControlWindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
++    LRESULT CALLBACK WindowConfig::startUPWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+     { 
+-        MControlWindowConfig* pWnd;
++        WindowConfig* pWnd;
+ 
+         if (msg == WM_NCCREATE)
+         {
+@@ -198,7 +200,7 @@ namespace mControl
+             return DefWindowProc(hWnd, msg, wParam, lParam);
+     }
+ 
+-    LRESULT CALLBACK MControlWindowConfig::wndProc
++    LRESULT CALLBACK WindowConfig::wndProc
+         (
+             HWND hWnd, 
+             UINT message, 
+@@ -206,6 +208,15 @@ namespace mControl
+             LPARAM lParam
+         )
+     {  
++        static enum
++         {
++            INISTATUS_INITIAL,
++            INISTATUS_WAIT,
++            INISTATUS_STARTED
++         }                      
++        initialStart = INISTATUS_INITIAL;
++
++
+         static int                  xSize,xPosition,
+                                     ySize,yPosition,
+                                     cxLoad,
+@@ -250,39 +261,39 @@ namespace mControl
+ 
+                 hdc = GetDC(hWnd);
+ 
+-                if(m_config.serverMode())
+-                    this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small.bmp") );
++                if(m_globalConfig.serverMode())
++                    this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small.bmp") );
+                 else
+                 {
+                     if(xPosition<=1024 && Tools::fileExists(".\\mcontrol_1024.bmp"))
+                     {
+-                        this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
++                        this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
+                     }
+                     else if(xPosition>1024 && Tools::fileExists(".\\mcontrol_1280.bmp"))
+                     {
+-                        this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
++                        this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
+                     }
+ 
+                     if(!this->m_hbmMain)
+                     {
+                         if(Tools::fileExists(".\\mcontrol.bmp"))
+                         {
+-                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol.bmp") );
++                            this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol.bmp") );
+                         } 
+                         else if(Tools::fileExists(".\\mcontrol_1280.bmp"))
+                         {
+-                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
++                            this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1280.bmp") );
+                         } 
+                         else if(Tools::fileExists(".\\mcontrol_1024.bmp"))
+                         {
+-                            this->setHBitMap( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
++                            this->setHBitMap( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_1024.bmp") );
+                         }
+                     }
+                 }
+ 
+                 ReleaseDC(hWnd, hdc);
+ 
+-                if(!m_config.serverMode())
++                if(!m_globalConfig.serverMode())
+                 {
+                     cyLoad = 20;
+ 
+@@ -341,7 +352,7 @@ namespace mControl
+ 
+                 hdc = GetDC(this->getHwndInfo1());
+ 
+-                this->setHBitMapInfo1( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_ds.bmp") );
++                this->setHBitMapInfo1( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_ds.bmp") );
+                 if(!this->getHBitMapInfo1())
+                 {
+                     TRACE(HERE,".\\mcontrol_small_ds.bmp not found");
+@@ -378,7 +389,7 @@ namespace mControl
+ 
+                 hdc = GetDC(this->getHwndInfo2());
+ 
+-                this->setHBitMapInfo2( Tools::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_su.bmp") );
++                this->setHBitMapInfo2( Dialog::CreateBitmapObjectFromDibFile (hdc,".\\mcontrol_small_su.bmp") );
+                 if(!this->getHBitMapInfo2())
+                 {
+                     TRACE(HERE,".\\mcontrol_small_su.bmp not found");
+@@ -420,7 +431,7 @@ namespace mControl
+                     //xSize = rect.right / 2  - bitmap.bmWidth / 2;
+                     //ySize = rect.bottom / 2 - bitmap.bmHeight / 2;
+ 
+-                    if(m_config.serverMode())
++                    if(m_globalConfig.serverMode())
+                       BitBlt(hdc,0,0,xPosition,yPosition,hdcMem,0,0,SRCCOPY);
+                     else
+                       StretchBlt(hdc,
+@@ -464,6 +475,110 @@ namespace mControl
+ 
+                 break;
+ 
++          case WM_START_DELAY_TIMER:
++              TRACE(SecondaryRuntime_HERE,"WM_START_DELAY_TIMER");
++              if( initialStart != INISTATUS_INITIAL )
++              {
++                return 0;
++              }
++              if((int)wParam<=0)
++              {
++                TRACE(HERE,"No start delay timer set - normal startup");
++                InvalidateRect (hWnd, NULL, TRUE);
++                UpdateWindow (hWnd);
++                initialStart = INISTATUS_STARTED;
++                PostMessage(hWnd,WM_MASSAISTART,0,0);
++              }
++              else
++              {
++                TRACE(HERE,"Start delay timer seconds:%d",wParam);
++                initialStart = INISTATUS_WAIT;
++                SetTimer( hWnd, START_DELAY_TIMER, wParam*1000, NULL );
++
++                ShowWindow(m_hWndInfo_1,SW_SHOW);
++                UpdateWindow(m_hWndInfo_1);
++              }
++              return 0;
++
++            case WM_MCONTROL_PROGRESS:
++                TRACE(SecondaryRuntime_HERE,"WM_MCONTROL_PROGRESS");
++                
++                if(wParam)
++                {
++                    m_globalConfig.setAllProcesses( wParam );
++                }
++                m_globalConfig.setCurrentProcesses( lParam );
++                
++                TRACE(HERE_9,"Processbar: all = %d, current = %d", m_globalConfig.getAllProcesses(), m_globalConfig.getCurrentProcesses() );
++                if(m_globalConfig.getAllProcesses())
++                {
++                    m_globalConfig.setTmp( (float)m_globalConfig.getCurrentProcesses()/(float)m_globalConfig.getAllProcesses() );
++                    m_globalConfig.setCurrLoadPercent( (long)(m_globalConfig.getTmp() *100) );
++                    SendMessage(m_hWndLoad,PBM_SETPOS,m_globalConfig.getCurrLoadPercent(),0);
++                    UpdateWindow(m_hWndLoad);
++                    if(this->m_globalConfig.serverMode() && lParam >= 0 && m_globalConfig.getCurrLoadPercent() >= 100)
++                        ShowWindow(hWnd,SW_MINIMIZE);
++                }
++                return 0;
++            
++            /*
++        Restoring the mcontrol from the taskbar results in an automatic trigger of "go into service" rendering
++        the nasty button obsolete.
++        (AkA)
++        */
++        case WM_SYSCOMMAND:
++            TRACE(SecondaryRuntime_HERE,"WM_SYSCOMMAND(%x)", wParam);
++            if ((GET_SC_WPARAM(wParam) != SC_RESTORE && GET_SC_WPARAM(wParam) != SC_MAXIMIZE) || m_globalConfig.serverMode()) break;    // nothing to do
++
++            TRACE(HERE, "Request to go into service");
++
++            // Connect to server and trigger the return to service function
++            try
++            {
++                corbaClient <PlatformManager::platformControl> pltfClient("PlatformController");
++                PlatformManager::platformControl* pPltfCtrl = pltfClient.proxy();
++                if (pPltfCtrl)            // check if corba made some trouble...
++                {
++                    try
++                    {
++                      pPltfCtrl->returnToService();
++                    }
++                    catch(const CORBA::COMM_FAILURE& e)
++                    {
++                      /*
++                        Some ORB implementations close unused TCP sockets (for example OpenORB)
++                        if the servant socket is closed while TAO sends the indication,
++                          TAO throws the exception CORBA::COMM_FAILURE
++                        if the indication is send again, a new connection is opened
++                           (the servant is still listening) and
++                           the indication can be send successfully
++                      */
++                      TRACE(HERE_5, "WARNING: 'Go into service' failed, retry");
++                      TRACE(HERE_5, "WARNING: Corba exception occured: <%s>", e._info());
++                      pPltfCtrl->returnToService();
++                    }
++                }
++                else
++                    TRACE(HERE, "pltfClient.proxy() returned NULL. Something seems terribly wrong with Corba");
++            }
++            catch ( const CORBA::SystemException& e )
++            {
++                TRACE( HERE_5, "WARNING: 'Go into service' failed!" );
++                TRACE(HERE_5, "WARNING: Corba exception occured: <%s>", e._info());
++            }
++            catch ( const std::exception& e )
++            {
++                TRACE( HERE_5, "WARNING: 'Go into service' failed!" );
++                TRACE( HERE_5, "WARNING: Exception occured: %s", e.what() );
++            }
++            catch( ... )
++            {
++                TRACE( HERE_5, "WARNING: 'Go into service' failed!" );
++                TRACE( HERE_5, "WARNING: Some unknown exception occured" );
++            }
++
++            break;
++
+             //original as in the old mControl
+             //TODO: implement case VK_F12
+             case WM_KEYUP:
+@@ -472,7 +587,7 @@ namespace mControl
+                 switch(wParam)
+                 {
+                 case VK_F1:
+-                   if(m_config.isRunningAsUserShell())
++                   if(m_globalConfig.isRunningAsUserShell())
+                    {
+                      MessageBox(hWnd,
+                                 TEXT("You may use the following function keys:\n\n"
+@@ -483,7 +598,7 @@ namespace mControl
+                                 TEXT("Massai Shell-Help"),
+                                 MB_ICONINFORMATION | MB_OK);
+                    }
+-                   else if(!m_config.serverMode())
++                   else if(!m_globalConfig.serverMode())
+                    {
+                      MessageBox(hWnd,
+                                 TEXT("You may use the following function keys:\n\n"
+@@ -510,7 +625,7 @@ namespace mControl
+ 
+               case VK_F8:
+ 
+-                   if(!m_config.serverMode())
++                   if(!m_globalConfig.serverMode())
+                    {
+                      if(MessageBox(hWnd,
+                                    TEXT("By pressing OK the WINDOWS EXPLORER will be started and the "
+@@ -529,7 +644,7 @@ namespace mControl
+           case VK_F9:
+           case VK_F11:
+ 
+-               if(!m_config.serverMode())
++               if(!m_globalConfig.serverMode())
+                {
+                  if(MessageBox(hWnd,
+                                TEXT("By pressing OK the window will be minimized for administration work.\n\n"
+@@ -539,7 +654,7 @@ namespace mControl
+                                MB_ICONEXCLAMATION | MB_OKCANCEL) == IDOK)
+                  {
+                    ShowWindow(hWnd,SW_MINIMIZE);
+-                   if(m_config.isRunningAsUserShell())
++                   if(m_globalConfig.isRunningAsUserShell())
+                    {
+                      Tools::startExplorer();
+                    }
+@@ -550,12 +665,43 @@ namespace mControl
+ 
+                break;
+ 
++        //TODO: implement correct functionality
+         case VK_F12: 
++                if(MessageBox(hWnd,
++                               TEXT("Do you really want to shut down the platform?"),
++                               TEXT("Massai"),
++                               MB_ICONQUESTION | MB_YESNO) == IDYES)
++                 {
++                    PostQuitMessage(0);
++                     /*
++                    sendAlert(ALERT_E_SHUTDOWN_LOCAL);
++                    if(isRunningAsUserShell())
++                    {
++                        startExplorer();
++                    }
++                    PostMessage(hwnd,WM_CLOSE,0,0);
++                    */
++                 }
+                 break;
+             }
+             break;
+             
+-            default:
++        case WM_SYSKEYUP:
++          TRACE(SecondaryRuntime_HERE,"WM_SYSKEYUP");
++          // don't let windows process these messages
++          return 0;
++
++        case WM_SYSKEYDOWN:
++            TRACE(SecondaryRuntime_HERE,"WM_SYSKEYDOWN");
++            // don't let windows process these messages
++            return 0;
++
++        case WM_SYSCHAR:
++            TRACE(SecondaryRuntime_HERE,"WM_SYSCHAR");
++            // don't let windows process these messages
++            return 0;
++
++        default:
+                 return DefWindowProc(hWnd, message, wParam, lParam);
+                 break;
+         }
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
+deleted file mode 100644
+index d9e22966..00000000
+--- a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_impl.cpp
++++ /dev/null
+@@ -1,38 +0,0 @@
+-//---------------------------------------------------------------------------
+-//
+-//  file:       mControl_impl.cpp
+-//
+-//  purpose:    impl class of mControl implementation
+-//
+-//  date:       01.09.2014
+-//
+-//  author:     Materna Information & Communications (MOt)
+-//
+-//---------------------------------------------------------------------------
+-
+-#include "..\inc\mControl_impl.h"
+-
+-namespace mControl
+-{
+-  mControl_Impl::mControl_Impl(HINSTANCE hInst) :
+-    m_config(hInst),
+-    m_notificationQueue(),
+-    m_scheduledTasks(m_notificationQueue, m_config),
+-    //m_servant(),
+-    m_kioskRebooter(100, m_notificationQueue, m_config),//, m_servant ),
+-    m_Dialog(m_notificationQueue, hInst, m_config)
+-  {}
+-
+-
+-  /**
+-  * Attribut getter Methods
+-  */
+-  Scheduler& mControl_Impl::getScheduler() { return m_scheduledTasks; }
+-  KioskReboot& mControl_Impl::getRebooter(){ return m_kioskRebooter; }
+-  Dialog& mControl_Impl::getDialog(){ return m_Dialog; }
+-  NotificationQueue& mControl_Impl::getQueue(){ return m_notificationQueue; }
+-  MControlProcessConfig& mControl_Impl::getConfig(){ return m_config; }
+-
+-  mControl_Impl::~mControl_Impl(){}
+-
+-}
+\ No newline at end of file
+diff --git a/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+new file mode 100644
+index 00000000..959d615e
+--- /dev/null
++++ b/SelfServiceCommon/Massai/cpp/mControl/src/mControl_worker.cpp
+@@ -0,0 +1,139 @@
++//---------------------------------------------------------------------------
++//
++//  file:       mControl_worker.cpp
++//
++//  purpose:    Worker classes implementation
++//
++//  date:       23.10.2014
++//
++//  author:     Materna Information & Communications (MOt)
++//
++//---------------------------------------------------------------------------
++
++#include "..\inc\mControl_worker.h"
++#include "..\inc\mControl_notification.h"
++
++#include <Commctrl.h>
++
++#include "trc/trace.h"
++
++#include <string.h>
++
++using Poco::NotificationQueue;
++using namespace std;
++
++namespace mControl
++{
++    Worker::Worker(NotificationQueue& queue, GlobalConfig& config, Dialog& dialog) :
++        m_notificationQueue(queue),
++        m_globalConfig(config),
++        m_dialog(dialog),
++        m_tools(config)
++    {
++    }
++
++
++    void Worker::run()
++    {
++        TRACE(HERE,"Worker-Thread runTask() started...");
++
++        //dequeue a Notification out of the Queue
++        AutoPtr<Notification> pNf;
++        MControlNotification* pWorkNf;
++
++        //work as long as there are Notifications
++        while(!m_notificationQueue.empty())
++        {    
++            //get next Notification
++            pNf = m_notificationQueue.waitDequeueNotification();
++            pWorkNf = dynamic_cast<MControlNotification*>(pNf.get());
++      
++            if (pWorkNf)
++            {
++                int cmd (pWorkNf->getCmd());
++
++                switch ( cmd )
++                {
++                case WM_MASSAISTART:
++                        TRACE(HERE,"WM_MASSAISTART command enqueued");
++                        break;
++                case WM_MASSAISTART_REMOTE:
++                        TRACE(SecondaryRuntime_HERE,"WM_MASSAISTART_REMOTE");
++
++                        /*
++                        long rc;
++                        // request from remote !!
++
++                        if(!m_globalConfig.isStarted())
++                        {
++                            SendMessage(m_dialog.getWindowConfig().getHwndLoad(),PBM_SETBARCOLOR,0,0x00008000);
++
++                            m_tools.sendAlert(ALERT_E_START_REMOTE);
++
++                            m_globalConfig.setStarted( true );
++
++                            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_SHOW);
++                            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++                            UpdateWindow(m_dialog.getWindowConfig().getHwndLoad());
++
++                            // start update service previous to all other tasks ...
++
++                            rc = Tools::startUpdate();
++
++                            ShowWindow(m_dialog.getWindowConfig().getHwndInfo2(),SW_HIDE);
++                            UpdateWindow(m_dialog.getWindowConfig().getHwndInfo2());
++
++                            if(rc == REBOOT_KIOSK)
++                            {
++                                TRACE(HERE,"update service requested kiosk reboot, rc = %d",rc);
++
++                                rc = Tools::shutdownOS_Now(true);
++
++                                TRACE(HERE,"kiosk reboot, rc = %d",rc);
++
++                                PostQuitMessage(0);
++                                break;
++                            }
++
++                            // execute system commands before starting platform
++                            m_tools.execSysCmdsStartup();
++
++                            rc = startAll();
++
++                            if(!rc)
++                            {
++                                Sleep(1000);
++
++                                SetActiveWindow(hwnd);
++                                SetFocus(hwnd);
++                            }
++                        }
++                        else
++                            rc = -1;
++                        return rc;
++                        */
++                        break;
++
++                case WM_MASSAIREBOOT_REMOTE:
++                        TRACE(HERE,"WM_MASSAIREBOOT_REMOTE command enqueued");
++                        break;
++                case WM_MASSAISHUTDOWN_REMOTE:
++                        TRACE(HERE,"WM_MASSAISHUTDOWN_REMOTE command enqueued");
++                        break;
++                case WM_MASSAISTOP_REMOTE:
++                        TRACE(HERE,"WM_MASSAISTOP_REMOTE command enqueued");
++                        break;
++                case WM_MASSAISTOP_SCHEDULER:
++                        TRACE(HERE,"WM_MASSAISTOP_SCHEDULER command enqueued");
++                        break;
++                case WM_MASSAISTART_SCHEDULER:
++                        TRACE(HERE,"WM_MASSAISTART_SCHEDULER command enqueued");
++                        break;
++                default:
++                        TRACE(HERE,"default command enqueued");
++                        break;
++                }               
++            }
++        }
++    }
++}
+\ No newline at end of file
+-- 
+2.41.0.windows.1
+

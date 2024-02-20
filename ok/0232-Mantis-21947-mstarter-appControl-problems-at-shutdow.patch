@@ -1,0 +1,192 @@
+From 285d4fd21fa8a6e7e323dca0dfd898b1cd00e759 Mon Sep 17 00:00:00 2001
+From: tstegema <tstegema@90b65887-3827-0410-9a23-83215b262276>
+Date: Tue, 3 Jan 2012 17:08:28 +0000
+Subject: [PATCH 0232/1077] Mantis 21947: mstarter, appControl problems at
+ shutdown
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@282 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/cpp/LogService/src/mlog.cpp        | 74 ++++---------------
+ .../Massai/cpp/Systools/src/mSysWindowW32.cpp |  2 +
+ 2 files changed, 18 insertions(+), 58 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+index 9391c6b6..e246c6dd 100644
+--- a/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
++++ b/SelfServiceCommon/Massai/cpp/LogService/src/mlog.cpp
+@@ -13,7 +13,6 @@
+ #pragma warning(disable: 4786)
+ 
+ 
+-#include <signal.h>
+ #include <fstream>
+ #include <list>
+ #include <queue>
+@@ -40,6 +39,7 @@
+ #include "fsm/mfMTQueue.hpp"
+ #include "execTime.hpp"
+ 
++
+ #ifndef __FUNCTION__
+ #define __FUNCTION__  ""
+ #endif
+@@ -57,13 +57,17 @@
+ #include "logging/alertDef.h"
+ 
+ #include "systools/mEventSem.hpp"
++#include "systools/mSysProcessTerminate.h"
++#include "tools/TraceClient.h"
++
+ 
+ VERSION_ID_DT( 01, 01, 01 );
+ // history:
+ 
+ static std::list<trapListener*> trapListeners;
+ 
+-static bool fDone;
++Materna::MSSD::eventSemaphore terminateEvent;
++
+ 
+ #define MAXHOSTNAMESIZE 512
+ #define MAXTIMESTRINGSIZE 128
+@@ -98,7 +102,7 @@ public:
+ 
+   ~serviceThread()
+   {
+-    fDone = true;
++    terminateEvent.post();
+ 
+     OS_Sleep(3000);
+ 
+@@ -188,7 +192,7 @@ private:
+ 
+           writeTrace(BasicRuntime_HERE, "logService::CMD_LOG");
+ 
+-#ifdef _COMPILER_VERSION_VC6		  
++#ifdef _COMPILER_VERSION_VC6
+           DeviceComponents::strngData  pData;
+           pCmd->data >>= pData;
+ 
+@@ -201,12 +205,12 @@ private:
+ 
+             mLog::trapToListener(trapEvent(pRData, receptionTime));
+           }
+- 
++
+ #else
+ 		  std::string pRData;
+           pCmd->data >>= pRData;
+ 			mLog::trapToListener(trapEvent(pRData, receptionTime));
+-#endif		  
++#endif
+         }
+         break;
+ 
+@@ -357,46 +361,6 @@ void mLog::trapToListener(const trapEvent& tE)
+   pEventDispatcher->dispatch(tE);
+ }
+ 
+-/*---------------------------------------------------------------------------
+-
+- FUNCTION:  void exitHandler(INT iSignal)
+-
+- COMMENTS:  Signal handler
+-
+- DATE:      04/11/97 - 11:58:33
+-
+- AUTHOR:    Dr. Materna GmbH   (AGe)
+-
+----------------------------------------------------------------------------*/
+-
+-void exitHandler(INT iSignal)
+-{
+-CHAR szTmp[30];
+-
+-  switch(iSignal)
+-  {
+-  case SIGABRT:   strcpy(szTmp,"SIGABRT");  break;
+-  case SIGBREAK:  strcpy(szTmp,"SIGBREAK"); break;
+-  case SIGTERM:   strcpy(szTmp,"SIGTERM");  break;
+-  case SIGINT:    strcpy(szTmp,"SIGINT");   break;
+-
+-  case SIGFPE:    strcpy(szTmp,"SIGFPE");   break;
+-  case SIGSEGV:   strcpy(szTmp,"SIGSEGV");  break;
+-  case SIGILL:    strcpy(szTmp,"SIGILL");   break;
+-  }
+-
+-  writeTrace(BasicRuntime_HERE, "signal [%s]",szTmp);
+-
+-  switch(iSignal)
+-  {
+-  case SIGABRT:
+-  case SIGTERM:
+-  case SIGINT:
+-
+-    fDone = true;
+-    break;
+-  }
+-}
+ 
+ //---------------------------------------------------------------------------
+ //
+@@ -455,7 +419,7 @@ void mLog::stopService()
+ {
+     writeTrace(BasicRuntime_HERE, "stopService()");
+ 
+-    fDone = true;
++    terminateEvent.post();
+ 
+     while(service.fRunning)
+     {
+@@ -564,10 +528,7 @@ void mLog::runService(bool fSNMPDll = false)
+       }
+     }
+ 
+-    while(!fDone)
+-    {
+-      OS_Sleep(100);
+-    }
++    terminateEvent.wait();
+ 
+     writeTrace(BasicRuntime_HERE, "runService(), done.");
+ 
+@@ -623,19 +584,16 @@ void mLog::runService(bool fSNMPDll = false)
+ 
+ int main(int argc, char ** argv)
+ {
++  MASSAI::trace::TraceClient trc;
+   openTrace("logging");
+-  signal(SIGABRT, exitHandler);
+-  signal(SIGBREAK,exitHandler);
+-  signal(SIGTERM, exitHandler);
+-  signal(SIGINT,  exitHandler);
+-  signal(SIGSEGV, exitHandler);
+-  signal(SIGILL,  exitHandler);
+-  signal(SIGFPE,  exitHandler);
++
++  mSysProcessTerminate::setShutdownHook(mSysProcessTerminate::SHUTDOWN_NORMAL, &terminateEvent, &trc);
+ 
+   mLog::runService();
+ 
+   configSNMP::cleanUp();
+ 
++  closeTrace();
+   return 0;
+ }
+ 
+diff --git a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+index 9d0a11ad..2e525adc 100644
+--- a/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
++++ b/SelfServiceCommon/Massai/cpp/Systools/src/mSysWindowW32.cpp
+@@ -139,6 +139,8 @@ namespace
+       {
+         traceLastError(MinorError_HERE, "BringWindowToTop", mSysError::getErrorCode());
+       }
++      // if SetForegroundWindow fails sometimes
++      // set HKEY_CURRENT_USER\Control Panel\Desktop\ForegroundLockTimeout to 0
+       if(!SetForegroundWindow(m_hwnd))
+       {
+         traceLastError(MinorError_HERE, "SetForegroundWindow", mSysError::getErrorCode());
+-- 
+2.41.0.windows.1
+

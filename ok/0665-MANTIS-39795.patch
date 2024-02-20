@@ -1,0 +1,135 @@
+From e8b1904b0aec7977e4757448783b224be9c87c45 Mon Sep 17 00:00:00 2001
+From: jkreierh <jkreierh@90b65887-3827-0410-9a23-83215b262276>
+Date: Fri, 15 Apr 2016 13:58:53 +0000
+Subject: [PATCH 0665/1000] MANTIS 39795 CMD_VERSION_QUERY / IND_VERSION_INFO
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@1004 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Massai/idl/Massai/gmrdev.idl              | 42 +++++++++++++------
+ 1 file changed, 29 insertions(+), 13 deletions(-)
+
+diff --git a/SelfServiceCommon/Massai/idl/Massai/gmrdev.idl b/SelfServiceCommon/Massai/idl/Massai/gmrdev.idl
+index 552fe5d7..d1cf169c 100644
+--- a/SelfServiceCommon/Massai/idl/Massai/gmrdev.idl
++++ b/SelfServiceCommon/Massai/idl/Massai/gmrdev.idl
+@@ -1,7 +1,7 @@
+ /** Contains module gmrdev, which is the platform-internal interface
+-    definition for generic massai multi reader device components. 
++    definition for generic massai multi reader device components.
+     @version 1.1
+-    @author Nicolas Bruns 
++    @author Nicolas Bruns
+ **/
+ 
+ #ifndef GMRDEV
+@@ -23,6 +23,9 @@
+ /** Generic MASSAI Device Component interface module for multi reader devices **/
+ module gmrdev
+ {
++
++   const string interface_version = "1.00";
++
+ /*
+ using DeviceComponents::indicationListener and DeviceComponents::Generic from mdci.idl
+   RC indicationListener::indication(in any ind);
+@@ -33,17 +36,18 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+       with ind.data: gmrdev::readerDataType            for IND_SETUP_DONE, IND_DATA
+       with ind.data: gmrdev::compDataTypeList          for IND_QUERY_DATA_TYPE_DONE
+       with ind.data: gmrdev::devFunctionality          for IND_COMPS_INFO
++      with ind.data: gmrdev::versionInfo               for IND_VERSION_INFO
+       with ind.data: DeviceComponents::nullData        for the others
+   RC Generic::exec(in any cmd);
+     with cmd: DeviceComponents::command
+       with cmd.type: gmrdev::commandType
+-      with cmd.data: gmrdev::multiCompCmdData        
+-        with cmd.data.data: string                     for CMD_CONTEXT_SWITCH       
++      with cmd.data: gmrdev::multiCompCmdData
++        with cmd.data.data: string                     for CMD_CONTEXT_SWITCH
+         with cmd.data.data: gmrdev::compDataType       for CMD_SELECT_DATA_TYPE
+         with cmd.data.data: DeviceComponents::nullData for CMD_CANCEL, CMD_EJECT, CMD_RETRACT, CMD_TEST, CMD_ENABLE, CMD_ENABLE
+-        with cmd.data.data:                            for CMD_SETUP 
++        with cmd.data.data:                            for CMD_SETUP
+           gmrdev::readerDataType
+-          or DeviceComponents::aeaData                                                                       
++          or DeviceComponents::aeaData
+       with cmd.data: DeviceComponents::nullData        for CMD_STATUS_QUERY, CMD_RESET, CMD_QUERY_DATA_TYPE, CMD_COMPS_QUERY
+ */
+ 
+@@ -54,7 +58,7 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+     any                     data; /**< command data     */
+   };
+ 
+-  enum dataType 
++  enum dataType
+   {
+     DT_UNKNOWN,
+     DT_CODE39,
+@@ -101,7 +105,7 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+     DT_OCR,
+     DT_POSICODE,
+     DT_AZTEC,             /* Aztec 2D barcode  */
+-    DT_MESA,   
++    DT_MESA,
+     DT_BMP_IR,            /* Infrared image    */
+     DT_BMP_VIS,           /* Visible image     */
+     DT_BMP_UV,            /* Ultraviolet image */
+@@ -143,7 +147,7 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+     DT_DISCRETIONARY_ISO, /* ISO track data with DISCRETIONARY Data truncation     */
+     DT_FOID_JIS2,         /* JIS-2 track data with FOID Data truncation            */
+     DT_PAYMENT_JIS2,      /* JIS-2 track data without truncation                   */
+-    DT_DISCRETIONARY_JIS2 /* JIS-2 track data with DISCRETIONARY Data truncation   */   
++    DT_DISCRETIONARY_JIS2 /* JIS-2 track data with DISCRETIONARY Data truncation   */
+   };
+ 
+   /**  The data status */
+@@ -181,7 +185,7 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+   {
+     compDataTypeList_ dataTypes;    /**< a sequence of data types */
+   };
+-  
++
+   /** The data type definition for tracks. */
+   struct dataTrack
+   {
+@@ -249,7 +253,17 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+   /** Defines the current reader status. */
+   struct status
+   {
+-    compStatusList statusMessage; /**< sequence of component status */
++    compStatusList          statusMessage;    /**< sequence of component status */
++  };
++
++  /** Data, which are sent with a IND_VERSION_INFO message */
++  struct versionInfo
++  {
++    string                  manufacturer;     /**< Device manufacturer (e.g. "Access") */
++    string                  modelType;        /**< Product class (e.g. "LSR116") */
++    string                  serialId;         /**< Serial number */
++    string                  firmwareVersion;  /**< Fw version */
++    string                  firmwareDate;     /**< Build date YYYYMMDD */
+   };
+ 
+   /** Definition of command types passed to this device handler. */
+@@ -267,7 +281,8 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+     CMD_EJECT,                  /**< Eject media (dispenser)                  */
+     CMD_RETRACT,                /**< Retract media (capture)                  */
+     CMD_QUERY_DATA_TYPE,        /**< Query supported data type of a component */
+-    CMD_SELECT_DATA_TYPE        /**< Set supported data types                 */
++    CMD_SELECT_DATA_TYPE,       /**< Set supported data types                 */
++    CMD_VERSION_QUERY           /**< Query version information                */
+   };
+ 
+   /** Definition of indication types received from this device handler. */
+@@ -286,7 +301,8 @@ using DeviceComponents::indicationListener and DeviceComponents::Generic from md
+     IND_RETRACT_DONE,           /**< Retract media has finished                         */
+     IND_TEST_DONE,              /**< Test has finished                                  */
+     IND_QUERY_DATA_TYPE_DONE,   /**< Return the supported data type                     */
+-    IND_SELECT_DATA_TYPE_DONE   /**< data type selected                                 */
++    IND_SELECT_DATA_TYPE_DONE,  /**< data type selected                                 */
++    IND_VERSION_INFO            /**< Supply version information (struc versionInfo)     */
+   };
+ 
+   /** scanner dev interface inherits from the generic interface. */
+-- 
+2.41.0.windows.1
+

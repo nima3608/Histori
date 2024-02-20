@@ -1,0 +1,579 @@
+From 7cb34e3ad809c764b78e436c64987a890f8276cc Mon Sep 17 00:00:00 2001
+From: tgeisler <tgeisler@90b65887-3827-0410-9a23-83215b262276>
+Date: Thu, 24 Nov 2011 14:50:21 +0000
+Subject: [PATCH 0217/1077] Reverted CorbaOrb changes WCTask
+
+git-svn-id: svn://localhost/SelfServiceCommon/trunk@265 90b65887-3827-0410-9a23-83215b262276
+---
+ .../Interfaces/inc/massaiCorba/corbaorb.h     |   1 -
+ .../Massai/cpp/MassaiCorba/src/corbaorb.cpp   | 418 ++++--------------
+ 2 files changed, 98 insertions(+), 321 deletions(-)
+
+diff --git a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb.h b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb.h
+index d7e71935..a2cd215b 100644
+--- a/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb.h
++++ b/SelfServiceCommon/Interfaces/inc/massaiCorba/corbaorb.h
+@@ -25,7 +25,6 @@
+ 
+ class corbaOrb
+ {
+-    friend class WC_Task;    
+ private:
+ 
+     CORBA::ORB_var                 _orb;
+diff --git a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+index 72ba7410..a11f31df 100644
+--- a/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
++++ b/SelfServiceCommon/Massai/cpp/MassaiCorba/src/corbaorb.cpp
+@@ -11,18 +11,9 @@
+ //---------------------------------------------------------------------------
+ 
+ #include "tracedef.h"
+-
+ #include "massaiCorba/corbaorb.h"
+ #include "massaiCorba/corbacfg.h"
+ 
+-#include "ace/Service_Object.h"
+-#include "ace/Thread_Manager.h"
+-#include "ace/Task_T.h"
+-#include "ace/OS.h"
+-#include "ace/Message_Block.h"
+-
+-#include <map>
+-//#include <multimap> // for pair
+ 
+ namespace
+ {
+@@ -35,206 +26,14 @@ namespace
+ 
+     argv[argc++] = "-ORBVerboseLogging";
+     argv[argc++] = "2";
+-    
+-    argv[argc++] = "-ORBLogFile ";
+-    argv[argc++] = "c:\\ablserver.log";
+   }
+ }
+-//************************************************************************************
+-class WC_Task : public ACE_Task< ACE_MT_SYNCH >
+-{
+-    //************************************************************************************
+-    class MessageBlock_ORB: public ACE_Message_Block
+-    {
+-        friend class WC_Task;
+-        CORBA::ORB_var e_;
+-    public:                
+-        MessageBlock_ORB( CORBA::ORB_var e ):        
+-            e_(e)
+-            {}
+-        virtual ~MessageBlock_ORB(){}
+-        virtual bool ProcessMessageBlock()
+-        {
+-            if( !CORBA::is_nil( e_ ))
+-            {
+-                // really no need to call orb.shutdown()  because destroy() calls shutdown(1)
+-                // however for purity reasons
+-                e_->shutdown( 1 );
+-                e_->destroy();
+-                return true;
+-            }
+-            return false;
+-        }     
+-    };
+-    //************************************************************************************
+-
+-    friend void killClientOrb();
+-private:    
+-    static WC_Task* WC_Task_Ptr;
+-    static ACE_Thread_Mutex *lockMux;
+-private:    
+-    //----------------------------------------
+-    //!!!!
+-    WC_Task(){} 
+-    virtual ~WC_Task(){}    
+-    //----------------------------------------
+-    int Activate()
+-    {
+-        int rc = activate( THR_NEW_LWP );
+-        trace(_HERE_5, "WC_Task::Activate() - %d", rc );
+-        return rc;
+-    }
+-    //----------------------------------------
+-    bool RecycleORB( CORBA::ORB_var orbVar )
+-    {
+-        MessageBlock_ORB* msg = new MessageBlock_ORB( orbVar );
+-        return putq( msg ) >= 0;
+-    }
+-    //-----------------------------------------        
+-private:    
+-private:    
+-    //----------------------------------------
+-    
+-    //----------------------------------------
+-    std::multimap<  CORBA::ORB_ptr, corbaOrb* > corbaOrbs_;
+-    //----------------------------------------
+-    void AddCorbaOrb( corbaOrb* orb, CORBA::ORB_var orbVar )
+-    {
+-        AddCorbaOrb( orb, orbVar.in() );
+-    }
+-    //----------------------------------------
+-    void AddCorbaOrb( corbaOrb* orb, const CORBA::ORB_ptr orbPtr );
+-    //----------------------------------------
+-    void CancelCorbaOrbs( CORBA::ORB_var orbVar )
+-    {
+-        CancelCorbaOrbs( orbVar.in() );
+-    }    
+-    //----------------------------------------
+-    void CancelCorbaOrbs( const CORBA::ORB_ptr );
+-    //----------------------------------------
+-public:
+-    static WC_Task* WCTask_Object()
+-    {
+-        // That is win-specific because ACE_Thread_Mutex is mapped 2 CRITICAL_SECTION 
+-        // and therefore requires InitalizeCriticalSection() - problems arise w. globals
+-        static HANDLE hMux = NULL;
+-        HANDLE hMuxLocal;
+-        if( hMux == NULL  )
+-        {
+-            char szMuxName[ 256 ];
+-            sprintf( szMuxName, "WCTask_Mutex_%lu", GetCurrentProcessId() );
+-            hMuxLocal = ::CreateMutex( NULL, TRUE, szMuxName );
+-            if( GetLastError() == ERROR_ALREADY_EXISTS )        
+-            {
+-                // wait until the lockMux becomes reality..
+-                ::WaitForSingleObject( hMuxLocal, NULL );
+-                ::ReleaseMutex( hMuxLocal );                
+-                ::CloseHandle( hMuxLocal );//  Decrease the mux ref counter - otherwise the resource leaks!
+-            }
+-            else
+-            {
+-                hMux = hMuxLocal ;                
+-                // Here we posess the mux
+-                lockMux = new ACE_Thread_Mutex;
+-                ::ReleaseMutex( hMux );
+-                // Don't close the {main} handle!!!
+-            }
+-        }
+-        
+-        ACE_GUARD_RETURN (ACE_Thread_Mutex, ace_mon, *lockMux, NULL );
+-        if( WC_Task_Ptr == 0 )
+-        {
+-            WC_Task_Ptr = new WC_Task();
+-            WC_Task_Ptr->Activate();            
+-        }        
+-        return WC_Task_Ptr;
+-    } 
+-    //----------------------------------------
+-    static void WCTask_Shutdown()
+-    {
+-        ACE_GUARD (ACE_Thread_Mutex, ace_mon, *lockMux );
+-        if( WC_Task_Ptr )
+-        {
+-            WC_Task_Ptr->close();
+-            delete WC_Task_Ptr; 
+-            WC_Task_Ptr = 0;
+-        }        
+-    }
+-    //----------------------------------------
+-    virtual int svc()
+-    {
+-        ACE_Message_Block* pMsgBlock = NULL;
+-        trace(_HERE, "WC_Task::svc() - running mq 0x%p", msg_queue() );
+-        msg_queue()->activate();
+-
+-        while( getq( pMsgBlock ) >= 0 )
+-        {
+-            if( pMsgBlock )
+-            {
+-                MessageBlock_ORB* pMsg = dynamic_cast<MessageBlock_ORB*>( pMsgBlock );
+-                pMsg->ProcessMessageBlock();        
+-                
+-                delete pMsgBlock;
+-                pMsgBlock = NULL;
+-            }
+-        }        
+-        return 0;
+-    }
+-    //----------------------------------------
+-    static bool Recycle_CorbaORB( CORBA::ORB_var orbVar )
+-    {
+-        WC_Task* ptr = WC_Task::WCTask_Object();
+-        if( ptr )
+-        {
+-            ptr->CancelCorbaOrbs( orbVar );    
+-            return ptr->RecycleORB( orbVar );
+-        }        
+-        return false;
+-    }
+-    
+-    static void Add_CorbaORB( corbaOrb* orb, CORBA::ORB_var orbVar )
+-    {
+-        WC_Task* ptr = WC_Task::WCTask_Object();
+-        if( ptr )
+-        {
+-            ptr->AddCorbaOrb( orb, orbVar );
+-        }
+-    }    
+-};
+-//************************************************************************************
+-WC_Task* WC_Task::WC_Task_Ptr = 0;
+-//************************************************************************************
+-ACE_Thread_Mutex* WC_Task::lockMux;
+-//************************************************************************************
+-void WC_Task::AddCorbaOrb( corbaOrb* orb, CORBA::ORB_ptr orbPtr )
+-{
+-    ACE_GUARD (ACE_Thread_Mutex, ace_mon, *lockMux );
+-    if(( orb != NULL )&& orbPtr )
+-        corbaOrbs_.insert( std::pair<CORBA::ORB_ptr, corbaOrb*> ( orbPtr, orb ));    
+-}
+-//************************************************************************************
+-void WC_Task::CancelCorbaOrbs( CORBA::ORB_ptr orbPtr )
+-{
+-    ACE_GUARD (ACE_Thread_Mutex, ace_mon, *lockMux );
+-    std::multimap< CORBA::ORB_ptr, corbaOrb* >::iterator itEnd = corbaOrbs_.end();
+-    for( std::multimap< CORBA::ORB_ptr, corbaOrb* >::iterator it = corbaOrbs_.begin();
+-            it != itEnd; ++it )
+-    {
+-        CORBA::ORB_ptr itObj = it->first;
+-        if( itObj == orbPtr )
+-        {
+-            it->second->_orb = 0;
+-        }
+-    }                    
+-}
+-//************************************************************************************
+ 
+-static CORBA::ORB_var _orbClnt = NULL;
+-static CORBA::ORB_var _orbSrvr = NULL;
+ 
+-// simple singleton class 
+-// ? what hinders me 2 instantiate this shit a couple more times  ?
++// simple singleton class
+ 
++static CORBA::ORB_var _orbClnt = NULL;
++static CORBA::ORB_var _orbSrvr = NULL;
+ 
+ class orbClntSingleton : public mThreadEx
+ {
+@@ -263,7 +62,7 @@ public:
+ };
+ 
+ // max. two ORBs per process
+-// EVER HEARD ABOUT INITIALISATION/DESTRUCTION OF GLOBALS IN DLLs???
++
+ static orbClntSingleton clntSingleton;
+ static orbSrvrSingleton srvrSingleton;
+ 
+@@ -300,10 +99,9 @@ void killClientOrb()
+ {
+     if(!CORBA::is_nil(_orbClnt))
+     {
+-#ifdef OLD_STUFF        
+       try
+       {
+-        _orbClnt->shutdown(1);  // returns threads from run() method.
++        _orbClnt->shutdown(0);  // returns threads from run() method.
+       }
+       catch(...) { }
+ 
+@@ -312,11 +110,9 @@ void killClientOrb()
+         _orbClnt->destroy(); // destroy the ORB
+       }
+       catch(...) { }
+-#else
+-        WC_Task* ptr = WC_Task::WCTask_Object();
+-        ptr->RecycleORB( _orbClnt );        
+-#endif          
+-        _orbClnt = NULL;
++
++
++      _orbClnt = NULL;
+     }
+ }
+ 
+@@ -379,8 +175,8 @@ long orbSrvrSingleton::function()
+ long orbClntSingleton::function()
+ {
+     //trace(_HERE,"orbClntSingleton::function() ...");
++
+     try { if(_orbClnt) _orbClnt->run(); } catch (...) {};
+-            
+ 
+     //trace(_HERE,"orbClntSingleton::function(), end.");
+ 
+@@ -400,8 +196,7 @@ long orbClntSingleton::function()
+ //---------------------------------------------------------------------------
+ 
+ orbClntSingleton::~orbClntSingleton()
+-{    
+-#ifdef OLD_STUFF            
++{
+     if(!CORBA::is_nil(_orbClnt))
+     {
+       try
+@@ -428,18 +223,6 @@ orbClntSingleton::~orbClntSingleton()
+       }
+       catch(...) { }
+     }
+-#else
+-    if( !CORBA::is_nil( _orbClnt ))
+-        WC_Task::Recycle_CorbaORB( _orbClnt );
+-    _orbClnt = NULL;
+-#if defined (_ORBACUS_)
+-
+-    mThreadEx::killWait();
+-#else
+-    mThreadEx::kill();
+-#endif
+-
+-#endif        
+ }
+ 
+ //---------------------------------------------------------------------------
+@@ -553,6 +336,7 @@ void corbaOrb::createRootPOA()
+     rootPoa = PortableServer::POA::_narrow(poaObj);
+ 
+     // Get a reference to the POA manager
++
+     poaManager = rootPoa->the_POAManager();
+ }
+ 
+@@ -676,7 +460,7 @@ void corbaOrb::run()
+ corbaOrb::corbaOrb()
+ {
+ int    argc= 0;
+-char  *argv[33];
++char  *argv[20];
+ long   port = 0;
+ char   szArgs1[256];
+ 
+@@ -686,104 +470,117 @@ char   szArgs1[256];
+     {
+ #if defined (_ORBACUS_)
+ 
+-        OB::Properties_var defProps = OB::Properties::getDefaultProperties();
+-        OB::Properties_var props    = new OB::Properties( defProps );
++       OB::Properties_var defProps = OB::Properties::getDefaultProperties();
++       OB::Properties_var props    = new OB::Properties( defProps );
++
++       #if defined(NUMERIC_ORB)
+ 
+-    #if defined(NUMERIC_ORB)
+-        props->setProperty("ooc.orb.oa.numeric","true");
+-    #endif
++       props->setProperty("ooc.orb.oa.numeric","true");
++
++       #endif
+ 
+        _orbClnt = OBCORBA::ORB_init(argc,argv,props);
++
+         fServer = false;
++
+        _orb = _orbClnt;
+-       
+ #elif defined(_TAO_)
+-    #if defined(_TAO_1_5_)
+-        argv[argc++] = "-ORBKeepalive";
+-        argv[argc++] = "1";
+-    #endif
+-
+-        if( getenv( "ORBENDPOINT_PORT" ))
+-            port = atoi(getenv("ORBENDPOINT_PORT"));
+-
+-        if( getenv( "TAO_ENABLE_LOGGING" ))
+-             enableTAO_Logging(argc, argv);
+-
+-        if( port > 0 )
+-        {
+-            sprintf( szArgs1, "iiop://:%d",port); // bind TAO-ORB to this port
+-            if(getenv("TAO_NUMERIC_ORB"))
+-            {
+-                argv[argc++] = "-ORBEndpoint";
+-                argv[argc++] = szArgs1;
+-                argv[argc++] = "-ORBDottedDecimalAddresses";
+-                argv[argc++] = "1";
+-            }
+-            else
+-            {
+-                argv[argc++] = "-ORBEndpoint";
+-                argv[argc++] = szArgs1;
+-            }
+-#ifdef WHAT_THE_HELL_IS_if_CORBA_is_nil_orbClnt_FOR
+-            // if we already have a client ORB running, kill him !!
+-            killClientOrb();
++#if defined(_TAO_1_5_)
++       argv[argc++] = "-ORBKeepalive";
++       argv[argc++] = "1";
+ #endif
+ 
+-            // create the new ORB ...
+-            trace(_HERE,"binding new srv ORB to [%s]", szArgs1);
+-            _orbSrvr = CORBA::ORB_init(argc,argv);
+-            fServer = true;
+-            this->_orb = _orbSrvr;
+-        } 
+-        else
+-        {
+-            if(getenv("TAO_NUMERIC_ORB"))
+-            {
+-                argv[argc++] = "-ORBDottedDecimalAddresses";
+-                argv[argc++] = "1";
+-            }
+-            trace(_HERE,"binding new clnt ORB");
+-            _orbClnt = CORBA::ORB_init(argc,argv);
+-            fServer = false;
+-            this->_orb = _orbClnt;
+-            WC_Task::Add_CorbaORB( this, this->_orb );
+-            // add an orb to the map
++       if(getenv("ORBENDPOINT_PORT"))
++       {
++         port = atoi(getenv("ORBENDPOINT_PORT"));
++       }
++
++       if(getenv("TAO_ENABLE_LOGGING"))
++       {
++         enableTAO_Logging(argc, argv);
++       }
++       if(port > 0)
++       {
++         sprintf(szArgs1,"iiop://:%d",port); // bind TAO-ORB to this port
++
++         if(getenv("TAO_NUMERIC_ORB"))
++         {
++           argv[argc++] = "-ORBEndpoint";
++           argv[argc++] = szArgs1;
++           argv[argc++] = "-ORBDottedDecimalAddresses";
++           argv[argc++] = "1";
++         }
++         else
++         {
++           argv[argc++] = "-ORBEndpoint";
++           argv[argc++] = szArgs1;
++         }
++
++         // if we already have a client ORB running, kill him !!
++         killClientOrb();
++
++         // create the new ORB ...
++
++        trace(_HERE,"binding new srv ORB to [%s]", szArgs1);
++
++         _orbSrvr = CORBA::ORB_init(argc,argv);
++
++         fServer = true;
++
++         _orb = _orbSrvr;
++       } else
++       {
++         if(getenv("TAO_NUMERIC_ORB"))
++         {
++           argv[argc++] = "-ORBDottedDecimalAddresses";
++           argv[argc++] = "1";
++        }
++
++        trace(_HERE,"binding new clnt ORB");
++
++         _orbClnt = CORBA::ORB_init(argc,argv);
++
++         fServer = false;
++
++         _orb = _orbClnt;
+        }
+-    #if defined (_TAO_1_4_)  || defined(_TAO_1_5_)
++#if defined (_TAO_1_4_)  || defined(_TAO_1_5_)
+ 
+        long lto = -1;
+-       if( getenv("CORBA_INVOCATION_TIMEOUT" ))
++       if(getenv("CORBA_INVOCATION_TIMEOUT"))
++       {
+            lto = atoi(getenv("CORBA_INVOCATION_TIMEOUT"));
+-           
+-       if( lto > 0 )
++       }
++       if( lto > 0)
+            SetInvocationTimeout( _orb, lto, false);
+        else
+            SetInvocationTimeout( _orb, CORBA_INVOCATION_TIMEOUT_DEFAULT, false);
+-    #endif // _TAO_1_4_
++#endif // _TAO_1_4_
+ 
+ #elif defined(_MICO_)
+ 
+-        _orbClnt = CORBA::ORB_init(argc,argv,"mico-local-orb");
++       _orbClnt = CORBA::ORB_init(argc,argv,"mico-local-orb");
+ 
+         fServer = false;
+ 
+        _orb = _orbClnt;
+ 
+ #endif
+-    } 
+-    else
++    } else
+     {
+-        if(!CORBA::is_nil(_orbClnt))
+-        {
+-            fServer = false;
+-            _orb = _orbClnt;
+-            WC_Task::Add_CorbaORB( this, this->_orb );
+-        }    
+-        else if(!CORBA::is_nil( _orbSrvr ))
+-        {
+-            fServer = true;
+-            _orb = _orbSrvr;
+-        }
++      if(!CORBA::is_nil(_orbClnt))
++      {
++        fServer = false;
++
++        _orb = _orbClnt;
++      }
++
++      if(!CORBA::is_nil(_orbSrvr))
++      {
++        fServer = true;
++
++        _orb = _orbSrvr;
++      }
+     }
+ }
+ 
+@@ -835,20 +632,10 @@ char   szArgs1[256];
+        argv[argc++] = "-ORBKeepalive";
+        argv[argc++] = "1";
+ #endif
+-
+        if(getenv("TAO_ENABLE_LOGGING"))
+        {
+          enableTAO_Logging(argc, argv);
+        }
+-/*
+-      if(!getenv("STANDARD_ORB_WAIT_STRATEGY"))
+-      {
+-          argv[argc++] = "-ORBSvcConfDirective";
+-          argv[argc++] = "static Client_Strategy_Factory \"-ORBClientConnectionHandler rw\"";
+-          argv[argc++] = "-ORBSvcConfDirective";
+-          argv[argc++] = "static Resource_Factory \"-ORBFlushingStrategy blocking\"";
+-      }
+-*/
+        if(port <= 0)
+        {
+          if(getenv("ORBENDPOINT_PORT"))
+@@ -989,15 +776,6 @@ char   szArgs1[256];
+        {
+          enableTAO_Logging(argc, argv);
+        }
+-/*
+-      if(!getenv("STANDARD_ORB_WAIT_STRATEGY"))
+-      {
+-          argv[argc++] = "-ORBSvcConfDirective";
+-          argv[argc++] = "static Client_Strategy_Factory \"-ORBClientConnectionHandler rw\"";
+-          argv[argc++] = "-ORBSvcConfDirective";
+-          argv[argc++] = "static Resource_Factory \"-ORBFlushingStrategy blocking\"";
+-      }
+-*/
+        if(port <= 0)
+        {
+          if(getenv("ORBENDPOINT_PORT"))
+-- 
+2.41.0.windows.1
+
